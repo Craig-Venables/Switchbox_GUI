@@ -3,6 +3,9 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import json
 import time
+from Keithley.Keithley2400 import Keithley2400  # Import the Keithley.py class
+from Keithley.Keithley_sim import SimulatedKeithley
+
 
 # Load sample configuration from JSON file
 sample_config = {
@@ -261,7 +264,6 @@ class SampleGUI:
         self.log_terminal("change image sample")
 
 
-
 class MeasurementGUI:
     def __init__(self, master, sample_type, section, device_list):
         self.master = tk.Toplevel(master)
@@ -271,14 +273,14 @@ class MeasurementGUI:
         self.sample_type = sample_type
         self.section = section
         self.device_list = device_list
-        self.current_device_index = 0
         self.connected = False
+        self.keithley = None  # Keithley.py instance
 
-        # Keithley Connection
-        tk.Label(self.master, text="Serial Port:").grid(row=0, column=0, sticky="w")
-        self.port_var = tk.StringVar()
-        self.port_entry = tk.Entry(self.master, textvariable=self.port_var)
-        self.port_entry.grid(row=0, column=1)
+        # Keithley.py Connection
+        tk.Label(self.master, text="GPIB Address:").grid(row=0, column=0, sticky="w")
+        self.address_var = tk.StringVar(value="GPIB0::24::INSTR")
+        self.address_entry = tk.Entry(self.master, textvariable=self.address_var)
+        self.address_entry.grid(row=0, column=1)
 
         self.connect_button = tk.Button(self.master, text="Connect", command=self.connect_keithley)
         self.connect_button.grid(row=0, column=2)
@@ -308,23 +310,21 @@ class MeasurementGUI:
         self.status_box.grid(row=5, column=0, columnspan=3, pady=5)
 
     def connect_keithley(self):
-        """Connect to the Keithley SMU"""
-        port = self.port_var.get()
+        """Connect to the Keithley.py SMU via GPIB"""
+        address = self.address_var.get()
         try:
-            self.keithley = serial.Serial(port, 9600, timeout=1)
+            self.keithley = Keithley2400(address)
             self.connected = True
             self.status_box.config(text="Status: Connected")
-            self.keithley.write(b"*IDN?\n")  # Check connection
-            time.sleep(1)
-            response = self.keithley.read_all().decode().strip()
-            messagebox.showinfo("Connection", f"Connected to: {response}")
+            messagebox.showinfo("Connection", f"Connected to: {self.keithley.get_idn()}")
         except Exception as e:
+            self.connected = False
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
 
     def start_measurement(self):
         """Start voltage sweeps on all devices"""
         if not self.connected:
-            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            messagebox.showwarning("Warning", "Not connected to Keithley.py!")
             return
 
         start_v = self.start_voltage.get()
@@ -336,27 +336,18 @@ class MeasurementGUI:
             self.status_box.config(text=f"Measuring {device}...")
             self.master.update()
 
-            self.keithley.write(b"*RST\n")  # Reset Keithley
+            self.keithley.set_voltage(0)  # Start at 0V
+            self.keithley.enable_output(True)  # Enable output
             time.sleep(0.5)
-            self.keithley.write(b":SOUR:VOLT:MODE FIXED\n")  # Set to fixed voltage mode
-            self.keithley.write(b":SOUR:VOLT:RANGE AUTO\n")
-            self.keithley.write(b":SENS:FUNC 'CURR'\n")  # Measure current
-            self.keithley.write(b":SENS:CURR:RANGE AUTO\n")
-            self.keithley.write(b":OUTP ON\n")
 
             # Sweep through voltages
             for v in voltage_range:
-                command = f":SOUR:VOLT {v}\n"
-                self.keithley.write(command.encode())
+                self.keithley.set_voltage(v)
                 time.sleep(0.2)  # Allow measurement to settle
+                current = self.keithley.measure_current()
+                self.log_data(device, v, current)
 
-                self.keithley.write(b":READ?\n")
-                time.sleep(0.1)
-                response = self.keithley.read_all().decode().strip()
-
-                self.log_data(device, v, response)
-
-            self.keithley.write(b":OUTP OFF\n")  # Turn off output
+            self.keithley.enable_output(False)  # Turn off output
 
         self.status_box.config(text="Measurement Complete")
         messagebox.showinfo("Complete", "Measurements finished.")
@@ -372,7 +363,6 @@ class MeasurementGUI:
         while start <= stop:
             yield start
             start += step
-
 
 if __name__ == "__main__":
     root = tk.Tk()
