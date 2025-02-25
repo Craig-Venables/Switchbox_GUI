@@ -1,7 +1,8 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import json
+import time
 
 # Load sample configuration from JSON file
 sample_config = {
@@ -79,7 +80,9 @@ class SampleGUI:
         self.section_dropdown.bind("<<ComboboxSelected>>", self.update_info_box)
         self.device_dropdown.bind("<<ComboboxSelected>>", self.update_info_box)
 
-        self.device = ""
+        # Measurement Button
+        self.measure_button = tk.Button(root, text="Measure Devices", command=self.open_measurement_window)
+        self.measure_button.grid(row=7, column=0, columnspan=2, pady=10)
 
         # Placeholder for clicked points
         #self.electrode_points = []
@@ -215,7 +218,18 @@ class SampleGUI:
             # Draw a new rectangle
             self.canvas.create_rectangle(x_min, y_min, x_max, y_max, outline="red", width=2, tags="highlight")
 
+    def open_measurement_window(self):
+        sample_type = self.sample_type_var.get()
+        section = self.section_var.get()
 
+        # Filter devices belonging to the selected sample type
+        selected_devices = [d for d in self.device_list if device_mapping[d]["sample"] == sample_type]
+
+        if not selected_devices:
+            messagebox.showwarning("Warning", "No devices found for this sample.")
+            return
+
+        MeasurementGUI(self.root, sample_type, section, selected_devices)
 
     def update_info_box(self, event=None):
         selected_sample = self.sample_type_var.get()
@@ -246,6 +260,118 @@ class SampleGUI:
     def Change_image(self,sample):
         self.log_terminal("change image sample")
 
+
+
+class MeasurementGUI:
+    def __init__(self, master, sample_type, section, device_list):
+        self.master = tk.Toplevel(master)
+        self.master.title("Measurement Setup")
+        self.master.geometry("400x300")
+
+        self.sample_type = sample_type
+        self.section = section
+        self.device_list = device_list
+        self.current_device_index = 0
+        self.connected = False
+
+        # Keithley Connection
+        tk.Label(self.master, text="Serial Port:").grid(row=0, column=0, sticky="w")
+        self.port_var = tk.StringVar()
+        self.port_entry = tk.Entry(self.master, textvariable=self.port_var)
+        self.port_entry.grid(row=0, column=1)
+
+        self.connect_button = tk.Button(self.master, text="Connect", command=self.connect_keithley)
+        self.connect_button.grid(row=0, column=2)
+
+        # Sweep Parameters
+        tk.Label(self.master, text="Start Voltage (V):").grid(row=1, column=0, sticky="w")
+        self.start_voltage = tk.DoubleVar(value=0)
+        self.start_entry = tk.Entry(self.master, textvariable=self.start_voltage)
+        self.start_entry.grid(row=1, column=1)
+
+        tk.Label(self.master, text="Stop Voltage (V):").grid(row=2, column=0, sticky="w")
+        self.stop_voltage = tk.DoubleVar(value=1)
+        self.stop_entry = tk.Entry(self.master, textvariable=self.stop_voltage)
+        self.stop_entry.grid(row=2, column=1)
+
+        tk.Label(self.master, text="Step Size (V):").grid(row=3, column=0, sticky="w")
+        self.step_size = tk.DoubleVar(value=0.1)
+        self.step_entry = tk.Entry(self.master, textvariable=self.step_size)
+        self.step_entry.grid(row=3, column=1)
+
+        # Start Measurement Button
+        self.measure_button = tk.Button(self.master, text="Start Measurement", command=self.start_measurement)
+        self.measure_button.grid(row=4, column=0, columnspan=2, pady=10)
+
+        # Status Box
+        self.status_box = tk.Label(self.master, text="Status: Not Connected", relief=tk.SUNKEN)
+        self.status_box.grid(row=5, column=0, columnspan=3, pady=5)
+
+    def connect_keithley(self):
+        """Connect to the Keithley SMU"""
+        port = self.port_var.get()
+        try:
+            self.keithley = serial.Serial(port, 9600, timeout=1)
+            self.connected = True
+            self.status_box.config(text="Status: Connected")
+            self.keithley.write(b"*IDN?\n")  # Check connection
+            time.sleep(1)
+            response = self.keithley.read_all().decode().strip()
+            messagebox.showinfo("Connection", f"Connected to: {response}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
+
+    def start_measurement(self):
+        """Start voltage sweeps on all devices"""
+        if not self.connected:
+            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            return
+
+        start_v = self.start_voltage.get()
+        stop_v = self.stop_voltage.get()
+        step_v = self.step_size.get()
+        voltage_range = [round(v, 3) for v in self.frange(start_v, stop_v, step_v)]
+
+        for device in self.device_list:
+            self.status_box.config(text=f"Measuring {device}...")
+            self.master.update()
+
+            self.keithley.write(b"*RST\n")  # Reset Keithley
+            time.sleep(0.5)
+            self.keithley.write(b":SOUR:VOLT:MODE FIXED\n")  # Set to fixed voltage mode
+            self.keithley.write(b":SOUR:VOLT:RANGE AUTO\n")
+            self.keithley.write(b":SENS:FUNC 'CURR'\n")  # Measure current
+            self.keithley.write(b":SENS:CURR:RANGE AUTO\n")
+            self.keithley.write(b":OUTP ON\n")
+
+            # Sweep through voltages
+            for v in voltage_range:
+                command = f":SOUR:VOLT {v}\n"
+                self.keithley.write(command.encode())
+                time.sleep(0.2)  # Allow measurement to settle
+
+                self.keithley.write(b":READ?\n")
+                time.sleep(0.1)
+                response = self.keithley.read_all().decode().strip()
+
+                self.log_data(device, v, response)
+
+            self.keithley.write(b":OUTP OFF\n")  # Turn off output
+
+        self.status_box.config(text="Measurement Complete")
+        messagebox.showinfo("Complete", "Measurements finished.")
+
+    def log_data(self, device, voltage, current):
+        """Log the measured data"""
+        with open("measurement_data.csv", "a") as file:
+            file.write(f"{device},{voltage},{current}\n")
+
+    @staticmethod
+    def frange(start, stop, step):
+        """Generate floating-point numbers within a range"""
+        while start <= stop:
+            yield start
+            start += step
 
 
 if __name__ == "__main__":
