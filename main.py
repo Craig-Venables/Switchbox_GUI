@@ -270,14 +270,16 @@ class MeasurementGUI:
     def __init__(self, master, sample_type, section, device_list,sample_gui):
         self.master = tk.Toplevel(master)
         self.master.title("Measurement Setup")
-        self.master.geometry("400x300")
+        self.master.geometry("600x300")  # Increased width to accommodate new section
         self.sample_gui = sample_gui
-
         self.sample_type = sample_type
         self.section = section
         self.device_list = device_list
         self.connected = False
         self.keithley = None  # Keithley instance
+
+        # Load custom sweeps from JSON
+        self.custom_sweeps = self.load_custom_sweeps("Custom_Sweeps.json")
 
         # UI Mode Selection (Custom or Preset)
         tk.Label(self.master, text="Mode:").grid(row=0, column=0, sticky="w")
@@ -296,7 +298,6 @@ class MeasurementGUI:
         self.address_var = tk.StringVar(value="GPIB0::24::INSTR")
         self.address_entry = tk.Entry(self.master, textvariable=self.address_var)
         self.address_entry.grid(row=2, column=1)
-
         self.connect_button = tk.Button(self.master, text="Connect", command=self.connect_keithley)
         self.connect_button.grid(row=2, column=2)
 
@@ -316,10 +317,10 @@ class MeasurementGUI:
         self.step_entry = tk.Entry(self.master, textvariable=self.step_size)
         self.step_entry.grid(row=5, column=1)
 
-        tk.Label(self.master, text="Settle Time (s):").grid(row=6, column=0, sticky="w")
-        self.settle_time = tk.DoubleVar(value=0.2)
-        self.settle_entry = tk.Entry(self.master, textvariable=self.settle_time)
-        self.settle_entry.grid(row=6, column=1)
+        tk.Label(self.master, text="# Sweeps:").grid(row=6, column=0, sticky="w")
+        self.sweeps = tk.DoubleVar(value=1)
+        self.sweeps_entry = tk.Entry(self.master, textvariable=self.sweeps)
+        self.sweeps_entry.grid(row=6, column=1)
 
         # Start Measurement Button
         self.measure_button = tk.Button(self.master, text="Start Measurement", command=self.start_measurement)
@@ -329,6 +330,17 @@ class MeasurementGUI:
         self.status_box = tk.Label(self.master, text="Status: Not Connected", relief=tk.SUNKEN)
         self.status_box.grid(row=8, column=0, columnspan=3, pady=5)
 
+        # Custom Measurements Section
+        tk.Label(self.master, text="Custom Measurement:").grid(row=0, column=3, padx=10, sticky="w")
+        self.custom_measurements = ["Test" , "IV Curve", "Resistance Sweep", "Capacitance Test"]
+        self.custom_measurement_var = tk.StringVar(value=self.custom_measurements[0])
+        self.custom_measurement_menu = ttk.Combobox(self.master, textvariable=self.custom_measurement_var,
+                                                    values=self.custom_measurements)
+        self.custom_measurement_menu.grid(row=0, column=4, padx=10)
+
+        self.run_custom_button = tk.Button(self.master, text="Run Custom", command=self.run_custom_measurement)
+        self.run_custom_button.grid(row=2, column=3, padx=10)
+
     def toggle_mode(self, event=None):
         """Enable or disable inputs based on mode selection."""
         mode = self.mode_var.get()
@@ -336,13 +348,13 @@ class MeasurementGUI:
             self.start_entry.config(state="normal")
             self.stop_entry.config(state="normal")
             self.step_entry.config(state="normal")
-            self.settle_entry.config(state="normal")
+            self.sweeps_entry.config(state="normal")
             self.preset_menu.config(state="disabled")
         else:  # Preset mode
             self.start_entry.config(state="disabled")
             self.stop_entry.config(state="disabled")
             self.step_entry.config(state="disabled")
-            self.settle_entry.config(state="disabled")
+            self.sweeps_entry.config(state="disabled")
 
             # Update preset options
             self.preset_menu.config(state="readonly")
@@ -357,55 +369,53 @@ class MeasurementGUI:
             self.start_voltage.set(0)
             self.voltage_high.set(1)
             self.step_size.set(0.1)
-            self.settle_time.set(0.2)
+            self.sweeps.set(1)
         elif preset == "Slow Sweep":
             self.start_voltage.set(0)
             self.voltage_high.set(2)
             self.step_size.set(0.05)
-            self.settle_time.set(1)
+            self.sweeps.set(1)
         elif preset == "High Voltage":
             self.start_voltage.set(0)
             self.voltage_high.set(5)
             self.step_size.set(0.5)
-            self.settle_time.set(0.5)
+            self.sweeps.set(1)
 
-        # # Keithley Connection
-        # tk.Label(self.master, text="GPIB Address:").grid(row=0, column=0, sticky="w")
-        # self.address_var = tk.StringVar(value="GPIB0::24::INSTR")
-        # self.address_entry = tk.Entry(self.master, textvariable=self.address_var)
-        # self.address_entry.grid(row=0, column=1)
-        #
-        # self.connect_button = tk.Button(self.master, text="Connect", command=self.connect_keithley)
-        # self.connect_button.grid(row=0, column=2)
-        #
-        # # Sweep Parameters
-        # tk.Label(self.master, text="Start Voltage (V):").grid(row=1, column=0, sticky="w")
-        # self.start_voltage = tk.DoubleVar(value=0)
-        # self.start_entry = tk.Entry(self.master, textvariable=self.start_voltage)
-        # self.start_entry.grid(row=1, column=1)
-        #
-        # tk.Label(self.master, text="Voltage high (V):").grid(row=2, column=0, sticky="w")
-        # self.voltage_high = tk.DoubleVar(value=1)
-        # self.stop_entry = tk.Entry(self.master, textvariable=self.voltage_high)
-        # self.stop_entry.grid(row=2, column=1)
-        #
-        # tk.Label(self.master, text="Step Size (V):").grid(row=3, column=0, sticky="w")
-        # self.step_size = tk.DoubleVar(value=0.1)
-        # self.step_entry = tk.Entry(self.master, textvariable=self.step_size)
-        # self.step_entry.grid(row=3, column=1)
-        #
-        # tk.Label(self.master, text="Settle_time (s):").grid(row=4, column=0, sticky="w")
-        # self.settle_time = tk.DoubleVar(value=0.2)
-        # self.settle_time = tk.Entry(self.master, textvariable=self.settle_time)
-        # self.settle_time.grid(row=4, column=1)
-        #
-        # # Start Measurement Button
-        # self.measure_button = tk.Button(self.master, text="Start Measurement", command=self.start_measurement)
-        # self.measure_button.grid(row=5, column=0, columnspan=2, pady=10)
-        #
-        # # Status Box
-        # self.status_box = tk.Label(self.master, text="Status: Not Connected", relief=tk.SUNKEN)
-        # self.status_box.grid(row=6, column=0, columnspan=3, pady=5)
+
+    def run_custom_measurement(self):
+        selected_measurement = self.custom_measurement_var.get()
+        print(f"Running custom measurement: {selected_measurement}")
+        if selected_measurement in self.custom_sweeps:
+
+            for device in self.device_list:
+                # Loop through devices
+                self.status_box.config(text=f"Measuring {device}...")
+                self.master.update()
+                time.sleep(0.5)
+
+                for key, params in self.custom_sweeps[selected_measurement].items():
+                    start_v = params.get("start_v", 0)
+                    stop_v = params.get("stop_v", 1)
+                    sweeps = params.get("sweeps", 1)
+                    step_v = params.get("step_v", 0.1)
+
+                    voltage_range = get_voltage_range(start_v, stop_v,step_v)
+                    v_arr , c_arr = self.measure(voltage_range,sweeps)
+
+                    # save data to file
+                    data = np.column_stack((v_arr, c_arr))
+                    file_path = "Data_save_loc\\" f"{selected_measurement}_{device}_{key}.txt"
+                    np.savetxt(file_path, data, fmt="%.5f", header="Voltage Current", comments="")
+
+                # switch to next device
+                self.sample_gui.next_device()
+        else:
+            print("Selected measurement not found in JSON file.")
+
+
+        # loop through devices
+        # do custom mearrment here
+
 
     def connect_keithley(self):
         """Connect to the Keithley SMU via GPIB"""
@@ -428,27 +438,15 @@ class MeasurementGUI:
 
         start_v = self.start_voltage.get()
         stop_v = self.voltage_high.get()
-        settle_time = self.settle_time.get()
+        sweeps = self.sweeps.get()
         step_v = self.step_size.get()
 
-        def frange(start, stop, step):
-            while start <= stop if step > 0 else start >= stop:
-                yield round(start, 3)
-                start += step
 
-        voltage_range = (list(frange(start_v, stop_v, step_v)) +
-                         list(frange(stop_v, -stop_v, -step_v)) +
-                         list(frange(-stop_v, start_v, step_v)))
-        # this method takes the readings twice at all ends of the ranges.
 
-        print(voltage_range)
+        voltage_range = get_voltage_range(start_v, stop_v,step_v)
+
         # loops through the device's
         for device in self.device_list:
-
-            # Add in here the line of code to change the device.
-            print("add code to change device here")
-            self.sample_gui.next_device()
-
 
             self.status_box.config(text=f"Measuring {device}...")
             self.master.update()
@@ -459,16 +457,13 @@ class MeasurementGUI:
             # possibly change time sleep
             time.sleep(0.5)
 
-            # Sweep through voltages
-            for v in voltage_range:
-                print("uncomment out the kiethly stuffs")
-                #self.keithley.set_voltage(v)
-                time.sleep(0.2)  # Allow measurement to settle
-                #current = self.keithley.measure_current()
-                #self.log_data(device, v, current)
+            # measure device
+            v_arr, c_arr = self.measure(voltage_range,sweeps)
 
-
-            #self.keithley.enable_output(False)  # Turn off output
+            # Turn off output
+            #self.keithley.enable_output(False)
+            # change device
+            self.sample_gui.next_device()
 
         self.status_box.config(text="Measurement Complete")
         messagebox.showinfo("Complete", "Measurements finished.")
@@ -478,14 +473,54 @@ class MeasurementGUI:
         with open("measurement_data.csv", "a") as file:
             file.write(f"{device},{voltage},{current}\n")
 
-    @staticmethod
+    def measure(self, voltage_range,sweeps):
+
+        # Sweep through voltages
+        for sweep_num in range(int(sweeps)):
+            v_arr = []
+            c_arr = []
+            print("uncomment out the kiethly stuffs")
+            for v in voltage_range:
+                # self.keithley.set_voltage(v)
+                time.sleep(0.2)  # Allow measurement to settle
+                # current = self.keithley.measure_current()
+                v_arr.append(v)
+                current=2
+                c_arr.append(current)
+                #print(sweep_num, device, v)
+            # save the data outside this function!
+            return v_arr, c_arr
+
+    def load_custom_sweeps(self, filename):
+        try:
+            with open(filename, "r") as file:
+                return json.load(file)
+        except FileNotFoundError:
+            print("Custom sweeps file not found.")
+            return {}
+        except json.JSONDecodeError:
+            print("Error decoding JSON file.")
+            return {}
+
+
+
+
+def get_voltage_range(start_v, stop_v, step_v):
     def frange(start, stop, step):
-        """Generate floating-point numbers within a range"""
-        while start <= stop:
-            yield start
+        while start <= stop if step > 0 else start >= stop:
+            yield round(start, 3)
             start += step
+
+    voltage_range = (list(frange(start_v, stop_v, step_v)) +
+                     list(frange(stop_v, -stop_v, -step_v)) +
+                     list(frange(-stop_v, start_v, step_v)))
+    # this method takes the readings twice at all ends of the ranges.
+    return voltage_range
+
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = SampleGUI(root)
     root.mainloop()
+
+
