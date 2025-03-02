@@ -7,6 +7,10 @@ import json
 import time
 #import serial
 from Keithley2400 import Keithley2400  # Import the Keithley class
+import matplotlib.pyplot as plt
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
 
 
 # Load sample configuration from JSON file
@@ -261,7 +265,6 @@ class SampleGUI:
         self.terminal_output.config(state=tk.DISABLED)
         self.terminal_output.see(tk.END)
 
-
     def Change_image(self,sample):
         self.log_terminal("change image sample")
 
@@ -270,7 +273,7 @@ class MeasurementGUI:
     def __init__(self, master, sample_type, section, device_list,sample_gui):
         self.master = tk.Toplevel(master)
         self.master.title("Measurement Setup")
-        self.master.geometry("600x300")  # Increased width to accommodate new section
+        self.master.geometry("900x300")  # Increased width to accommodate new section
         self.sample_gui = sample_gui
         self.sample_type = sample_type
         self.section = section
@@ -332,7 +335,7 @@ class MeasurementGUI:
 
         # Custom Measurements Section
         tk.Label(self.master, text="Custom Measurement:").grid(row=0, column=3, padx=10, sticky="w")
-        self.custom_measurements = ["Test" , "IV Curve", "Resistance Sweep", "Capacitance Test"]
+        self.custom_measurements = ["Test", "IV Curve", "Resistance Sweep", "Capacitance Test"]
         self.custom_measurement_var = tk.StringVar(value=self.custom_measurements[0])
         self.custom_measurement_menu = ttk.Combobox(self.master, textvariable=self.custom_measurement_var,
                                                     values=self.custom_measurements)
@@ -340,6 +343,14 @@ class MeasurementGUI:
 
         self.run_custom_button = tk.Button(self.master, text="Run Custom", command=self.run_custom_measurement)
         self.run_custom_button.grid(row=2, column=3, padx=10)
+
+        # Matplotlib Figure for Plotting
+        self.figure, self.ax = plt.subplots(figsize=(4, 3))
+        self.ax.set_title("Measurement Plot")
+        self.ax.set_xlabel("Voltage (V)")
+        self.ax.set_ylabel("Current (A)")
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.master)
+        self.canvas.get_tk_widget().grid(row=3, column=5, rowspan=9, padx=10, pady=10)
 
     def toggle_mode(self, event=None):
         """Enable or disable inputs based on mode selection."""
@@ -407,14 +418,22 @@ class MeasurementGUI:
                     file_path = "Data_save_loc\\" f"{selected_measurement}_{device}_{key}.txt"
                     np.savetxt(file_path, data, fmt="%.5f", header="Voltage Current", comments="")
 
+                    voltages = [start_v + i * step_v for i in range(int((stop_v - start_v) / step_v) + 1)]
+                    currents = [v * 1e-6 for v in voltages]  # Simulated data
+                    self.ax.clear()
+                    self.ax.plot(v_arr, c_arr, marker='o')
+                    self.ax.set_title("Measurement Plot")
+                    self.ax.set_xlabel("Voltage (V)")
+                    self.ax.set_ylabel("Current (A)")
+                    self.canvas.draw()
+
+
+
+
                 # switch to next device
                 self.sample_gui.next_device()
         else:
             print("Selected measurement not found in JSON file.")
-
-
-        # loop through devices
-        # do custom mearrment here
 
 
     def connect_keithley(self):
@@ -441,8 +460,6 @@ class MeasurementGUI:
         sweeps = self.sweeps.get()
         step_v = self.step_size.get()
 
-
-
         voltage_range = get_voltage_range(start_v, stop_v,step_v)
 
         # loops through the device's
@@ -460,6 +477,11 @@ class MeasurementGUI:
             # measure device
             v_arr, c_arr = self.measure(voltage_range,sweeps)
 
+            # save data to file
+            data = np.column_stack((v_arr, c_arr))
+            file_path = "Data_save_loc\\" f"Simple_measurment_{device}_.txt"
+            np.savetxt(file_path, data, fmt="%.5f", header="Voltage Current", comments="")
+
             # Turn off output
             #self.keithley.enable_output(False)
             # change device
@@ -468,10 +490,6 @@ class MeasurementGUI:
         self.status_box.config(text="Measurement Complete")
         messagebox.showinfo("Complete", "Measurements finished.")
 
-    def log_data(self, device, voltage, current):
-        """Log the measured data"""
-        with open("measurement_data.csv", "a") as file:
-            file.write(f"{device},{voltage},{current}\n")
 
     def measure(self, voltage_range,sweeps):
 
