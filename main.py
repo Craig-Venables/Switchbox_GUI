@@ -572,11 +572,11 @@ class MeasurementGUI:
             c_arr = []
             print("uncomment out the kiethly stuffs")
             for v in voltage_range:
-                # self.keithley.set_voltage(v)
+                self.keithley.set_voltage(v)
                 time.sleep(0.2)  # Allow measurement to settle
-                # current = self.keithley.measure_current()
+                current = self.keithley.measure_current()
                 v_arr.append(v)
-                current=2
+                #current=2
                 c_arr.append(current)
                 #print(sweep_num, device, v)
             # save the data outside this function!
