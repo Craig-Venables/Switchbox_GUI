@@ -5,6 +5,9 @@ pip install matplotlib
 
 
 
+# Create a custom sweep order 
+
+T o create custom sweeps use Custom_sweeps.jason build the sweeps you want and then within the code add it too the ddown list within the code
 
 
 # Common Problems
