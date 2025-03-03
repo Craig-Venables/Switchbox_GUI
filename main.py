@@ -353,7 +353,7 @@ class MeasurementGUI:
         frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
 
 
-        self.test_names = ["Test", "IV Curve", "Resistance Sweep", "Capacitance Test"]
+        #self.test_names = ["Test", "IV Curve", "Resistance Sweep", "Capacitance Test"]
         tk.Label(frame, text="Custom Measurement:").grid(row=0, column=0, sticky="w")
         self.custom_measurement_var = tk.StringVar(value=self.test_names[0] if self.test_names else "Test")
         self.custom_measurement_menu = ttk.Combobox(frame, textvariable=self.custom_measurement_var,
@@ -419,9 +419,13 @@ class MeasurementGUI:
         tk.Label(frame, text="# Sweeps:").grid(row=3, column=0, sticky="w")
         self.sweeps = tk.DoubleVar(value=1)
         tk.Entry(frame, textvariable=self.sweeps).grid(row=3, column=1)
+        # todo add compliance current as a way to limit the V
+        tk.Label(frame, text="Icc:").grid(row=4, column=0, sticky="w")
+        self.icc = tk.DoubleVar(value=0.01)
+        tk.Entry(frame, textvariable=self.icc).grid(row=4, column=1)
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=self.start_measurement)
-        self.measure_button.grid(row=4, column=0, columnspan=2, pady=5)
+        self.measure_button.grid(row=5, column=0, columnspan=2, pady=5)
 
     def toggle_mode(self, event=None):
         """Enable or disable inputs based on mode selection."""
