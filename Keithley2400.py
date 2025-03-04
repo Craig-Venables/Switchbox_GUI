@@ -47,7 +47,7 @@ class Keithley2400:
         """Set output voltage."""
         if self.device:
             self.device.write(f'SOUR:VOLT {voltage}')
-            print(f"Voltage set to {voltage}V.")
+            #print(f"Voltage set to {voltage}V.")
 
     def set_current(self, current):
         """Set output current."""
@@ -60,7 +60,7 @@ class Keithley2400:
         if self.device:
             state = 1 if enable else 0
             self.device.write(f'OUTP {state}')
-            print(f"Output {'Enabled' if enable else 'Disabled'}.")
+            #print(f"Output {'Enabled' if enable else 'Disabled'}.")
 
     def close(self):
         """Close connection to the instrument."""

@@ -313,26 +313,83 @@ class MeasurementGUI:
         results_window.title("Last Measurement for Each Device")
         results_window.geometry("800x600")
 
-        figure, axes = plt.subplots(10, 10, figsize=(12, 12))  # 10x10 grid
+        figure, axes = plt.subplots(10, 10, figsize=(10, 10))  # 10x10 grid
         figure.tight_layout()
+        figure.subplots_adjust(wspace=0.1, hspace=0.1)
+
+        # Store the figure and axes for future updates
+        self.figure = figure
+        self.axes = axes
+        self.results_window = results_window
 
         for i, (device, measurements) in enumerate(self.measurement_data.items()):
             if i >= 100:
                 break  # Limit to 100 devices
 
             row, col = divmod(i, 10)  # Convert index to 10x10 grid position
-            ax = axes[row, col]
+            ax = self.axes[row, col]
             last_key = list(measurements.keys())[-1]  # Get the last sweep key
             v_arr, c_arr = measurements[last_key]
-            ax.plot(v_arr, c_arr, marker="o")
-            ax.set_title(f"Device {device}")
-            ax.set_xticks([])
-            ax.set_yticks([])
 
-        canvas = FigureCanvasTkAgg(figure, master=results_window)
-        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        canvas.draw()
+            ax.plot(v_arr, c_arr, marker="o", markersize=1)
+            #ax.set_title(f"Device {device}", fontsize=5)
 
+            # Add labels to axes (you can adjust the label text and font size)
+            #ax.set_xlabel('Voltage (V)', fontsize=6)  # X-axis label
+            #ax.set_ylabel('Current (A)', fontsize=6)  # Y-axis label
+
+            # Make tick labels visible and set font size
+            ax.tick_params(axis='x', labelsize=2)  # X-axis tick labels font size
+            ax.tick_params(axis='y', labelsize=2)  # Y-axis tick labels font size
+
+            # Optionally, set limits or show minor ticks if needed
+            ax.set_xticks(np.linspace(min(v_arr), max(v_arr), 2))  # Adjust the number of ticks
+            ax.set_yticks(np.linspace(min(c_arr), max(c_arr), 2))  # Adjust the number of ticks
+
+            ax.ticklabel_format(style='sci', axis='y',scilimits=(0, 0))
+            ax.set_title(f"Device {device}", fontsize=6)
+
+        self.canvas = FigureCanvasTkAgg(self.figure, master=self.results_window)
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        self.canvas.draw()
+
+        # Start automatic update
+        self.update_last_sweeps()
+
+    def update_last_sweeps(self):
+        """Automatically updates the plot every 1000ms"""
+        # Re-draw the latest data on the axes
+        for i, (device, measurements) in enumerate(self.measurement_data.items()):
+            if i >= 100:
+                break  # Limit to 100 devices
+
+            row, col = divmod(i, 10)  # Convert index to 10x10 grid position
+            ax = self.axes[row, col]
+            last_key = list(measurements.keys())[-1]  # Get the last sweep key
+            v_arr, c_arr = measurements[last_key]
+            ax.clear()  # Clear the old plot
+            ax.plot(v_arr, c_arr, marker="o", markersize=1)
+
+
+            # # Add labels to axes (you can adjust the label text and font size)
+            # ax.set_xlabel('Voltage (V)', fontsize=6)  # X-axis label
+            # ax.set_ylabel('Current (A)', fontsize=6)  # Y-axis label
+
+            # Make tick labels visible and set font size
+            ax.tick_params(axis='x', labelsize=6)  # X-axis tick labels font size
+            ax.tick_params(axis='y', labelsize=6)  # Y-axis tick labels font size
+
+            # Optionally, set limits or show minor ticks if needed
+            ax.set_xticks(np.linspace(min(v_arr), max(v_arr), 3))  # Adjust the number of ticks
+            ax.set_yticks(np.linspace(min(c_arr), max(c_arr), 3))  # Adjust the number of ticks
+
+            ax.ticklabel_format(style='sci', axis='y',scilimits=(0, 0))
+            ax.set_title(f"Device {device}", fontsize=6)
+
+        self.canvas.draw()  # Redraw the canvas with the new data
+
+        # Set the next update ( or 10 seconds)
+        self.master.after(10000, self.update_last_sweeps)
 
     def create_plot_section(self):
         """Matplotlib figure for plotting"""
@@ -469,6 +526,11 @@ class MeasurementGUI:
 
 
     def run_custom_measurement(self):
+
+        if not self.connected:
+            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            return
+
         selected_measurement = self.custom_measurement_var.get()
         print(f"Running custom measurement: {selected_measurement}")
         if selected_measurement in self.custom_sweeps:
@@ -477,9 +539,15 @@ class MeasurementGUI:
                 # Loop through devices
                 self.status_box.config(text=f"Measuring {device}...")
                 self.master.update()
-                time.sleep(0.5)
+                time.sleep(1)
+
+                self.keithley.set_voltage(0)  # Start at 0V
+                self.keithley.enable_output(True)  # Enable output
 
                 for key, params in self.custom_sweeps[selected_measurement].items():
+
+                    print("working on device -", device, ": Measurment -" , key)
+
                     start_v = params.get("start_v", 0)
                     stop_v = params.get("stop_v", 1)
                     sweeps = params.get("sweeps", 1)
@@ -487,15 +555,22 @@ class MeasurementGUI:
 
                     voltage_range = get_voltage_range(start_v, stop_v,step_v)
                     v_arr , c_arr = self.measure(voltage_range,sweeps)
+
+                    # Ensure the device exists in measurement_data
+                    if device not in self.measurement_data:
+                        self.measurement_data[device] = {}  # Initialize with an empty dictionary
+
                     self.measurement_data[device][key] = (v_arr, c_arr)
+
+                    #print(v_arr,c_arr)
 
                     # save data to file
                     data = np.column_stack((v_arr, c_arr))
                     file_path = "Data_save_loc\\" f"{selected_measurement}_{device}_{key}.txt"
-                    np.savetxt(file_path, data, fmt="%.5f", header="Voltage Current", comments="")
+                    np.savetxt(file_path, data, fmt="%0.18e", header="Voltage Current", comments="")
 
-                    voltages = [start_v + i * step_v for i in range(int((stop_v - start_v) / step_v) + 1)]
-                    currents = [v * 1e-6 for v in voltages]  # Simulated data
+                    #voltages = [start_v + i * step_v for i in range(int((stop_v - start_v) / step_v) + 1)]
+                    #currents = [v * 1e-6 for v in voltages]  # Simulated data
                     self.ax.clear()
                     self.ax.plot(v_arr, c_arr, marker='o')
                     self.ax.set_title("Measurement Plot")
@@ -503,6 +578,8 @@ class MeasurementGUI:
                     self.ax.set_ylabel("Current (A)")
                     self.canvas.draw()
 
+                # Turn off output
+                self.keithley.enable_output(False)
                 # switch to next device
                 self.sample_gui.next_device()
         else:
@@ -537,15 +614,15 @@ class MeasurementGUI:
 
         # loops through the device's
         for device in self.device_list:
-
+            print("working on device - ", device)
             self.status_box.config(text=f"Measuring {device}...")
             self.master.update()
 
-            #self.keithley.set_voltage(0)  # Start at 0V
-            #self.keithley.enable_output(True)  # Enable output
+            self.keithley.set_voltage(0)  # Start at 0V
+            self.keithley.enable_output(True)  # Enable output
 
-            # possibly change time sleep
-            time.sleep(0.5)
+            # time between devices , needs to allow for relay to change
+            time.sleep(1)
 
             # measure device
             v_arr, c_arr = self.measure(voltage_range,sweeps)
@@ -553,10 +630,17 @@ class MeasurementGUI:
             # save data to file
             data = np.column_stack((v_arr, c_arr))
             file_path = "Data_save_loc\\" f"Simple_measurment_{device}_.txt"
-            np.savetxt(file_path, data, fmt="%.5f", header="Voltage Current", comments="")
+            np.savetxt(file_path, data, fmt="%0.18e", header="Voltage Current", comments="")
+
+            self.ax.clear()
+            self.ax.plot(v_arr, c_arr, marker='o')
+            self.ax.set_title("Measurement Plot")
+            self.ax.set_xlabel("Voltage (V)")
+            self.ax.set_ylabel("Current (A)")
+            self.canvas.draw()
 
             # Turn off output
-            #self.keithley.enable_output(False)
+            self.keithley.enable_output(False)
             # change device
             self.sample_gui.next_device()
 
@@ -570,15 +654,14 @@ class MeasurementGUI:
         for sweep_num in range(int(sweeps)):
             v_arr = []
             c_arr = []
-            print("uncomment out the kiethly stuffs")
+            #print("uncomment out the kiethly stuffs")
             for v in voltage_range:
                 self.keithley.set_voltage(v)
                 time.sleep(0.2)  # Allow measurement to settle
                 current = self.keithley.measure_current()
                 v_arr.append(v)
-                #current=2
+
                 c_arr.append(current)
-                #print(sweep_num, device, v)
             # save the data outside this function!
             return v_arr, c_arr
 
