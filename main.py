@@ -8,7 +8,7 @@ from Keithley2400 import Keithley2400  # Import the Keithley class
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from AdaptiveMeasurement import AdaptiveMeasurement
-
+import pySwitchbox
 
 """ Classes for the Gui"""
 
@@ -22,6 +22,22 @@ sample_config = {
 
 }
 
+
+# Function to load device mapping from JSON file
+def load_device_mapping(filename="pin_mapping.json"):
+    try:
+        with open(filename, "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        print("Error: JSON file not found.")
+        return {}
+    except json.JSONDecodeError:
+        print("Error: JSON file is not formatted correctly.")
+        return {}
+
+
+pin_mapping = load_device_mapping()
+
 # Load device mapping
 with open("mapping.json", "r") as f:
     device_mapping = json.load(f)
@@ -33,10 +49,12 @@ class SampleGUI:
         self.root.title("Device Viewer")
         self.root.geometry("650x600")
 
-        #list of all devices
+        # list of all devices
         self.device_mapping = device_mapping  # Dictionary of devices
         self.device_list = list(device_mapping.keys())  # Ordered list of device names
         self.current_index = 0  # Index of currently selected device
+
+        self.switchbox = pySwitchbox.Switchbox()
 
         # Sample Type Dropdown
         tk.Label(root, text="Sample type").grid(row=0, column=0, sticky='w')
@@ -72,13 +90,12 @@ class SampleGUI:
         self.change_button.grid(row=5, column=0, pady=2)
 
         self.next_button = tk.Button(root, text=">", command=self.next_device)
-        self.next_button.grid(row=4, column=1,pady=2)
+        self.next_button.grid(row=4, column=1, pady=2)
 
         # Canvas for Image
         self.canvas = tk.Canvas(root, width=400, height=400, bg="white", highlightbackground="black")
         self.canvas.grid(row=0, column=2, rowspan=5, padx=10)
         self.canvas.bind("<Button-1>", self.canvas_click)
-
 
         # Terminal Output
         self.terminal_output = tk.Text(root, height=5, width=80, state=tk.DISABLED)
@@ -93,11 +110,10 @@ class SampleGUI:
         self.measure_button.grid(row=7, column=0, columnspan=2, pady=10)
 
         # Placeholder for clicked points
-        #self.electrode_points = []
+        # self.electrode_points = []
         # Load image
 
-
-    def load_image(self,sample):
+    def load_image(self, sample):
         """ Load imgae into canvas set up to add others later simply """
 
         if sample == 'Cross_bar':
@@ -111,9 +127,6 @@ class SampleGUI:
         if sample == 'Sample 2':
             self.log_terminal("no image for selection")
             # clear image?
-
-
-
 
     def update_dropdowns(self, event):
         sample = self.sample_type_var.get()
@@ -132,7 +145,7 @@ class SampleGUI:
             # Call do_something when sample changes
             self.load_image(sample)
             self.device = self.device_var.get()
-            #self.Change_image(sample)
+            # self.Change_image(sample)
 
     def prev_device(self):
 
@@ -148,8 +161,6 @@ class SampleGUI:
         # Update the highlight
         self.update_highlight(new_device)
 
-
-
     def next_device(self):
         # Move to the next device in the list
         self.current_index = (self.current_index + 1) % len(self.device_list)
@@ -162,9 +173,8 @@ class SampleGUI:
         # Update the highlight
         self.update_highlight(new_device)
 
-
     def canvas_click(self, event):
-        #print(event)
+        # print(event)
 
         orig_width, orig_height = self.original_image.size
         scaled_width, scaled_height = 400, 400
@@ -172,10 +182,8 @@ class SampleGUI:
         scale_x = orig_width / scaled_width
         scale_y = orig_height / scaled_height
 
-
-        #for device, bounds in device_mapping.items():
+        # for device, bounds in device_mapping.items():
         for i, (device, bounds) in enumerate(device_mapping.items()):
-
 
             # Scale down the bounding box coordinates to match canvas size
             x_min_scaled = bounds["x_min"] / scale_x
@@ -184,11 +192,10 @@ class SampleGUI:
             y_max_scaled = bounds["y_max"] / scale_y
 
             # debugging when not devices not working once clicked
-            #print(event.x, event.y)
-            #print(event.x*scale_x,event.y*scale_y)
+            # print(event.x, event.y)
+            # print(event.x*scale_x,event.y*scale_y)
 
             if x_min_scaled <= event.x <= x_max_scaled and y_min_scaled <= event.y <= y_max_scaled:
-
                 # Remove previous highlights
                 self.canvas.delete("highlight")
 
@@ -205,8 +212,7 @@ class SampleGUI:
                     x_min_scaled, y_min_scaled, x_max_scaled, y_max_scaled,
                     outline="red", width=2, tags="highlight"
                 )
-                #self.device = device
-
+                # self.device = device
 
     def update_highlight(self, device):
         # Clear any existing highlights
@@ -237,7 +243,7 @@ class SampleGUI:
             messagebox.showwarning("Warning", "No devices found for this sample.")
             return
 
-        MeasurementGUI(self.root, sample_type, section, selected_devices,self)
+        MeasurementGUI(self.root, sample_type, section, selected_devices, self)
 
     def update_info_box(self, event=None):
         selected_sample = self.sample_type_var.get()
@@ -247,15 +253,30 @@ class SampleGUI:
         self.info_box.config(text=device_text)
 
     def change_relays(self):
+
+        def get_device_pins(device_name):
+            if device_name in pin_mapping:
+                # print(device_name,pin_mapping)
+                return pin_mapping[device_name]["pins"]
+            else:
+                print(f"Warning: {device_name} not found in mapping.")
+                return None
+
         self.log_terminal("changing relays too")
         self.log_terminal(self.device_list[self.current_index])
 
+        # current device
+        # print(self.device_list[self.current_index])
 
-        self.log_terminal(self.section_var.get()+self.device_var.get())
+        # gives pins in array
+        pins_arr = get_device_pins(self.device_list[self.current_index])
+        self.switchbox.activate(pins_arr)
+
+        self.log_terminal(self.section_var.get() + self.device_var.get())
 
     def clear_canvas(self):
         self.canvas.delete("all")
-        #self.electrode_points.clear()
+        # self.electrode_points.clear()
         self.log_terminal("Canvas cleared")
 
     def log_terminal(self, message):
@@ -264,12 +285,12 @@ class SampleGUI:
         self.terminal_output.config(state=tk.DISABLED)
         self.terminal_output.see(tk.END)
 
-    def Change_image(self,sample):
+    def Change_image(self, sample):
         self.log_terminal("change image sample")
 
 
 class MeasurementGUI:
-    def __init__(self, master, sample_type, section, device_list,sample_gui):
+    def __init__(self, master, sample_type, section, device_list, sample_gui):
         self.master = tk.Toplevel(master)
         self.master.title("Measurement Setup")
         self.master.geometry("800x600")  # Increased width to accommodate new section
@@ -332,11 +353,11 @@ class MeasurementGUI:
             v_arr, c_arr = measurements[last_key]
 
             ax.plot(v_arr, c_arr, marker="o", markersize=1)
-            #ax.set_title(f"Device {device}", fontsize=5)
+            # ax.set_title(f"Device {device}", fontsize=5)
 
             # Add labels to axes (you can adjust the label text and font size)
-            #ax.set_xlabel('Voltage (V)', fontsize=6)  # X-axis label
-            #ax.set_ylabel('Current (A)', fontsize=6)  # Y-axis label
+            # ax.set_xlabel('Voltage (V)', fontsize=6)  # X-axis label
+            # ax.set_ylabel('Current (A)', fontsize=6)  # Y-axis label
 
             # Make tick labels visible and set font size
             ax.tick_params(axis='x', labelsize=2)  # X-axis tick labels font size
@@ -346,7 +367,7 @@ class MeasurementGUI:
             ax.set_xticks(np.linspace(min(v_arr), max(v_arr), 2))  # Adjust the number of ticks
             ax.set_yticks(np.linspace(min(c_arr), max(c_arr), 2))  # Adjust the number of ticks
 
-            ax.ticklabel_format(style='sci', axis='y',scilimits=(0, 0))
+            ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
             ax.set_title(f"Device {device}", fontsize=6)
 
         self.canvas = FigureCanvasTkAgg(self.figure, master=self.results_window)
@@ -370,7 +391,6 @@ class MeasurementGUI:
             ax.clear()  # Clear the old plot
             ax.plot(v_arr, c_arr, marker="o", markersize=1)
 
-
             # # Add labels to axes (you can adjust the label text and font size)
             # ax.set_xlabel('Voltage (V)', fontsize=6)  # X-axis label
             # ax.set_ylabel('Current (A)', fontsize=6)  # Y-axis label
@@ -383,7 +403,7 @@ class MeasurementGUI:
             ax.set_xticks(np.linspace(min(v_arr), max(v_arr), 3))  # Adjust the number of ticks
             ax.set_yticks(np.linspace(min(c_arr), max(c_arr), 3))  # Adjust the number of ticks
 
-            ax.ticklabel_format(style='sci', axis='y',scilimits=(0, 0))
+            ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
             ax.set_title(f"Device {device}", fontsize=6)
 
         self.canvas.draw()  # Redraw the canvas with the new data
@@ -409,8 +429,7 @@ class MeasurementGUI:
         frame = tk.LabelFrame(self.master, text="Custom Measurements", padx=5, pady=5)
         frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
 
-
-        #self.test_names = ["Test", "IV Curve", "Resistance Sweep", "Capacitance Test"]
+        # self.test_names = ["Test", "IV Curve", "Resistance Sweep", "Capacitance Test"]
         tk.Label(frame, text="Custom Measurement:").grid(row=0, column=0, sticky="w")
         self.custom_measurement_var = tk.StringVar(value=self.test_names[0] if self.test_names else "Test")
         self.custom_measurement_menu = ttk.Combobox(frame, textvariable=self.custom_measurement_var,
@@ -524,7 +543,6 @@ class MeasurementGUI:
             self.step_size.set(0.5)
             self.sweeps.set(1)
 
-
     def run_custom_measurement(self):
 
         if not self.connected:
@@ -546,15 +564,15 @@ class MeasurementGUI:
 
                 for key, params in self.custom_sweeps[selected_measurement].items():
 
-                    print("working on device -", device, ": Measurment -" , key)
+                    print("working on device -", device, ": Measurment -", key)
 
                     start_v = params.get("start_v", 0)
                     stop_v = params.get("stop_v", 1)
                     sweeps = params.get("sweeps", 1)
                     step_v = params.get("step_v", 0.1)
 
-                    voltage_range = get_voltage_range(start_v, stop_v,step_v)
-                    v_arr , c_arr = self.measure(voltage_range,sweeps)
+                    voltage_range = get_voltage_range(start_v, stop_v, step_v)
+                    v_arr, c_arr = self.measure(voltage_range, sweeps)
 
                     # Ensure the device exists in measurement_data
                     if device not in self.measurement_data:
@@ -562,15 +580,15 @@ class MeasurementGUI:
 
                     self.measurement_data[device][key] = (v_arr, c_arr)
 
-                    #print(v_arr,c_arr)
+                    # print(v_arr,c_arr)
 
                     # save data to file
                     data = np.column_stack((v_arr, c_arr))
                     file_path = "Data_save_loc\\" f"{selected_measurement}_{device}_{key}.txt"
                     np.savetxt(file_path, data, fmt="%0.18e", header="Voltage Current", comments="")
 
-                    #voltages = [start_v + i * step_v for i in range(int((stop_v - start_v) / step_v) + 1)]
-                    #currents = [v * 1e-6 for v in voltages]  # Simulated data
+                    # voltages = [start_v + i * step_v for i in range(int((stop_v - start_v) / step_v) + 1)]
+                    # currents = [v * 1e-6 for v in voltages]  # Simulated data
                     self.ax.clear()
                     self.ax.plot(v_arr, c_arr, marker='o')
                     self.ax.set_title("Measurement Plot")
@@ -585,7 +603,6 @@ class MeasurementGUI:
         else:
             print("Selected measurement not found in JSON file.")
 
-
     def connect_keithley(self):
         """Connect to the Keithley SMU via GPIB"""
         address = self.address_var.get()
@@ -598,7 +615,6 @@ class MeasurementGUI:
             self.connected = True
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
 
-
     def start_measurement(self):
         """Start voltage sweeps on all devices"""
         if not self.connected:
@@ -610,7 +626,7 @@ class MeasurementGUI:
         sweeps = self.sweeps.get()
         step_v = self.step_size.get()
 
-        voltage_range = get_voltage_range(start_v, stop_v,step_v)
+        voltage_range = get_voltage_range(start_v, stop_v, step_v)
 
         # loops through the device's
         for device in self.device_list:
@@ -625,7 +641,7 @@ class MeasurementGUI:
             time.sleep(1)
 
             # measure device
-            v_arr, c_arr = self.measure(voltage_range,sweeps)
+            v_arr, c_arr = self.measure(voltage_range, sweeps)
 
             # save data to file
             data = np.column_stack((v_arr, c_arr))
@@ -647,14 +663,13 @@ class MeasurementGUI:
         self.status_box.config(text="Measurement Complete")
         messagebox.showinfo("Complete", "Measurements finished.")
 
-
-    def measure(self, voltage_range,sweeps):
+    def measure(self, voltage_range, sweeps):
 
         # Sweep through voltages
         for sweep_num in range(int(sweeps)):
             v_arr = []
             c_arr = []
-            #print("uncomment out the kiethly stuffs")
+            # print("uncomment out the kiethly stuffs")
             for v in voltage_range:
                 self.keithley.set_voltage(v)
                 time.sleep(0.2)  # Allow measurement to settle
@@ -677,8 +692,6 @@ class MeasurementGUI:
             return {}
 
 
-
-
 def get_voltage_range(start_v, stop_v, step_v):
     def frange(start, stop, step):
         while start <= stop if step > 0 else start >= stop:
@@ -696,5 +709,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SampleGUI(root)
     root.mainloop()
-
-
