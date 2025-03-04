@@ -26,6 +26,21 @@ class Switchbox:
                 self.connected = True
     
     def close(self):
+        self.running = True
+
+        while self.running and self.connected:
+            if self.status == "idle":
+                self.status = self.beginComms()
+
+            elif self.status == "ready":
+                while self.ser.in_waiting > 0:
+                    message = self.getMessage()
+
+                    if message == "READY RECIEVED":
+                        self.resetRelays()
+
+                        time.sleep(0.8)
+
         if self.ser and self.ser.is_open:
             self.ser.close()
 
@@ -48,9 +63,6 @@ class Switchbox:
     
 
     def resetRelays(self):
-        command = "READY"
-        self.sendMessage(command)
-
         print("Resetting all shift registers...\n")
         command = "RESET"
         self.sendMessage(command)
@@ -163,7 +175,7 @@ class Switchbox:
                         self.sendMessage("IDLE")
                         self.status = "idle"
 
-                        relays_to_switch = []
+                        self.relays_to_switch = []
                         self.running = False
 
 
@@ -171,8 +183,7 @@ if __name__ == "__main__":
     box = Switchbox()
     
     # Run interactive test
-    box.activate()
-    
+    box.activate([1,2])
     
     # Or manual control
     # box.set_relays([0, 1, 2])  # 0-based indexes
