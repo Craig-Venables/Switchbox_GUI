@@ -1,5 +1,7 @@
 import pyvisa
 
+"""https://pymeasure.readthedocs.io/en/latest/api/instruments/keithley/keithley2400.html#pymeasure.instruments.keithley.Keithley2400.compliance_current"""
+
 class Keithley2400:
     def __init__(self, gpib_address='GPIB0::24::INSTR', timeout=5000):
         """Initialize connection to Keithley 2400."""
@@ -17,6 +19,27 @@ class Keithley2400:
         except Exception as e:
             print("General Error:", e)
             self.device = None
+
+        # keithley.apply_current()  # Sets up to source current
+        # keithley.source_current_range = 10e-3  # Sets the source current range to 10 mA
+        # keithley.compliance_voltage = 10  # Sets the compliance voltage to 10 V
+        # keithley.source_current = 0  # Sets the source current to 0 mA
+        # keithley.enable_source()  # Enables the source output
+        #
+        # keithley.measure_voltage()  # Sets up to measure voltage
+        #
+        # keithley.ramp_to_current(5e-3)  # Ramps the current to 5 mA
+        # print(keithley.voltage)  # Prints the voltage in Volts
+        #
+        # keithley.shutdown()  # Ramps the current to 0 mA and disables output
+
+        # ramp_to_voltage(target_voltage, steps=30, pause=0.02)
+    def beep(self,frequency,duration):
+        self.device.beep(frequency,duration)
+
+    def voltage_ramp(self,target_voltage, steps=30, pause=0.02):
+        "set voltage ramp"
+        self.device.ramp_to_voltage(target_voltage, steps=30, pause=0.02)
 
     def get_idn(self):
         """Query and return the device identity string."""
@@ -67,6 +90,10 @@ class Keithley2400:
         if self.device:
             self.device.close()
             print("Connection closed.")
+
+    def shutdown(self):
+        """ Ramps the current to 0 mA and disables output"""
+        self.device.shutdown()
 
 # Example Usage
 if __name__ == "__main__":
