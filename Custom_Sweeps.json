@@ -19,19 +19,5 @@
         "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05}
     },
     "Resistance Sweep": {"measurement_1": {"start_v": 0, "stop_v": 5, "sweeps": 3, "step_v": 0.5}
-    },
-    "Capacitance Test": {
-        "measurement_1": {
-            "start_v": -2,
-            "stop_v": 2,
-            "sweeps": 2,
-            "step_v": 0.1
-        },
-        "measurement_2": {
-            "start_v": -5,
-            "stop_v": 5,
-            "sweeps": 1,
-            "step_v": 0.5
-        }
     }
 }
