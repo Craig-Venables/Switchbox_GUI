@@ -1,6 +1,7 @@
 {
  "Debug_testing_sweep": {
-        "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 1,"step_v": 0.1}
+        "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 1,"step_v": 0.1},
+        "2": {"start_v": 0,"stop_v": 5,"sweeps": 1,"step_v": 1}
     },
     "Increasing Iv 0 - 2": {
         "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 3,"step_v": 0.05},
