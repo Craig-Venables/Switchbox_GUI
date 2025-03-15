@@ -46,5 +46,12 @@
         "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05}
     },
     "Resistance Sweep": {"measurement_1": {"start_v": 0, "stop_v": 5, "sweeps": 3, "step_v": 0.5}
-    }
+    },
+  "test2": {
+      "1": {"start_v": 0, "stop_v": 0.1, "sweeps": 3, "step_v": 0.01,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS"},
+        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"},
+        "4": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "NS"},
+        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"}
+  }
 }
