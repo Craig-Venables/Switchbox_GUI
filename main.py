@@ -9,7 +9,13 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from AdaptiveMeasurement import AdaptiveMeasurement
 import sys
-#import pySwitchbox
+# import pySwitchbox
+
+# TODO add half sweeps both positive and negative
+# TODO add step delay
+
+# TODO Sort saving of the files correctly
+
 
 """ Classes for the Gui"""
 
@@ -18,10 +24,7 @@ sample_config = {
     "Cross_bar": {
         "sections": {"A": True, "B": True, "C": False, "D": True, "E": True, "F": False, "G": True, "H": True,
                      "I": True, "J": True, "K": True, "L": True},
-        "devices": [str(i) for i in range(1, 11)]
-    }
-
-}
+        "devices": [str(i) for i in range(1, 11)]}}
 
 
 # Function to load device mapping from JSON file
@@ -55,7 +58,9 @@ class SampleGUI:
         self.device_list = list(device_mapping.keys())  # Ordered list of device names
         self.current_index = 0  # Index of currently selected device
 
-        #self.switchbox = pySwitchbox.Switchbox()
+        self.measurement_window = False
+
+        # self.switchbox = pySwitchbox.Switchbox()
 
         # Sample Type Dropdown
         tk.Label(root, text="Sample type").grid(row=0, column=0, sticky='w')
@@ -234,17 +239,21 @@ class SampleGUI:
             self.canvas.create_rectangle(x_min, y_min, x_max, y_max, outline="red", width=2, tags="highlight")
 
     def open_measurement_window(self):
-        sample_type = self.sample_type_var.get()
-        section = self.section_var.get()
 
-        # Filter devices belonging to the selected sample type
-        selected_devices = [d for d in self.device_list if device_mapping[d]["sample"] == sample_type]
+        if not self.measurement_window:
+            sample_type = self.sample_type_var.get()
+            section = self.section_var.get()
 
-        if not selected_devices:
-            messagebox.showwarning("Warning", "No devices found for this sample.")
-            return
+            # Filter devices belonging to the selected sample type
+            selected_devices = [d for d in self.device_list if device_mapping[d]["sample"] == sample_type]
 
-        MeasurementGUI(self.root, sample_type, section, selected_devices, self)
+            if not selected_devices:
+                messagebox.showwarning("Warning", "No devices found for this sample.")
+                return
+            self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_devices, self)
+            self.measurement_window = True
+        else:
+            self.measuremnt_gui.bring_to_top()
 
     def update_info_box(self, event=None):
         selected_sample = self.sample_type_var.get()
@@ -254,7 +263,6 @@ class SampleGUI:
         self.info_box.config(text=device_text)
 
     def change_relays(self):
-
         def get_device_pins(device_name):
             if device_name in pin_mapping:
                 # print(device_name,pin_mapping)
@@ -271,9 +279,13 @@ class SampleGUI:
 
         # gives pins in array
         pins_arr = get_device_pins(self.device_list[self.current_index])
-        self.switchbox.activate(pins_arr)
+        # self.switchbox.activate(pins_arr)
 
         self.log_terminal(self.section_var.get() + self.device_var.get())
+        if self.measurement_window:
+            print("needtoupdat")
+            self.measuremnt_gui.current_index = self.current_index
+            self.measuremnt_gui.update_variables()
 
     def clear_canvas(self):
         self.canvas.delete("all")
@@ -294,19 +306,22 @@ class MeasurementGUI:
     def __init__(self, master, sample_type, section, device_list, sample_gui):
         self.master = tk.Toplevel(master)
         self.master.title("Measurement Setup")
-        self.master.geometry("800x600")  # Increased width to accommodate new section
-        #self.icc = 0.01
+        self.master.geometry("800x600+800+100")  # Increased width to accommodate new section
         self.sample_gui = sample_gui
+        self.current_index = self.sample_gui.current_index
         self.sample_type = sample_type
         self.section = section
         self.device_list = device_list
+        self.current_device = self.device_list[self.current_index]
+
+        # Flags
         self.connected = False
         self.keithley = None  # Keithley instance
         self.adaptive_measurement = None
-        # Flags
         self.single_device_flag = False
         self.stop_measurement_flag = False
 
+        # Data storage
         self.measurement_data = {}  # Store measurement results
 
         # Load custom sweeps from JSON
@@ -314,8 +329,8 @@ class MeasurementGUI:
         self.test_names = list(self.custom_sweeps.keys())
 
         # layout
-        self.create_mode_selection()
         self.create_connection_section()
+        self.create_mode_selection()
         self.create_sweep_parameters()
         self.create_status_box()
         self.create_custom_measurement_section()
@@ -333,20 +348,28 @@ class MeasurementGUI:
         self.adaptive_button = tk.Button(self.master, text="Song", command=self.play_melody)
         self.adaptive_button.grid(row=10, column=1, columnspan=2, pady=10)
 
+    def bring_to_top(self):
+        # If the window is already open, bring it to the front
+        self.master.lift()  # Bring the GUI window to the front
+        self.master.focus()  # Focus the window (optional, makes it active)
+
+    def update_variables(self):
+        self.current_device = self.device_list[self.current_index]
+        self.device_var.config(text=self.current_device)
+
     def ohno(self):
-        self.keithley.beep(150,0.2)
+        self.keithley.beep(150, 0.2)
         time.sleep(0.2)
         self.keithley.beep(100, 0.2)
-
 
     def close(self):
         if self.keithley:
 
             self.stop_measurement_flag = True  # Set stop flag to break loops
-            self.keithley.beep(5000,0.1)
+            self.keithley.beep(5000, 0.1)
             time.sleep(0.2)
             self.keithley.beep(4000, 0.1)
-            #time.sleep(0.1)
+            # time.sleep(0.1)
             self.keithley.shutdown()
             print("closed")
             self.master.destroy()  # Closes the GUI window
@@ -359,9 +382,13 @@ class MeasurementGUI:
         if self.adaptive_var.get():
             print("Measuring only one device")
             self.single_device_flag = True
+
+            self.save_entry.config(state="normal")
         else:
             print("Measuring all devices")
             self.single_device_flag = False
+            self.device_entry.config(state="disabled")
+            self.save_entry.config(state="disabled")
 
     def open_adaptive_settings(self):
         if self.adaptive_measurement is None or not self.adaptive_measurement.master.winfo_exists():
@@ -477,6 +504,7 @@ class MeasurementGUI:
 
     def spare_button(self):
         print("spare")
+
     def create_custom_measurement_section(self):
         """Custom measurements section"""
         frame = tk.LabelFrame(self.master, text="Custom Measurements", padx=5, pady=5)
@@ -498,7 +526,6 @@ class MeasurementGUI:
         self.run_custom_button = tk.Button(frame, text="Run Custom", command=self.run_custom_measurement)
         self.run_custom_button.grid(row=2, column=0, columnspan=2, pady=5)
 
-
     def create_status_box(self):
         """Status box section"""
         frame = tk.LabelFrame(self.master, text="Status", padx=5, pady=5)
@@ -510,32 +537,48 @@ class MeasurementGUI:
     def create_mode_selection(self):
         """Mode selection section"""
         frame = tk.LabelFrame(self.master, text="Mode Selection", padx=5, pady=5)
-        frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
 
+        # Mode selection
         tk.Label(frame, text="Mode:").grid(row=0, column=0, sticky="w")
         self.mode_var = tk.StringVar(value="Custom")
         self.mode_menu = ttk.Combobox(frame, textvariable=self.mode_var, values=["Custom", "Preset"])
         self.mode_menu.grid(row=0, column=1)
         self.mode_menu.bind("<<ComboboxSelected>>", self.toggle_mode)
 
+        # Preset selection (disabled by default)
         self.preset_var = tk.StringVar(value="Select a Preset")
         self.preset_menu = ttk.Combobox(frame, textvariable=self.preset_var, values=[], state="disabled")
         self.preset_menu.grid(row=1, column=1)
 
-        # only measure one device
-        # Variable to store switch state (0 = OFF, 1 = ON)
+        # Toggle switch: Measure one device
         self.adaptive_var = tk.IntVar(value=0)
-
-        # Create the toggle switch (styled Checkbutton)
         self.adaptive_switch = ttk.Checkbutton(frame,
-            text="Measure One device?", variable=self.adaptive_var, style="Switch.TCheckbutton",
-            command=self.measure_one_device)
+                                               text="Measure One Device?", variable=self.adaptive_var,
+                                               command=self.measure_one_device)
         self.adaptive_switch.grid(row=2, column=1, columnspan=2, pady=10)
+        ##
+
+        tk.Label(frame, text="Current Device:").grid(row=3, column=0, sticky="w")
+        self.device_var = tk.Label(frame, text=self.current_device, relief=tk.SUNKEN, anchor="w", width=20)
+        self.device_var.grid(row=3, column=1, columnspan=2, sticky="ew")
+        ##
+
+        # # Device Name Box (Initially Disabled)
+
+        # self.device_var = tk.StringVar(value=self.current_device)  # Default text
+        # self.device_entry = ttk.Entry(frame, textvariable=self.device_var, state="disabled")
+        # self.device_entry.grid(row=3, column=1, columnspan=2, sticky="ew")
+
+        # Save Location Box (Initially Disabled)
+        tk.Label(frame, text="Save Location:").grid(row=4, column=0, sticky="w")
+        self.save_entry = ttk.Entry(frame, state="disabled")
+        self.save_entry.grid(row=4, column=1, columnspan=2, sticky="ew")
 
     def create_connection_section(self):
         """Keithley connection section"""
         frame = tk.LabelFrame(self.master, text="Keithley Connection", padx=5, pady=5)
-        frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
 
         tk.Label(frame, text="GPIB Address:").grid(row=0, column=0, sticky="w")
         self.address_var = tk.StringVar(value="GPIB0::24::INSTR")
@@ -623,13 +666,22 @@ class MeasurementGUI:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
 
+        if self.single_device_flag:
+            # You can modify the message text to be more descriptive
+            response = messagebox.askquestion(
+                "Did you choose the correct device?",
+                "Please make sure the correct device is selected.\nClick 'Yes' if you are sure.\nIf not you will be "
+                "saving over old data"
+            )
+
+            if response != 'yes':
+                return
+
         selected_measurement = self.custom_measurement_var.get()
         print(f"Running custom measurement: {selected_measurement}")
         if selected_measurement in self.custom_sweeps:
 
             for device in self.device_list:
-
-
 
                 # Loop through devices
 
@@ -637,7 +689,7 @@ class MeasurementGUI:
                 self.master.update()
                 time.sleep(1)
 
-                self.keithley.set_voltage(0,self.icc.get())  # Start at 0V
+                self.keithley.set_voltage(0, self.icc.get())  # Start at 0V
                 self.keithley.enable_output(True)  # Enable output
 
                 for key, params in self.custom_sweeps[selected_measurement].items():
@@ -661,8 +713,6 @@ class MeasurementGUI:
                         self.measurement_data[device] = {}  # Initialize with an empty dictionary
 
                     self.measurement_data[device][key] = (v_arr, c_arr)
-
-
 
                     # save data to file
                     data = np.column_stack((v_arr, c_arr))
@@ -698,10 +748,10 @@ class MeasurementGUI:
             self.keithley = Keithley2400Controller(address)
             self.connected = True
             self.status_box.config(text="Status: Connected")
-            #messagebox.showinfo("Connection", f"Connected to: {address}")
-            self.keithley.beep(4000,0.2)
+            # messagebox.showinfo("Connection", f"Connected to: {address}")
+            self.keithley.beep(4000, 0.2)
             time.sleep(0.2)
-            self.keithley.beep(5000,0.5)
+            self.keithley.beep(5000, 0.5)
 
 
         except Exception as e:
@@ -734,7 +784,7 @@ class MeasurementGUI:
             self.status_box.config(text=f"Measuring {device}...")
             self.master.update()
 
-            self.keithley.set_voltage(0,self.icc.get())# Start at 0V
+            self.keithley.set_voltage(0, self.icc.get())  # Start at 0V
             self.keithley.enable_output(True)  # Enable output
 
             # time between devices , needs to allow for relay to change
@@ -781,10 +831,10 @@ class MeasurementGUI:
             c_arr = []
             # print("uncomment out the kiethly stuffs")
             for v in voltage_range:
-                self.keithley.set_voltage(v,self.icc.get())
+                self.keithley.set_voltage(v, self.icc.get())
                 time.sleep(0.2)  # Allow measurement to settle
                 current = self.keithley.measure_current()
-                #print(v,current[1])
+                # print(v,current[1])
                 v_arr.append(v)
 
                 c_arr.append(current[1])
@@ -832,7 +882,6 @@ class MeasurementGUI:
             time.sleep(duration * 0.8)  # Small gap between notes
 
         print("Melody finished!")
-
 
 
 def get_voltage_range(start_v, stop_v, step_v):
