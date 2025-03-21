@@ -21,5 +21,5 @@ def find_largest_number_in_folder(folder_path):
 
     return largest_number
 
-path = "C:\\Users\\ppxcv1\\OneDrive - The University of Nottingham\\Documents\\GitHub_labpc1\\Switchbox_GUI\\Data_save_loc\\.!toplevel.!labelframe2.!entry\\A\\1"
+path = "C:\\Users\\ppxcv1\\OneDrive - The University of Nottingham\\Documents\\GitHub_labpc1\\Switchbox_GUI\\Data_save_loc\\.!toplevel.!labelframe2.!entry\\Across Ito\\1"
 print(find_largest_number_in_folder(path))

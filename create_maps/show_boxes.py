@@ -4,10 +4,10 @@ import matplotlib.patches as patches
 from PIL import Image
 
 # Load the image
-image_path = "../Sample_images/memristor.png"  # Replace with the actual image filename
+image_path = "../Sample_Infomation/memristor.png"  # Replace with the actual image filename
 image = Image.open(image_path)
 
-mapping_file = "../mapping.json"  # Replace with actual mapping JSON fil
+mapping_file = "../Json_Files/mapping.json"  # Replace with actual mapping JSON fil
 
 
 # Load the image and resize it to 400x400

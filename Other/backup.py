@@ -76,6 +76,6 @@
         # self.figure, self.ax = plt.subplots(figsize=(4, 3))
         # self.ax.set_title("Measurement Plot")
         # self.ax.set_xlabel("Voltage (V)")
-        # self.ax.set_ylabel("Current (A)")
+        # self.ax.set_ylabel("Current (Across Ito)")
         # self.canvas = FigureCanvasTkAgg(self.figure, master=self.master)
         # self.canvas.get_tk_widget().grid(row=3, column=5, rowspan=6, padx=10, pady=10)

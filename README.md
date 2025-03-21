@@ -3,6 +3,7 @@ Install the following dependancies
 pip install opencv-python
 pip install matplotlib
 
+https://nodejs.org/en
 
 
 # Create a custom sweep 

@@ -1,9 +1,7 @@
-import pyvisa
-from pymeasure.instruments.keithley import Keithley2400
-
-"""https://pymeasure.readthedocs.io/en/latest/api/instruments/keithley/keithley2400.html#pymeasure.instruments.keithley.Keithley2400.compliance_current"""
 from pymeasure.instruments.keithley import Keithley2400
 import time
+"""https://pymeasure.readthedocs.io/en/latest/api/instruments/keithley/keithley2400.html#pymeasure.instruments.keithley.Keithley2400.compliance_current"""
+
 
 class Keithley2400Controller:
     def __init__(self, gpib_address='GPIB0::24::INSTR', timeout=5):
