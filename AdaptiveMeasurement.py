@@ -18,7 +18,7 @@ class AdaptiveMeasurement:
         self.resistance_entry = tk.Entry(self.master, textvariable=self.resistance_limit)
         self.resistance_entry.grid(row=1, column=1)
 
-        tk.Label(self.master, text="Max Compliance (A):").grid(row=2, column=0, sticky="w")
+        tk.Label(self.master, text="Max Compliance (Across Ito):").grid(row=2, column=0, sticky="w")
         self.compliance_limit = tk.DoubleVar(value=1e-6)
         self.compliance_entry = tk.Entry(self.master, textvariable=self.compliance_limit)
         self.compliance_entry.grid(row=2, column=1)
@@ -80,7 +80,7 @@ class AdaptiveMeasurement:
 #         ttk.Label(self.window, text="Resistance Threshold (Ω):").grid(row=1, column=0, sticky="w")
 #         ttk.Entry(self.window, textvariable=self.resistance_threshold).grid(row=1, column=1)
 #
-#         ttk.Label(self.window, text="Compliance Limit (A):").grid(row=2, column=0, sticky="w")
+#         ttk.Label(self.window, text="Compliance Limit (Across Ito):").grid(row=2, column=0, sticky="w")
 #         ttk.Entry(self.window, textvariable=self.compliance_limit).grid(row=2, column=1)
 #
 #         ttk.Button(self.window, text="Save Settings", command=self.save_settings).grid(row=3, column=0, columnspan=2,
@@ -90,7 +90,7 @@ class AdaptiveMeasurement:
 #         """Saves adaptive settings and closes the window."""
 #         print(f"Adaptive Enabled: {self.adaptive_enabled.get()}")
 #         print(f"Resistance Threshold: {self.resistance_threshold.get()} Ω")
-#         print(f"Compliance Limit: {self.compliance_limit.get()} A")
+#         print(f"Compliance Limit: {self.compliance_limit.get()} Across Ito")
 #         self.window.destroy()
 #
 #     def analyze_sweep(self, voltages, currents):

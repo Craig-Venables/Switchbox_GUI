@@ -18,7 +18,7 @@ device_counter = 1
 device_mapping = {}
 
 # Load image
-image_path = "../Sample_images/memristor.png"
+image_path = "../Sample_Infomation/memristor.png"
 image = cv2.imread(image_path)
 clone = image.copy()
 
