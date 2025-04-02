@@ -1,25 +1,37 @@
-import re
-import os
-def extract_number_from_filename(filename):
-    # Use regex to find the number at the start of the filename before the first '-'
-    match = re.match(r'^(\d+)_', filename)
-    if match:
-        return int(match.group(1))
-    return None
+import pyvisa
+import time
 
+# Initialize VISA resource manager
+rm = pyvisa.ResourceManager()
 
-def find_largest_number_in_folder(folder_path):
-    largest_number = None
+# Replace this with the actual resource name from rm.list_resources()
+keithley = rm.open_resource("USB0::0x05E6::0x2220::9210734::INSTR")
 
-    # Iterate over all files in the folder
-    for filename in os.listdir(folder_path):
-        print(filename)
-        number = extract_number_from_filename(filename)
-        if number is not None:
-            if largest_number is None or number > largest_number:
-                largest_number = number
+# Set channel (1 or 2, depending on where your LED is connected)
+CHANNEL = 1
+VOLTAGE = 2.5  # Adjust to your LED's requirements
+CURRENT_LIMIT = 0.5  # Set a safe limit to protect the LED
 
-    return largest_number
+# Configure the power supply
+keithley.write(f"INST CH{CHANNEL}")  # Select channel
+keithley.write(f"VOLT {VOLTAGE}")  # Set voltage
+keithley.write(f"CURR {CURRENT_LIMIT}")  # Set current limit
 
-path = "C:\\Users\\ppxcv1\\OneDrive - The University of Nottingham\\Documents\\GitHub_labpc1\\Switchbox_GUI\\Data_save_loc\\.!toplevel.!labelframe2.!entry\\Across Ito\\1"
-print(find_largest_number_in_folder(path))
+while True:
+    command = input("Enter 'ON' to turn LED on, 'OFF' to turn it off, 'EXIT' to quit: ").strip().upper()
+
+    if command == "ON":
+        keithley.write("OUTP ON")  # Enable output
+        print("LED ON")
+    elif command == "OFF":
+        keithley.write("OUTP OFF")  # Disable output
+        print("LED OFF")
+    elif command == "EXIT":
+        break
+    else:
+        print("Invalid command. Use 'ON', 'OFF', or 'EXIT'.")
+
+# Turn off output and close connection
+keithley.write("OUTP OFF")
+keithley.close()
+print("Connection closed.")

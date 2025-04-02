@@ -1,5 +1,6 @@
 import tkinter as tk
 from Sample_GUI import SampleGUI
+import atexit
 
 # import pySwitchbox
 
@@ -24,4 +25,5 @@ from Sample_GUI import SampleGUI
 if __name__ == "__main__":
     root = tk.Tk()
     app = SampleGUI(root)
+
     root.mainloop()
