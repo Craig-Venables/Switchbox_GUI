@@ -3,18 +3,21 @@ from tkinter import ttk, messagebox, simpledialog
 import numpy as np
 import json
 import time
-from Kiethley_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from AdaptiveMeasurement import AdaptiveMeasurement
-from Check_Connection import CheckConnection
 import sys
 import string
 import os
 import re
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import logging
 from datetime import datetime
 import threading
+import atexit
+
+from Kiethley_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
+from Kiethley_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
+from AdaptiveMeasurement import AdaptiveMeasurement
+from Check_Connection import CheckConnection
 
 # Set logging level to WARNING (hides INFO messages)
 logging.getLogger("pymeasure").setLevel(logging.WARNING)
@@ -32,6 +35,7 @@ class MeasurementGUI:
         self.sample_gui = sample_gui
         self.current_index = self.sample_gui.current_index
         self.load_messaging_data()
+        self.psu_visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"
 
         # Device name's
         self.sample_type = sample_type
@@ -44,10 +48,12 @@ class MeasurementGUI:
         # Flags
         self.connected = False
         self.keithley = None  # Keithley instance
+        self.psu_connected = False
         self.adaptive_measurement = None
         self.single_device_flag = True
         self.stop_measurement_flag = False
         self.get_messaged_var = False
+
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
@@ -78,7 +84,20 @@ class MeasurementGUI:
         self.adaptive_button = tk.Button(self.master, text="Song", command=self.play_melody)
         self.adaptive_button.grid(row=10, column=3, columnspan=2, pady=10)
 
+        # connect
         self.connect_keithley()
+        self.connect_keithley_psu()
+        self.psu.set_voltage(1,5)
+        self.psu.enable_channel(1)
+
+        atexit.register(self.cleanup)
+
+    def cleanup(self):
+        self.keithley.shutdown()
+        self.psu.disable_channel(1)
+        self.psu.disable_channel(2)
+        self.psu.close()
+        print("safely turned everything off")
 
     def create_connection_section(self):
         """Keithley connection section"""
@@ -233,10 +252,11 @@ class MeasurementGUI:
 
         self.status_box = tk.Label(frame, text="Status: Not Connected", relief=tk.SUNKEN, anchor="w", width=40)
         self.status_box.pack(fill=tk.X)
+
     def create_plot_section(self):
         """Matplotlib figure for plotting"""
         frame = tk.LabelFrame(self.master, text="Last Measurement Plot", padx=5, pady=5)
-        frame.grid(row=0, column=1, rowspan=8,padx=10, pady=5, sticky="nsew")
+        frame.grid(row=0, column=1, rowspan=8, padx=10, pady=5, sticky="nsew")
 
         self.figure, self.ax = plt.subplots(figsize=(4, 4))
         self.ax.set_title("Measurement Plot")
@@ -451,8 +471,6 @@ class MeasurementGUI:
             if response != 'yes':
                 return
 
-
-
         # make sure it is on the top
         self.bring_to_top()
 
@@ -626,8 +644,23 @@ class MeasurementGUI:
 
 
         except Exception as e:
-            self.connected = True
+            self.connected = False
+            print("unable to connect to SMU please check")
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
+
+    def connect_keithley_psu(self):
+        try:
+            self.psu = Keithley2220_Powersupply(self.psu_visa_address)
+            self.psu_connected = True
+            self.keithley.beep(8000, 0.2)
+            time.sleep(0.2)
+            self.keithley.beep(10000, 0.2)
+
+            self.psu.reset() # reset psu
+        except Exception as e:
+            print("unable to connect to psu please check")
+            messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
+
 
     def start_measurement(self):
         """Start single measurementt on the device! """
@@ -841,8 +874,12 @@ class MeasurementGUI:
             self.keithley.beep(5000, 0.1)
             time.sleep(0.2)
             self.keithley.beep(4000, 0.1)
-            # time.sleep(0.1)
+
             self.keithley.shutdown()
+            self.psu.disable_channel(1)
+            self.psu.disable_channel(2)
+
+            self.psu.close()
             print("closed")
             self.master.destroy()  # Closes the GUI window
             sys.exit()
