@@ -45,6 +45,9 @@ class MeasurementGUI:
         self.device_section_and_number = self.convert_to_name(self.current_index)
         self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
 
+        #
+        self.led = 'Uv'
+
         # Flags
         self.connected = False
         self.keithley = None  # Keithley instance
@@ -87,10 +90,15 @@ class MeasurementGUI:
         # connect
         self.connect_keithley()
         self.connect_keithley_psu()
-        self.psu.set_voltage(1,5)
-        self.psu.enable_channel(1)
+        self.psu.set_voltage(1,3)
 
+
+        # for i in range(10):
+        #     self.psu.enable_channel(1)
+        #     time.sleep(1)
+        #     self.psu.disable_channel(1)
         atexit.register(self.cleanup)
+
 
     def cleanup(self):
         self.keithley.shutdown()
@@ -528,6 +536,7 @@ class MeasurementGUI:
 
                     # LED control
                     # Todo incorporate this into the code fully
+                    led_sequence = params.get("LED_sequence",None)
                     led = params.get("LED", "OFF")
                     led_time = params.get("led_time", "10")
                     led_sweeps = params.get("led_sweeps", "2")
@@ -546,6 +555,12 @@ class MeasurementGUI:
                         print("endurance")
                     elif sweep_type == "Retention":
                         print("retention")
+                    elif sweep_type == "Retention_led":
+                        print("Retention_led")
+                    elif sweep_type == "Endurance_led":
+                        print("Endurance_led")
+                    elif sweep_type == "Fs_Led":
+                        print("Endurance_led")
 
                     else:  # sweep_type == "FS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
