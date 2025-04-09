@@ -48,7 +48,8 @@
         "3": {"start_v": 0, "stop_v": 1, "sweeps": 3, "step_v": 0.05},
         "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05},
         "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05},
-        "6": {"start_v": 0, "stop_v": 2, "sweeps": 3, "step_v": 0.05}
+        "6": {"start_v": 0, "stop_v": 2, "sweeps": 3, "step_v": 0.05},
+        "7": {"start_v": 0, "stop_v": 1.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS","LED_sequence": "1,0,1,0,1"}
     },
   "Increasing Iv 0 - 1.5": {
         "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 3,"step_v": 0.05},
