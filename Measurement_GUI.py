@@ -64,6 +64,7 @@ class MeasurementGUI:
         # Load custom sweeps from JSON
         self.custom_sweeps = self.load_custom_sweeps("Json_Files/Custom_Sweeps.json")
         self.test_names = list(self.custom_sweeps.keys())
+        self.code_names = {name: self.custom_sweeps[name].get("code_name") for name in self.test_names}
 
         # layout
         self.create_connection_section()
@@ -89,22 +90,20 @@ class MeasurementGUI:
 
         # connect
         self.connect_keithley()
+
+        #connect to psu
         self.connect_keithley_psu()
-        self.psu.set_voltage(1,3)
+        # self.psu.set_voltage(1,3)
 
-
-        # for i in range(10):
-        #     self.psu.enable_channel(1)
-        #     time.sleep(1)
-        #     self.psu.disable_channel(1)
         atexit.register(self.cleanup)
 
 
     def cleanup(self):
         self.keithley.shutdown()
-        self.psu.disable_channel(1)
-        self.psu.disable_channel(2)
-        self.psu.close()
+        if self.psu_connected:
+            self.psu.disable_channel(1)
+            self.psu.disable_channel(2)
+            self.psu.close()
         print("safely turned everything off")
 
     def create_connection_section(self):
@@ -180,7 +179,7 @@ class MeasurementGUI:
         tk.Entry(frame, textvariable=self.sweeps).grid(row=4, column=1)
         # todo add compliance current as a way to limit the V
         tk.Label(frame, text="Icc:").grid(row=5, column=0, sticky="w")
-        self.icc = tk.DoubleVar(value=0.01)
+        self.icc = tk.DoubleVar(value=0.1)
         tk.Entry(frame, textvariable=self.icc).grid(row=5, column=1)
 
         def start_thread():
@@ -209,7 +208,7 @@ class MeasurementGUI:
 
         # compliance current Data entry
         tk.Label(frame, text="Icc (A):").grid(row=1, column=0, sticky="w")
-        self.icc = tk.DoubleVar(value=0.01)
+        self.icc = tk.DoubleVar(value=0.1)
         tk.Entry(frame, textvariable=self.icc).grid(row=1, column=1)
 
         def start_thread():
@@ -488,6 +487,7 @@ class MeasurementGUI:
         selected_measurement = self.custom_measurement_var.get()
         print(f"Running custom measurement: {selected_measurement}")
 
+        # use the bot to send a message
         # if self.get_messaged_var:
         #     bot = TelegramBot(self.token_var.get(), self.chatid_var.get())
         #     var = self.custom_measurement_var.get()
@@ -504,6 +504,7 @@ class MeasurementGUI:
 
             device_count = len(self.device_list)
 
+            # looping through each device.
             for i in range(device_count):  # Ensure we process each device exactly once
                 device = self.device_list[(start_index + i) % device_count]  # Wrap around when reaching the end
 
@@ -511,13 +512,18 @@ class MeasurementGUI:
                 self.master.update()
                 time.sleep(1)
 
+                # Ensure Kiethley set correctly
                 self.keithley.set_voltage(0, self.icc.get())  # Start at 0V
                 self.keithley.enable_output(True)  # Enable output
 
                 start = time.time()
                 start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-                for key, params in self.custom_sweeps[selected_measurement].items():
+                sweeps = self.custom_sweeps[selected_measurement]["sweeps"]
+                code_name = self.custom_sweeps[selected_measurement].get("code_name", "unknown")
+
+                for key, params in sweeps.items():
+                    print(key,params)
                     if self.stop_measurement_flag:  # Check if stop was pressed
                         print("Measurement interrupted!")
                         break  # Exit measurement loop immediately
@@ -586,7 +592,7 @@ class MeasurementGUI:
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
 
-                    name = f"{key}_{sweep_type}_{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}"
+                    name = f"{key}_{sweep_type}_{stop_v}v-{step_v}sv-{step_delay}sd-Py_{code_name}-{sweeps}"
                     file_path = f"{save_dir}\\{name}.txt"
 
                     if os.path.exists(file_path):
