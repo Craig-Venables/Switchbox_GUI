@@ -127,12 +127,12 @@ class Keithley2220_Powersupply:
 
         self.set_voltage(1, applied_v)
         self.enable_channel(1)
-        time.sleep(1)
+        #time.sleep(1)
         print("applied_v", applied_v)
 
     def led_off_380(self):
         self.disable_channel(1)
-        time.sleep(1)
+        #time.sleep(1)
 
 
 
