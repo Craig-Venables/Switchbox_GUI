@@ -125,3 +125,24 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = CheckConnection(root)
     root.mainloop()
+
+
+    def endurance(self):
+        time_data = []
+        current_data = []
+        start_time = time.time()
+        self.keithley.set_voltage(0.2,0.0001)
+        self.keithley.enable_output(True)
+        time.sleep(0.5)
+        self.previous_current = None
+        while self.check_connection_window:
+
+            current_value = self.keithley.measure_current()
+            elapsed_time = time.time() - start_time
+
+            time_data.append(elapsed_time)
+            current_data.append(current_value[1])
+
+            time.sleep(0.2)
+
+        self.keithley.shutdown()
