@@ -14,10 +14,12 @@ from datetime import datetime
 import threading
 import atexit
 
+
 from Kiethley_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
 from Kiethley_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from AdaptiveMeasurement import AdaptiveMeasurement
 from Check_Connection import CheckConnection
+from TelegramBot import TelegramBot
 
 # Set logging level to WARNING (hides INFO messages)
 logging.getLogger("pymeasure").setLevel(logging.WARNING)
@@ -88,12 +90,9 @@ class MeasurementGUI:
         self.adaptive_button = tk.Button(self.master, text="Song", command=self.play_melody)
         self.adaptive_button.grid(row=10, column=3, columnspan=2, pady=10)
 
-        # connect
+        # connect to kiethley's
         self.connect_keithley()
-
-        #connect to psu
         self.connect_keithley_psu()
-        # self.psu.set_voltage(1,3)
 
         atexit.register(self.cleanup)
 
@@ -244,13 +243,13 @@ class MeasurementGUI:
         # tk.Entry(frame, textvariable=self.icc).grid(row=3, column=1)
 
         # # Labels to display token and chat ID
-        # tk.Label(frame, text="Token:").grid(row=4, column=0, sticky="w")
-        # self.token_var = tk.StringVar(value="")
-        # tk.Label(frame, textvariable=self.token_var).grid(row=4, column=1, sticky="w")
-        #
-        # tk.Label(frame, text="Chat ID:").grid(row=4, column=0, sticky="w")
-        # self.chatid_var = tk.StringVar(value="")
-        # tk.Label(frame, textvariable=self.chatid_var).grid(row=4, column=1, sticky="w")
+        #tk.Label(frame, text="Token:").grid(row=4, column=0, sticky="w")
+        self.token_var = tk.StringVar(value="")
+        #tk.Label(frame, textvariable=self.token_var).grid(row=4, column=1, sticky="w")
+
+        #tk.Label(frame, text="Chat ID:").grid(row=4, column=0, sticky="w")
+        self.chatid_var = tk.StringVar(value="")
+        #tk.Label(frame, textvariable=self.chatid_var).grid(row=4, column=1, sticky="w")
 
     def create_status_box(self):
         """Status box section"""
@@ -463,6 +462,7 @@ class MeasurementGUI:
         return f"{valid_letters[index]}{sub_number}"
 
     def run_custom_measurement(self):
+        """ when custom measurements has been ran"""
 
         if not self.connected:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
@@ -472,9 +472,7 @@ class MeasurementGUI:
             response = messagebox.askquestion(
                 "Did you choose the correct device?",
                 "Please make sure the correct device is selected.\nClick 'Yes' if you are sure.\nIf not you will be "
-                "saving over old data"
-            )
-
+                "saving over old data" )
             if response != 'yes':
                 return
 
@@ -487,14 +485,14 @@ class MeasurementGUI:
         selected_measurement = self.custom_measurement_var.get()
         print(f"Running custom measurement: {selected_measurement}")
 
-        # use the bot to send a message
-        # if self.get_messaged_var:
-        #     bot = TelegramBot(self.token_var.get(), self.chatid_var.get())
-        #     var = self.custom_measurement_var.get()
-        #     samle_name = self.sample_name_var.get()
-        #     section = self.device_section_and_number
-        #     text = f"Starting Measurements on {samle_name} device {section} "
-        #     bot.send_message(text)  # Runs the coroutine properly
+        #use the bot to send a message
+        if self.get_messaged_var:
+            bot = TelegramBot(self.token_var.get(), self.chatid_var.get())
+            var = self.custom_measurement_var.get()
+            samle_name = self.sample_name_var.get()
+            section = self.device_section_and_number
+            text = f"Starting Measurements on {samle_name} device {section} "
+            bot.send_message(text)  # Runs the coroutine properly
 
         if selected_measurement in self.custom_sweeps:
             if self.current_device in self.device_list:
@@ -522,14 +520,25 @@ class MeasurementGUI:
                 sweeps = self.custom_sweeps[selected_measurement]["sweeps"]
                 code_name = self.custom_sweeps[selected_measurement].get("code_name", "unknown")
 
+                # checks psu connection if led required for measurement
+                LED = False
                 for key, params in sweeps.items():
-                    print(key,params)
+                    LED = params.get("LED_ON", "OFF")
+                    if LED:
+                        if not self.psu_connected:
+                            print("led used needs to be connected to psu")
+                            messagebox.showwarning("Warning", "Not connected to PSU!")
+                            time.sleep(1)
+                            self.connect_keithley_psu()
+                            break
+
+
+                for key, params in sweeps.items():
                     if self.stop_measurement_flag:  # Check if stop was pressed
                         print("Measurement interrupted!")
                         break  # Exit measurement loop immediately
 
                     self.measurment_number = key
-
                     print("Working on device -", device, ": Measurement -", key)
 
                     # default values
@@ -541,22 +550,32 @@ class MeasurementGUI:
                     sweep_type = params.get("Sweep_type", "FS")
 
                     # LED control
-                    # Todo incorporate this into the code fully
-                    led_sequence = params.get("LED_sequence",None)
-                    led = params.get("LED", "OFF")
+                    led = params.get("LED_ON", 0)
+                    power = params.get("power", 1) # Power Refers to voltage
+                    sequence = params.get("sequence",0)
+
+                    if sequence == 0:
+                        sequence = None
+
+                    # for retention
                     led_time = params.get("led_time", "10")
                     led_sweeps = params.get("led_sweeps", "2")
+
+                    if led:
+                        if not self.psu_connected:
+                            messagebox.showwarning("Warning", "Not connected to PSU!")
+                            self.connect_keithley_psu()
 
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
                     if sweep_type == "NS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay,led,power,sequence)
                     elif sweep_type == "PS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay,led,power,sequence)
                     elif sweep_type == "Endurance":
                         print("endurance")
                     elif sweep_type == "Retention":
@@ -571,7 +590,7 @@ class MeasurementGUI:
                     else:  # sweep_type == "FS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay,led,power,sequence)
 
                     # this isnt being used yet i dont think
                     if device not in self.measurement_data:
@@ -580,6 +599,8 @@ class MeasurementGUI:
                     self.measurement_data[device][key] = (v_arr, c_arr, timestamps)
 
                     # todo wrap this into a function for use on other method!!!
+
+                    self.keithley.beep(600,1)
 
                     # data arry to save
                     data = np.column_stack((v_arr, c_arr, timestamps))
@@ -809,15 +830,40 @@ class MeasurementGUI:
         self.master.update_idletasks()
         self.master.update()
 
-    def measure(self, voltage_range, sweeps, step_delay):
+    def measure(self, voltage_range, sweeps, step_delay, led=0, power=1, sequence=None):
+        """Start measurement for device.
+
+        Parameters:
+            voltage_range : iterable of voltages to apply.
+            sweeps        : number of sweeps to perform.
+            step_delay    : delay between each voltage step.
+            led           : if 1, LED will be controlled (default: 0 = off).
+            power         : LED power level between 0-1.
+            sequence      : optional string like '0101' determining LED status per sweep.
+        """
+        if sequence is not None:
+            sequence = str(sequence)
+
         start_time = time.time()
         v_arr = []
         c_arr = []
         time_stamps = []
         icc = self.icc.get()
+
         for sweep_num in range(int(sweeps)):
-            # Loops through number of sweeps
             self.sweep_num = sweep_num
+
+
+
+            # Determine LED state for this sweep
+            led_state = '1' if led == 1 else '0'  # default if no sequence is given
+            if sequence and sweep_num < len(sequence):
+                led_state = sequence[sweep_num]
+
+            if led_state == '1':
+                self.psu.led_on_380(power)
+            else:
+                self.psu.led_off_380()
 
             if self.stop_measurement_flag:  # Check if stop was pressed
                 print("Measurement interrupted!")
@@ -827,8 +873,6 @@ class MeasurementGUI:
                 self.keithley.set_voltage(v, icc)
                 time.sleep(0.1)  # Allow measurement to settle
 
-                # takes instantaneous measurement for the current
-                # NPLC = 1 (Medium intergration)
                 current = self.keithley.measure_current()
                 measure_time = time.time() - start_time
 
@@ -836,10 +880,54 @@ class MeasurementGUI:
                 c_arr.append(current[1])
                 time_stamps.append(measure_time)
 
-                # add step delay between measurments.
                 time.sleep(step_delay)
-        # save the data outside this function!
+
+        self.psu.led_off_380()  # ensure LED is off at the end
+
         return v_arr, c_arr, time_stamps
+
+    # def measure(self, voltage_range, sweeps, step_delay,led=0,power=1,sequence=0):
+    #     """ Start measurment for device.
+    #     Power = 0-1 as a decimal
+    #     """
+    #     start_time = time.time()
+    #     v_arr = []
+    #     c_arr = []
+    #     time_stamps = []
+    #     icc = self.icc.get()
+    #
+    #     if led == 1:
+    #         self.psu.led_on_380(power)
+    #
+    #     for sweep_num in range(int(sweeps)):
+    #         # Loops through number of sweeps
+    #         self.sweep_num = sweep_num
+    #
+    #         if self.stop_measurement_flag:  # Check if stop was pressed
+    #             print("Measurement interrupted!")
+    #             break  # Exit measurement loop immediately
+    #
+    #         for v in voltage_range:
+    #             self.keithley.set_voltage(v, icc)
+    #             time.sleep(0.1)  # Allow measurement to settle
+    #
+    #             # takes instantaneous measurement for the current
+    #             # NPLC = 1 (Medium intergration)
+    #             current = self.keithley.measure_current()
+    #             measure_time = time.time() - start_time
+    #
+    #             v_arr.append(v)
+    #             c_arr.append(current[1])
+    #             time_stamps.append(measure_time)
+    #
+    #             # add step delay between measurments.
+    #             time.sleep(step_delay)
+    #
+    #     # save the data outside this function!
+    #     # turn led off
+    #     self.psu.led_off_380()
+    #
+    #     return v_arr, c_arr, time_stamps
 
     def load_custom_sweeps(self, filename):
         try:
