@@ -564,12 +564,21 @@ class MeasurementGUI:
                     power = params.get("power", 1)  # Power Refers to voltage
                     sequence = params.get("sequence", 0)
 
+
+                    # retention
+                    set_voltage = params.get("set_voltage", 10)
+                    reset_voltage = params.get("reset_voltage", 10)
+                    repeat_delay = params.get("repeat_delay", 500) #ms
+                    number = params.get("number", 100)
+                    set_time = params.get("set_time",100)
+                    read_voltage = params.get("read_voltage",0.15)
+                    #led = params.get("LED_ON", 0)
+                    # sequence
+                    led_time = params.get("led_time", "100") # in seconds
+
+
                     if sequence == 0:
                         sequence = None
-
-                    # for retention
-                    led_time = params.get("led_time", "10")
-                    led_sweeps = params.get("led_sweeps", "2")
 
                     if led:
                         if not self.psu_connected:
@@ -588,14 +597,10 @@ class MeasurementGUI:
                         v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
                     elif sweep_type == "Endurance":
                         print("endurance")
+                        #self.endurance_measure()
                     elif sweep_type == "Retention":
+                        self.retention_measure(set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time)
                         print("retention")
-                    elif sweep_type == "Retention_led":
-                        print("Retention_led")
-                    elif sweep_type == "Endurance_led":
-                        print("Endurance_led")
-                    elif sweep_type == "Fs_Led":
-                        print("Endurance_led")
 
                     else:  # sweep_type == "FS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
@@ -665,6 +670,32 @@ class MeasurementGUI:
 
         else:
             print("Selected measurement not found in JSON file.")
+
+    def retention_measure(self,set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time):
+        icc = 0.0001
+        time_data = []
+        current_data = []
+        start_time = time.time()
+        self.keithley.enable_output(True)
+
+        #apply pulse
+        self.keithley.set_voltage(set_voltage, icc)
+        time.sleep(set_time)
+        # apply read
+        self.keithley.set_voltage(read_voltage, icc)
+
+        for i in range(number):
+            current_value = self.keithley.measure_current()
+            elapsed_time = time.time() - start_time
+
+            time_data.append(elapsed_time)
+            current_data.append(current_value[1])
+            time.sleep(repeat_delay)
+
+            #add in an iteration for led
+
+        self.keithley.shutdown()
+        return current_data,time_data
 
     def create_log_file(self, save_dir, start_time, measurement_type):
         # Get the current date and time
