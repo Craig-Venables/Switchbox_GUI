@@ -14,7 +14,6 @@ from datetime import datetime
 import threading
 import atexit
 
-
 from Kiethley_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
 from Kiethley_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from AdaptiveMeasurement import AdaptiveMeasurement
@@ -47,9 +46,6 @@ class MeasurementGUI:
         self.device_section_and_number = self.convert_to_name(self.current_index)
         self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
 
-        #
-        self.led = 'Uv'
-
         # Flags
         self.connected = False
         self.keithley = None  # Keithley instance
@@ -58,7 +54,6 @@ class MeasurementGUI:
         self.single_device_flag = True
         self.stop_measurement_flag = False
         self.get_messaged_var = False
-
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
@@ -95,7 +90,6 @@ class MeasurementGUI:
         self.connect_keithley_psu()
 
         atexit.register(self.cleanup)
-
 
     def cleanup(self):
         self.keithley.shutdown()
@@ -176,10 +170,27 @@ class MeasurementGUI:
         tk.Label(frame, text="# Sweeps:").grid(row=4, column=0, sticky="w")
         self.sweeps = tk.DoubleVar(value=1)
         tk.Entry(frame, textvariable=self.sweeps).grid(row=4, column=1)
-        # todo add compliance current as a way to limit the V
+
+        # dosnt work
         tk.Label(frame, text="Icc:").grid(row=5, column=0, sticky="w")
         self.icc = tk.DoubleVar(value=0.1)
         tk.Entry(frame, textvariable=self.icc).grid(row=5, column=1)
+
+        # self.led = tk.IntVar(value=0)
+        # self.led = ttk.Checkbutton(frame, variable=self.led_toggle)
+        # self.led.grid(row=6, column=1, columnspan=1)
+
+        tk.Label(frame, text="Led (0=OFF,1=ON) :").grid(row=6, column=0, sticky="w")
+        self.led = tk.DoubleVar(value=0)
+        tk.Entry(frame, textvariable=self.led).grid(row=6, column=1)
+
+        tk.Label(frame, text="Led_Power (0-1):").grid(row=7, column=0, sticky="w")
+        self.led_power = tk.DoubleVar(value=1)
+        tk.Entry(frame, textvariable=self.led_power).grid(row=7, column=1)
+
+        tk.Label(frame, text="Sequence: (01010)").grid(row=8, column=0, sticky="w")
+        self.sequence  = tk.DoubleVar()
+        tk.Entry(frame, textvariable=self.sequence).grid(row=8, column=1)
 
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.start_measurement)
@@ -187,11 +198,11 @@ class MeasurementGUI:
             self.measurement_thread.start()
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=start_thread)
-        self.measure_button.grid(row=6, column=0, columnspan=1, pady=5)
+        self.measure_button.grid(row=9, column=0, columnspan=1, pady=5)
 
         # stop button
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.close)
-        self.adaptive_button.grid(row=6, column=1, columnspan=1, pady=10)
+        self.adaptive_button.grid(row=9, column=1, columnspan=1, pady=10)
 
     def create_custom_measurement_section(self):
         """Custom measurements section"""
@@ -243,13 +254,13 @@ class MeasurementGUI:
         # tk.Entry(frame, textvariable=self.icc).grid(row=3, column=1)
 
         # # Labels to display token and chat ID
-        #tk.Label(frame, text="Token:").grid(row=4, column=0, sticky="w")
+        # tk.Label(frame, text="Token:").grid(row=4, column=0, sticky="w")
         self.token_var = tk.StringVar(value="")
-        #tk.Label(frame, textvariable=self.token_var).grid(row=4, column=1, sticky="w")
+        # tk.Label(frame, textvariable=self.token_var).grid(row=4, column=1, sticky="w")
 
-        #tk.Label(frame, text="Chat ID:").grid(row=4, column=0, sticky="w")
+        # tk.Label(frame, text="Chat ID:").grid(row=4, column=0, sticky="w")
         self.chatid_var = tk.StringVar(value="")
-        #tk.Label(frame, textvariable=self.chatid_var).grid(row=4, column=1, sticky="w")
+        # tk.Label(frame, textvariable=self.chatid_var).grid(row=4, column=1, sticky="w")
 
     def create_status_box(self):
         """Status box section"""
@@ -267,7 +278,7 @@ class MeasurementGUI:
         self.figure, self.ax = plt.subplots(figsize=(4, 4))
         self.ax.set_title("Measurement Plot")
         self.ax.set_xlabel("Voltage (V)")
-        self.ax.set_ylabel("Current (Across Ito)")
+        self.ax.set_ylabel("Current")
 
         self.canvas = FigureCanvasTkAgg(self.figure, master=frame)
         self.canvas.get_tk_widget().grid(row=0, column=0, columnspan=5, sticky="nsew")
@@ -292,7 +303,7 @@ class MeasurementGUI:
         self.figure2, self.ax2 = plt.subplots(figsize=(4, 4))
         self.ax2.set_title("Iv - All")
         self.ax2.set_xlabel("Voltage (V)")
-        self.ax2.set_ylabel("Current (Across Ito)")
+        self.ax2.set_ylabel("Current")
         self.figure2.tight_layout()  # Adjust layout
 
         self.canvas2 = FigureCanvasTkAgg(self.figure2, master=frame)
@@ -301,7 +312,7 @@ class MeasurementGUI:
         self.figure3, self.ax3 = plt.subplots(figsize=(4, 3))
         self.ax3.set_title("Log Plot - All")
         self.ax3.set_xlabel("Voltage (V)")
-        self.ax3.set_ylabel("abs(Current (Across Ito))")
+        self.ax3.set_ylabel("abs(Current)")
         self.ax3.set_yscale('log')
         self.figure3.tight_layout()  # Adjust layout
 
@@ -472,7 +483,7 @@ class MeasurementGUI:
             response = messagebox.askquestion(
                 "Did you choose the correct device?",
                 "Please make sure the correct device is selected.\nClick 'Yes' if you are sure.\nIf not you will be "
-                "saving over old data" )
+                "saving over old data")
             if response != 'yes':
                 return
 
@@ -485,7 +496,7 @@ class MeasurementGUI:
         selected_measurement = self.custom_measurement_var.get()
         print(f"Running custom measurement: {selected_measurement}")
 
-        #use the bot to send a message
+        # use the bot to send a message
         if self.get_messaged_var:
             bot = TelegramBot(self.token_var.get(), self.chatid_var.get())
             var = self.custom_measurement_var.get()
@@ -532,7 +543,6 @@ class MeasurementGUI:
                             self.connect_keithley_psu()
                             break
 
-
                 for key, params in sweeps.items():
                     if self.stop_measurement_flag:  # Check if stop was pressed
                         print("Measurement interrupted!")
@@ -551,8 +561,8 @@ class MeasurementGUI:
 
                     # LED control
                     led = params.get("LED_ON", 0)
-                    power = params.get("power", 1) # Power Refers to voltage
-                    sequence = params.get("sequence",0)
+                    power = params.get("power", 1)  # Power Refers to voltage
+                    sequence = params.get("sequence", 0)
 
                     if sequence == 0:
                         sequence = None
@@ -571,11 +581,11 @@ class MeasurementGUI:
                     if sweep_type == "NS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay,led,power,sequence)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
                     elif sweep_type == "PS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay,led,power,sequence)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
                     elif sweep_type == "Endurance":
                         print("endurance")
                     elif sweep_type == "Retention":
@@ -590,7 +600,7 @@ class MeasurementGUI:
                     else:  # sweep_type == "FS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay,led,power,sequence)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
 
                     # this isnt being used yet i dont think
                     if device not in self.measurement_data:
@@ -600,7 +610,7 @@ class MeasurementGUI:
 
                     # todo wrap this into a function for use on other method!!!
 
-                    self.keithley.beep(600,1)
+                    self.keithley.beep(600, 1)
 
                     # data arry to save
                     data = np.column_stack((v_arr, c_arr, timestamps))
@@ -698,11 +708,10 @@ class MeasurementGUI:
             time.sleep(0.2)
             self.keithley.beep(10000, 0.2)
 
-            self.psu.reset() # reset psu
+            self.psu.reset()  # reset psu
         except Exception as e:
             print("unable to connect to psu please check")
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
-
 
     def start_measurement(self):
         """Start single measurementt on the device! """
@@ -719,6 +728,15 @@ class MeasurementGUI:
         step_delay = self.step_delay.get()
         icc = self.icc.get()
         device_count = len(self.device_list)
+
+        led = self.led.get()
+        led_power = self.led_power.get()
+        sequence = self.sequence.get()
+        if led != 1:
+            led_power = 1
+            sequence = None
+        if sequence == 0:
+            sequence = None
 
         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
         self.stop_measurement_flag = False  # Reset the stop flag
@@ -751,13 +769,10 @@ class MeasurementGUI:
             self.status_box.config(text=f"Measuring {device}...")
             self.master.update()
 
-            self.keithley.set_voltage(0, icc)  # Start at 0V
-            self.keithley.enable_output(True)  # Enable output
-
             time.sleep(1)
 
             # measure device
-            v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay)
+            v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, led_power, sequence)
 
             # save data to file
             data = np.column_stack((v_arr, c_arr, timestamps))
@@ -852,8 +867,6 @@ class MeasurementGUI:
 
         for sweep_num in range(int(sweeps)):
             self.sweep_num = sweep_num
-
-
 
             # Determine LED state for this sweep
             led_state = '1' if led == 1 else '0'  # default if no sequence is given
