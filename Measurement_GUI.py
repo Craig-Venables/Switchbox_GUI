@@ -628,7 +628,7 @@ class MeasurementGUI:
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
 
-                    name = f"{key}_{sweep_type}_{stop_v}v-{step_v}sv-{step_delay}sd-Py_{code_name}-{sweeps}"
+                    name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}-{sweeps}"
                     file_path = f"{save_dir}\\{name}.txt"
 
                     if os.path.exists(file_path):
@@ -819,7 +819,7 @@ class MeasurementGUI:
 
             key = find_largest_number_in_folder(save_dir)
             save_key = 0 if key is None else key + 1
-            name = f"{save_key}_{sweep_type}_{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}"
+            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}"
             file_path = f"{save_dir}\\{name}.txt"
 
             np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
