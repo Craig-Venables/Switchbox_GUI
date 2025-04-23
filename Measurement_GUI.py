@@ -189,7 +189,7 @@ class MeasurementGUI:
         tk.Entry(frame, textvariable=self.led_power).grid(row=7, column=1)
 
         tk.Label(frame, text="Sequence: (01010)").grid(row=8, column=0, sticky="w")
-        self.sequence  = tk.DoubleVar()
+        self.sequence  = tk.StringVar()
         tk.Entry(frame, textvariable=self.sequence).grid(row=8, column=1)
 
         def start_thread():
@@ -615,12 +615,12 @@ class MeasurementGUI:
 
                     # todo wrap this into a function for use on other method!!!
 
-                    self.keithley.beep(600, 1)
+                    #self.keithley.beep(600, 1)
 
                     # data arry to save
                     data = np.column_stack((v_arr, c_arr, timestamps))
 
-                    # creats save directory with the selected measurement device name letter and number
+                    # creates save directory with the selected measurement device name letter and number
                     save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}" \
                                f"\\{self.final_device_number}"
 
@@ -762,12 +762,11 @@ class MeasurementGUI:
 
         led = self.led.get()
         led_power = self.led_power.get()
-        sequence = self.sequence.get()
-        if led != 1:
-            led_power = 1
-            sequence = None
-        if sequence == 0:
-            sequence = None
+        sequence = self.sequence.get().strip()
+        # if led != 1:
+        #     led_power = 1
+        # if led == 0:
+        #     sequence = None
 
         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
         self.stop_measurement_flag = False  # Reset the stop flag
@@ -816,10 +815,14 @@ class MeasurementGUI:
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
             # find a way top extract key from previous device
+            if sequence != "":
+                additional = "-"+sequence
+            else:
+                additional =""
 
             key = find_largest_number_in_folder(save_dir)
             save_key = 0 if key is None else key + 1
-            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}"
+            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}{additional}"
             file_path = f"{save_dir}\\{name}.txt"
 
             np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
@@ -887,8 +890,10 @@ class MeasurementGUI:
             power         : LED power level between 0-1.
             sequence      : optional string like '0101' determining LED status per sweep.
         """
+        print(sequence)
         if sequence is not None:
             sequence = str(sequence)
+            print("sequence = ",sequence)
 
         start_time = time.time()
         v_arr = []
@@ -1095,7 +1100,7 @@ def get_voltage_range(start_v, stop_v, step_v, sweep_type):
 
 def extract_number_from_filename(filename):
     # Use regex to find the number at the start of the filename before the first '-'
-    match = re.match(r'^(\d+)_', filename)
+    match = re.match(r'^(\d+)-', filename)
     if match:
         return int(match.group(1))
     return None
@@ -1110,5 +1115,5 @@ def find_largest_number_in_folder(folder_path):
         if number is not None:
             if largest_number is None or number > largest_number:
                 largest_number = number
-
+    print(largest_number)
     return largest_number

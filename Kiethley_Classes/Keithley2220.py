@@ -15,6 +15,8 @@ class Keithley2220_Powersupply:
         except Exception as e:
             print(f"Failed to connect to {visa_address}: {e}")
 
+        self.remote()
+
     def get_id(self):
         """Query the power supply identity."""
         return self.instrument.query("*IDN?").strip()
@@ -114,6 +116,9 @@ class Keithley2220_Powersupply:
         self.instrument.close()
         print("Connection closed.")
 
+    def remote(self):
+        self.instrument.write("SYST:REM")
+
     def led_on_380(self, power):
         """Turn on the 380 nm LED assuming it's in channel 1."""
 
@@ -143,7 +148,7 @@ if __name__ == "__main__":
     psu = Keithley2220_Powersupply(visa_address)
 
     if psu.instrument:
-        psu.set_voltage(1, 12)  # Set CH1 to 12V
+        psu.set_voltage(1, 3)  # Set CH1 to 12V
         psu.set_current(1, 0.5)  # Set CH1 current limit to 0.5A
         psu.enable_channel(1)  # Enable output only on CH1
 
