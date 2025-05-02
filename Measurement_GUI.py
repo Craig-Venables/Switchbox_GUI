@@ -275,7 +275,7 @@ class MeasurementGUI:
 
         # Toggle switch: Measure one device
         tk.Label(frame, text="Do you want to use the bot?").grid(row=0, column=0, sticky="w")
-        self.get_messaged_var = tk.IntVar(value=1)
+        self.get_messaged_var = tk.IntVar(value=0)
         self.get_messaged_switch = ttk.Checkbutton(frame, variable=self.get_messaged_var)
         self.get_messaged_switch.grid(row=0, column=1)
 
@@ -539,8 +539,12 @@ class MeasurementGUI:
         selected_measurement = self.custom_measurement_var.get()
         print(f"Running custom measurement: {selected_measurement}")
 
+        print(self.get_messaged_var)
         # use the bot to send a message
-        if self.get_messaged_var:
+        a = self.get_messaged_var.get()
+        #b = self.get_messaged_switch.get()
+        print(a)
+        if self.get_messaged_var.get() == 1:
             bot = TelegramBot(self.token_var.get(), self.chatid_var.get())
             var = self.custom_measurement_var.get()
             samle_name = self.sample_name_var.get()
@@ -708,7 +712,8 @@ class MeasurementGUI:
 
                 self.sample_gui.next_device()
 
-            bot.send_message("Measurments Finished")
+            if self.get_messaged_var.get() == 1:
+                bot.send_message("Measurments Finished")
 
             try:
                 bot.send_image(plot_filename_log,"Final_graphs_LOG")
@@ -948,7 +953,6 @@ class MeasurementGUI:
 
         if sequence is not None:
             sequence = str(sequence)
-            print("sequence = ",sequence)
 
         start_time = time.time()
         v_arr = []
@@ -958,15 +962,12 @@ class MeasurementGUI:
         self.c_arr_disp = []
         self.t_arr_disp = []
 
-
         time_stamps = []
         icc = self.icc.get()
         v_max = np.max(voltage_range)
         v_min = np.min(voltage_range)
 
-        print("voltage_range",voltage_range)
-        print(v_max)
-
+        previous_v = 0
 
         for sweep_num in range(int(sweeps)):
             self.sweep_num = sweep_num
@@ -1002,64 +1003,18 @@ class MeasurementGUI:
                 self.c_arr_disp.append(current[1])
                 self.t_arr_disp.append(measure_time)
 
-
-
                 time.sleep(step_delay)
 
                 # pause feature at v_max
                 if v == v_max or v == v_min:
-                    if pause != 0:
-                        self.keithley.set_voltage(0, icc)
-                        print('pausing for',pause," seconds")
-                        print("this pauses twice!")
-                        time.sleep(pause)
-
+                    if v != previous_v:
+                        if pause != 0:
+                            self.keithley.set_voltage(0, icc)
+                            print('pausing for',pause," seconds")
+                            time.sleep(pause)
+                previous_v = v
         self.psu.led_off_380()  # ensure LED is off at the end
-
         return v_arr, c_arr, time_stamps
-
-    # def measure(self, voltage_range, sweeps, step_delay,led=0,power=1,sequence=0):
-    #     """ Start measurment for device.
-    #     Power = 0-1 as a decimal
-    #     """
-    #     start_time = time.time()
-    #     v_arr = []
-    #     c_arr = []
-    #     time_stamps = []
-    #     icc = self.icc.get()
-    #
-    #     if led == 1:
-    #         self.psu.led_on_380(power)
-    #
-    #     for sweep_num in range(int(sweeps)):
-    #         # Loops through number of sweeps
-    #         self.sweep_num = sweep_num
-    #
-    #         if self.stop_measurement_flag:  # Check if stop was pressed
-    #             print("Measurement interrupted!")
-    #             break  # Exit measurement loop immediately
-    #
-    #         for v in voltage_range:
-    #             self.keithley.set_voltage(v, icc)
-    #             time.sleep(0.1)  # Allow measurement to settle
-    #
-    #             # takes instantaneous measurement for the current
-    #             # NPLC = 1 (Medium intergration)
-    #             current = self.keithley.measure_current()
-    #             measure_time = time.time() - start_time
-    #
-    #             v_arr.append(v)
-    #             c_arr.append(current[1])
-    #             time_stamps.append(measure_time)
-    #
-    #             # add step delay between measurments.
-    #             time.sleep(step_delay)
-    #
-    #     # save the data outside this function!
-    #     # turn led off
-    #     self.psu.led_off_380()
-    #
-    #     return v_arr, c_arr, time_stamps
 
     def load_custom_sweeps(self, filename):
         try:
@@ -1100,7 +1055,6 @@ class MeasurementGUI:
         for freq, duration in melody:
             self.keithley.beep(freq, duration)
             time.sleep(duration * 0.8)  # Small gap between notes
-
         print("Melody finished!")
 
     def ohno(self):
