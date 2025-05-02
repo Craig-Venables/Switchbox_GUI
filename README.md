@@ -17,6 +17,7 @@ The following options are along with the defaults:
 "step_v": 0.01,
 "step_delay":0.05
 "Sweep_type": "FS" 
+"pause" : 0  #adds pause at the end of the sweep for the indicated time 
 (FS = Full sweep (default),Ps=PositiveHalf-sweep +ve, Ns=NegativeHalf-sweep)
 
 "LED": "OFF"      (colour of the led,options - blue,red,green,white,OFF)
