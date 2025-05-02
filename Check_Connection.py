@@ -15,8 +15,6 @@ class CheckConnection:
         self.check_connection_window = True
         self.noise_already = False
 
-
-
         self.frame1()
         self.start_measurement_loop()
 

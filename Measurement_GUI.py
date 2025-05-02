@@ -32,7 +32,7 @@ class MeasurementGUI:
         self.sweep_num = None
         self.master = tk.Toplevel(master)
         self.master.title("Measurement Setup")
-        self.master.geometry("1600x650+200+100")
+        self.master.geometry("1600x900+200+100")
         self.sample_gui = sample_gui
         self.current_index = self.sample_gui.current_index
         self.load_messaging_data()
@@ -54,9 +54,13 @@ class MeasurementGUI:
         self.single_device_flag = True
         self.stop_measurement_flag = False
         self.get_messaged_var = False
+        self.measuring = False
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
+        self.v_arr_disp = []
+        self.c_arr_disp = []
+        self.t_arr_disp = []
 
         # Load custom sweeps from JSON
         self.custom_sweeps = self.load_custom_sweeps("Json_Files/Custom_Sweeps.json")
@@ -72,6 +76,7 @@ class MeasurementGUI:
         self.create_plot_section()
         self.create_plot_section2()
         self.signal_messaging()
+        self.real_time_graphs()
 
         # Adaptive Measurement Section
         self.adaptive_button = tk.Button(self.master, text="Adaptive Settings", command=self.open_adaptive_settings)
@@ -98,6 +103,38 @@ class MeasurementGUI:
             self.psu.disable_channel(2)
             self.psu.close()
         print("safely turned everything off")
+
+    def real_time_graphs(self):
+        frame = tk.LabelFrame(self.master, text="Current time", padx=5, pady=5)
+        frame.grid(row=9, column=1, padx=10, pady=5, columnspan=2, rowspan=3, sticky="ew")
+
+        self.figure4, self.ax4 = plt.subplots(figsize=(8, 2))
+        self.ax4.set_title("Measurement Plot")
+        self.ax4.set_xlabel("Time (s)")
+        self.ax4.set_ylabel("Current (A)")
+
+        self.canvas = FigureCanvasTkAgg(self.figure4, master=frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, columnspan=6, sticky="nsew")
+
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        # Start the plotting thread
+        self.measurement_thread = threading.Thread(target=self.plot_current_time)
+        self.measurement_thread.daemon = True
+        self.measurement_thread.start()
+
+    def plot_current_time(self):
+        while True:
+            if self.measuring:
+                self.ax4.clear()
+                self.ax4.plot(self.t_arr_disp, self.c_arr_disp, marker='x')
+                self.ax4.set_title("Measurement Plot")
+                self.ax4.set_xlabel("Time (s)")
+                self.ax4.set_ylabel("Current (A)")
+                self.canvas.draw()
+            time.sleep(0.5)  # adjust as needed for responsiveness
+
 
     def create_connection_section(self):
         """Keithley connection section"""
@@ -201,9 +238,11 @@ class MeasurementGUI:
         self.measure_button.grid(row=9, column=0, columnspan=1, pady=5)
 
         # stop button
-        self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.close)
+        self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
         self.adaptive_button.grid(row=9, column=1, columnspan=1, pady=10)
 
+    def set_measurment_flag_true(self):
+        self.stop_measurement_flag = True
     def create_custom_measurement_section(self):
         """Custom measurements section"""
         frame = tk.LabelFrame(self.master, text="Custom Measurements", padx=5, pady=5)
@@ -475,6 +514,7 @@ class MeasurementGUI:
     def run_custom_measurement(self):
         """ when custom measurements has been ran"""
 
+
         if not self.connected:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
@@ -486,6 +526,9 @@ class MeasurementGUI:
                 "saving over old data")
             if response != 'yes':
                 return
+        self.measuring = True
+
+        self.stop_measurement_flag = False
 
         # make sure it is on the top
         self.bring_to_top()
@@ -558,6 +601,7 @@ class MeasurementGUI:
                     step_v = params.get("step_v", 0.1)
                     step_delay = params.get("step_delay", 0.05)
                     sweep_type = params.get("Sweep_type", "FS")
+                    pause = params.get('pause', 0)
 
                     # LED control
                     led = params.get("LED_ON", 0)
@@ -590,22 +634,23 @@ class MeasurementGUI:
                     if sweep_type == "NS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence,pause)
                     elif sweep_type == "PS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence,pause)
                     elif sweep_type == "Endurance":
                         print("endurance")
                         #self.endurance_measure()
                     elif sweep_type == "Retention":
-                        self.retention_measure(set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time)
+                        self.retention_measure(set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time,pause)
                         print("retention")
-
+                    # elif sweep_type == "FS_pause":
+                    #     v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
                     else:  # sweep_type == "FS":
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
                         # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
+                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence,pause)
 
                     # this isnt being used yet i dont think
                     if device not in self.measurement_data:
@@ -664,6 +709,12 @@ class MeasurementGUI:
                 self.sample_gui.next_device()
 
             bot.send_message("Measurments Finished")
+
+            try:
+                bot.send_image(plot_filename_log,"Final_graphs_LOG")
+            except:
+                print("failed to send image")
+            self.measuring = False
             self.status_box.config(text="Measurement Complete")
             messagebox.showinfo("Complete", "Measurements finished.")
 
@@ -750,6 +801,8 @@ class MeasurementGUI:
         if not self.connected:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
+        self.measuring = True
+
 
         start_v = self.start_voltage.get()
         stop_v = self.voltage_high.get()
@@ -839,6 +892,7 @@ class MeasurementGUI:
             # change device
             self.sample_gui.next_device()
 
+        self.measuring = False
         self.status_box.config(text="Measurement Complete")
         messagebox.showinfo("Complete", "Measurements finished.")
 
@@ -879,7 +933,7 @@ class MeasurementGUI:
         self.master.update_idletasks()
         self.master.update()
 
-    def measure(self, voltage_range, sweeps, step_delay, led=0, power=1, sequence=None):
+    def measure(self, voltage_range, sweeps, step_delay, led=0, power=1, sequence=None, pause=0):
         """Start measurement for device.
 
         Parameters:
@@ -890,7 +944,8 @@ class MeasurementGUI:
             power         : LED power level between 0-1.
             sequence      : optional string like '0101' determining LED status per sweep.
         """
-        print(sequence)
+        self.stop_measurement_flag = False
+
         if sequence is not None:
             sequence = str(sequence)
             print("sequence = ",sequence)
@@ -898,8 +953,20 @@ class MeasurementGUI:
         start_time = time.time()
         v_arr = []
         c_arr = []
+
+        self.v_arr_disp = []
+        self.c_arr_disp = []
+        self.t_arr_disp = []
+
+
         time_stamps = []
         icc = self.icc.get()
+        v_max = np.max(voltage_range)
+        v_min = np.min(voltage_range)
+
+        print("voltage_range",voltage_range)
+        print(v_max)
+
 
         for sweep_num in range(int(sweeps)):
             self.sweep_num = sweep_num
@@ -925,11 +992,27 @@ class MeasurementGUI:
                 current = self.keithley.measure_current()
                 measure_time = time.time() - start_time
 
+                # append information
                 v_arr.append(v)
                 c_arr.append(current[1])
                 time_stamps.append(measure_time)
 
+                # appending info for real time graphs.
+                self.v_arr_disp.append(v)
+                self.c_arr_disp.append(current[1])
+                self.t_arr_disp.append(measure_time)
+
+
+
                 time.sleep(step_delay)
+
+                # pause feature at v_max
+                if v == v_max or v == v_min:
+                    if pause != 0:
+                        self.keithley.set_voltage(0, icc)
+                        print('pausing for',pause," seconds")
+                        print("this pauses twice!")
+                        time.sleep(pause)
 
         self.psu.led_off_380()  # ensure LED is off at the end
 
