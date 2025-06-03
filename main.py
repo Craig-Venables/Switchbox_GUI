@@ -13,9 +13,6 @@ import atexit
 # todo when it sends tne start it sends an estimated time of completion
 
 
-# todo Led code?
-# todo worth adding uv led?
-
 # TODO can i add a time to this so i can do endurance and retention
 # todo is there a way to find the optimal settings for each device, some kind of test?
 

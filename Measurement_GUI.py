@@ -106,7 +106,8 @@ class MeasurementGUI:
         self.create_status_box(self.left_frame)
         self.create_custom_measurement_section(self.left_frame)
         self.signal_messaging(self.left_frame)
-        self.temp_measurments(self.left_frame)
+        self.temp_measurments_itc4(self.left_frame)
+        self.sequential_measurments(self.left_frame)
 
         # right frame
 
@@ -664,7 +665,7 @@ class MeasurementGUI:
         print("connecting to temp controller")
         self.connect_temp_controller()
 
-    def temp_measurments(self, parent):
+    def temp_measurments_itc4(self, parent):
         # Temperature section
         frame = tk.LabelFrame(parent, text="temp_measurments", padx=5, pady=5)
         frame.grid(row=9, column=0, padx=10, pady=5, sticky="ew")
@@ -681,11 +682,78 @@ class MeasurementGUI:
         self.temp_go_button = tk.Button(frame, text="Apply", command=self.send_temp)
         self.temp_go_button.grid(row=1, column=2)
 
+
+    def sequential_measurments(self,parent):
+
+        frame = tk.LabelFrame(parent, text="Sequential_measurement", padx=5, pady=5)
+        frame.grid(row=10, column=0, padx=10, pady=5, sticky="ew")
+
+        # Drop_down menu
+        tk.Label(frame, text="Sequential_measurement:").grid(row=0, column=0, sticky="w")
+        self.Sequential_measurement_var = tk.StringVar(value ="choose")
+        self.Sequential_measurement = ttk.Combobox(frame, textvariable=self.Sequential_measurement_var,
+                                                    values=["Iv Sweep","Single Avg Measure"])
+        self.Sequential_measurement.grid(row=0, column=1, padx=5)
+
+        # compliance current Data entry
+        tk.Label(frame, text="Voltage").grid(row=1, column=0, sticky="w")
+        self.sq_voltage = tk.DoubleVar(value=0.1)
+        tk.Entry(frame, textvariable=self.sq_voltage).grid(row=1, column=1)
+
+        def start_thread():
+            self.measurement_thread = threading.Thread(target=self.sequential_measure)
+            self.measurement_thread.daemon = True
+            self.measurement_thread.start()
+
+        # Run button
+        self.run_custom_button = tk.Button(frame, text="Run Sequence", command=start_thread)
+        self.run_custom_button.grid(row=2, column=0, columnspan=2, pady=5)
+    def Lakshore_temp(self):
+        print("lakeshore temp")
     ###################################################################
     # All Measurment acquisition code
     ###################################################################
 
-    def measure(self, voltage_range, sweeps, step_delay, led=0, power=1, sequence=None, pause=0):
+    def sequential_measure (self):
+
+        self.measuring = True
+        self.stop_measurement_flag = False
+        self.bring_to_top()# make sure it is on the top
+        self.check_for_sample_name()# checks for sample name if not prompts user
+
+        print(f"Running sequential measurement:")
+
+        if self.Sequential_measurement_var == "iv_sweep":
+            voltage = self.sq_voltage
+            voltage_arr = get_voltage_range(0, voltage, 0.05, "FS")
+
+
+            if self.current_device in self.device_list:
+                start_index = self.device_list.index(self.current_device)
+            else:
+                start_index = 0  # Default to the first device if current one is not found
+
+            device_count = len(self.device_list)
+
+            # looping through each device.
+            for i in range(device_count):  # Ensure we process each device exactly once
+                device = self.device_list[(start_index + i) % device_count]  # Wrap around when reaching the end
+
+                self.status_box.config(text=f"Measuring {device}...")
+                self.master.update()
+                time.sleep(0.5)
+
+                v_arr, c_arr, timestamps = self.measure(voltage_arr)
+
+                #todo save the data.
+
+
+        elif self.Sequential_measurement_var == "Single Avg Measure":
+            voltage = self.sq_voltage
+
+
+
+    def measure(self, voltage_range, sweeps= 1, step_delay=0.05, led=0, power=1, sequence=None, pause=0):
         """Start measurement for device.
 
         Parameters:
