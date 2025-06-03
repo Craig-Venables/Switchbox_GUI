@@ -18,7 +18,7 @@ device_counter = 1
 device_mapping = {}
 
 # Load image
-image_path = "../Sample_Infomation/memristor.png"
+image_path = "../Sample_Infomation/Multiplexer.jpg"
 image = cv2.imread(image_path)
 clone = image.copy()
 
@@ -57,13 +57,13 @@ while True:
 
     # Press 's' to save the current mappings
     if key == ord("s"):
-        with open("device_mapping.json", "w") as f:
+        with open("device_mapping_multiplexer.json", "w") as f:
             json.dump(device_mapping, f, indent=4)
         print("Mappings saved!")
 
     # Press 'q' to quit and save
     elif key == ord("q"):
-        with open("device_mapping.json", "w") as f:
+        with open("device_mapping_multiplexer.json", "w") as f:
             json.dump(device_mapping, f, indent=4)
         print("Final mappings saved! Exiting.")
         break
