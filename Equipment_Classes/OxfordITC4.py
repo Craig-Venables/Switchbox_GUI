@@ -109,6 +109,27 @@ class OxfordITC4:
     def set_isobus_address(self, address):
         return self.inst.query(f'!{address}').strip()
 
+        # Just add these methods at the end:
+
+    def get_temperature_celsius(self, channel='A'):
+        """Wrapper to match the common interface"""
+        # Channel mapping: A=1, B=2, C=3
+        channel_map = {'A': 1, 'B': 2, 'C': 3}
+        sensor = channel_map.get(channel.upper(), 2)  # Default to sensor 2
+
+        temp_raw = self.read_param(sensor)
+        try:
+            # Parse response (e.g., "R+00253" -> 25.3°C)
+            val_str = temp_raw.lstrip("R").replace("+", "").replace("-", "-")
+            temp_c = int(val_str) / 10
+            return temp_c
+        except:
+            return 25.0
+
+    def get_idn(self):
+        """Get identification string"""
+        return f"Oxford ITC4 - {self.read_version()}"
+
     # Utility
     def close(self):
         self.inst.close()

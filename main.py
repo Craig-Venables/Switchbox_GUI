@@ -1,6 +1,5 @@
 import tkinter as tk
-from Sample_GUI import SampleGUI
-import atexit
+from Other.old_code.Sample_GUI_old import SampleGUI
 
 # import pySwitchbox
 
