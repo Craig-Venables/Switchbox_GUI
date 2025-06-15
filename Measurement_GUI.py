@@ -16,7 +16,7 @@ import atexit
 
 from Equipment_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
 from Equipment_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
-from AdaptiveMeasurement import AdaptiveMeasurement
+from Other.old_code.AdaptiveMeasurement import AdaptiveMeasurement
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
 from Equipment_Classes.OxfordITC4 import OxfordITC4
@@ -33,7 +33,7 @@ class MeasurementGUI:
         self.sweep_num = None
         self.master = tk.Toplevel(master)
         self.master.title("Measurement Setup")
-        self.master.geometry("1800x1000")
+        self.master.geometry("1800x1200")
         #200+100
         self.sample_gui = sample_gui
         self.current_index = self.sample_gui.current_index
@@ -43,6 +43,7 @@ class MeasurementGUI:
         self.keithley_address = "GPIB0::24::INSTR"
         self.axis_font_size = 8
         self.title_font_size = 10
+        self.sequential_number_of_sweeps = 100
 
         # Device name's
         self.sample_type = sample_type
@@ -63,6 +64,7 @@ class MeasurementGUI:
         self.measuring = False
         self.not_at_tempriture = False
         self.itc_connected = False
+        self.lakeshore = None
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
@@ -87,8 +89,11 @@ class MeasurementGUI:
         self.left_frame = tk.Frame(self.master)
         self.left_frame.grid(row=1, column=0, sticky="nsew",padx=0, pady=0)
 
-        self.right_frame = tk.Frame(self.master)
-        self.right_frame.grid(row=1, column=1, sticky="nsew", padx=0, pady=0)
+        self.middle_frame = tk.Frame(self.master)
+        self.middle_frame.grid(row=1, column=1, sticky="nsew", padx=0, pady=0)
+
+        self.Graph_frame = tk.Frame(self.master)
+        self.Graph_frame.grid(row=0, column=2, sticky="nsew", padx=0,rowspan=10 ,pady=0)
 
         self.top_frame = tk.Frame(self.master)
         self.top_frame.grid(row=0, column=0, columnspan=2, sticky="nsew",padx=0, pady=0)
@@ -103,21 +108,24 @@ class MeasurementGUI:
         self.create_connection_section(self.left_frame)
         self.create_mode_selection(self.left_frame)
         self.create_sweep_parameters(self.left_frame)
-        self.create_status_box(self.left_frame)
+
         self.create_custom_measurement_section(self.left_frame)
-        self.signal_messaging(self.left_frame)
-        self.temp_measurments_itc4(self.left_frame)
         self.sequential_measurments(self.left_frame)
+
+        # middle
+        self.create_status_box(self.middle_frame)
+        self.signal_messaging(self.middle_frame)
+        self.temp_measurments_itc4(self.middle_frame)
 
         # right frame
 
-        self.graphs_main_iv(self.right_frame) # main
-        self.graphs_all(self.right_frame)
-        self.graphs_current_time_rt(self.right_frame)
-        self.graphs_resistance_time_rt(self.right_frame)
-        self.graphs_temp_time_rt(self.right_frame)
-        self.graphs_endurance_retention(self.right_frame)
-        self.graphs_vi_logiv(self.right_frame)
+        self.graphs_main_iv(self.Graph_frame) # main
+        self.graphs_all(self.Graph_frame)
+        self.graphs_current_time_rt(self.Graph_frame)
+        self.graphs_resistance_time_rt(self.Graph_frame)
+        self.graphs_temp_time_rt(self.Graph_frame)
+        self.graphs_endurance_retention(self.Graph_frame)
+        self.graphs_vi_logiv(self.Graph_frame)
 
         self.top_banner(self.top_frame)
 
@@ -150,6 +158,7 @@ class MeasurementGUI:
             self.psu.disable_channel(2)
             self.psu.close()
         print("safely turned everything off")
+
     ###################################################################
     # Frames
     ###################################################################
@@ -170,28 +179,28 @@ class MeasurementGUI:
 
         # Info display
         info_frame = tk.Frame(top_frame)
-        info_frame.grid(row=0, column=2, columnspan=4, sticky="ew")
+        info_frame.grid(row=1, column=0, columnspan=4, sticky="ew")
         info_frame.columnconfigure([0, 1, 2], weight=1)
 
         # Device
         self.device_label = tk.Label(info_frame, text="Device: XYZ", font=("Helvetica", 12))
-        self.device_label.grid(row=0, column=0, padx=10, sticky="w")
+        self.device_label.grid(row=1, column=0, padx=10, sticky="w")
 
         # Voltage
         self.voltage_label = tk.Label(info_frame, text="Voltage: 1.23 V", font=("Helvetica", 12))
-        self.voltage_label.grid(row=0, column=1, padx=10, sticky="w")
+        self.voltage_label.grid(row=1, column=1, padx=10, sticky="w")
 
         # Loop
         self.loop_label = tk.Label(info_frame, text="Loop: 5", font=("Helvetica", 12))
-        self.loop_label.grid(row=0, column=2, padx=10, sticky="w")
+        self.loop_label.grid(row=1, column=2, padx=10, sticky="w")
 
         # Show last sweeps button
         self.show_results_button = tk.Button(info_frame, text="Show Last Sweeps", command=self.show_last_sweeps)
-        self.show_results_button.grid(row=0, column=6, columnspan=1, pady=5)
+        self.show_results_button.grid(row=1, column=3, columnspan=1, pady=5)
 
         # Show last sweeps button
         self.show_results_button = tk.Button(info_frame, text="check_connection", command=self.check_connection)
-        self.show_results_button.grid(row=0, column=7, columnspan=1, pady=5)
+        self.show_results_button.grid(row=1, column=4, columnspan=1, pady=5)
 
     ###################################################################
     # Graph empty shells setting up for plotting
@@ -695,10 +704,34 @@ class MeasurementGUI:
                                                     values=["Iv Sweep","Single Avg Measure"])
         self.Sequential_measurement.grid(row=0, column=1, padx=5)
 
-        # compliance current Data entry
+        # voltage Data entry
         tk.Label(frame, text="Voltage").grid(row=1, column=0, sticky="w")
         self.sq_voltage = tk.DoubleVar(value=0.1)
         tk.Entry(frame, textvariable=self.sq_voltage).grid(row=1, column=1)
+
+        # voltage Data entry
+        tk.Label(frame, text="Num of itterations").grid(row=2, column=0, sticky="w")
+        self.sequential_number_of_sweeps = tk.DoubleVar(value=100)
+        tk.Entry(frame, textvariable=self.sequential_number_of_sweeps).grid(row=2, column=1)
+
+        # voltage Data entry
+        tk.Label(frame, text="Time delay (S)").grid(row=3, column=0, sticky="w")
+        self.sq_time_delay = tk.DoubleVar(value=10)
+        tk.Entry(frame, textvariable=self.sq_time_delay).grid(row=3, column=1)
+
+        # Add this to your GUI initialization section where other sequential measurement controls are:
+
+        # Temperature recording checkbox
+        self.record_temp_var = tk.BooleanVar(value=True)
+        self.record_temp_checkbox = tk.Checkbutton(frame,text="Record Temperature",variable=self.record_temp_var)
+        self.record_temp_checkbox.grid(row=5, column=0, sticky='w')  # Adjust row/column as needed
+
+        # Add measurement duration entry for averaging
+        tk.Label(frame, text="Measurement Duration (s):").grid(row=4, column=0, sticky='w')
+        self.measurement_duration_var = tk.DoubleVar(value=5.0)  # Default 5 seconds
+        self.measurement_duration_entry = tk.Entry(frame,textvariable=self.measurement_duration_var,width=10)
+        self.measurement_duration_entry.grid(row=4, column=1)
+
 
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.sequential_measure)
@@ -707,50 +740,373 @@ class MeasurementGUI:
 
         # Run button
         self.run_custom_button = tk.Button(frame, text="Run Sequence", command=start_thread)
-        self.run_custom_button.grid(row=2, column=0, columnspan=2, pady=5)
+        self.run_custom_button.grid(row=5, column=1, columnspan=2, pady=5)
     def Lakshore_temp(self):
         print("lakeshore temp")
     ###################################################################
     # All Measurment acquisition code
     ###################################################################
 
-    def sequential_measure (self):
+    def sequential_measure(self):
 
         self.measuring = True
         self.stop_measurement_flag = False
-        self.bring_to_top()# make sure it is on the top
-        self.check_for_sample_name()# checks for sample name if not prompts user
+        self.bring_to_top() # make sure it is on the top
+        self.check_for_sample_name() # checks for sample name if not prompts user
 
         print(f"Running sequential measurement:")
 
-        if self.Sequential_measurement_var == "iv_sweep":
-            voltage = self.sq_voltage
-            voltage_arr = get_voltage_range(0, voltage, 0.05, "FS")
+        all_data = []
 
+
+        if self.Sequential_measurement_var.get() == "Iv Sweep":
+            count_pass = 1
+
+            for i in range(int(self.sequential_number_of_sweeps.get())):
+                print("Starting pass #",i + 1)
+                voltage = int(self.sq_voltage.get())
+                voltage_arr = get_voltage_range(0, voltage, 0.05, "FS")
+
+                self.stop_measurement_flag = False  # Reset the stop flag
+
+                if self.current_device in self.device_list:
+                    start_index = self.device_list.index(self.current_device)
+                else:
+                    start_index = 0  # Default to the first device if current one is not found
+
+                device_count = len(self.device_list)
+
+                # looping through each device.
+                for j in range(device_count):  # Ensure we process each device exactly once
+                    device = self.device_list[(start_index + j) % device_count]  # Wrap around when reaching the end
+
+                    self.status_box.config(text=f"Measuring {device}...")
+                    self.master.update()
+                    self.keithley.set_voltage(0, self.icc.get())  # Start at 0V
+                    self.keithley.enable_output(True)  # Enable output
+
+                    if self.stop_measurement_flag:  # Check if stop was pressed
+                        print("Measurement interrupted!")
+                        break  # Exit measurement loop immediately
+                    time.sleep(0.5)
+                    v_arr, c_arr, timestamps = self.measure(voltage_arr)
+                    data = np.column_stack((v_arr, c_arr, timestamps))
+
+                    # save the current data in a folder called multiplexer and the name of the sample
+
+                    # creates save directory with the selected measurement device name letter and number
+                    save_dir = f"Data_save_loc\\Multiplexer_IV_sweep\\{self.sample_name_var.get()}" \
+                               f"\\{j+1}"
+                    # make directory if dost exist.
+                    if not os.path.exists(save_dir):
+                        os.makedirs(save_dir)
+                    sweeps=1
+                    name = f"{count_pass}-FS-{voltage}v-{0.05}sv-{0.05}sd-Py-Sq-{sweeps}"
+                    file_path = f"{save_dir}\\{name}.txt"
+
+
+                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+                    #change device
+                    self.sample_gui.next_device()
+                    time.sleep(0.1)
+
+
+                count_pass += 1
+                time.sleep(self.sq_time_delay.get()) # delay for the time between measurements
+
+
+
+        elif self.Sequential_measurement_var.get() == "Single Avg Measure":
+
+            count_pass = 1
+
+            # Initialize data arrays for each device
+
+            device_data = {}  # Dictionary to store data for each device
+
+            start_time = time.time()  # Record overall start time
 
             if self.current_device in self.device_list:
+
                 start_index = self.device_list.index(self.current_device)
+
             else:
+
                 start_index = 0  # Default to the first device if current one is not found
 
             device_count = len(self.device_list)
 
-            # looping through each device.
-            for i in range(device_count):  # Ensure we process each device exactly once
-                device = self.device_list[(start_index + i) % device_count]  # Wrap around when reaching the end
+            # Initialize empty arrays for each device
 
-                self.status_box.config(text=f"Measuring {device}...")
-                self.master.update()
-                time.sleep(0.5)
+            for j in range(device_count):
+                device_idx = (start_index + j) % device_count
 
-                v_arr, c_arr, timestamps = self.measure(voltage_arr)
+                device = self.device_list[device_idx]
 
-                #todo save the data.
+                device_data[device] = {
 
+                    'voltages': [],
 
-        elif self.Sequential_measurement_var == "Single Avg Measure":
-            voltage = self.sq_voltage
+                    'currents': [],
 
+                    'std_errors': [],
+
+                    'timestamps': [],
+
+                    'temperatures': []
+
+                }
+
+            voltage = float(self.sq_voltage.get())
+
+            measurement_duration = self.measurement_duration_var.get()
+
+            # Main measurement loop
+
+            for i in range(int(self.sequential_number_of_sweeps.get())):
+
+                print(f"Starting pass #{i + 1}")
+
+                self.stop_measurement_flag = False  # Reset the stop flag
+
+                # Loop through each device
+
+                for j in range(device_count):
+
+                    device_idx = (start_index + j) % device_count
+
+                    device = self.device_list[device_idx]
+
+                    self.status_box.config(text=f"Pass {i + 1}: Measuring {device}...")
+
+                    self.master.update()
+
+                    # Calculate timestamp (middle of measurement period)
+
+                    measurement_timestamp = time.time() - start_time + (measurement_duration / 2)
+
+                    # Perform averaged measurement
+
+                    avg_current, std_error, temperature = self.measure_average_current(voltage, measurement_duration)
+
+                    # Store data in arrays
+
+                    device_data[device]['voltages'].append(voltage)
+
+                    device_data[device]['currents'].append(avg_current)
+
+                    device_data[device]['std_errors'].append(std_error)
+
+                    device_data[device]['timestamps'].append(measurement_timestamp)
+
+                    if self.record_temp_var.get():
+                        device_data[device]['temperatures'].append(temperature)
+
+                    # Log current measurement
+
+                    self.log_terminal(f"Pass {i + 1}, Device {device}: V={voltage}V, "
+
+                                      f"I_avg={avg_current:.3E}A, σ={std_error:.3E}A, "
+
+                                      f"t={measurement_timestamp:.1f}s")
+
+                    if self.stop_measurement_flag:  # Check if stop was pressed
+
+                        print("Measurement interrupted! Saving current data...")
+
+                        self.save_averaged_data(device_data, self.sample_name_var.get(),
+
+                                                start_index, device_count, interrupted=True)
+
+                        return  # Exit the function
+
+                    # Change to next device
+
+                    self.sample_gui.next_device()
+
+                    time.sleep(0.1)
+
+                # Auto-save every 5 cycles
+
+                if (i + 1) % 5 == 0:
+                    self.log_terminal(f"Auto-saving data after {i + 1} cycles...")
+
+                    self.save_averaged_data(device_data, self.sample_name_var.get(),
+
+                                            start_index, device_count, interrupted=False)
+
+                count_pass += 1
+
+                # Delay between measurement passes (if not the last pass)
+
+                if i < int(self.sequential_number_of_sweeps.get()) - 1:
+                    time.sleep(self.sq_time_delay.get())
+
+            # Save all data at the end
+
+            self.save_averaged_data(device_data, self.sample_name_var.get(),
+
+                                    start_index, device_count, interrupted=False)
+
+            self.measuring = False
+
+            self.status_box.config(text="Measurement Complete")
+
+            self.keithley.enable_output(False)  # Disable output when done
+
+    def save_averaged_data(self, device_data, sample_name, start_index, device_count, interrupted=False):
+        """
+        Save the averaged measurement data for all devices.
+
+        Args:
+            device_data: Dictionary containing arrays for each device
+            sample_name: Name of the sample
+            start_index: Starting device index
+            device_count: Total number of devices
+            interrupted: Boolean indicating if measurement was interrupted
+        """
+        # Create main save directory
+        base_dir = f"Data_save_loc\\Multiplexer_Avg_Measure\\{sample_name}"
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+
+        # Save data for each device
+        for j in range(device_count):
+            device_idx = (start_index + j) % device_count
+            device = self.device_list[device_idx]
+
+            if device not in device_data or len(device_data[device]['currents']) == 0:
+                continue  # Skip if no data for this device
+
+            # Create device-specific directory
+            device_dir = f"{base_dir}\\{j + 1}"
+            if not os.path.exists(device_dir):
+                os.makedirs(device_dir)
+
+            # Prepare data array
+            voltages = np.array(device_data[device]['voltages'])
+            currents = np.array(device_data[device]['currents'])
+            std_errors = np.array(device_data[device]['std_errors'])
+            timestamps = np.array(device_data[device]['timestamps'])
+
+            if self.record_temp_var.get() and device_data[device]['temperatures']:
+                temperatures = np.array(device_data[device]['temperatures'])
+                data = np.column_stack((timestamps, voltages, currents, std_errors, temperatures))
+                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)\tTemperature(C)"
+                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
+            else:
+                data = np.column_stack((timestamps, voltages, currents, std_errors))
+                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)"
+                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E"
+
+            # Create filename
+            timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+            status_str = "interrupted" if interrupted else "complete"
+            num_measurements = len(currents)
+
+            voltage = voltages[0] if len(voltages) > 0 else 0
+            measurement_duration = self.measurement_duration_var.get()
+
+            filename = f"Device_{j + 1}_{device}_{voltage}V_{measurement_duration}s_" \
+                       f"{num_measurements}measurements_{status_str}_{timestamp_str}.txt"
+
+            file_path = os.path.join(device_dir, filename)
+
+            # Save data
+            np.savetxt(file_path, data, fmt=fmt, header=header, comments="# ")
+
+            self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
+
+    def measure_average_current(self, voltage, duration):
+        """
+        Apply voltage and measure current for specified duration, then return average.
+
+        Args:
+            voltage: Voltage to apply (V)
+            duration: Time to measure for (seconds)
+
+        Returns:
+            tuple: (average_current, standard_error, temperature)
+        """
+        # Set voltage and enable output
+        self.keithley.set_voltage(voltage, self.icc.get())
+        self.keithley.enable_output(True)
+
+        # Allow settling time
+        time.sleep(0.1)
+
+        # Collect current measurements
+        current_readings = []
+        timestamps = []
+        start_time = time.time()
+
+        # Sample rate (adjust as needed)
+        sample_interval = 0.1  # 10 Hz sampling
+
+        while (time.time() - start_time) < duration:
+            if self.stop_measurement_flag:
+                break
+
+            current = self.keithley.measure_current()
+            current_readings.append(current)
+            timestamps.append(time.time() - start_time)
+
+            # Update status
+            elapsed = time.time() - start_time
+            self.status_box.config(
+                text=f"Measuring... {elapsed:.1f}/{duration}s"
+            )
+            self.master.update()
+
+            # Wait for next sample
+            time.sleep(sample_interval)
+
+        # Calculate statistics
+        if current_readings:
+            current_array = np.array(current_readings)
+            avg_current = np.mean(current_array)
+            std_dev = np.std(current_array)
+            std_error = std_dev / np.sqrt(len(current_array))
+        else:
+            avg_current = 0
+            std_error = 0
+
+        # Record temperature if enabled
+        temperature = 0  # Default value
+        if self.record_temp_var.get():
+            temperature = self.record_temperature()
+
+        # Disable output after measurement
+        self.keithley.enable_output(False)
+
+        return avg_current, std_error, temperature
+
+    def record_temperature(self):
+        """
+        Placeholder function for temperature recording.
+        To be implemented when temperature measurement hardware is available.
+
+        Returns:
+            float: Temperature in Celsius (currently returns 25.0 as placeholder)
+        """
+        # TODO: Implement actual temperature measurement
+        # This might involve:
+        # - Reading from a thermocouple
+        # - Querying a temperature controller
+        # - Reading from an environmental chamber
+
+        # For now, return a placeholder value
+        return 25.0  # Room temperature placeholder
+
+    def log_terminal(self, message):
+        """Log message to terminal output (if you don't already have this)"""
+        if hasattr(self, 'terminal_output'):
+            self.terminal_output.config(state=tk.NORMAL)
+            self.terminal_output.insert(tk.END, message + "\n")
+            self.terminal_output.config(state=tk.DISABLED)
+            self.terminal_output.see(tk.END)
+        else:
+            print(message)
 
 
     def measure(self, voltage_range, sweeps= 1, step_delay=0.05, led=0, power=1, sequence=None, pause=0):
@@ -1197,7 +1553,7 @@ class MeasurementGUI:
 
     def send_temp(self):
         self.itc.set_temperature(int(self.temp_var.get()))
-        self.graphs_temp_time_rt(self.right_frame)
+        self.graphs_temp_time_rt(self.Graph_frame)
         print("temperature set too", self.temp_var.get())
 
     def update_variables(self):
@@ -1591,3 +1947,6 @@ def zero_devision_check(x, y):
         return x / y
     except:
         return 0
+
+if __name__ == "__main__":
+    print("you cannot do this")
