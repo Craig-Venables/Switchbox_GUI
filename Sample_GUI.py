@@ -62,8 +62,8 @@ class SampleGUI:
         self.Electronic_Mpx = False
         self.measurement_window = False
 
-        print(self.device_maps_list)
-        print(self.device_list)
+        # print(self.device_maps_list)
+        # print(self.device_list)
 
         # initialise switchbox
         # self.switchbox = pySwitchbox.Switchbox()
@@ -410,8 +410,8 @@ class SampleGUI:
 
     def canvas_click(self, event):
         mapname = self.current_map_name
-        print(mapname)
-        print(self.current_map_map)
+        #print(mapname)
+        #print(self.current_map_map)
 
         orig_width, orig_height = self.original_image.size
         scaled_width, scaled_height = 400, 400
@@ -451,8 +451,11 @@ class SampleGUI:
         # Get the device bounds
         bounds = self.device_mapping.get(device, None)
         if bounds:
-            scale_x = 1198 / 400  # Adjust based on your scaling factor
-            scale_y = 1199 / 400
+            orig_width, orig_height = self.original_image.size
+            scaled_width, scaled_height = 400, 400
+            # Compute the scaling factors
+            scale_x = orig_width / scaled_width
+            scale_y = orig_height / scaled_height
 
             x_min = bounds["x_min"] / scale_x
             x_max = bounds["x_max"] / scale_x
@@ -473,6 +476,8 @@ class SampleGUI:
             if not selected_device_list:
                 messagebox.showwarning("Warning", "No devices selected for measurement.")
                 return
+
+            self.change_relays()
 
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True

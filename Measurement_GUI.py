@@ -16,7 +16,9 @@ import atexit
 
 from Equipment_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
 from Equipment_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
-from Other.old_code.AdaptiveMeasurement import AdaptiveMeasurement
+from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
+from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
+
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
 from Equipment_Classes.OxfordITC4 import OxfordITC4
@@ -65,6 +67,7 @@ class MeasurementGUI:
         self.not_at_tempriture = False
         self.itc_connected = False
         self.lakeshore = None
+        self.psu_needed = False
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
@@ -116,6 +119,7 @@ class MeasurementGUI:
         self.create_status_box(self.middle_frame)
         self.signal_messaging(self.middle_frame)
         self.temp_measurments_itc4(self.middle_frame)
+        self.create_controller_selection(self.middle_frame)
 
         # right frame
 
@@ -129,20 +133,17 @@ class MeasurementGUI:
 
         self.top_banner(self.top_frame)
 
-        # # ohno
-        # self.adaptive_button = tk.Button(self.master, text="oh no", command=self.ohno)
-        # self.adaptive_button.grid(row=9, column=2, columnspan=2, pady=10)
-        #
-        # # Adaptive melody
-        # self.adaptive_button = tk.Button(self.master, text="Song", command=self.play_melody)
-        # self.adaptive_button.grid(row=10, column=3, columnspan=2, pady=10)
+        # self.measurement_thread = None
+        # self.plotter = None
+        # self.safe_plotter = None
+        # self.plotter = None
 
         # list all GPIB Devices
         # find kiethely smu assign to correct
 
         # connect to kiethley's
         self.connect_keithley()
-        self.connect_keithley_psu()
+        #self.connect_keithley_psu()
 
         atexit.register(self.cleanup)
 
@@ -473,6 +474,49 @@ class MeasurementGUI:
             time.sleep(0.1)
 
     ###################################################################
+    # seequencial plotting
+    ###################################################################
+
+    # Add to your GUI initialization
+    def create_plot_menu(self):
+        """Create menu options for plotting."""
+        # Add to your menu bar
+        plot_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Plot", menu=plot_menu)
+
+        plot_menu.add_command(label="Open Live Plotter", command=self.open_live_plotter)
+        plot_menu.add_separator()
+        plot_menu.add_command(label="Export All Plots", command=self.export_all_plots)
+        plot_menu.add_command(label="Save Current Plot", command=self.save_current_plot)
+
+    def open_live_plotter(self):
+        """Open a standalone live plotter window."""
+        if not hasattr(self, 'standalone_plotter') or not self.standalone_plotter.window.winfo_exists():
+            measurement_type = self.Sequential_measurement_var.get()
+            if measurement_type == "Iv Sweep":
+                plot_type = "IV Sweep"
+            elif measurement_type == "Single Avg Measure":
+                plot_type = "Single Avg Measure"
+            else:
+                plot_type = "Unknown"
+
+            self.standalone_plotter = MeasurementPlotter(self.root, measurement_type=plot_type)
+
+    def export_all_plots(self):
+        """Export plots from the current plotter."""
+        if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
+            self.plotter.export_data()
+        else:
+            tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
+
+    def save_current_plot(self):
+        """Save the current plot as an image."""
+        if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
+            self.plotter.save_current_plot()
+        else:
+            tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
+
+    ###################################################################
 
     ###################################################################
     def create_connection_section(self,parent):
@@ -667,12 +711,9 @@ class MeasurementGUI:
         frame = tk.LabelFrame(parent, text="Status", padx=5, pady=5)
         frame.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
 
-        self.status_box = tk.Label(frame, text="Status: Not Connected", relief=tk.SUNKEN, anchor="w", width=40)
+        self.status_box = tk.Label(frame, text="Status: Not Connected", relief=tk.SUNKEN, anchor="w", width=20)
         self.status_box.pack(fill=tk.X)
 
-    def connect_temp_sensor(self):
-        print("connecting to temp controller")
-        self.connect_temp_controller()
 
     def temp_measurments_itc4(self, parent):
         # Temperature section
@@ -691,6 +732,95 @@ class MeasurementGUI:
         self.temp_go_button = tk.Button(frame, text="Apply", command=self.send_temp)
         self.temp_go_button.grid(row=1, column=2)
 
+    def create_controller_selection(self,parent):
+        """Create manual controller selection widgets."""
+        control_frame = tk.LabelFrame(parent, text="Temperature Controller", padx=5, pady=5)
+        control_frame.grid(row=6, column=0, columnspan=2, sticky='ew', padx=5)
+
+        # Controller type dropdown
+        tk.Label(control_frame, text="Type:").grid(row=0, column=0, sticky='w')
+        self.controller_type_var = tk.StringVar(value="Auto-Detect")
+        self.controller_dropdown = ttk.Combobox(
+            control_frame,
+            textvariable=self.controller_type_var,
+            values=["Auto-Detect", "Lakeshore 335", "Oxford ITC4", "None"],
+            width=15
+        )
+        self.controller_dropdown.grid(row=0, column=1, padx=5)
+
+        # Address entry
+        tk.Label(control_frame, text="Address:").grid(row=1, column=0, sticky='w')
+        self.controller_address_var = tk.StringVar(value="Auto")
+        self.controller_address_entry = tk.Entry(
+            control_frame,
+            textvariable=self.controller_address_var,
+            width=15
+        )
+        self.controller_address_entry.grid(row=1, column=1, padx=5)
+
+        # Connect button
+        self.connect_button = tk.Button(
+            control_frame,
+            text="Connect",
+            command=self.reconnect_temperature_controller
+        )
+        self.connect_button.grid(row=2, column=0, padx=5)
+
+        # Status indicator
+        self.controller_status_label = tk.Label(
+            control_frame,
+            text="● Disconnected",
+            fg="red"
+        )
+        self.controller_status_label.grid(row=2, column=1, padx=5)
+
+    def reconnect_temperature_controller(self):
+        """Reconnect temperature controller based on GUI selection."""
+        controller_type = self.controller_type_var.get()
+        address = self.controller_address_var.get()
+
+        # Close existing connection
+        if hasattr(self, 'temp_controller'):
+            self.temp_controller.close()
+
+        # Connect based on selection
+        if controller_type == "Auto-Detect":
+            self.temp_controller = TemperatureControllerManager(auto_detect=True)
+        elif controller_type == "None":
+            self.temp_controller = TemperatureControllerManager(auto_detect=False)
+        else:
+            # Manual connection
+            if address == "Auto":
+                # Use default addresses
+                default_addresses = {
+                    "Lakeshore 335": "12",
+                    "Oxford ITC4": "ASRL12::INSTR"
+                }
+                address = default_addresses.get(controller_type, "12")
+
+            self.temp_controller = TemperatureControllerManager(
+                auto_detect=False,
+                controller_type=controller_type,
+                address=address
+            )
+
+        # Update status
+        self.update_controller_status()
+
+    def update_controller_status(self):
+        """Update controller status indicator."""
+        if self.temp_controller.is_connected():
+            info = self.temp_controller.get_controller_info()
+            self.controller_status_label.config(
+                text=f"● Connected: {info['type']}",
+                fg="green"
+            )
+            self.log_terminal(f"Connected to {info['type']} at {info['address']}")
+        else:
+            self.controller_status_label.config(
+                text="● Disconnected",
+                fg="red"
+            )
 
     def sequential_measurments(self,parent):
 
@@ -741,10 +871,11 @@ class MeasurementGUI:
         # Run button
         self.run_custom_button = tk.Button(frame, text="Run Sequence", command=start_thread)
         self.run_custom_button.grid(row=5, column=1, columnspan=2, pady=5)
+
     def Lakshore_temp(self):
         print("lakeshore temp")
     ###################################################################
-    # All Measurment acquisition code
+    # All Measurement acquisition code
     ###################################################################
 
     def sequential_measure(self):
@@ -755,9 +886,6 @@ class MeasurementGUI:
         self.check_for_sample_name() # checks for sample name if not prompts user
 
         print(f"Running sequential measurement:")
-
-        all_data = []
-
 
         if self.Sequential_measurement_var.get() == "Iv Sweep":
             count_pass = 1
@@ -806,61 +934,44 @@ class MeasurementGUI:
 
 
                     np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+
                     #change device
                     self.sample_gui.next_device()
                     time.sleep(0.1)
-
+                    self.sample_gui.change_relays()
 
                 count_pass += 1
                 time.sleep(self.sq_time_delay.get()) # delay for the time between measurements
 
 
-
         elif self.Sequential_measurement_var.get() == "Single Avg Measure":
 
             count_pass = 1
-
             # Initialize data arrays for each device
-
             device_data = {}  # Dictionary to store data for each device
-
             start_time = time.time()  # Record overall start time
 
             if self.current_device in self.device_list:
-
                 start_index = self.device_list.index(self.current_device)
-
             else:
-
                 start_index = 0  # Default to the first device if current one is not found
 
             device_count = len(self.device_list)
-
             # Initialize empty arrays for each device
 
             for j in range(device_count):
                 device_idx = (start_index + j) % device_count
-
                 device = self.device_list[device_idx]
-
                 device_data[device] = {
-
                     'voltages': [],
-
                     'currents': [],
-
                     'std_errors': [],
-
                     'timestamps': [],
-
                     'temperatures': []
-
                 }
 
             voltage = float(self.sq_voltage.get())
-
             measurement_duration = self.measurement_duration_var.get()
-
             # Main measurement loop
 
             for i in range(int(self.sequential_number_of_sweeps.get())):
@@ -874,40 +985,32 @@ class MeasurementGUI:
                 for j in range(device_count):
 
                     device_idx = (start_index + j) % device_count
-
                     device = self.device_list[device_idx]
-
                     self.status_box.config(text=f"Pass {i + 1}: Measuring {device}...")
-
                     self.master.update()
+                    device_display_name = f"Device_{j + 1}_{device}"
 
                     # Calculate timestamp (middle of measurement period)
-
                     measurement_timestamp = time.time() - start_time + (measurement_duration / 2)
-
                     # Perform averaged measurement
-
                     avg_current, std_error, temperature = self.measure_average_current(voltage, measurement_duration)
 
+
+
                     # Store data in arrays
-
                     device_data[device]['voltages'].append(voltage)
-
                     device_data[device]['currents'].append(avg_current)
-
                     device_data[device]['std_errors'].append(std_error)
-
                     device_data[device]['timestamps'].append(measurement_timestamp)
 
                     if self.record_temp_var.get():
+                        temperature = self.temp_controller.get_temperature_celsius() #B
                         device_data[device]['temperatures'].append(temperature)
 
+
                     # Log current measurement
-
                     self.log_terminal(f"Pass {i + 1}, Device {device}: V={voltage}V, "
-
                                       f"I_avg={avg_current:.3E}A, σ={std_error:.3E}A, "
-
                                       f"t={measurement_timestamp:.1f}s")
 
                     if self.stop_measurement_flag:  # Check if stop was pressed
@@ -921,101 +1024,35 @@ class MeasurementGUI:
                         return  # Exit the function
 
                     # Change to next device
-
                     self.sample_gui.next_device()
-
+                    time.sleep(0.1)
+                    self.sample_gui.change_relays()
+                    print("switching device")
                     time.sleep(0.1)
 
                 # Auto-save every 5 cycles
-
                 if (i + 1) % 5 == 0:
                     self.log_terminal(f"Auto-saving data after {i + 1} cycles...")
-
-                    self.save_averaged_data(device_data, self.sample_name_var.get(),
-
-                                            start_index, device_count, interrupted=False)
-
+                    self.save_averaged_data(device_data, self.sample_name_var.get(),start_index, device_count, interrupted=False)
                 count_pass += 1
 
                 # Delay between measurement passes (if not the last pass)
-
                 if i < int(self.sequential_number_of_sweeps.get()) - 1:
                     time.sleep(self.sq_time_delay.get())
 
+
             # Save all data at the end
+            self.save_averaged_data(device_data, self.sample_name_var.get(), start_index, device_count,interrupted=False)
 
-            self.save_averaged_data(device_data, self.sample_name_var.get(),
+            # Save comprehensive file with all measurements
+            self.save_all_measurements_file(device_data, self.sample_name_var.get(), start_index, device_count)
 
-                                    start_index, device_count, interrupted=False)
-
+            # Save all data at the end
+            self.save_averaged_data(device_data, self.sample_name_var.get(),start_index, device_count, interrupted=False)
             self.measuring = False
-
             self.status_box.config(text="Measurement Complete")
-
             self.keithley.enable_output(False)  # Disable output when done
 
-    def save_averaged_data(self, device_data, sample_name, start_index, device_count, interrupted=False):
-        """
-        Save the averaged measurement data for all devices.
-
-        Args:
-            device_data: Dictionary containing arrays for each device
-            sample_name: Name of the sample
-            start_index: Starting device index
-            device_count: Total number of devices
-            interrupted: Boolean indicating if measurement was interrupted
-        """
-        # Create main save directory
-        base_dir = f"Data_save_loc\\Multiplexer_Avg_Measure\\{sample_name}"
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
-
-        # Save data for each device
-        for j in range(device_count):
-            device_idx = (start_index + j) % device_count
-            device = self.device_list[device_idx]
-
-            if device not in device_data or len(device_data[device]['currents']) == 0:
-                continue  # Skip if no data for this device
-
-            # Create device-specific directory
-            device_dir = f"{base_dir}\\{j + 1}"
-            if not os.path.exists(device_dir):
-                os.makedirs(device_dir)
-
-            # Prepare data array
-            voltages = np.array(device_data[device]['voltages'])
-            currents = np.array(device_data[device]['currents'])
-            std_errors = np.array(device_data[device]['std_errors'])
-            timestamps = np.array(device_data[device]['timestamps'])
-
-            if self.record_temp_var.get() and device_data[device]['temperatures']:
-                temperatures = np.array(device_data[device]['temperatures'])
-                data = np.column_stack((timestamps, voltages, currents, std_errors, temperatures))
-                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)\tTemperature(C)"
-                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
-            else:
-                data = np.column_stack((timestamps, voltages, currents, std_errors))
-                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)"
-                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E"
-
-            # Create filename
-            timestamp_str = time.strftime("%Y%m%d_%H%M%S")
-            status_str = "interrupted" if interrupted else "complete"
-            num_measurements = len(currents)
-
-            voltage = voltages[0] if len(voltages) > 0 else 0
-            measurement_duration = self.measurement_duration_var.get()
-
-            filename = f"Device_{j + 1}_{device}_{voltage}V_{measurement_duration}s_" \
-                       f"{num_measurements}measurements_{status_str}_{timestamp_str}.txt"
-
-            file_path = os.path.join(device_dir, filename)
-
-            # Save data
-            np.savetxt(file_path, data, fmt=fmt, header=header, comments="# ")
-
-            self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
 
     def measure_average_current(self, voltage, duration):
         """
@@ -1028,6 +1065,8 @@ class MeasurementGUI:
         Returns:
             tuple: (average_current, standard_error, temperature)
         """
+        # todo add retention on graph
+
         # Set voltage and enable output
         self.keithley.set_voltage(voltage, self.icc.get())
         self.keithley.enable_output(True)
@@ -1048,7 +1087,7 @@ class MeasurementGUI:
                 break
 
             current = self.keithley.measure_current()
-            current_readings.append(current)
+            current_readings.append(current[1])
             timestamps.append(time.time() - start_time)
 
             # Update status
@@ -1108,7 +1147,6 @@ class MeasurementGUI:
         else:
             print(message)
 
-
     def measure(self, voltage_range, sweeps= 1, step_delay=0.05, led=0, power=1, sequence=None, pause=0):
         """Start measurement for device.
 
@@ -1121,6 +1159,7 @@ class MeasurementGUI:
             sequence      : optional string like '0101' determining LED status per sweep.
         """
         self.stop_measurement_flag = False
+
 
         if sequence is not None:
             sequence = str(sequence)
@@ -1159,7 +1198,8 @@ class MeasurementGUI:
             if led_state == '1':
                 self.psu.led_on_380(power)
             else:
-                self.psu.led_off_380()
+                if self.psu_needed:
+                    self.psu.led_off_380()
 
             if self.stop_measurement_flag:  # Check if stop was pressed
                 print("Measurement interrupted!")
@@ -1202,7 +1242,8 @@ class MeasurementGUI:
                             print('pausing for',pause," seconds")
                             time.sleep(pause)
                 previous_v = v
-        self.psu.led_off_380()  # ensure LED is off at the end
+        if self.psu_needed:
+            self.psu.led_off_380()  # ensure LED is off at the end
         return v_arr, c_arr, time_stamps
 
     def run_custom_measurement(self):
@@ -1326,6 +1367,9 @@ class MeasurementGUI:
                         if not self.psu_connected:
                             messagebox.showwarning("Warning", "Not connected to PSU!")
                             self.connect_keithley_psu()
+                            self.psu_needed = True
+                        else:
+                            self.psu_needed = False
 
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
@@ -1551,28 +1595,6 @@ class MeasurementGUI:
         self.keithley.shutdown()
         return current_data,time_data
 
-    def send_temp(self):
-        self.itc.set_temperature(int(self.temp_var.get()))
-        self.graphs_temp_time_rt(self.Graph_frame)
-        print("temperature set too", self.temp_var.get())
-
-    def update_variables(self):
-        # update current device
-        self.current_device = self.device_list[self.current_index]
-        # Update number (ie device_11)
-        self.device_section_and_number = self.convert_to_name(self.current_index)
-        # Update section and number
-        self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
-        self.device_var.config(text=self.display_index_section_number)
-        # print(self.convert_to_name(self.current_index))
-
-    def measure_one_device(self):
-        if self.adaptive_var.get():
-            print("Measuring only one device")
-            self.single_device_flag = True
-        else:
-            print("Measuring all devices")
-            self.single_device_flag = False
 
     ###################################################################
     # Connect
@@ -1627,9 +1649,148 @@ class MeasurementGUI:
             print("unable to connect to Temp please check")
             messagebox.showerror("Error", f"Could not connect to temp device: {str(e)}")
 
+    def init_temperature_controller(self):
+        """Initialize temperature controller with auto-detection."""
+        self.temp_controller = TemperatureControllerManager(auto_detect=True)
+
+        # Log the result
+        if self.temp_controller.is_connected():
+            info = self.temp_controller.get_controller_info()
+            self.log_terminal(f"Temperature Controller: {info['type']} at {info['address']}")
+            self.log_terminal(f"Current temperature: {info['temperature']:.1f}°C")
+        else:
+            self.log_terminal("No temperature controller detected - using 25°C default")
+
+    ###################################################################
+    # Temp logging
+    ###################################################################
+
+    def create_temperature_log(self):
+        """Create a temperature log that records during measurements."""
+        self.temperature_log = []
+        self.is_logging_temperature = False
+
+    def start_temperature_logging(self):
+        """Start logging temperature data."""
+        self.temperature_log = []
+        self.is_logging_temperature = True
+        self.log_temperature_data()
+
+    def log_temperature_data(self):
+        """Log temperature data periodically during measurements."""
+        if self.is_logging_temperature and self.measuring:
+            timestamp = time.time()
+            temp = self.temp_controller.get_temperature_celsius()
+            self.temperature_log.append((timestamp, temp))
+
+            # Continue logging every second
+            self.root.after(1000, self.log_temperature_data)
+
+    def stop_temperature_logging(self):
+        """Stop temperature logging and save data."""
+        self.is_logging_temperature = False
+
+        if self.temperature_log:
+            # Save temperature log with measurement data
+            save_path = f"Data_save_loc\\Temperature_Log_{time.strftime('%Y%m%d_%H%M%S')}.txt"
+            with open(save_path, 'w') as f:
+                f.write("Time(s)\tTemperature(C)\n")
+                start_time = self.temperature_log[0][0]
+                for timestamp, temp in self.temperature_log:
+                    f.write(f"{timestamp - start_time:.1f}\t{temp:.2f}\n")
+
+
+
     ###################################################################
     # Other Functions
     ###################################################################
+
+    def save_averaged_data(self, device_data, sample_name, start_index, device_count, interrupted=False):
+        """
+        Save the averaged measurement data for all devices.
+
+        Args:
+            device_data: Dictionary containing arrays for each device
+            sample_name: Name of the sample
+            start_index: Starting device index
+            device_count: Total number of devices
+            interrupted: Boolean indicating if measurement was interrupted
+        """
+        # Create main save directory
+        base_dir = f"Data_save_loc\\Multiplexer_Avg_Measure\\{sample_name}"
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+
+        # Save data for each device
+        for j in range(device_count):
+            device_idx = (start_index + j) % device_count
+            device = self.device_list[device_idx]
+
+            if device not in device_data or len(device_data[device]['currents']) == 0:
+                continue  # Skip if no data for this device
+
+            # Create device-specific directory
+            device_dir = f"{base_dir}\\{j + 1}"
+            if not os.path.exists(device_dir):
+                os.makedirs(device_dir)
+
+            # Prepare data array
+            voltages = np.array(device_data[device]['voltages'])
+            currents = np.array(device_data[device]['currents'])
+            std_errors = np.array(device_data[device]['std_errors'])
+            timestamps = np.array(device_data[device]['timestamps'])
+
+            if self.record_temp_var.get() and device_data[device]['temperatures']:
+                temperatures = np.array(device_data[device]['temperatures'])
+                data = np.column_stack((timestamps, voltages, currents, std_errors, temperatures))
+                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)\tTemperature(C)"
+                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
+            else:
+                data = np.column_stack((timestamps, voltages, currents, std_errors))
+                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)"
+                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E"
+
+            # Create filename
+            timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+            status_str = "interrupted" if interrupted else "complete"
+            num_measurements = len(currents)
+
+            voltage = voltages[0] if len(voltages) > 0 else 0
+            measurement_duration = self.measurement_duration_var.get()
+
+            filename = f"Device_{j + 1}_{device}_{voltage}V_{measurement_duration}s_" \
+                       f"{num_measurements}measurements_{status_str}_{timestamp_str}.txt"
+
+            file_path = os.path.join(device_dir, filename)
+
+            # Save data
+            np.savetxt(file_path, data, fmt=fmt, header=header, comments="# ")
+
+            self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
+
+    def send_temp(self):
+        self.itc.set_temperature(int(self.temp_var.get()))
+        self.graphs_temp_time_rt(self.Graph_frame)
+        print("temperature set too", self.temp_var.get())
+
+    def update_variables(self):
+        # update current device
+        self.current_device = self.device_list[self.current_index]
+        # Update number (ie device_11)
+        self.device_section_and_number = self.convert_to_name(self.current_index)
+        # Update section and number
+        self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
+        self.device_var.config(text=self.display_index_section_number)
+        # print(self.convert_to_name(self.current_index))
+
+    def measure_one_device(self):
+        if self.adaptive_var.get():
+            print("Measuring only one device")
+            self.single_device_flag = True
+        else:
+            print("Measuring all devices")
+            self.single_device_flag = False
+
     def update_last_sweeps(self):
         """Automatically updates the plot every 1000ms"""
         # Re-draw the latest data on the axes
@@ -1749,6 +1910,47 @@ class MeasurementGUI:
             self.master.update_idletasks()
             self.master.update()
 
+    def save_all_measurements_file(self, device_data, sample_name, start_index, device_count):
+        """Save all measurements with each device in its own columns using pandas"""
+
+        import pandas as pd
+
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{sample_name}_{timestamp}_all.csv"
+
+        # Create a dictionary to hold all columns
+        all_columns = {}
+
+        # Build columns for each device
+        for j in range(device_count):
+            device_idx = (start_index + j) % device_count
+            device = self.device_list[device_idx]
+            device_display_name = f"D{j + 1}_{device}"  # Shortened for cleaner headers
+
+            if device in device_data:
+                data = device_data[device]
+
+                # Add columns for this device
+                all_columns[f'Time({device_display_name})'] = data['timestamps']
+                all_columns[f'Voltage({device_display_name})'] = data['voltages']
+                all_columns[f'Current({device_display_name})'] = data['currents']
+                all_columns[f'StdError({device_display_name})'] = data['std_errors']
+
+                # Add temperature if recorded
+                if self.record_temp_var.get() and 'temperatures' in data:
+                    all_columns[f'Temperature({device_display_name})'] = data['temperatures']
+
+        # Create DataFrame
+        df = pd.DataFrame(dict([(k, pd.Series(v)) for k, v in all_columns.items()]))
+
+        # Save to CSV
+        filepath = os.path.join(self.save_directory, filename)
+        df.to_csv(filepath, index=False)
+
+        self.log_terminal(f"Saved all measurements to: {filename}")
+
+        return filename
     def spare_button(self):
         print("spare")
 
@@ -1894,6 +2096,9 @@ class MeasurementGUI:
         else:
             print("closed")
             sys.exit()
+
+
+
 
 
 def get_voltage_range(start_v, stop_v, step_v, sweep_type):

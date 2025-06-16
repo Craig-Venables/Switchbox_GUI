@@ -9,7 +9,7 @@ class Lakeshore335Controller:
     Default GPIB address is 12.
     """
 
-    def __init__(self, gpib_address=12, timeout=5000):
+    def __init__(self, gpib_address=17, timeout=5000):
         """
         Initialize connection to Lakeshore 335.
 
@@ -346,7 +346,7 @@ class Lakeshore335Controller:
 # Example usage and integration with your existing code
 if __name__ == "__main__":
     # Test the controller
-    lakeshore = Lakeshore335Controller(gpib_address=12)
+    lakeshore = Lakeshore335Controller(gpib_address=17)
 
     if lakeshore.device:
         # Get current temperatures
@@ -355,7 +355,7 @@ if __name__ == "__main__":
         print(f"Channel B: {temps['B']['celsius']:.2f}°C")
 
         # Set a setpoint
-        lakeshore.set_setpoint(300, output=1)  # 300K = 26.85°C
+        lakeshore.set_setpoint(100, output=1)  # 300K = 26.85°C
 
         # Get heater status
         heater = lakeshore.get_heater_output(1)
