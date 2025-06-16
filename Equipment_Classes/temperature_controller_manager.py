@@ -3,8 +3,9 @@ import pyvisa
 from typing import Optional, Dict, Any
 
 # Import your controller classes
-from Lakeshore355 import Lakeshore335Controller
-from OxfordITC4 import OxfordITC4
+
+from Equipment_Classes.OxfordITC4 import OxfordITC4
+from Equipment_Classes.Lakeshore355 import Lakeshore335Controller
 
 
 class TemperatureControllerManager:
@@ -18,7 +19,7 @@ class TemperatureControllerManager:
         {
             'class': Lakeshore335Controller,
             'type': 'GPIB',
-            'addresses': [12, 13],  # Common GPIB addresses
+            'addresses': [17,12, 13],  # Common GPIB addresses
             'name': 'Lakeshore 335',
             'test_method': 'get_temperature_celsius'
         },
@@ -152,7 +153,7 @@ class TemperatureControllerManager:
             print(f"Failed to connect to {controller_type}: {e}")
             return False
 
-    def get_temperature_celsius(self, channel: str = 'A', use_cache: bool = True) -> float:
+    def get_temperature_celsius(self, channel: str = 'B', use_cache: bool = True) -> float:
         """
         Get temperature in Celsius.
 
