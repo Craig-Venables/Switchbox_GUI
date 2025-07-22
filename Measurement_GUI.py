@@ -676,7 +676,7 @@ class MeasurementGUI:
 
     def signal_messaging(self,parent):
         frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
-        frame.grid(row=5, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
+        frame.grid(row=4, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
 
         # Toggle switch: Measure one device
         tk.Label(frame, text="Do you want to use the bot?").grid(row=0, column=0, sticky="w")
@@ -709,7 +709,7 @@ class MeasurementGUI:
     def create_status_box(self,parent):
         """Status box section"""
         frame = tk.LabelFrame(parent, text="Status", padx=5, pady=5)
-        frame.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
 
         self.status_box = tk.Label(frame, text="Status: Not Connected", relief=tk.SUNKEN, anchor="w", width=20)
         self.status_box.pack(fill=tk.X)
@@ -718,7 +718,7 @@ class MeasurementGUI:
     def temp_measurments_itc4(self, parent):
         # Temperature section
         frame = tk.LabelFrame(parent, text="temp_measurments", padx=5, pady=5)
-        frame.grid(row=9, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
 
         # temp entry
         self.temp_label = tk.Label(frame, text="Set_temp:")
@@ -735,7 +735,7 @@ class MeasurementGUI:
     def create_controller_selection(self,parent):
         """Create manual controller selection widgets."""
         control_frame = tk.LabelFrame(parent, text="Temperature Controller", padx=5, pady=5)
-        control_frame.grid(row=6, column=0, columnspan=2, sticky='ew', padx=5)
+        control_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5)
 
         # Controller type dropdown
         tk.Label(control_frame, text="Type:").grid(row=0, column=0, sticky='w')

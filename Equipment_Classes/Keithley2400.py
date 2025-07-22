@@ -83,7 +83,7 @@ class Keithley2400Controller:
 
 # Example Usage
 if __name__ == "__main__":
-    keithley = Keithley2400()  # Connect to the device
+    keithley = Keithley2400Controller()  # Connect to the device
     print("Device ID:", keithley.device.id)  # Check connection
 
     # Test beep function using PyMeasure interface
