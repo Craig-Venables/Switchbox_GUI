@@ -7,7 +7,6 @@ class Keithley2400Controller:
     def __init__(self, gpib_address='GPIB0::24::INSTR', timeout=5):
         """Initialize connection to Keithley 2400 via PyMeasure."""
         try:
-            print("a")
             self.device = Keithley2400(gpib_address)
             self.device.adapter.connection.timeout = timeout * 1000  # Convert to milliseconds
             self.device.reset()  # Reset the instrument

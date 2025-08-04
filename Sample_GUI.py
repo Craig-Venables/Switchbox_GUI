@@ -292,11 +292,11 @@ class SampleGUI:
 
     def update_multiplexer(self, event):
         self.multiplexer_type = self.Multiplexer_type_var.get()
-        print("multiplexer set to", self.multiplexer_type)
+        print("Multiplexer set to:", self.multiplexer_type)
         if self.multiplexer_type == "Pyswitchbox":
             # initialise switchbox
             # self.switchbox = pySwitchbox.Switchbox()
-            print("initiating py switch box please wait")
+            print("Initiating Py Switch box")
         elif self.multiplexer_type == "Electronic_Mpx":
             print("initialising Electronic_Mpx")
             self.mpx = MultiplexerController()
@@ -335,7 +335,7 @@ class SampleGUI:
 
     def update_dropdowns(self, event):
         sample = self.sample_type_var.get()
-        print("sample chosen", sample)
+        print("Sample chosen:", sample)
         self.update_device_type(sample)
 
         if sample in sample_config:
@@ -478,7 +478,10 @@ class SampleGUI:
                 return
 
             self.change_relays()
-
+            print("")
+            print("Selected devices:")
+            print(selected_device_list)
+            print("")
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
         else:
