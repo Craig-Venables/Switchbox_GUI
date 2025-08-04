@@ -47,6 +47,7 @@ class MeasurementGUI:
         self.title_font_size = 10
         self.sequential_number_of_sweeps = 100
 
+
         # Device name's
         self.sample_type = sample_type
         self.section = section  # redudntant i think
@@ -110,16 +111,19 @@ class MeasurementGUI:
         # left frame
         self.create_connection_section(self.left_frame)
         self.create_mode_selection(self.left_frame)
-        self.create_sweep_parameters(self.left_frame)
+        self.create_status_box(self.left_frame)
+        self.create_controller_selection(self.left_frame)
 
-        self.create_custom_measurement_section(self.left_frame)
-        self.sequential_measurments(self.left_frame)
+        self.temp_measurments_itc4(self.left_frame)
+        self.signal_messaging(self.left_frame)
 
         # middle
-        self.create_status_box(self.middle_frame)
-        self.signal_messaging(self.middle_frame)
-        self.temp_measurments_itc4(self.middle_frame)
-        self.create_controller_selection(self.middle_frame)
+        self.create_sweep_parameters(self.middle_frame)
+        self.create_custom_measurement_section(self.middle_frame)
+        self.sequential_measurments(self.middle_frame)
+
+
+
 
         # right frame
 
@@ -142,6 +146,8 @@ class MeasurementGUI:
         # find kiethely smu assign to correct
 
         # connect to kiethley's
+        # Set default to System 1 and trigger the change
+        self.set_default_system()
         self.connect_keithley()
         #self.connect_keithley_psu()
 
@@ -517,38 +523,129 @@ class MeasurementGUI:
             tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
 
     ###################################################################
-
+    # GUI mETHODS
     ###################################################################
-    def create_connection_section(self,parent):
+
+
+    def create_connection_section(self, parent):
         """Keithley connection section"""
         frame = tk.LabelFrame(parent, text="Keithley Connection", padx=5, pady=5)
         frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
 
-        # add dropdowns to connect too each
+        # System selection dropdown
+        tk.Label(frame, text="Choose System:").grid(row=0, column=0, sticky="w")
+        self.system_var = tk.StringVar()
+        self.systems = self.load_systems()
+        self.system_dropdown = tk.OptionMenu(frame, self.system_var,*self.systems,
+                                             command=self.on_system_change)
+        self.system_dropdown.grid(row=0, column=1, columnspan=2, sticky="ew")
 
-        tk.Label(frame, text="GPIB Address - Iv:").grid(row=0, column=0, sticky="w")
+        # GPIB Address - IV
+        self.iv_label = tk.Label(frame, text="GPIB Address - IV:")
+        self.iv_label.grid(row=1, column=0, sticky="w")
         self.keithley_address_var = tk.StringVar(value=self.keithley_address)
-        self.address_entry = tk.Entry(frame, textvariable=self.keithley_address_var)
-        self.address_entry.grid(row=0, column=1)
+        self.iv_address_entry = tk.Entry(frame, textvariable=self.keithley_address_var)
+        self.iv_address_entry.grid(row=1, column=1)
+        self.iv_connect_button = tk.Button(frame, text="Connect", command=self.connect_keithley)
+        self.iv_connect_button.grid(row=1, column=2)
 
-        self.connect_button = tk.Button(frame, text="Connect", command=self.connect_keithley)
-        self.connect_button.grid(row=0, column=2)
+        # GPIB Address - PSU
+        self.psu_label = tk.Label(frame, text="GPIB Address - PSU:")
+        self.psu_label.grid(row=2, column=0, sticky="w")
+        self.psu_address_var = tk.StringVar(value=self.psu_visa_address)
+        self.psu_address_entry = tk.Entry(frame, textvariable=self.psu_address_var)
+        self.psu_address_entry.grid(row=2, column=1)
+        self.psu_connect_button = tk.Button(frame, text="Connect", command=self.connect_keithley_psu)
+        self.psu_connect_button.grid(row=2, column=2)
 
-        tk.Label(frame, text="GPIB Address - PSU:").grid(row=1, column=0, sticky="w")
-        self.address_var = tk.StringVar(value=self.psu_visa_address)
-        self.address_entry = tk.Entry(frame, textvariable=self.address_var)
-        self.address_entry.grid(row=1, column=1)
+        # GPIB Address - Temp
+        self.temp_label = tk.Label(frame, text="GPIB Address - Temp:")
+        self.temp_label.grid(row=3, column=0, sticky="w")
+        self.temp_address_var = tk.StringVar(value=self.temp_controller_address)
+        self.temp_address_entry = tk.Entry(frame, textvariable=self.temp_address_var)
+        self.temp_address_entry.grid(row=3, column=1)
+        self.temp_connect_button = tk.Button(frame, text="Connect", command=self.reconnect_temperature_controller)
+        #self.temp_connect_button = tk.Button(frame, text="Connect", command=self.connect_temp_controller)
+        self.temp_connect_button.grid(row=3, column=2)
 
-        self.connect_button = tk.Button(frame, text="Connect", command=self.connect_keithley_psu)
-        self.connect_button.grid(row=1, column=2)
+    def set_default_system(self):
+        systems = self.systems
+        default = "Lab Small"
+        if default in systems:
+            self.system_var.set(default)
+            self.on_system_change(default)  # Trigger the address updates
+        elif systems and systems[0] != "No systems available":
+            self.system_var.set(systems[0])
+            self.on_system_change(systems[0])
 
-        tk.Label(frame, text="GPIB Address - Temp:").grid(row=2, column=0, sticky="w")
-        self.address_var = tk.StringVar(value=self.temp_controller_address)
-        self.address_entry = tk.Entry(frame, textvariable=self.address_var)
-        self.address_entry.grid(row=2, column=1)
+    def load_systems(self):
+        """Load system configurations from JSON file"""
+        config_file = "system_configs.json"
 
-        self.connect_button = tk.Button(frame, text="Connect", command=self.connect_temp_controller)
-        self.connect_button.grid(row=2, column=2)
+        try:
+            with open(config_file, 'r') as f:
+                self.system_configs = json.load(f)
+            return list(self.system_configs.keys())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return ["No systems available"]
+
+    def on_system_change(self, selected_system):
+        """Update addresses when system selection changes"""
+        if selected_system in self.system_configs:
+            config = self.system_configs[selected_system]
+
+            # Update IV section
+            iv_address = config.get("iv_address", "")
+            self.keithley_address_var.set(iv_address)
+            self.keithley_address = iv_address
+            self.update_component_state("iv", iv_address)
+
+            # Update PSU section
+            psu_address = config.get("psu_address", "")
+            self.psu_address_var.set(psu_address)
+            self.psu_visa_address = psu_address
+            self.update_component_state("psu", psu_address)
+
+            # Update Temp section
+            temp_address = config.get("temp_address", "")
+            self.temp_address_var.set(temp_address)
+            self.temp_controller_address = temp_address
+            self.update_component_state("temp", temp_address)
+
+            # updater controller type
+            self.temp_controller_type = config.get("temp_controller", "")
+            self.controller_type_var.set(self.temp_controller_type)
+            self.controller_address_var.set(temp_address)
+
+
+
+    def update_component_state(self, component_type, address):
+        """Enable/disable and style components based on address availability"""
+        has_address = bool(address and address.strip())
+
+        if component_type == "iv":
+            components = [self.iv_label, self.iv_address_entry, self.iv_connect_button]
+        elif component_type == "psu":
+            components = [self.psu_label, self.psu_address_entry, self.psu_connect_button]
+        elif component_type == "temp":
+            components = [self.temp_label, self.temp_address_entry, self.temp_connect_button]
+        else:
+            return
+
+        if has_address:
+            # Enable components - normal state
+            for component in components:
+                component.configure(state="normal")
+
+            # Reset colors to default
+            components[0].configure(fg="black")  # label
+            components[1].configure(state="normal", bg="white", fg="black")  # entry
+            components[2].configure(state="normal")  # button
+        else:
+            # Disable and grey out components
+            components[0].configure(fg="grey")  # label
+            components[1].configure(state="disabled", bg="lightgrey", fg="grey")  # entry
+            components[2].configure(state="disabled")  # button
 
     def create_mode_selection(self,parent):
         """Mode selection section"""
@@ -584,10 +681,10 @@ class MeasurementGUI:
         self.sample_name_entry = ttk.Entry(mode_frame, textvariable=self.sample_name_var)
         self.sample_name_entry.grid(row=2, column=1, columnspan=1, sticky="ew")
 
-    def create_sweep_parameters(self,parent):
+    def create_sweep_parameters(self, parent):
         """Sweep parameter section"""
         frame = tk.LabelFrame(parent, text="Sweep Parameters", padx=5, pady=5)
-        frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=2, column=0,columnspan = 2 ,padx=10, pady=5, sticky="ew")
 
         tk.Label(frame, text="Start Voltage (V):").grid(row=0, column=0, sticky="w")
         self.start_voltage = tk.DoubleVar(value=0)
@@ -609,30 +706,49 @@ class MeasurementGUI:
         self.sweeps = tk.DoubleVar(value=1)
         tk.Entry(frame, textvariable=self.sweeps).grid(row=4, column=1)
 
-
         tk.Label(frame, text="Icc:").grid(row=5, column=0, sticky="w")
         self.icc = tk.DoubleVar(value=0.1)
         tk.Entry(frame, textvariable=self.icc).grid(row=5, column=1)
 
-        tk.Label(frame, text="Pause at end?:").grid(row=6, column=0, sticky="w")
-        self.pause = tk.DoubleVar(value=0.0)
-        tk.Entry(frame, textvariable=self.pause).grid(row=6, column=1)
+        # LED Controls mini title
+        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=6, column=0, columnspan=2, sticky="w",
+                                                                             pady=(10, 2))
 
-        # self.led = tk.IntVar(value=0)
-        # self.led = ttk.Checkbutton(frame, variable=self.led_toggle)
-        # self.led.grid(row=6, column=1, columnspan=1)
+        # LED Toggle Button
+        tk.Label(frame, text="LED Status:").grid(row=7, column=0, sticky="w")
+        self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
 
-        tk.Label(frame, text="Led (0=OFF,1=ON) :").grid(row=7, column=0, sticky="w")
-        self.led = tk.DoubleVar(value=0)
-        tk.Entry(frame, textvariable=self.led).grid(row=7, column=1)
+        def toggle_led():
+            current_state = self.led.get()
+            new_state = 1 - current_state
+            self.led.set(new_state)
+            update_led_button()
+
+        def update_led_button():
+            if self.led.get() == 1:
+                self.led_button.config(text="ON", bg="green", fg="white")
+            else:
+                self.led_button.config(text="OFF", bg="red", fg="white")
+
+        self.led_button = tk.Button(frame, text="OFF", bg="red", fg="white",
+                                    width=8, command=toggle_led)
+        self.led_button.grid(row=7, column=1, sticky="w")
 
         tk.Label(frame, text="Led_Power (0-1):").grid(row=8, column=0, sticky="w")
         self.led_power = tk.DoubleVar(value=1)
         tk.Entry(frame, textvariable=self.led_power).grid(row=8, column=1)
 
         tk.Label(frame, text="Sequence: (01010)").grid(row=9, column=0, sticky="w")
-        self.sequence  = tk.StringVar()
+        self.sequence = tk.StringVar()
         tk.Entry(frame, textvariable=self.sequence).grid(row=9, column=1)
+
+        # Other Controls mini title
+        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=10, column=0, columnspan=2, sticky="w",
+                                                                      pady=(10, 2))
+
+        tk.Label(frame, text="Pause at end?:").grid(row=11, column=0, sticky="w")
+        self.pause = tk.DoubleVar(value=0.0)
+        tk.Entry(frame, textvariable=self.pause).grid(row=11, column=1)
 
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.start_measurement)
@@ -640,11 +756,11 @@ class MeasurementGUI:
             self.measurement_thread.start()
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=start_thread)
-        self.measure_button.grid(row=10, column=0, columnspan=1, pady=5)
+        self.measure_button.grid(row=12, column=0, columnspan=1, pady=5)
 
         # stop button
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
-        self.adaptive_button.grid(row=10, column=1, columnspan=1, pady=10)
+        self.adaptive_button.grid(row=12, column=1, columnspan=1, pady=10)
 
     def set_measurment_flag_true(self):
         self.stop_measurement_flag = True
@@ -660,11 +776,6 @@ class MeasurementGUI:
                                                     values=self.test_names)
         self.custom_measurement_menu.grid(row=0, column=1, padx=5)
 
-        # compliance current Data entry
-        tk.Label(frame, text="Icc (A):").grid(row=1, column=0, sticky="w")
-        self.icc = tk.DoubleVar(value=0.1)
-        tk.Entry(frame, textvariable=self.icc).grid(row=1, column=1)
-
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.run_custom_measurement)
             self.measurement_thread.daemon = True
@@ -672,11 +783,11 @@ class MeasurementGUI:
 
         # Run button
         self.run_custom_button = tk.Button(frame, text="Run Custom", command=start_thread)
-        self.run_custom_button.grid(row=2, column=0, columnspan=2, pady=5)
+        self.run_custom_button.grid(row=1, column=0, columnspan=2, pady=5)
 
     def signal_messaging(self,parent):
         frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
-        frame.grid(row=4, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
+        frame.grid(row=6, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
 
         # Toggle switch: Measure one device
         tk.Label(frame, text="Do you want to use the bot?").grid(row=0, column=0, sticky="w")
@@ -709,7 +820,7 @@ class MeasurementGUI:
     def create_status_box(self,parent):
         """Status box section"""
         frame = tk.LabelFrame(parent, text="Status", padx=5, pady=5)
-        frame.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
 
         self.status_box = tk.Label(frame, text="Status: Not Connected", relief=tk.SUNKEN, anchor="w", width=20)
         self.status_box.pack(fill=tk.X)
@@ -717,8 +828,8 @@ class MeasurementGUI:
 
     def temp_measurments_itc4(self, parent):
         # Temperature section
-        frame = tk.LabelFrame(parent, text="temp_measurments", padx=5, pady=5)
-        frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
+        frame = tk.LabelFrame(parent, text="Itc4 Temp Set", padx=5, pady=5)
+        frame.grid(row=5, column=0, padx=10, pady=5, sticky="ew")
 
         # temp entry
         self.temp_label = tk.Label(frame, text="Set_temp:")
@@ -735,7 +846,7 @@ class MeasurementGUI:
     def create_controller_selection(self,parent):
         """Create manual controller selection widgets."""
         control_frame = tk.LabelFrame(parent, text="Temperature Controller", padx=5, pady=5)
-        control_frame.grid(row=2, column=0, columnspan=2, sticky='ew', padx=5)
+        control_frame.grid(row=4, column=0, columnspan=2, sticky='ew', padx=5)
 
         # Controller type dropdown
         tk.Label(control_frame, text="Type:").grid(row=0, column=0, sticky='w')
@@ -780,6 +891,42 @@ class MeasurementGUI:
         address = self.controller_address_var.get()
 
         # Close existing connection
+        try:
+            if hasattr(self, 'temp_controller'):
+                self.temp_controller.close()
+        except:
+            pass
+
+        # Connect based on selection
+        if controller_type == "Auto-Detect":
+            self.temp_controller = TemperatureControllerManager(auto_detect=True)
+        elif controller_type == "None":
+            self.temp_controller = TemperatureControllerManager(auto_detect=False)
+        else:
+            # Manual connection
+            if address == "Auto":
+                # Use default addresses
+                default_addresses = {
+                    "Lakeshore 335": "12",
+                    "Oxford ITC4": "ASRL12::INSTR"
+                }
+                address = default_addresses.get(controller_type, "12")
+
+            self.temp_controller = TemperatureControllerManager(
+                auto_detect=False,
+                controller_type=controller_type,
+                address=address
+            )
+
+        # Update status
+        self.update_controller_status()
+
+    def reconnect_Kieithley_controller(self):
+        """Reconnect temperature controller based on GUI selection."""
+        controller_type = self.controller_type_var.get()
+        address = self.controller_address_var.get()
+
+        # Close existing connection
         if hasattr(self, 'temp_controller'):
             self.temp_controller.close()
 
@@ -806,7 +953,6 @@ class MeasurementGUI:
 
         # Update status
         self.update_controller_status()
-
     def update_controller_status(self):
         """Update controller status indicator."""
         if self.temp_controller.is_connected():
@@ -815,7 +961,7 @@ class MeasurementGUI:
                 text=f"● Connected: {info['type']}",
                 fg="green"
             )
-            self.log_terminal(f"Connected to {info['type']} at {info['address']}")
+            #self.log_terminal(f"Connected to {info['type']} at {info['address']}")
         else:
             self.controller_status_label.config(
                 text="● Disconnected",
@@ -872,8 +1018,6 @@ class MeasurementGUI:
         self.run_custom_button = tk.Button(frame, text="Run Sequence", command=start_thread)
         self.run_custom_button.grid(row=5, column=1, columnspan=2, pady=5)
 
-    def Lakshore_temp(self):
-        print("lakeshore temp")
     ###################################################################
     # All Measurement acquisition code
     ###################################################################
@@ -943,7 +1087,6 @@ class MeasurementGUI:
                 count_pass += 1
                 time.sleep(self.sq_time_delay.get()) # delay for the time between measurements
 
-
         elif self.Sequential_measurement_var.get() == "Single Avg Measure":
 
             count_pass = 1
@@ -972,6 +1115,8 @@ class MeasurementGUI:
 
             voltage = float(self.sq_voltage.get())
             measurement_duration = self.measurement_duration_var.get()
+            self.keithley.set_voltage(0)
+            self.keithley.enable_output(True)
             # Main measurement loop
 
             for i in range(int(self.sequential_number_of_sweeps.get())):
@@ -986,16 +1131,18 @@ class MeasurementGUI:
 
                     device_idx = (start_index + j) % device_count
                     device = self.device_list[device_idx]
+
+                    # Extract actual device number from device name
+                    device_number = int(device.split('_')[1]) if '_' in device else j + 1
+
                     self.status_box.config(text=f"Pass {i + 1}: Measuring {device}...")
                     self.master.update()
-                    device_display_name = f"Device_{j + 1}_{device}"
+                    device_display_name = f"Device_{device_number}_{device}"  # Use actual device number
 
                     # Calculate timestamp (middle of measurement period)
                     measurement_timestamp = time.time() - start_time + (measurement_duration / 2)
                     # Perform averaged measurement
                     avg_current, std_error, temperature = self.measure_average_current(voltage, measurement_duration)
-
-
 
                     # Store data in arrays
                     device_data[device]['voltages'].append(voltage)
@@ -1004,9 +1151,8 @@ class MeasurementGUI:
                     device_data[device]['timestamps'].append(measurement_timestamp)
 
                     if self.record_temp_var.get():
-                        temperature = self.temp_controller.get_temperature_celsius() #B
+                        temperature = self.temp_controller.get_temperature_celsius()  # B
                         device_data[device]['temperatures'].append(temperature)
-
 
                     # Log current measurement
                     self.log_terminal(f"Pass {i + 1}, Device {device}: V={voltage}V, "
@@ -1014,44 +1160,153 @@ class MeasurementGUI:
                                       f"t={measurement_timestamp:.1f}s")
 
                     if self.stop_measurement_flag:  # Check if stop was pressed
-
                         print("Measurement interrupted! Saving current data...")
-
                         self.save_averaged_data(device_data, self.sample_name_var.get(),
-
-                                                start_index, device_count, interrupted=True)
-
+                                                start_index, interrupted=True)  # Removed device_count parameter
                         return  # Exit the function
+
+                    #when changing device ensure voltage is 0
+                    self.keithley.set_voltage(0,self.icc.get())
+                    # let current drop/voltage to decrease
+                    time.sleep(0.1)
 
                     # Change to next device
                     self.sample_gui.next_device()
                     time.sleep(0.1)
                     self.sample_gui.change_relays()
-                    print("switching device")
+                    print("Switching Device")
                     time.sleep(0.1)
 
                 # Auto-save every 5 cycles
                 if (i + 1) % 5 == 0:
                     self.log_terminal(f"Auto-saving data after {i + 1} cycles...")
-                    self.save_averaged_data(device_data, self.sample_name_var.get(),start_index, device_count, interrupted=False)
+                    self.save_averaged_data(device_data, self.sample_name_var.get(), start_index, interrupted=False)
                 count_pass += 1
 
                 # Delay between measurement passes (if not the last pass)
                 if i < int(self.sequential_number_of_sweeps.get()) - 1:
                     time.sleep(self.sq_time_delay.get())
 
-
             # Save all data at the end
-            self.save_averaged_data(device_data, self.sample_name_var.get(), start_index, device_count,interrupted=False)
+            self.save_averaged_data(device_data, self.sample_name_var.get(), start_index, interrupted=False)
 
             # Save comprehensive file with all measurements
-            self.save_all_measurements_file(device_data, self.sample_name_var.get(), start_index, device_count)
+            self.save_all_measurements_file(device_data, self.sample_name_var.get(), start_index)
 
-            # Save all data at the end
-            self.save_averaged_data(device_data, self.sample_name_var.get(),start_index, device_count, interrupted=False)
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
+            self.keithley.set_voltage(0)
+            time.sleep(0.1)
             self.keithley.enable_output(False)  # Disable output when done
+
+        # elif self.Sequential_measurement_var.get() == "Single Avg Measure":
+        #
+        #     count_pass = 1
+        #     # Initialize data arrays for each device
+        #     device_data = {}  # Dictionary to store data for each device
+        #     start_time = time.time()  # Record overall start time
+        #
+        #     if self.current_device in self.device_list:
+        #         start_index = self.device_list.index(self.current_device)
+        #     else:
+        #         start_index = 0  # Default to the first device if current one is not found
+        #
+        #     device_count = len(self.device_list)
+        #     # Initialize empty arrays for each device
+        #
+        #     for j in range(device_count):
+        #         device_idx = (start_index + j) % device_count
+        #         device = self.device_list[device_idx]
+        #         device_data[device] = {
+        #             'voltages': [],
+        #             'currents': [],
+        #             'std_errors': [],
+        #             'timestamps': [],
+        #             'temperatures': []
+        #         }
+        #
+        #     voltage = float(self.sq_voltage.get())
+        #     measurement_duration = self.measurement_duration_var.get()
+        #     # Main measurement loop
+        #
+        #     for i in range(int(self.sequential_number_of_sweeps.get())):
+        #
+        #         print(f"Starting pass #{i + 1}")
+        #
+        #         self.stop_measurement_flag = False  # Reset the stop flag
+        #
+        #         # Loop through each device
+        #
+        #         for j in range(device_count):
+        #
+        #             device_idx = (start_index + j) % device_count
+        #             device = self.device_list[device_idx]
+        #             self.status_box.config(text=f"Pass {i + 1}: Measuring {device}...")
+        #             self.master.update()
+        #             device_display_name = f"Device_{j + 1}_{device}"
+        #
+        #             # Calculate timestamp (middle of measurement period)
+        #             measurement_timestamp = time.time() - start_time + (measurement_duration / 2)
+        #             # Perform averaged measurement
+        #             avg_current, std_error, temperature = self.measure_average_current(voltage, measurement_duration)
+        #
+        #
+        #
+        #             # Store data in arrays
+        #             device_data[device]['voltages'].append(voltage)
+        #             device_data[device]['currents'].append(avg_current)
+        #             device_data[device]['std_errors'].append(std_error)
+        #             device_data[device]['timestamps'].append(measurement_timestamp)
+        #
+        #             if self.record_temp_var.get():
+        #                 temperature = self.temp_controller.get_temperature_celsius() #B
+        #                 device_data[device]['temperatures'].append(temperature)
+        #
+        #
+        #             # Log current measurement
+        #             self.log_terminal(f"Pass {i + 1}, Device {device}: V={voltage}V, "
+        #                               f"I_avg={avg_current:.3E}A, σ={std_error:.3E}A, "
+        #                               f"t={measurement_timestamp:.1f}s")
+        #
+        #             if self.stop_measurement_flag:  # Check if stop was pressed
+        #
+        #                 print("Measurement interrupted! Saving current data...")
+        #
+        #                 self.save_averaged_data(device_data, self.sample_name_var.get(),
+        #
+        #                                         start_index, device_count, interrupted=True)
+        #
+        #                 return  # Exit the function
+        #
+        #             # Change to next device
+        #             self.sample_gui.next_device()
+        #             time.sleep(0.1)
+        #             self.sample_gui.change_relays()
+        #             print("switching device")
+        #             time.sleep(0.1)
+        #
+        #         # Auto-save every 5 cycles
+        #         if (i + 1) % 5 == 0:
+        #             self.log_terminal(f"Auto-saving data after {i + 1} cycles...")
+        #             self.save_averaged_data(device_data, self.sample_name_var.get(),start_index, device_count, interrupted=False)
+        #         count_pass += 1
+        #
+        #         # Delay between measurement passes (if not the last pass)
+        #         if i < int(self.sequential_number_of_sweeps.get()) - 1:
+        #             time.sleep(self.sq_time_delay.get())
+        #
+        #
+        #     # Save all data at the end
+        #     self.save_averaged_data(device_data, self.sample_name_var.get(), start_index, device_count,interrupted=False)
+        #
+        #     # Save comprehensive file with all measurements
+        #     self.save_all_measurements_file(device_data, self.sample_name_var.get(), start_index, device_count)
+        #
+        #     # Save all data at the end
+        #     self.save_averaged_data(device_data, self.sample_name_var.get(),start_index, device_count, interrupted=False)
+        #     self.measuring = False
+        #     self.status_box.config(text="Measurement Complete")
+        #     self.keithley.enable_output(False)  # Disable output when done
 
 
     def measure_average_current(self, voltage, duration):
@@ -1069,10 +1324,10 @@ class MeasurementGUI:
 
         # Set voltage and enable output
         self.keithley.set_voltage(voltage, self.icc.get())
-        self.keithley.enable_output(True)
+
 
         # Allow settling time
-        time.sleep(0.1)
+        time.sleep(0.2)
 
         # Collect current measurements
         current_readings = []
@@ -1116,7 +1371,8 @@ class MeasurementGUI:
             temperature = self.record_temperature()
 
         # Disable output after measurement
-        self.keithley.enable_output(False)
+        #self.keithley.enable_output(False)
+        self.keithley.set_voltage(0,self.icc.get())
 
         return avg_current, std_error, temperature
 
@@ -1430,6 +1686,10 @@ class MeasurementGUI:
 
                     # give time to sleep between measurements!
                     time.sleep(2)
+                try:
+                    self.psu.led_off_380()
+                except:
+                    continue
 
                 plot_filename_iv = f"{save_dir}\\All_graphs_IV.png"
                 plot_filename_log = f"{save_dir}\\All_graphs_LOG.png"
@@ -1705,7 +1965,71 @@ class MeasurementGUI:
     # Other Functions
     ###################################################################
 
-    def save_averaged_data(self, device_data, sample_name, start_index, device_count, interrupted=False):
+    # def save_averaged_data(self, device_data, sample_name, start_index, interrupted=False):
+    #     """
+    #     Save the averaged measurement data for all devices.
+    #
+    #     Args:
+    #         device_data: Dictionary containing arrays for each device
+    #         sample_name: Name of the sample
+    #         start_index: Starting device index
+    #         interrupted: Boolean indicating if measurement was interrupted
+    #     """
+    #     # Create main save directory
+    #     base_dir = f"Data_save_loc\\Multiplexer_Avg_Measure\\{sample_name}"
+    #     if not os.path.exists(base_dir):
+    #         os.makedirs(base_dir)
+    #
+    #     # Save data for each device
+    #     for device in device_data.keys():  # Iterate through actual devices instead of using range
+    #
+    #         if len(device_data[device]['currents']) == 0:
+    #             continue  # Skip if no data for this device
+    #
+    #         # Extract actual device number from device name
+    #         device_number = int(device.split('_')[1]) if '_' in device else 1
+    #
+    #         # Create device-specific directory using actual device number
+    #         device_dir = f"{base_dir}\\{device_number}"
+    #         if not os.path.exists(device_dir):
+    #             os.makedirs(device_dir)
+    #
+    #         # Prepare data array
+    #         voltages = np.array(device_data[device]['voltages'])
+    #         currents = np.array(device_data[device]['currents'])
+    #         std_errors = np.array(device_data[device]['std_errors'])
+    #         timestamps = np.array(device_data[device]['timestamps'])
+    #
+    #         if self.record_temp_var.get() and device_data[device]['temperatures']:
+    #             temperatures = np.array(device_data[device]['temperatures'])
+    #             data = np.column_stack((timestamps,temperatures, voltages, currents, std_errors))
+    #             header = "Time(s)\tTemperature(C)\tVoltage(V)\tCurrent(A)\tStd_Error(A)"
+    #             fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
+    #         else:
+    #             data = np.column_stack((timestamps, voltages, currents, std_errors))
+    #             header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)"
+    #             fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E"
+    #
+    #         # Create filename
+    #         timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+    #         status_str = "interrupted" if interrupted else "complete"
+    #         num_measurements = len(currents)
+    #
+    #         voltage = voltages[0] if len(voltages) > 0 else 0
+    #         measurement_duration = self.measurement_duration_var.get()
+    #
+    #         # Use actual device number in filename
+    #         filename = f"Device_{device_number}_{device}_{voltage}V_{measurement_duration}s_" \
+    #                    f"{num_measurements}measurements_{status_str}_{timestamp_str}.txt"
+    #
+    #         file_path = os.path.join(device_dir, filename)
+    #
+    #         # Save data
+    #         np.savetxt(file_path, data, fmt=fmt, header=header, comments="# ")
+    #
+    #         self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
+
+    def save_averaged_data(self, device_data, sample_name, start_index, interrupted=False):
         """
         Save the averaged measurement data for all devices.
 
@@ -1713,7 +2037,6 @@ class MeasurementGUI:
             device_data: Dictionary containing arrays for each device
             sample_name: Name of the sample
             start_index: Starting device index
-            device_count: Total number of devices
             interrupted: Boolean indicating if measurement was interrupted
         """
         # Create main save directory
@@ -1722,33 +2045,45 @@ class MeasurementGUI:
             os.makedirs(base_dir)
 
         # Save data for each device
-        for j in range(device_count):
-            device_idx = (start_index + j) % device_count
-            device = self.device_list[device_idx]
+        for device in device_data.keys():
 
-            if device not in device_data or len(device_data[device]['currents']) == 0:
+            if len(device_data[device]['currents']) == 0:
                 continue  # Skip if no data for this device
 
-            # Create device-specific directory
-            device_dir = f"{base_dir}\\{j + 1}"
+            # Extract actual device number from device name
+            device_number = int(device.split('_')[1]) if '_' in device else 1
+
+            # Create device-specific directory using actual device number
+            device_dir = f"{base_dir}\\{device_number}"
             if not os.path.exists(device_dir):
                 os.makedirs(device_dir)
 
-            # Prepare data array
+            # Prepare data arrays
+            timestamps = np.array(device_data[device]['timestamps'])
             voltages = np.array(device_data[device]['voltages'])
             currents = np.array(device_data[device]['currents'])
             std_errors = np.array(device_data[device]['std_errors'])
-            timestamps = np.array(device_data[device]['timestamps'])
+
+            # Calculate additional parameters
+            resistance = voltages / currents  # R = V/I
+            conductance = currents / voltages  # G = I/V = 1/R
+
+            # Calculate normalized conductance (G/G0 where G0 is first measurement)
+            conductance_normalized = conductance / np.max(conductance) if len(conductance) > 0 else conductance
 
             if self.record_temp_var.get() and device_data[device]['temperatures']:
                 temperatures = np.array(device_data[device]['temperatures'])
-                data = np.column_stack((timestamps, voltages, currents, std_errors, temperatures))
-                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)\tTemperature(C)"
-                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
+                data = np.column_stack((timestamps, temperatures, voltages, currents, std_errors,
+                                        resistance, conductance, conductance_normalized))
+                header = "Time(s)\tTemperature(C)\tVoltage(V)\tCurrent(A)\tStd_Error(A)\tResistance(Ohm)\tConductance(S)\tConductance_Normalized"
+                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
             else:
-                data = np.column_stack((timestamps, voltages, currents, std_errors))
-                header = "Time(s)\tVoltage(V)\tCurrent(A)\tStd_Error(A)"
-                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E"
+                # If no temperature, fill with NaN or zeros
+                temperatures = np.full_like(timestamps, np.nan)
+                data = np.column_stack((timestamps, temperatures, voltages, currents, std_errors,
+                                        resistance, conductance, conductance_normalized))
+                header = "Time(s)\tTemperature(C)\tVoltage(V)\tCurrent(A)\tStd_Error(A)\tResistance(Ohm)\tConductance(S)\tConductance_Normalized"
+                fmt = "%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E\t%0.3E"
 
             # Create filename
             timestamp_str = time.strftime("%Y%m%d_%H%M%S")
@@ -1758,7 +2093,7 @@ class MeasurementGUI:
             voltage = voltages[0] if len(voltages) > 0 else 0
             measurement_duration = self.measurement_duration_var.get()
 
-            filename = f"Device_{j + 1}_{device}_{voltage}V_{measurement_duration}s_" \
+            filename = f"Device_{device_number}_{device}_{voltage}V_{measurement_duration}s_" \
                        f"{num_measurements}measurements_{status_str}_{timestamp_str}.txt"
 
             file_path = os.path.join(device_dir, filename)
@@ -1910,47 +2245,206 @@ class MeasurementGUI:
             self.master.update_idletasks()
             self.master.update()
 
-    def save_all_measurements_file(self, device_data, sample_name, start_index, device_count):
-        """Save all measurements with each device in its own columns using pandas"""
+    def save_all_measurements_file(self, device_data, sample_name, start_index):
+        """Save all measurements with each device in its own columns using pandas and create graphs"""
 
         import pandas as pd
+        import matplotlib.pyplot as plt
+        import numpy as np
 
         # Create filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{sample_name}_{timestamp}_all.csv"
 
-        # Create a dictionary to hold all columns
+        # Create a dictionary to hold all columns and processed data for graphing
         all_columns = {}
+        graph_data = {}  # Store processed data for graphing
 
-        # Build columns for each device
-        for j in range(device_count):
-            device_idx = (start_index + j) % device_count
-            device = self.device_list[device_idx]
-            device_display_name = f"D{j + 1}_{device}"  # Shortened for cleaner headers
+        # Build columns for each device - iterate through actual devices
+        for device in device_data.keys():
+            # Extract actual device number from device name
+            device_number = int(device.split('_')[1]) if '_' in device else 1
+            device_display_name = f"D{device_number}_{device}"
 
             if device in device_data:
                 data = device_data[device]
 
-                # Add columns for this device
-                all_columns[f'Time({device_display_name})'] = data['timestamps']
-                all_columns[f'Voltage({device_display_name})'] = data['voltages']
-                all_columns[f'Current({device_display_name})'] = data['currents']
-                all_columns[f'StdError({device_display_name})'] = data['std_errors']
+                # Calculate additional parameters
+                timestamps = np.array(data['timestamps'])
+                voltages = np.array(data['voltages'])
+                currents = np.array(data['currents'])
+                std_errors = np.array(data['std_errors'])
 
-                # Add temperature if recorded
-                if self.record_temp_var.get() and 'temperatures' in data:
-                    all_columns[f'Temperature({device_display_name})'] = data['temperatures']
+                resistance = voltages / currents
+                conductance = currents / voltages
+                conductance_normalized = conductance / np.max(conductance) if len(conductance) > 0 else conductance
+
+                temperatures = np.array(
+                    data['temperatures']) if self.record_temp_var.get() and 'temperatures' in data else np.full_like(
+                    timestamps, np.nan)
+
+                # Add columns in the specified order
+                all_columns[f'Time({device_display_name})'] = timestamps
+                all_columns[f'Temperature({device_display_name})'] = temperatures
+                all_columns[f'Voltage({device_display_name})'] = voltages
+                all_columns[f'Current({device_display_name})'] = currents
+                all_columns[f'StdError({device_display_name})'] = std_errors
+                all_columns[f'Resistance({device_display_name})'] = resistance
+                all_columns[f'Conductance({device_display_name})'] = conductance
+                all_columns[f'Conductance_Normalized({device_display_name})'] = conductance_normalized
+
+                # Store data for graphing
+                graph_data[device] = {
+                    'device_number': device_number,
+                    'device_name': device,
+                    'timestamps': timestamps,
+                    'temperatures': temperatures,
+                    'currents': currents,
+                    'conductance': conductance,
+                    'conductance_normalized': conductance_normalized
+                }
 
         # Create DataFrame
         df = pd.DataFrame(dict([(k, pd.Series(v)) for k, v in all_columns.items()]))
 
+        # Create main save directory
+        base_dir = f"Data_save_loc\\Multiplexer_Avg_Measure\\{sample_name}"
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+
+
         # Save to CSV
-        filepath = os.path.join(self.save_directory, filename)
+        filepath = os.path.join(base_dir, filename)
         df.to_csv(filepath, index=False)
 
+        # Create graphs directory
+        graphs_dir = os.path.join(base_dir, "graphs")
+        if not os.path.exists(graphs_dir):
+            os.makedirs(graphs_dir)
+
+        # Create individual device graphs
+        self._create_individual_device_graphs(graph_data, graphs_dir, sample_name, timestamp)
+
+        # Create comparison graph
+        self._create_comparison_graph(graph_data, graphs_dir, sample_name, timestamp)
+
         self.log_terminal(f"Saved all measurements to: {filename}")
+        self.log_terminal(f"Saved graphs to: graphs directory")
 
         return filename
+
+    def _create_individual_device_graphs(self, graph_data, graphs_dir, sample_name, timestamp):
+        """Create individual graphs for each device"""
+        # stops error message by using back end
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+
+        for device, data in graph_data.items():
+            device_number = data['device_number']
+            device_name = data['device_name']
+
+            # Skip if no valid temperature data
+            if np.all(np.isnan(data['temperatures'])):
+                continue
+
+            fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+            fig.suptitle(f'Device {device_number} ({device_name}) - {sample_name}', fontsize=16)
+
+            # Time vs Current
+            axes[0, 0].plot(data['timestamps'], data['currents'], 'b.-')
+            axes[0, 0].set_xlabel('Time (s)')
+            axes[0, 0].set_ylabel('Current (A)')
+            axes[0, 0].set_title('Time vs Current')
+            axes[0, 0].grid(True)
+
+            # Temperature vs Current
+            axes[0, 1].plot(data['temperatures'], data['currents'], 'r.-')
+            axes[0, 1].set_xlabel('Temperature (°C)')
+            axes[0, 1].set_ylabel('Current (A)')
+            axes[0, 1].set_title('Temperature vs Current')
+            axes[0, 1].grid(True)
+
+            # Temperature vs Conductance
+            axes[0, 2].plot(data['temperatures'], data['conductance'], 'g.-')
+            axes[0, 2].set_xlabel('Temperature (°C)')
+            axes[0, 2].set_ylabel('Conductance (S)')
+            axes[0, 2].set_title('Temperature vs Conductance')
+            axes[0, 2].grid(True)
+
+            # Temperature vs Normalized Conductance
+            axes[1, 0].plot(data['temperatures'], data['conductance_normalized'], 'm.-')
+            axes[1, 0].set_xlabel('Temperature (°C)')
+            axes[1, 0].set_ylabel('Normalized Conductance')
+            axes[1, 0].set_title('Temperature vs Normalized Conductance')
+            axes[1, 0].grid(True)
+
+            # Temperature power law plots (log-log)
+            temp_kelvin = data['temperatures'] + 273.15  # Convert to Kelvin
+
+            # Filter out any invalid temperatures
+            valid_temp = temp_kelvin > 0
+            temp_filtered = temp_kelvin[valid_temp]
+            cond_norm_filtered = data['conductance_normalized'][valid_temp]
+
+            if len(temp_filtered) > 0:
+                axes[1, 1].loglog(temp_filtered ** (-1 / 4), cond_norm_filtered, 'c.-', label='T^(-1/4)')
+                axes[1, 1].loglog(temp_filtered ** (-1 / 3), cond_norm_filtered, 'y.-', label='T^(-1/3)')
+                axes[1, 1].loglog(temp_filtered ** (-1 / 2), cond_norm_filtered, 'k.-', label='T^(-1/2)')
+                axes[1, 1].set_xlabel('Temperature^(-n) (K^(-n))')
+                axes[1, 1].set_ylabel('Normalized Conductance')
+                axes[1, 1].set_title('Power Law: T^(-n) vs Normalized Conductance')
+                axes[1, 1].legend()
+                axes[1, 1].grid(True)
+
+            # Remove empty subplot
+            axes[1, 2].remove()
+
+            plt.tight_layout()
+
+            # Save individual device graph
+            graph_filename = f"Device_{device_number}_{device_name}_{sample_name}_{timestamp}.png"
+            graph_filepath = os.path.join(graphs_dir, graph_filename)
+            plt.savefig(graph_filepath, dpi=300, bbox_inches='tight')
+            plt.close()
+
+    def _create_comparison_graph(self, graph_data, graphs_dir, sample_name, timestamp):
+        """Create comparison graph with all devices"""
+        import matplotlib
+        matplotlib.use('Agg')  # Use non-interactive backend
+        import matplotlib.pyplot as plt
+        import matplotlib.cm as cm
+
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+
+        colors = cm.tab10(np.linspace(0, 1, len(graph_data)))
+
+        for i, (device, data) in enumerate(graph_data.items()):
+            device_number = data['device_number']
+            device_name = data['device_name']
+
+            # Skip if no valid temperature data
+            if np.all(np.isnan(data['temperatures'])):
+                continue
+
+            ax.plot(data['temperatures'], data['conductance_normalized'],
+                    '.-', color=colors[i], label=f'Device {device_number}', linewidth=2, markersize=6)
+
+        ax.set_xlabel('Temperature (°C)', fontsize=12)
+        ax.set_ylabel('Normalized Conductance', fontsize=12)
+        ax.set_title(f'All Devices - Temperature vs Normalized Conductance\n{sample_name}', fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+        plt.tight_layout()
+
+        # Save comparison graph
+        comparison_filename = f"All_Devices_Comparison_{sample_name}_{timestamp}.png"
+        comparison_filepath = os.path.join(graphs_dir, comparison_filename)
+        plt.savefig(comparison_filepath, dpi=300, bbox_inches='tight')
+        plt.close()
+
     def spare_button(self):
         print("spare")
 
