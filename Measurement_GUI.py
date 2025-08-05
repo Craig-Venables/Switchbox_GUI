@@ -595,7 +595,7 @@ class MeasurementGUI:
             config = self.system_configs[selected_system]
 
             # Update IV section
-            iv_address = config.get("iv_address", "")
+            iv_address = config.get("SMU_address", "")
             self.keithley_address_var.set(iv_address)
             self.keithley_address = iv_address
             self.update_component_state("iv", iv_address)
@@ -617,6 +617,8 @@ class MeasurementGUI:
             self.controller_type_var.set(self.temp_controller_type)
             self.controller_address_var.set(temp_address)
 
+            # smu type
+            self.SMU_type = config.get("SMU Type", "")
 
 
     def update_component_state(self, component_type, address):
