@@ -85,7 +85,7 @@ class MultiplexerController:
                 time.sleep(0.01)  # Small delay to ensure latching
 
             self.current_channel = channel
-            print(f"Set channel {channel} with values: {values}")  # Debug output
+            #print(f"Set channel {channel} with values: {values}")  # Debug output
 
         except nidaqmx.DaqError as e:
             raise ConnectionError(f"Failed to set channel: {e}")

@@ -683,6 +683,16 @@ class MeasurementGUI:
         self.sample_name_entry = ttk.Entry(mode_frame, textvariable=self.sample_name_var)
         self.sample_name_entry.grid(row=2, column=1, columnspan=1, sticky="ew")
 
+        # Sample Name Entry
+        self.additional_info_label = tk.Label(mode_frame, text="Additional Info:")
+        self.additional_info_label.grid(row=3, column=0, sticky="w")
+
+        self.additional_info_var = tk.StringVar()  # Use a StringVar
+        self.additional_info_entry = ttk.Entry(mode_frame, textvariable=self.additional_info_var)
+        self.additional_info_entry.grid(row=3, column=1, columnspan=1, sticky="ew")
+
+
+
     def create_sweep_parameters(self, parent):
         """Sweep parameter section"""
         frame = tk.LabelFrame(parent, text="Sweep Parameters", padx=5, pady=5)
@@ -1808,9 +1818,17 @@ class MeasurementGUI:
             else:
                 additional =""
 
+            if self.additional_info_var != "":
+
+                #extra_info = "-" + str(self.additional_info_entry.get())
+                # or
+                extra_info = "-" + self.additional_info_entry.get().strip()
+            else:
+                extra_info = ""
+
             key = find_largest_number_in_folder(save_dir)
             save_key = 0 if key is None else key + 1
-            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}{additional}"
+            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}{additional}{extra_info}"
             file_path = f"{save_dir}\\{name}.txt"
 
             np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
