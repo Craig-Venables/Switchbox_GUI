@@ -1,3 +1,50 @@
+from __future__ import annotations
+
+import math
+import random
+
+
+class FakeMemristorInstrument:
+    """A simulated instrument for offline testing.
+
+    Modes:
+      - 'ohmic': linear I = V/R
+      - 'memristive': exhibits hysteresis with state-dependent conductance
+      - 'forming': starts ohmic-low until a voltage threshold then switches to memristive
+    """
+
+    def __init__(self, mode: str = 'memristive'):
+        self.mode = mode
+        self.enabled = False
+        self.voltage_v = 0.0
+        self.state = 0.0  # internal state for memristive behavior
+        self.formed = mode != 'forming'
+        self.R_ohmic = 1e9
+
+    # Minimal API to match Keithley2400Controller usage pattern
+    def set_voltage(self, voltage, Icc=50e-6):
+        self.voltage_v = float(voltage)
+
+    def enable_output(self, enable=True):
+        self.enabled = enable
+
+    def measure_current(self):
+        v = self.voltage_v if self.enabled else 0.0
+        # Forming behavior
+        if not self.formed and abs(v) > 2.0:
+            self.formed = True
+            self.mode = 'memristive'
+        if self.mode == 'ohmic':
+            return v / self.R_ohmic + random.gauss(0, 1e-12)
+        elif self.mode == 'memristive':
+            # simple hysteresis via state integration
+            self.state += 0.01 * v - 0.001 * self.state
+            g = 1e-7 + 2e-6 * (1 / (1 + math.exp(-self.state)))
+            return g * v + random.gauss(0, 1e-12)
+        elif self.mode == 'forming':
+            return v / self.R_ohmic + random.gauss(0, 1e-12)
+        return 0.0
+
 import pyvisa
 import time
 

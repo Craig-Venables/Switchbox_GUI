@@ -674,6 +674,12 @@ class ThreadSafePlotter:
         if self.plotter and self.plotter.running:
             self.plotter.add_batch_data(device_name, x_array, y_array, timestamps)
 
+    def callback_sink(self, device_name):
+        """Return a callback that accepts (x, y, t) and forwards to plotter."""
+        def cb(x, y, t):
+            self.add_data(device_name, x, y, t)
+        return cb
+
     def is_active(self):
         """Check if plotter is still active."""
         return self.plotter and self.plotter.running

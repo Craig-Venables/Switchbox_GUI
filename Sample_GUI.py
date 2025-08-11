@@ -2,8 +2,22 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import json
+import threading
+import queue
+from datetime import datetime
+from pathlib import Path
 from Measurement_GUI import MeasurementGUI
 from Equipment_Classes.Multiplexer.Multiplexer_Class import MultiplexerController
+from tests.config import Thresholds
+from tests.driver import MeasurementDriver
+from tests.runner import TestRunner
+from tests.preferences import load_thresholds, save_thresholds
+try:
+    from Equipment_Classes.Keithley2400 import Keithley2400Controller
+except Exception:
+    Keithley2400Controller = None
+
+BASE_DIR = Path(__file__).resolve().parent
 
 # Load sample configuration from JSON file
 sample_config = {
@@ -19,12 +33,13 @@ multiplexer_types = {'Pyswitchbox': {}, 'Electronic_Mpx': {}}
 
 
 # Function to load device mapping from JSON file
-def load_device_mapping(filename="Json_Files\pin_mapping.json"):
+def load_device_mapping(filename=None):
     try:
-        with open(filename, "r") as file:
+        mapping_path = (BASE_DIR / "Json_Files" / "pin_mapping.json") if filename is None else Path(filename)
+        with mapping_path.open("r", encoding="utf-8") as file:
             return json.load(file)
     except FileNotFoundError:
-        print("Error: JSON file not found.")
+        print(f"Error: JSON file not found at {mapping_path}.")
         return {}
     except json.JSONDecodeError:
         print("Error: JSON file is not formatted correctly.")
@@ -34,7 +49,7 @@ def load_device_mapping(filename="Json_Files\pin_mapping.json"):
 pin_mapping = load_device_mapping()
 
 # Load device mapping
-with open("Json_Files/mapping.json", "r") as f:
+with (BASE_DIR / "Json_Files" / "mapping.json").open("r", encoding="utf-8") as f:
     device_maps = json.load(f)
 
 
@@ -137,6 +152,8 @@ class SampleGUI:
         # Measurement Button
         self.measure_button = tk.Button(root, text="Measure Devices", command=self.open_measurement_window)
         self.measure_button.grid(row=8, column=0, columnspan=2, pady=10)
+
+        # Automated Tests controls moved to Measurement GUI
 
         # Placeholder for clicked points
         # self.electrode_points = []
@@ -306,14 +323,14 @@ class SampleGUI:
     def load_image(self, sample):
         """ Load image into canvas set up to add others later simply """
         if sample == 'Cross_bar':
-            sample = "Sample_Infomation/memristor.png"
+            sample = BASE_DIR / "Sample_Infomation" / "memristor.png"
             self.original_image = Image.open(sample)
             img = self.original_image.resize((400, 400))
             self.tk_img = ImageTk.PhotoImage(img)
             self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
 
         if sample == 'Multiplexer':
-            sample = "Sample_Infomation/Multiplexer.jpg"
+            sample = BASE_DIR / "Sample_Infomation" / "Multiplexer.jpg"
             self.original_image = Image.open(sample)
             img = self.original_image.resize((400, 400))
             self.tk_img = ImageTk.PhotoImage(img)
@@ -549,6 +566,184 @@ class SampleGUI:
         self.terminal_output.insert(tk.END, message + "\n")
         self.terminal_output.config(state=tk.DISABLED)
         self.terminal_output.see(tk.END)
+
+    def _pump_test_logs(self):
+        """Transfer messages from worker queue to terminal in UI thread."""
+        drained = False
+        try:
+            while True:
+                msg = self.test_log_queue.get_nowait()
+                drained = True
+                self.log_terminal(msg)
+        except queue.Empty:
+            pass
+        if self.tests_running:
+            self.root.after(100, self._pump_test_logs)
+        elif drained:
+            # Final drain
+            self.root.after(100, self._pump_test_logs)
+
+    def start_automated_tests(self):
+        if self.tests_running:
+            messagebox.showinfo("Tests", "Automated tests are already running.")
+            return
+        selected_device_list = [self.device_list[i] for i in self.selected_indices]
+        if not selected_device_list:
+            messagebox.showwarning("Warning", "No devices selected for automated testing.")
+            return
+        if Keithley2400Controller is None:
+            messagebox.showerror("Instrument", "Keithley2400Controller not available. Connect instrument and retry.")
+            return
+
+        self.tests_running = True
+        self.abort_tests_flag = False
+        self.test_log_queue.put("Starting automated tests...")
+        self._pump_test_logs()
+
+        worker = threading.Thread(target=self._run_automated_tests_worker, args=(selected_device_list,), daemon=True)
+        worker.start()
+
+    def stop_automated_tests(self):
+        if self.tests_running:
+            self.abort_tests_flag = True
+            self.test_log_queue.put("Abort requested. Stopping after current step...")
+
+    def _run_on_ui(self, func):
+        """Run a callable on the Tk UI thread and wait for completion."""
+        evt = threading.Event()
+        def wrapper():
+            try:
+                func()
+            finally:
+                evt.set()
+        self.root.after(0, wrapper)
+        evt.wait()
+
+    def _route_to_device_on_ui(self, device_name):
+        # Set selection and route relays in UI thread
+        if device_name in self.device_list:
+            idx = self.device_list.index(device_name)
+            self.current_index = idx
+            self.device_var.set(device_name)
+            self.update_highlight(device_name)
+            self.change_relays()
+
+    def open_preferences_dialog(self):
+        # Minimal dialog to view/save thresholds (read-only preview for now)
+        t = load_thresholds()
+        info = (
+            f"Probe: {t.probe_voltage_v} V for {t.probe_duration_s}s @ {t.probe_sample_hz} Hz\n"
+            f"Working I threshold: {t.working_current_a} A\n"
+            f"Forming steps: {t.forming_voltages_v}, comp={t.forming_compliance_a} A, cooldown={t.forming_cooldown_s}s\n"
+            f"Hyst budget: {t.hyst_budget}, profiles: {len(t.hyst_profiles)}\n"
+            f"Endurance cycles: {t.endurance_cycles}, pulse width: {t.pulse_width_s}s\n"
+            f"Retention times: {t.retention_times_s}\n"
+            f"Safety: Vmax={t.max_voltage_v} V, Imax={t.max_compliance_a} A\n"
+        )
+        messagebox.showinfo("Test Preferences (read-only preview)", info)
+
+    def _run_automated_tests_worker(self, devices):
+        try:
+            inst = Keithley2400Controller()
+            if not getattr(inst, 'device', None):
+                self.test_log_queue.put("Instrument not connected. Aborting tests.")
+                return
+            driver = MeasurementDriver(inst, abort_flag=lambda: self.abort_tests_flag)
+            runner = TestRunner(driver, Thresholds())
+
+            results_dir = BASE_DIR / "results"
+            results_dir.mkdir(exist_ok=True)
+
+            for device in devices:
+                if self.abort_tests_flag:
+                    break
+                self.test_log_queue.put(f"Routing to device {device}...")
+                self._run_on_ui(lambda d=device: self._route_to_device_on_ui(d))
+                if self.abort_tests_flag:
+                    break
+                self.test_log_queue.put(f"Probing and testing {device}...")
+
+                # Live plotting callback
+                on_sample = None
+                try:
+                    if self.live_plot_var.get() and hasattr(self, 'measuremnt_gui'):
+                        plotter = getattr(self.measuremnt_gui, 'plotter', None)
+                        if plotter and hasattr(plotter, 'thread_safe'):
+                            on_sample = plotter.thread_safe.callback_sink(device)
+                except Exception:
+                    on_sample = None
+
+                # Patch callbacks for this device if available
+                if on_sample is not None:
+                    orig_dc_hold = driver.dc_hold
+                    orig_sweep = driver.triangle_sweep
+                    def dc_hold_cb(voltage_v, duration_s, sample_hz, compliance_a):
+                        return orig_dc_hold(voltage_v, duration_s, sample_hz, compliance_a, on_sample=on_sample)
+                    def triangle_cb(v_min, v_max, step_v, dwell_s, cycles, compliance_a):
+                        return orig_sweep(v_min, v_max, step_v, dwell_s, cycles, compliance_a, on_sample=on_sample)
+                    driver.dc_hold = dc_hold_cb  # type: ignore
+                    driver.triangle_sweep = triangle_cb  # type: ignore
+
+                outcome, artifacts = runner.run_device(device)
+                # Persist summary
+                out_path = results_dir / f"{device}_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                try:
+                    with out_path.open('w', encoding='utf-8') as f:
+                        json.dump(outcome.__dict__, f, indent=2)
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed to save results for {device}: {e}")
+                # Persist best IV curve if available
+                try:
+                    best = artifacts.get("best_iv")
+                    if best:
+                        csv_path = results_dir / f"{device}_best_iv_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                        with csv_path.open('w', encoding='utf-8') as f:
+                            f.write("V,I,t\n")
+                            for v, i, t in zip(best.voltage, best.current, best.timestamps):
+                                f.write(f"{v},{i},{t}\n")
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed to save best IV for {device}: {e}")
+                # Append to summary CSV
+                try:
+                    import csv
+                    summary_path = results_dir / "summary.csv"
+                    write_header = not summary_path.exists()
+                    with summary_path.open('a', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        if write_header:
+                            writer.writerow(["device_id","status","formed","probe_current_a","hyst_area",
+                                             "endurance_on_off","retention_alpha","timestamp"])
+                        writer.writerow([
+                            device,
+                            "WORKING" if outcome.is_working else "NON-WORKING",
+                            outcome.formed,
+                            f"{outcome.probe_current_a:.3e}",
+                            f"{(outcome.hyst_area or 0):.3e}",
+                            f"{(outcome.endurance_on_off or 0):.3f}",
+                            f"{(outcome.retention_alpha or 0):.3f}",
+                            datetime.now().isoformat(timespec='seconds')
+                        ])
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed to update summary.csv for {device}: {e}")
+                # Log brief summary
+                status = "WORKING" if outcome.is_working else "NON-WORKING"
+                formed = " (formed)" if outcome.formed else ""
+                extra = []
+                if outcome.hyst_area is not None:
+                    extra.append(f"hyst_area={outcome.hyst_area:.2e}")
+                if outcome.endurance_on_off is not None:
+                    extra.append(f"end_on/off~{outcome.endurance_on_off:.2f}")
+                if outcome.retention_alpha is not None:
+                    extra.append(f"ret_alpha~{outcome.retention_alpha:.2f}")
+                extra_str = (", " + ", ".join(extra)) if extra else ""
+                self.test_log_queue.put(
+                    f"{device}: {status}{formed}, I_probe={outcome.probe_current_a:.2e} A{extra_str}")
+
+            self.test_log_queue.put("Automated tests completed.")
+        except Exception as e:
+            self.test_log_queue.put(f"Error during automated tests: {e}")
+        finally:
+            self.tests_running = False
 
     def Change_image(self, sample):
         self.log_terminal("change image sample")

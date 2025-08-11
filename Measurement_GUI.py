@@ -13,11 +13,17 @@ import logging
 from datetime import datetime
 import threading
 import atexit
+from pathlib import Path
+import queue
 
 from Equipment_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
 from Equipment_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
 from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
+from tests.config import Thresholds
+from tests.runner import TestRunner
+from tests.driver import MeasurementDriver
+from tests.preferences import load_thresholds, save_thresholds
 
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
@@ -46,6 +52,10 @@ class MeasurementGUI:
         self.axis_font_size = 8
         self.title_font_size = 10
         self.sequential_number_of_sweeps = 100
+        self.tests_running = False
+        self.abort_tests_flag = False
+        self.test_log_queue = queue.Queue()
+        self.live_plot_enabled = tk.BooleanVar(value=True)
 
 
         # Device name's
@@ -69,6 +79,7 @@ class MeasurementGUI:
         self.itc_connected = False
         self.lakeshore = None
         self.psu_needed = False
+        self._telegram_bot = None
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
@@ -116,11 +127,13 @@ class MeasurementGUI:
 
         self.temp_measurments_itc4(self.left_frame)
         self.signal_messaging(self.left_frame)
+        self.create_manual_endurance_retention(self.left_frame)
 
         # middle
         self.create_sweep_parameters(self.middle_frame)
         self.create_custom_measurement_section(self.middle_frame)
         self.sequential_measurments(self.middle_frame)
+        self.create_automated_tests_section(self.middle_frame)
 
 
 
@@ -151,6 +164,9 @@ class MeasurementGUI:
         self.connect_keithley()
         #self.connect_keithley_psu()
 
+        # Bottom log spanning left and middle columns
+        self.create_tests_log_frame()
+
         atexit.register(self.cleanup)
 
 
@@ -165,6 +181,8 @@ class MeasurementGUI:
             self.psu.disable_channel(2)
             self.psu.close()
         print("safely turned everything off")
+        self.tests_running = False
+        self.abort_tests_flag = False
 
     ###################################################################
     # Frames
@@ -208,6 +226,108 @@ class MeasurementGUI:
         # Show last sweeps button
         self.show_results_button = tk.Button(info_frame, text="check_connection", command=self.check_connection)
         self.show_results_button.grid(row=1, column=4, columnspan=1, pady=5)
+
+        # Start periodic status updates for device/voltage/loop
+        self._status_updates_active = True
+        self.master.after(250, self._status_update_tick)
+
+    def log_test(self, msg: str):
+        self.tests_log.config(state=tk.NORMAL)
+        self.tests_log.insert(tk.END, msg + "\n")
+        self.tests_log.config(state=tk.DISABLED)
+        self.tests_log.see(tk.END)
+
+    # ---------------- Telegram helpers -----------------
+    def _bot_enabled(self) -> bool:
+        try:
+            return bool(getattr(self, 'get_messaged_var', None) and self.get_messaged_var.get() == 1 \
+                        and getattr(self, 'token_var', None) and getattr(self, 'chatid_var', None) \
+                        and self.token_var.get().strip() and self.chatid_var.get().strip())
+        except Exception:
+            return False
+
+    def _get_bot(self):
+        if not self._bot_enabled():
+            return None
+        if self._telegram_bot is None:
+            try:
+                self._telegram_bot = TelegramBot(self.token_var.get().strip(), self.chatid_var.get().strip())
+            except Exception:
+                self._telegram_bot = None
+        return self._telegram_bot
+
+    def _send_bot_message(self, text: str):
+        bot = self._get_bot()
+        if bot:
+            try:
+                bot.send_message(text)
+            except Exception:
+                pass
+
+    def _send_bot_image(self, image_path: str, caption: str = ""):
+        bot = self._get_bot()
+        if bot:
+            try:
+                bot.send_image(image_path, caption)
+            except Exception:
+                pass
+
+    def _pump_test_logs(self):
+        drained = False
+        try:
+            while True:
+                m = self.test_log_queue.get_nowait()
+                drained = True
+                self.log_test(m)
+        except queue.Empty:
+            pass
+        if self.tests_running:
+            self.master.after(100, self._pump_test_logs)
+        elif drained:
+            self.master.after(100, self._pump_test_logs)
+
+    def show_test_preferences(self):
+        t = load_thresholds()
+        info = (
+            f"Probe: {t.probe_voltage_v} V for {t.probe_duration_s}s @ {t.probe_sample_hz} Hz\n"
+            f"Working I threshold: {t.working_current_a} A\n"
+            f"Forming steps: {t.forming_voltages_v}, comp={t.forming_compliance_a} A, cooldown={t.forming_cooldown_s}s\n"
+            f"Hyst budget: {t.hyst_budget}, profiles: {len(t.hyst_profiles)}\n"
+            f"Endurance cycles: {t.endurance_cycles}, pulse width: {t.pulse_width_s}s\n"
+            f"Retention times: {t.retention_times_s}\n"
+            f"Safety: Vmax={t.max_voltage_v} V, Imax={t.max_compliance_a} A\n"
+        )
+        messagebox.showinfo("Test Preferences (read-only)", info)
+
+    def create_automated_tests_section(self, parent):
+        frame = tk.LabelFrame(parent, text="Automated Tests", padx=5, pady=5)
+        frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+
+        # Row 0: Run / Stop
+        self.start_tests_btn = tk.Button(frame, text="Run Automated Tests", command=self.start_automated_tests)
+        self.start_tests_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        self.stop_tests_btn = tk.Button(frame, text="Stop", command=self.stop_automated_tests)
+        self.stop_tests_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        # Row 1: Live plotting / Preferences
+        self.live_plot_cb = tk.Checkbutton(frame, text="Live plotting", variable=self.live_plot_enabled)
+        self.live_plot_cb.grid(row=1, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        self.pref_btn = tk.Button(frame, text="Test Preferences", command=self.show_test_preferences)
+        self.pref_btn.grid(row=1, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        # Two columns only
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+    def create_tests_log_frame(self):
+        # A single tests log bar spanning left and middle columns of master
+        bottom = tk.LabelFrame(self.master, text="Automated Tests Log", padx=5, pady=5)
+        bottom.grid(row=9, column=0, columnspan=2, padx=10, pady=5, sticky='ew')
+        # Shorten the log height and avoid vertical expansion to make room for other widgets
+        self.tests_log = tk.Text(bottom, height=3, width=60, wrap='word', state=tk.DISABLED)
+        self.tests_log.pack(fill='x', expand=False)
 
     ###################################################################
     # Graph empty shells setting up for plotting
@@ -323,23 +443,225 @@ class MeasurementGUI:
 
     def graphs_endurance_retention(self, parent):
         frame = tk.LabelFrame(parent, text="Endurance & Retention", padx=5, pady=5)
-        frame.grid(row=3, column=2, padx=10, pady=5, columnspan=1, rowspan=1, sticky="ew")
+        frame.grid(row=3, column=2, padx=10, pady=5, columnspan=1, rowspan=1, sticky="nsew")
 
-        self.figure_rt_er, self.ax_rt_er = plt.subplots(figsize=(4, 2))
-        self.ax_rt_er.set_title("Endurance")
-        self.ax_rt_er.set_xlabel("Time (s)",fontsize=self.axis_font_size)
-        self.ax_rt_er.set_ylabel("Currnet (ohm)",fontsize=self.axis_font_size)
+        # Endurance (ON/OFF ratio over cycles)
+        self.figure_endurance, self.ax_endurance = plt.subplots(figsize=(3, 2))
+        self.ax_endurance.set_title("Endurance (ON/OFF)")
+        self.ax_endurance.set_xlabel("Cycle")
+        self.ax_endurance.set_ylabel("ON/OFF Ratio")
+        self.canvas_endurance = FigureCanvasTkAgg(self.figure_endurance, master=frame)
+        self.canvas_endurance.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
-        self.canvas_rt_er = FigureCanvasTkAgg(self.figure_rt_er, master=frame)
-        self.canvas_rt_er.get_tk_widget().grid(row=0, column=0, columnspan=1, sticky="nsew")
+        # Retention (Current vs time)
+        self.figure_retention, self.ax_retention = plt.subplots(figsize=(3, 2))
+        self.ax_retention.set_title("Retention")
+        self.ax_retention.set_xlabel("Time (s)")
+        self.ax_retention.set_ylabel("Current (A)")
+        self.ax_retention.set_xscale('log')
+        self.ax_retention.set_yscale('log')
+        self.canvas_retention = FigureCanvasTkAgg(self.figure_retention, master=frame)
+        self.canvas_retention.get_tk_widget().grid(row=0, column=1, sticky="nsew")
 
         frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
         frame.rowconfigure(0, weight=1)
 
-        # # Start the plotting thread
-        # self.measurement_ER_thread = threading.Thread(target=self.plot_resistance_time)
-        # self.measurement_ER_thread.daemon = True
-        # self.measurement_ER_thread.start()
+        # Data holders for plotting
+        self.endurance_ratios = []
+        self.retention_times = []
+        self.retention_currents = []
+
+    def create_manual_endurance_retention(self, parent):
+        frame = tk.LabelFrame(parent, text="Manual Endurance / Retention", padx=5, pady=5)
+        frame.grid(row=6, column=0, padx=10, pady=5, sticky="ew")
+
+        # Two-panel vertical layout (narrower, taller)
+        end_frame = tk.Frame(frame)
+        end_frame.grid(row=0, column=0, sticky='nw', padx=(0, 10))
+        ret_frame = tk.Frame(frame)
+        ret_frame.grid(row=0, column=1, sticky='ne')
+
+        # Endurance controls (stacked)
+        tk.Label(end_frame, text="Endurance").grid(row=0, column=0, columnspan=2, sticky='w')
+        tk.Label(end_frame, text="SET V").grid(row=1, column=0, sticky='w')
+        self.end_set_v = tk.DoubleVar(value=1.5)
+        tk.Entry(end_frame, textvariable=self.end_set_v, width=8).grid(row=1, column=1, sticky='w')
+
+        tk.Label(end_frame, text="RESET V").grid(row=2, column=0, sticky='w')
+        self.end_reset_v = tk.DoubleVar(value=-1.5)
+        tk.Entry(end_frame, textvariable=self.end_reset_v, width=8).grid(row=2, column=1, sticky='w')
+
+        tk.Label(end_frame, text="Pulse (ms)").grid(row=3, column=0, sticky='w')
+        self.end_pulse_ms = tk.DoubleVar(value=10)
+        tk.Entry(end_frame, textvariable=self.end_pulse_ms, width=8).grid(row=3, column=1, sticky='w')
+
+        tk.Label(end_frame, text="Cycles").grid(row=4, column=0, sticky='w')
+        self.end_cycles = tk.IntVar(value=100)
+        tk.Entry(end_frame, textvariable=self.end_cycles, width=8).grid(row=4, column=1, sticky='w')
+
+        tk.Label(end_frame, text="Read V").grid(row=5, column=0, sticky='w')
+        self.end_read_v = tk.DoubleVar(value=0.2)
+        tk.Entry(end_frame, textvariable=self.end_read_v, width=8).grid(row=5, column=1, sticky='w')
+
+        tk.Button(end_frame, text="Start Endurance", command=self.start_manual_endurance).grid(row=6, column=0, columnspan=2, pady=(4,0), sticky='w')
+
+        # Retention controls (stacked)
+        tk.Label(ret_frame, text="Retention").grid(row=0, column=0, columnspan=2, sticky='w')
+        tk.Label(ret_frame, text="SET V").grid(row=1, column=0, sticky='w')
+        self.ret_set_v = tk.DoubleVar(value=1.5)
+        tk.Entry(ret_frame, textvariable=self.ret_set_v, width=8).grid(row=1, column=1, sticky='w')
+
+        tk.Label(ret_frame, text="SET Time (ms)").grid(row=2, column=0, sticky='w')
+        self.ret_set_ms = tk.DoubleVar(value=10)
+        tk.Entry(ret_frame, textvariable=self.ret_set_ms, width=8).grid(row=2, column=1, sticky='w')
+
+        tk.Label(ret_frame, text="Read V").grid(row=3, column=0, sticky='w')
+        self.ret_read_v = tk.DoubleVar(value=0.2)
+        tk.Entry(ret_frame, textvariable=self.ret_read_v, width=8).grid(row=3, column=1, sticky='w')
+
+        tk.Label(ret_frame, text="Every (s)").grid(row=4, column=0, sticky='w')
+        self.ret_every_s = tk.DoubleVar(value=10.0)
+        tk.Entry(ret_frame, textvariable=self.ret_every_s, width=8).grid(row=4, column=1, sticky='w')
+
+        tk.Label(ret_frame, text="# Points").grid(row=5, column=0, sticky='w')
+        self.ret_points = tk.IntVar(value=30)
+        tk.Entry(ret_frame, textvariable=self.ret_points, width=8).grid(row=5, column=1, sticky='w')
+
+        self.ret_estimate_var = tk.StringVar(value="Total: ~300 s")
+        tk.Label(ret_frame, textvariable=self.ret_estimate_var, fg="grey").grid(row=6, column=0, columnspan=2, sticky='w')
+
+        tk.Button(ret_frame, text="Start Retention", command=self.start_manual_retention).grid(row=7, column=0, columnspan=2, pady=(4,0), sticky='w')
+
+        # LED row spanning under both panels
+        led_frame = tk.Frame(frame)
+        led_frame.grid(row=1, column=0, columnspan=2, sticky='w', pady=(6,0))
+        tk.Label(led_frame, text="LED:").pack(side='left')
+        self.manual_led_power = tk.DoubleVar(value=1.0)
+        tk.Entry(led_frame, textvariable=self.manual_led_power, width=8).pack(side='left', padx=(4,4))
+        self.manual_led_on = False
+        self.manual_led_btn = tk.Button(led_frame, text="LED OFF", command=self.toggle_manual_led)
+        self.manual_led_btn.pack(side='left')
+
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+
+    def toggle_manual_led(self):
+        try:
+            if not self.psu_connected:
+                self.connect_keithley_psu()
+            if not self.manual_led_on:
+                self.psu.led_on_380(self.manual_led_power.get())
+                self.manual_led_on = True
+                self.manual_led_btn.config(text="LED ON")
+            else:
+                self.psu.led_off_380()
+                self.manual_led_on = False
+                self.manual_led_btn.config(text="LED OFF")
+        except Exception:
+            pass
+
+    def start_manual_endurance(self):
+        if not self.connected:
+            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            return
+        threading.Thread(target=self._manual_endurance_worker, daemon=True).start()
+
+    def _manual_endurance_worker(self):
+        try:
+            set_v = self.end_set_v.get()
+            reset_v = self.end_reset_v.get()
+            width_s = max(0.001, self.end_pulse_ms.get() / 1000.0)
+            cycles = max(1, self.end_cycles.get())
+            read_v = self.end_read_v.get()
+            icc = self.icc.get()
+
+            self.endurance_ratios = []
+            self.keithley.enable_output(True)
+            for idx in range(cycles):
+                if self.stop_measurement_flag:
+                    break
+                # SET
+                self.keithley.set_voltage(set_v, icc)
+                time.sleep(width_s)
+                # Read ON
+                self.keithley.set_voltage(read_v, icc)
+                time.sleep(0.01)
+                i_on = self.keithley.measure_current()[1]
+                # RESET
+                self.keithley.set_voltage(reset_v, icc)
+                time.sleep(width_s)
+                # Read OFF
+                self.keithley.set_voltage(read_v, icc)
+                time.sleep(0.01)
+                i_off = self.keithley.measure_current()[1]
+                ratio = (abs(i_on) + 1e-12) / (abs(i_off) + 1e-12)
+                self.endurance_ratios.append(ratio)
+                # Update plot
+                self.ax_endurance.clear()
+                self.ax_endurance.set_title("Endurance (ON/OFF)")
+                self.ax_endurance.set_xlabel("Cycle")
+                self.ax_endurance.set_ylabel("ON/OFF Ratio")
+                self.ax_endurance.plot(range(1, len(self.endurance_ratios)+1), self.endurance_ratios, marker='o')
+                self.canvas_endurance.draw()
+            self.keithley.enable_output(False)
+        except Exception as e:
+            print("Manual endurance error:", e)
+
+    def start_manual_retention(self):
+        if not self.connected:
+            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            return
+        # Update estimate
+        try:
+            total = max(1, self.ret_points.get()) * max(0.001, self.ret_every_s.get())
+            self.ret_estimate_var.set(f"Total: ~{int(total)} s")
+        except Exception:
+            pass
+        threading.Thread(target=self._manual_retention_worker, daemon=True).start()
+
+    def _manual_retention_worker(self):
+        try:
+            set_v = self.ret_set_v.get()
+            set_ms = max(0.001, self.ret_set_ms.get() / 1000.0)
+            read_v = self.ret_read_v.get()
+            # Build uniform schedule using every and points
+            try:
+                every = max(0.001, self.ret_every_s.get())
+                points = max(1, self.ret_points.get())
+                times = [every * i for i in range(1, points + 1)]
+            except Exception:
+                times = [10 * i for i in range(1, 31)]
+            icc = self.icc.get()
+
+            self.retention_times = []
+            self.retention_currents = []
+            self.keithley.enable_output(True)
+            # Apply SET
+            self.keithley.set_voltage(set_v, icc)
+            time.sleep(set_ms)
+            # Retention reads
+            t0 = time.time()
+            for t in times:
+                while (time.time() - t0) < t:
+                    time.sleep(0.01)
+                self.keithley.set_voltage(read_v, icc)
+                time.sleep(0.01)
+                i = self.keithley.measure_current()[1]
+                self.retention_times.append(t)
+                self.retention_currents.append(abs(i))
+                # Update plot
+                self.ax_retention.clear()
+                self.ax_retention.set_title("Retention")
+                self.ax_retention.set_xlabel("Time (s)")
+                self.ax_retention.set_ylabel("Current (A)")
+                self.ax_retention.set_xscale('log')
+                self.ax_retention.set_yscale('log')
+                self.ax_retention.plot(self.retention_times, self.retention_currents, marker='x')
+                self.canvas_retention.draw()
+            self.keithley.enable_output(False)
+        except Exception as e:
+            print("Manual retention error:", e)
 
     def graphs_current_time_rt(self, parent):
         frame = tk.LabelFrame(parent, text="Current time", padx=5, pady=5)
@@ -419,6 +741,36 @@ class MeasurementGUI:
     ###################################################################
     #   Real time plotting
     ###################################################################
+
+    def _status_update_tick(self):
+        try:
+            # Device name
+            try:
+                current_device = self.sample_gui.device_var.get()
+            except Exception:
+                current_device = self.display_index_section_number
+            if current_device:
+                self.device_label.config(text=f"Device: {current_device}")
+
+            # Current voltage (latest sample if available)
+            if self.v_arr_disp:
+                try:
+                    v_now = float(self.v_arr_disp[-1])
+                    self.voltage_label.config(text=f"Voltage: {v_now:.3f} V")
+                except Exception:
+                    pass
+
+            # Loop number (if known)
+            loop_val = None
+            if getattr(self, 'sweep_num', None) is not None:
+                loop_val = self.sweep_num
+            elif getattr(self, 'measurment_number', None) is not None:
+                loop_val = self.measurment_number
+            if loop_val is not None:
+                self.loop_label.config(text=f"Loop: {loop_val}")
+        finally:
+            if self._status_updates_active and self.master.winfo_exists():
+                self.master.after(250, self._status_update_tick)
 
     def plot_current_time(self):
         while True:
@@ -774,6 +1126,148 @@ class MeasurementGUI:
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
         self.adaptive_button.grid(row=12, column=1, columnspan=1, pady=10)
 
+    def start_automated_tests(self):
+        if self.tests_running:
+            messagebox.showinfo("Tests", "Automated tests already running.")
+            return
+        if not self.connected or not isinstance(self.keithley, Keithley2400Controller):
+            messagebox.showerror("Instrument", "Keithley not connected.")
+            return
+        self.tests_running = True
+        self.abort_tests_flag = False
+        self.test_log_queue.put("Starting automated tests...")
+        self._send_bot_message("Automated tests started")
+        self._pump_test_logs()
+        threading.Thread(target=self._tests_worker, daemon=True).start()
+
+    def stop_automated_tests(self):
+        if self.tests_running:
+            self.abort_tests_flag = True
+            self.test_log_queue.put("Abort requested.")
+
+    def _route_current_device(self):
+        # use Sample GUI to route relays if available
+        try:
+            self.sample_gui.change_relays()
+        except Exception:
+            pass
+
+    def _tests_worker(self):
+        try:
+            inst = self.keithley
+            driver = MeasurementDriver(inst, abort_flag=lambda: self.abort_tests_flag)
+            runner = TestRunner(driver, load_thresholds())
+
+            results_dir = Path(__file__).resolve().parent / "results"
+            results_dir.mkdir(exist_ok=True)
+
+            # Current device only or all devices from Sample GUI
+            devices = [self.sample_gui.device_list[self.current_index]] if self.single_device_flag else list(self.sample_gui.get_selected_devices())
+            for device in devices:
+                if self.abort_tests_flag:
+                    break
+                self.test_log_queue.put(f"Routing to device {device}...")
+                self.master.after(0, self._route_current_device)
+                if self.abort_tests_flag:
+                    break
+                self.test_log_queue.put(f"Testing {device}...")
+                self._send_bot_message(f"Testing {device}...")
+
+                # Live plotting callback if enabled
+                on_sample = None
+                if self.live_plot_enabled.get():
+                    try:
+                        on_sample = getattr(self, 'plotter', None)
+                        if on_sample and hasattr(self, 'thread_safe'):
+                            on_sample = self.thread_safe.callback_sink(device)
+                        else:
+                            on_sample = None
+                    except Exception:
+                        on_sample = None
+
+                if on_sample is not None:
+                    orig_dc = driver.dc_hold
+                    orig_sw = driver.triangle_sweep
+                    def dc_cb(v, d, hz, comp):
+                        return orig_dc(v, d, hz, comp, on_sample=on_sample)
+                    def sw_cb(vmin, vmax, step, dwell, cycles, comp):
+                        return orig_sw(vmin, vmax, step, dwell, cycles, comp, on_sample=on_sample)
+                    driver.dc_hold = dc_cb  # type: ignore
+                    driver.triangle_sweep = sw_cb  # type: ignore
+
+                outcome, artifacts = runner.run_device(device)
+
+                # Save summary, best IV, and per-run log
+                ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                try:
+                    with (results_dir / f"{device}_summary_{ts}.json").open('w', encoding='utf-8') as f:
+                        import json as _json
+                        _json.dump(outcome.__dict__, f, indent=2)
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed summary save for {device}: {e}")
+                try:
+                    best = artifacts.get("best_iv")
+                    if best:
+                        with (results_dir / f"{device}_best_iv_{ts}-automated.csv").open('w', encoding='utf-8') as f:
+                            f.write("V,I,t\n")
+                            for v, i, t in zip(best.voltage, best.current, best.timestamps):
+                                f.write(f"{v},{i},{t}\n")
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed IV save for {device}: {e}")
+
+                # Persist per-run log in a subfolder per device
+                try:
+                    device_dir = results_dir / f"{device}_logs"
+                    device_dir.mkdir(exist_ok=True)
+                    log_path = device_dir / f"log_{ts}.txt"
+                    lines = artifacts.get("log_lines") or []
+                    with log_path.open('w', encoding='utf-8') as f:
+                        f.write("\n".join(lines))
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed log save for {device}: {e}")
+
+                # Append to summary CSV
+                try:
+                    import csv
+                    sp = results_dir / "summary.csv"
+                    write_header = not sp.exists()
+                    with sp.open('a', newline='', encoding='utf-8') as f:
+                        w = csv.writer(f)
+                        if write_header:
+                            w.writerow(["device_id","status","formed","probe_current_a","hyst_area",
+                                        "endurance_on_off","retention_alpha","timestamp"])
+                        w.writerow([
+                            device,
+                            "WORKING" if outcome.is_working else "NON-WORKING",
+                            outcome.formed,
+                            f"{outcome.probe_current_a:.3e}",
+                            f"{(outcome.hyst_area or 0):.3e}",
+                            f"{(outcome.endurance_on_off or 0):.3f}",
+                            f"{(outcome.retention_alpha or 0):.3f}",
+                            datetime.now().isoformat(timespec='seconds')
+                        ])
+                except Exception as e:
+                    self.test_log_queue.put(f"Failed to update summary: {e}")
+
+                status = "WORKING" if outcome.is_working else "NON-WORKING"
+                formed = " (formed)" if outcome.formed else ""
+                extras = []
+                if outcome.hyst_area is not None:
+                    extras.append(f"hyst={outcome.hyst_area:.2e}")
+                if outcome.endurance_on_off is not None:
+                    extras.append(f"on/off~{outcome.endurance_on_off:.2f}")
+                if outcome.retention_alpha is not None:
+                    extras.append(f"ret~{outcome.retention_alpha:.2f}")
+                summary_line = f"{device}: {status}{formed}, I_probe={outcome.probe_current_a:.2e} A" \
+                               + (", " + ", ".join(extras) if extras else "")
+                self.test_log_queue.put(summary_line)
+                self._send_bot_message(summary_line)
+        except Exception as e:
+            self.test_log_queue.put(f"Automated tests error: {e}")
+        finally:
+            self.tests_running = False
+            self._send_bot_message("Automated tests finished")
+
     def set_measurment_flag_true(self):
         self.stop_measurement_flag = True
     def create_custom_measurement_section(self,parent):
@@ -798,7 +1292,9 @@ class MeasurementGUI:
         self.run_custom_button.grid(row=1, column=0, columnspan=2, pady=5)
 
     def signal_messaging(self,parent):
-        frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
+        # Keep a handle to the frame so we can manage stacking/visibility
+        self.signal_frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
+        frame = self.signal_frame
         frame.grid(row=6, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
 
         # Toggle switch: Measure one device
@@ -828,6 +1324,11 @@ class MeasurementGUI:
         # tk.Label(frame, text="Chat ID:").grid(row=4, column=0, sticky="w")
         self.chatid_var = tk.StringVar(value="")
         # tk.Label(frame, textvariable=self.chatid_var).grid(row=4, column=1, sticky="w")
+        # Ensure the bot section isn't hidden behind other widgets
+        try:
+            frame.lift()
+        except Exception:
+            pass
 
     def create_status_box(self,parent):
         """Status box section"""
@@ -1722,13 +2223,12 @@ class MeasurementGUI:
 
                 self.sample_gui.next_device()
 
-            if self.get_messaged_var.get() == 1:
-                bot.send_message("Measurments Finished")
-
-            try:
-                bot.send_image(plot_filename_log,"Final_graphs_LOG")
-            except:
-                print("failed to send image")
+            if self._bot_enabled():
+                self._send_bot_message("Measurements finished")
+                try:
+                    self._send_bot_image(plot_filename_log, "Final_graphs_LOG")
+                except Exception:
+                    pass
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
             messagebox.showinfo("Complete", "Measurements finished.")
@@ -1801,6 +2301,26 @@ class MeasurementGUI:
 
             # measure device
             v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, led_power, sequence,pause)
+            
+            # If endurance selected as a custom mode via UI in future, we could branch here
+            # For now, update endurance/retention plots if arrays exist from tests
+            if hasattr(self, 'endurance_ratios') and self.endurance_ratios:
+                self.ax_endurance.clear()
+                self.ax_endurance.set_title("Endurance (ON/OFF)")
+                self.ax_endurance.set_xlabel("Cycle")
+                self.ax_endurance.set_ylabel("ON/OFF Ratio")
+                self.ax_endurance.plot(range(1, len(self.endurance_ratios)+1), self.endurance_ratios, marker='o')
+                self.canvas_endurance.draw()
+
+            if hasattr(self, 'retention_times') and self.retention_times and hasattr(self, 'retention_currents'):
+                self.ax_retention.clear()
+                self.ax_retention.set_title("Retention")
+                self.ax_retention.set_xlabel("Time (s)")
+                self.ax_retention.set_ylabel("Current (A)")
+                self.ax_retention.set_xscale('log')
+                self.ax_retention.set_yscale('log')
+                self.ax_retention.plot(self.retention_times, self.retention_currents, marker='x')
+                self.canvas_retention.draw()
 
             # save data to file
             data = np.column_stack((v_arr, c_arr, timestamps))
