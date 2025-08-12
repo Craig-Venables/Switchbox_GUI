@@ -10,10 +10,12 @@ class CheckConnection:
         self.master = master
         self.top = tk.Toplevel(master)
         self.top.title("Checking Connection...")
-        self.top.geometry("500x500")
+        self.top.geometry("700x700")
         self.keithley = keithley
         self.check_connection_window = True
         self.noise_already = False
+        # Beep when absolute current reaches or exceeds this threshold (A)
+        self.current_threshold_a = 10e-9
 
         self.frame1()
         self.start_measurement_loop()
@@ -22,7 +24,7 @@ class CheckConnection:
         frame = tk.LabelFrame(self.top, text="Last Measurement Plot", padx=5, pady=5)
         frame.grid(row=0, column=0, columnspan=5, padx=10, pady=5, sticky="nsew")
 
-        self.figure, self.ax = plt.subplots(figsize=(4, 3))
+        self.figure, self.ax = plt.subplots(figsize=(5, 5))
         self.ax.set_title("Measurement Plot")
         self.ax.set_xlabel("Time (s)")
         self.ax.set_ylabel("Current (Across Ito)")
@@ -81,11 +83,11 @@ class CheckConnection:
             current = current_value[1]
             #print(current)
 
-            if self.make_sound_var:
-                if self.previous_current is not None and current > 100 * self.previous_current:
-                    if not self.noise_already:
-                        print("sound made")
-                        self.on_spike_detected()
+            if self.make_sound_var.get():
+                # Beep once when absolute current crosses or exceeds threshold
+                if not self.noise_already and abs(current) >= self.current_threshold_a:
+                    print("sound made (threshold reached)")
+                    self.on_spike_detected()
 
             self.previous_current = current_value[1]
             self.update_plot(time_data, current_data)
@@ -110,13 +112,14 @@ class CheckConnection:
         self.ax.plot(time_data, current_data, marker='o')
         self.ax.set_title("Measurement Plot")
         self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("Current (Across Ito)")
-
-        # Set y-axis limit to not go above 1e-9
-        self.ax.set_ylim(bottom=-5e-10, top=5e-10)
+        self.ax.set_ylabel("Current")
+        self.ax.set_yscale("log")
+        #self.ax.autoscale(axis="y")
         self.canvas.draw()
+
     def close_window(self):
         self.check_connection_window = False
+        self.keithley.enable_output(False)
         self.top.destroy()
 
 if __name__ == "__main__":

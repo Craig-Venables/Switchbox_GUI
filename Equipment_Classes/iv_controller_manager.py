@@ -70,17 +70,18 @@ class IVControllerManager:
 
     def measure_current(self):
         value = self.instrument.measure_current()
+        return value
         # Normalize to a tuple where index [1] is current, to match existing GUI usage
-        if isinstance(value, (list, tuple)):
-            # Try to use last element as current if length >= 1
-            try:
-                return (None, float(value[-1]))
-            except Exception:
-                pass
-        try:
-            return (None, float(value))
-        except Exception:
-            return (None, float('nan'))
+        # if isinstance(value, (list, tuple)):
+        #     # Try to use last element as current if length >= 1
+        #     try:
+        #         return (None, float(value[-1]))
+        #     except Exception:
+        #         pass
+        # try:
+        #     return (None, float(value))
+        # except Exception:
+        #     return (None, float('nan'))
 
     def enable_output(self, enable: bool = True):
         return self.instrument.enable_output(enable)
