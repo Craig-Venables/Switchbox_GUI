@@ -32,7 +32,7 @@ class Keithley2400Controller:
             self.device.apply_voltage(voltage_range=20, compliance_current=Icc)  # Set compliance current
             self.device.source_voltage = voltage
 
-    def set_current(self, current, Vcc = 10):
+    def set_current(self, current, Vcc=10):
         """Set output current and enable source mode."""
         if self.device:
             self.device.apply_current(current_range=10e-3, compliance_voltage=Vcc)  # Set compliance voltage
@@ -80,7 +80,6 @@ class Keithley2400Controller:
             self.device.shutdown()
             print("Connection closed.")
 
-# Example Usage
 if __name__ == "__main__":
     keithley = Keithley2400Controller()  # Connect to the device
     print("Device ID:", keithley.device.id)  # Check connection
@@ -92,3 +91,4 @@ if __name__ == "__main__":
     keithley.beep(100000, 0.5)
 
     keithley.close()
+

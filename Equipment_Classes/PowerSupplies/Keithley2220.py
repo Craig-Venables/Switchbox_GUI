@@ -1,6 +1,7 @@
 import pyvisa
 import time
 
+
 class Keithley2220_Powersupply:
     """ simple class for controlling the PSU """
     def __init__(self, visa_address):
@@ -30,7 +31,6 @@ class Keithley2220_Powersupply:
         """Set voltage for a specific channel (1 or 2)."""
         self.instrument.write(f"INST CH{channel}")
         self.instrument.write(f"VOLT {voltage}")
-        #print(f"Set voltage on CH{channel} to {voltage}V")
 
     def set_current(self, channel, current):
         """Set current limit for a specific channel."""
@@ -62,13 +62,11 @@ class Keithley2220_Powersupply:
         """Enable output on a specific channel."""
         self.instrument.write(f"INST CH{channel}")
         self.instrument.write("OUTP ON")
-        #print(f"Enabled output on CH{channel}")
 
     def disable_channel(self, channel):
         """Disable output on a specific channel."""
         self.instrument.write(f"INST CH{channel}")
         self.instrument.write("OUTP OFF")
-        #print(f"Disabled output on CH{channel}")
 
     def is_output_on(self, channel):
         """Check if the output is enabled for a specific channel."""
@@ -120,42 +118,28 @@ class Keithley2220_Powersupply:
         self.instrument.write("SYST:REM")
 
     def led_on_380(self, power):
-        """Turn on the 380 nm LED assuming it's in channel 1."""
-
-        # Clamp value between 0.01 and 1
         power = min(max(power, 0.01), 1.0)
-
         max_voltage = 3.45
         min_voltage = 3.0
         diff = max_voltage - min_voltage
         applied_v = min_voltage + (power * diff)
-
         self.set_voltage(1, applied_v)
         self.enable_channel(1)
-        #time.sleep(1)
         print("applied_v", applied_v)
 
     def led_off_380(self):
         self.disable_channel(1)
-        #time.sleep(1)
 
-
-
-
-# Example usage
 if __name__ == "__main__":
-    visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"  # Replace with your actual VISA address
+    visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"
     psu = Keithley2220_Powersupply(visa_address)
-
     if psu.instrument:
-        psu.set_voltage(1, 3)  # Set CH1 to 12V
-        psu.set_current(1, 0.5)  # Set CH1 current limit to 0.5A
-        psu.enable_channel(1)  # Enable output only on CH1
-
-        time.sleep(2)  # Wait for power supply to stabilize
-
+        psu.set_voltage(1, 3)
+        psu.set_current(1, 0.5)
+        psu.enable_channel(1)
+        time.sleep(2)
         print("Output Voltage CH1:", psu.get_output_voltage(1))
         print("Output Current CH1:", psu.get_output_current(1))
-
-        psu.disable_channel(1)  # Disable only CH1
+        psu.disable_channel(1)
         psu.close()
+

@@ -4,8 +4,8 @@ from typing import Optional, Dict, Any
 
 # Import your controller classes
 
-from Equipment_Classes.OxfordITC4 import OxfordITC4
-from Equipment_Classes.Lakeshore355 import Lakeshore335Controller
+from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
+from Equipment_Classes.TempControllers.Lakeshore355 import Lakeshore335Controller
 
 
 class TemperatureControllerManager:
