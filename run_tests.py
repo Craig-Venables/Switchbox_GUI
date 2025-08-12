@@ -9,7 +9,7 @@ from tests.runner import TestRunner
 
 # Example: wire to Keithley2400 if available
 try:
-    from Equipment_Classes.Keithley2400 import Keithley2400Controller
+    from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller
 except Exception:
     Keithley2400Controller = None
 from Other.testing import FakeMemristorInstrument

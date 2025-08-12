@@ -13,7 +13,7 @@ from tests.driver import MeasurementDriver
 from tests.runner import TestRunner
 from tests.preferences import load_thresholds, save_thresholds
 try:
-    from Equipment_Classes.Keithley2400 import Keithley2400Controller
+    from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller
 except Exception:
     Keithley2400Controller = None
 

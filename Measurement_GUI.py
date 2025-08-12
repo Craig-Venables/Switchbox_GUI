@@ -16,8 +16,9 @@ import atexit
 from pathlib import Path
 import queue
 
-from Equipment_Classes.Keithley2400 import Keithley2400Controller  # Import the Keithley class
-from Equipment_Classes.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
+from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller  # Import the Keithley class
+from Equipment_Classes.iv_controller_manager import IVControllerManager
+from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
 from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
 from tests.config import Thresholds
@@ -27,7 +28,7 @@ from tests.preferences import load_thresholds, save_thresholds
 
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
-from Equipment_Classes.OxfordITC4 import OxfordITC4
+from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
 
 # Set logging level to WARNING (hides INFO messages)
 logging.getLogger("pymeasure").setLevel(logging.WARNING)
@@ -2400,18 +2401,18 @@ class MeasurementGUI:
     # Connect
     ###################################################################
     def connect_keithley(self):
-        """Connect to the Keithley SMU via GPIB"""
+        """Connect to the selected IV controller via GPIB using system config SMU Type"""
         address = self.keithley_address_var.get()
+        smu_type = getattr(self, 'SMU_type', 'Keithley 2400')
         try:
-            self.keithley = Keithley2400Controller(address)
+            self.keithley = IVControllerManager(smu_type, address)
             self.connected = True
             self.status_box.config(text="Status: Connected")
-            # messagebox.showinfo("Connection", f"Connected to: {address}")
-            self.keithley.beep(4000, 0.2)
-            time.sleep(0.2)
-            self.keithley.beep(5000, 0.5)
-
-
+            # Optional beep if supported
+            if hasattr(self.keithley, 'beep'):
+                self.keithley.beep(4000, 0.2)
+                time.sleep(0.2)
+                self.keithley.beep(5000, 0.5)
         except Exception as e:
             self.connected = False
             print("unable to connect to SMU please check")
