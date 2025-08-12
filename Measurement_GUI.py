@@ -1131,7 +1131,8 @@ class MeasurementGUI:
         if self.tests_running:
             messagebox.showinfo("Tests", "Automated tests already running.")
             return
-        if not self.connected or not isinstance(self.keithley, Keithley2400Controller):
+        # Connected flag is set when using IVControllerManager; don't require a raw Keithley2400 instance
+        if not self.connected or self.keithley is None:
             messagebox.showerror("Instrument", "Keithley not connected.")
             return
         self.tests_running = True
@@ -1982,6 +1983,8 @@ class MeasurementGUI:
                 current = self.keithley.measure_current()
                 measure_time = time.time() - start_time
 
+
+
                 # append information
                 v_arr.append(v)
                 c_arr.append(current[1])
@@ -2083,17 +2086,24 @@ class MeasurementGUI:
                 sweeps = self.custom_sweeps[selected_measurement]["sweeps"]
                 code_name = self.custom_sweeps[selected_measurement].get("code_name", "unknown")
 
-                # checks psu connection if led required for measurement
-                LED = False
-                for key, params in sweeps.items():
-                    LED = params.get("LED_ON", "OFF")
-                    if LED:
-                        if not self.psu_connected:
-                            print("led used needs to be connected to psu")
-                            messagebox.showwarning("Warning", "Not connected to PSU!")
-                            time.sleep(1)
-                            self.connect_keithley_psu()
-                            break
+                # checks psu connection only if any sweep explicitly requires LED
+                def _is_truthy(val) -> bool:
+                    try:
+                        # numeric truthiness: non-zero => True
+                        if isinstance(val, (int, float)):
+                            return float(val) != 0.0
+                    except Exception:
+                        pass
+                    if isinstance(val, str):
+                        return val.strip().lower() in {"1", "true", "on", "yes", "y"}
+                    return bool(val)
+
+                any_led_required = any(_is_truthy(params.get("LED_ON", 0)) for _k, params in sweeps.items())
+                if any_led_required and not self.psu_connected:
+                    print("LED required by at least one sweep; connecting PSU")
+                    messagebox.showwarning("Warning", "Not connected to PSU! Connecting now for LED use...")
+                    time.sleep(1)
+                    self.connect_keithley_psu()
 
                 for key, params in sweeps.items():
                     if self.stop_measurement_flag:  # Check if stop was pressed
@@ -2113,7 +2123,7 @@ class MeasurementGUI:
                     pause = params.get('pause', 0)
 
                     # LED control
-                    led = params.get("LED_ON", 0)
+                    led = _is_truthy(params.get("LED_ON", 0))
                     power = params.get("power", 1)  # Power Refers to voltage
                     sequence = params.get("sequence", 0)
 
@@ -2137,9 +2147,9 @@ class MeasurementGUI:
                         if not self.psu_connected:
                             messagebox.showwarning("Warning", "Not connected to PSU!")
                             self.connect_keithley_psu()
-                            self.psu_needed = True
-                        else:
-                            self.psu_needed = False
+                        self.psu_needed = True
+                    else:
+                        self.psu_needed = False
 
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
