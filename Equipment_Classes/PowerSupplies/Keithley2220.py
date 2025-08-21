@@ -129,6 +129,7 @@ class Keithley2220_Powersupply:
 
     def led_off_380(self):
         self.disable_channel(1)
+        self.disable_channel(2)
 
 if __name__ == "__main__":
     visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"
@@ -140,6 +141,6 @@ if __name__ == "__main__":
         time.sleep(2)
         print("Output Voltage CH1:", psu.get_output_voltage(1))
         print("Output Current CH1:", psu.get_output_current(1))
-        psu.disable_channel(1)
+        psu.led_off_380()
         psu.close()
 

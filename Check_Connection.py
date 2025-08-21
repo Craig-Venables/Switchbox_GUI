@@ -15,9 +15,14 @@ class CheckConnection:
         self.check_connection_window = True
         self.noise_already = False
         # Beep when absolute current reaches or exceeds this threshold (A)
-        self.current_threshold_a = 10e-9
+        self.current_threshold_a = 1e-9
 
         self.frame1()
+        # Ensure we also handle window manager close (X button)
+        try:
+            self.top.protocol("WM_DELETE_WINDOW", self.close_window)
+        except Exception:
+            pass
         self.start_measurement_loop()
 
     def frame1(self):
@@ -69,7 +74,7 @@ class CheckConnection:
         time_data = []
         current_data = []
         start_time = time.time()
-        self.keithley.set_voltage(0.2,0.0001)
+        self.keithley.set_voltage(0.2,0.1)
         self.keithley.enable_output(True)
         time.sleep(0.5)
         self.previous_current = None
@@ -119,7 +124,10 @@ class CheckConnection:
 
     def close_window(self):
         self.check_connection_window = False
-        self.keithley.enable_output(False)
+        try:
+            self.keithley.enable_output(False)
+        except Exception:
+            pass
         self.top.destroy()
 
 if __name__ == "__main__":
