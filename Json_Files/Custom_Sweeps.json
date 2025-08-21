@@ -46,7 +46,7 @@
         "32": {"start_v": 0, "stop_v": 2.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.01}
       }
     },
-  "Sdt V2-()": {
+  "Sdt V2-(2.8v)": {
       "code_name": "St_v2",
       "sweeps": {
         "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
@@ -76,7 +76,6 @@
 
       }
     },
-
   "Sdt V2-LED()": {
       "code_name": "St_v2_led",
       "sweeps": {
@@ -113,42 +112,28 @@
 
       }
     },
-
+    "Sdt Forming (2.2V)": {
+      "code_name": "St_form(2.2v)",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 2.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05}
+      }
+    },
     "Sdt V3_led-(~75 mins)": {
       "code_name": "ST_v3",
       "sweeps": {
         "1": {"start_v": 0, "stop_v": 1, "sweeps": 5, "step_v": 0.1,"step_delay": 0.05 ,"pause": 2},
         "2": {"start_v": 0, "stop_v": 1, "sweeps": 1, "step_v": 0.1,"step_delay": 0.05,"LED_ON": 1,"power": 0.1},
         "3": {"start_v": 0, "stop_v": 1.0, "sweeps": 5, "step_v": 0.1,"step_delay": 0.05,"sequence":10101}
-
-      }
-    },
-    "Increasing Iv 0 - 2": {
-        "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 3,"step_v": 0.05},
-        "2": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05},
-        "3": {"start_v": 0, "stop_v": 1, "sweeps": 3, "step_v": 0.05},
-        "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05},
-        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05},
-        "6": {"start_v": 0, "stop_v": 2, "sweeps": 3, "step_v": 0.05},
-        "7": {"start_v": 0, "stop_v": 1.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS","LED_sequence": "1,0,1,0,1"}
-    },
-  "Increasing Iv 0 - 1.5": {
-        "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 3,"step_v": 0.05},
-        "2": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05},
-        "3": {"start_v": 0, "stop_v": 1, "sweeps": 3, "step_v": 0.05},
-        "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05},
-        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05}
-    },
-    "Resistance Sweep": {"measurement_1": {"start_v": 0, "stop_v": 5, "sweeps": 3, "step_v": 0.5}
-    },
-  "test2": {
-      "1": {"start_v": 0, "stop_v": 0.1, "sweeps": 3, "step_v": 0.01,"step_delay": 0.05},
-        "2": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS"},
-        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"},
-        "4": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "NS"},
-        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"}
-  }
-  ,
+      }   
+   },
   "Manual_Endurance_Short": {
     "code_name": "end_short",
     "sweeps": {
@@ -160,5 +145,13 @@
     "sweeps": {
       "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
     }
+  },
+  "ITO_Test": {
+    "code_name": "ITO_TEST",
+    "sweeps": {
+      "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 1,"step_v": 0.1},
+      "2": {"start_v": 0, "stop_v": 3, "sweeps": 1, "step_v": 0.1},
+      "3": {"start_v": 0, "stop_v": 5, "sweeps": 3, "step_v": 0.2}
   }
+}
 }

@@ -94,6 +94,20 @@ class IVControllerManager:
         if hasattr(self.instrument, 'close'):
             self.instrument.close()
 
+    # Connection status helper used by GUI code
+    def is_connected(self) -> bool:
+        inst = getattr(self, 'instrument', None)
+        if inst is None:
+            return False
+        # Common attributes for our supported controllers
+        if hasattr(inst, 'device'):
+            return getattr(inst, 'device') is not None
+        if hasattr(inst, 'inst'):
+            return getattr(inst, 'inst') is not None
+        if hasattr(inst, 'sock'):
+            return getattr(inst, 'sock') is not None
+        # Fallback: assume connected if no known handle is exposed
+        return True
     # Optional pass-throughs
     def beep(self, frequency: float = 1000, duration: float = 0.2):
         if hasattr(self.instrument, 'beep'):
