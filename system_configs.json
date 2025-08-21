@@ -7,8 +7,8 @@
         "temp_controller": "Oxford ITC4"
     },
     "Lab_Laser-4200A ": {
-        "SMU_address": "GPIB0::24::INSTR",
-        "SMU Type": "Keithley 4000"
+        "SMU_address": "192.168.0.10:8888",
+        "SMU Type": "Keithley 4200A"
     },
     "Olegs_lab-2401": {
         "SMU_address": "GPIB0::9::INSTR",

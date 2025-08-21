@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 
 from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller
 from Equipment_Classes.SMU.HP4140B import HP4140BController
-from Equipment_Classes.SMU.Keithley4200A_KXCI import Keithley4200A_KXCI
+from Equipment_Classes.SMU.Keithley4200A import Keithley4200AController
 
 
 class IVControllerManager:
@@ -33,7 +33,7 @@ class IVControllerManager:
             'address_key': 'SMU_address',
         },
         'Keithley 4200A': {
-            'class': Keithley4200A_KXCI,
+            'class': Keithley4200AController,
             'address_key': 'SMU_address',  # Use IP:port string here
         },
     }
@@ -70,18 +70,15 @@ class IVControllerManager:
 
     def measure_current(self):
         value = self.instrument.measure_current()
+        # Only normalize for 4200A so GUI can use current[1]
+        if self.smu_type == 'Keithley 4200A':
+            try:
+                if isinstance(value, (list, tuple)):
+                    return (None, float(value[-1]))
+                return (None, float(value))
+            except Exception:
+                return (None, float('nan'))
         return value
-        # Normalize to a tuple where index [1] is current, to match existing GUI usage
-        # if isinstance(value, (list, tuple)):
-        #     # Try to use last element as current if length >= 1
-        #     try:
-        #         return (None, float(value[-1]))
-        #     except Exception:
-        #         pass
-        # try:
-        #     return (None, float(value))
-        # except Exception:
-        #     return (None, float('nan'))
 
     def enable_output(self, enable: bool = True):
         return self.instrument.enable_output(enable)
