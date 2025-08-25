@@ -22,11 +22,12 @@ from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller  # Import 
 from Equipment_Classes.iv_controller_manager import IVControllerManager
 from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
-from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
-from tests.config import Thresholds
-from tests.runner import TestRunner
-from tests.driver import MeasurementDriver
-from tests.preferences import load_thresholds, save_thresholds
+#from tests.config import Thresholds
+#from tests.runner import TestRunner
+#from tests.driver import MeasurementDriver
+#from tests.preferences import load_thresholds, save_thresholds
+from automated_memristor_tester import AutomatedTesterGUI
+
 
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
@@ -322,6 +323,10 @@ class MeasurementGUI:
 
         self.pref_btn = tk.Button(frame, text="Test Preferences", command=self.show_test_preferences)
         self.pref_btn.grid(row=1, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        self.autotester = tk.Button(frame, text="autotest", command=AutomatedTesterGUI(parent))
+        self.autotester.grid(row=2, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+        
 
         # Two columns only
         frame.columnconfigure(0, weight=1)
@@ -884,51 +889,9 @@ class MeasurementGUI:
                     pass
             time.sleep(0.1)
 
-    ###################################################################
-    # seequencial plotting
-    ###################################################################
-
-    # Add to your GUI initialization
-    def create_plot_menu(self):
-        """Create menu options for plotting."""
-        # Add to your menu bar
-        plot_menu = tk.Menu(self.menubar, tearoff=0)
-        self.menubar.add_cascade(label="Plot", menu=plot_menu)
-
-        plot_menu.add_command(label="Open Live Plotter", command=self.open_live_plotter)
-        plot_menu.add_separator()
-        plot_menu.add_command(label="Export All Plots", command=self.export_all_plots)
-        plot_menu.add_command(label="Save Current Plot", command=self.save_current_plot)
-
-    def open_live_plotter(self):
-        """Open a standalone live plotter window."""
-        if not hasattr(self, 'standalone_plotter') or not self.standalone_plotter.window.winfo_exists():
-            measurement_type = self.Sequential_measurement_var.get()
-            if measurement_type == "Iv Sweep":
-                plot_type = "IV Sweep"
-            elif measurement_type == "Single Avg Measure":
-                plot_type = "Single Avg Measure"
-            else:
-                plot_type = "Unknown"
-
-            self.standalone_plotter = MeasurementPlotter(self.root, measurement_type=plot_type)
-
-    def export_all_plots(self):
-        """Export plots from the current plotter."""
-        if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
-            self.plotter.export_data()
-        else:
-            tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
-
-    def save_current_plot(self):
-        """Save the current plot as an image."""
-        if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
-            self.plotter.save_current_plot()
-        else:
-            tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
 
     ###################################################################
-    # GUI mETHODS
+    # GUI Methods
     ###################################################################
 
 
@@ -985,8 +948,7 @@ class MeasurementGUI:
 
     def load_systems(self):
         """Load system configurations from JSON file"""
-        config_file = "system_configs.json"
-
+        config_file = "Json_Files/system_configs.json"
         try:
             with open(config_file, 'r') as f:
                 self.system_configs = json.load(f)

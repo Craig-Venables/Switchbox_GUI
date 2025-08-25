@@ -5,6 +5,8 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import time
 import threading
 
+"""Script for the lowing if the needles toi check is the device is connected or not. The code beeps when current is >1E-9 """
+
 class CheckConnection:
     def __init__(self, master,keithley):
         self.master = master

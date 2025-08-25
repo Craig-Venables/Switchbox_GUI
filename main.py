@@ -4,7 +4,7 @@ from Sample_GUI import SampleGUI
 # import pySwitchbox
 
 
-# record data when checking for connection to see if the current increases over time
+# record data when checking for connection to see if the current increases over times
 # maybe cut off after a sharp increase is seen!
 
 # todo give updates on gui of the current sweep
