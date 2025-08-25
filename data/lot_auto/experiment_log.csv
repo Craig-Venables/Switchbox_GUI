@@ -1,0 +1,5 @@
+20250825T200801,D1_G1,TEST_START,"{'device_meta': {'device_id': 'D1_G1', 'chip_id': 'chip1', 'section_id': 'A', 'area_um2': 10000.0, 'stack_code': 'UNKNOWN', 'film_thickness_nm': 100}}"
+20250825T200801,D1_G1,PRE_READ,"{'V_read': 0.1, 'I0_A': 1.1680202011998956e-10, 'I_short_thresh_A': 0.001}"
+20250825T200803,D1_G1,LOW_SWEEP,"{'vmax': 0.5, 'label': 'UNFORMED'}"
+20250825T200806,D1_G1,LOW_SWEEP,"{'vmax': 1.0, 'label': 'UNFORMED'}"
+20250825T200808,D1_G1,LOW_SWEEP,"{'vmax': 1.5, 'label': 'UNFORMED'}"
