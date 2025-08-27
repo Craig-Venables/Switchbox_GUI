@@ -79,6 +79,7 @@ class TestParams:
     auto_save_traces: bool = True
     use_tsp: bool = True
     tsp_instrument_hint: str = "2401"
+    debug_mode: bool = False  # When True, bypass pre-checks for quick bench debugging
     def to_dict(self):
         return asdict(self)
 
@@ -270,6 +271,10 @@ class AutoTester:
 
     # Pre-checks, low-voltage screen, triangular sweep, classifier (as before)
     def _pre_checks(self, device_meta: Dict[str,Any]) -> bool:
+        if self.params.debug_mode:
+            # In debug mode, skip pre-checks so you can test with a resistor or dummy
+            self._log(device_meta.get("device_id","unknown"), "PRECHECK_DEBUG_BYPASS", {})
+            return True
         device_id = device_meta.get("device_id","unknown")
         area = device_meta.get("area_um2", self.params.area_ref_um2)
         I_short_thresh = self.params.I_burn_base_A * (area / self.params.area_ref_um2)
@@ -365,8 +370,12 @@ class AutoTester:
             icc_start = float(cal_entry.get("Icomp_start_A", icc_start))
             icc_max = float(cal_entry.get("Icomp_max_A", icc_max))
         icc_factor = float(device_meta.get("icc_factor", cal_entry.get("icc_factor", DEFAULTS["icc_factor"])) if cal_entry else device_meta.get("icc_factor", DEFAULTS["icc_factor"]))
-        burn_abort_A = float(device_meta.get("burn_abort_A", cal_entry.get("burn_abort_A", icc_start*DEFAULTS["burn_abort_scale"] if icc_start else icc_start*10)))
-        delay_s = float(device_meta.get("tsp_delay_s", cal_entry.get("delay_s", 0.005)))
+        if cal_entry:
+            burn_abort_A = float(device_meta.get("burn_abort_A", cal_entry.get("burn_abort_A", icc_start*DEFAULTS["burn_abort_scale"] if icc_start else icc_start*10)))
+            delay_s = float(device_meta.get("tsp_delay_s", cal_entry.get("delay_s", 0.005)))
+        else:
+            burn_abort_A = float(device_meta.get("burn_abort_A", icc_start*DEFAULTS["burn_abort_scale"] if icc_start else icc_start*10))
+            delay_s = float(device_meta.get("tsp_delay_s", 0.005))
 
         # call instrument.run_tsp_sweep if available
         try:
@@ -705,7 +714,12 @@ class AutoTester:
 # GUI: updated with Run batch button
 # ---------------------------
 class AutomatedTesterGUI(tk.Toplevel):
-    def __init__(self, master=None, instrument: Optional[InstrumentInterface]=None):
+    def __init__(self, master=None, instrument: Optional[InstrumentInterface]=None, 
+                 current_section: Optional[str]=None,
+                 device_list: Optional[List[str]]=None,
+                 get_next_device_cb: Optional[Any]=None,
+                 current_device_id: Optional[str]=None,
+                 host_gui: Optional[Any]=None):
         super().__init__(master)
         self.title("Automated Memristor Tester")
         self.geometry("700x820")
@@ -714,7 +728,26 @@ class AutomatedTesterGUI(tk.Toplevel):
         self.lot_config = {"lot_id":"lot_auto","sections":{},"devices":{}}
         self.autotester = AutoTester(self.instrument if self.instrument else DummyInstrument(), self.params, self.lot_config)
         self.worker_thread = None
+        # integration with external GUIs
+        self.current_section = current_section or ""
+        self.external_device_list = device_list or []
+        self.current_device_id = current_device_id or (self.external_device_list[0] if self.external_device_list else "D1_G1")
+        self.get_next_device_cb = get_next_device_cb
+        self.host_gui = host_gui
         self._build_ui()
+        # try to listen to host selection changes if master provides callbacks/variables
+        try:
+            if hasattr(master, 'bind') and callable(master.bind):
+                # host may emit custom events like <<DeviceChanged>>; optional
+                master.bind('<<DeviceChanged>>', lambda e: self._sync_from_host())
+        except Exception:
+            pass
+        # periodic sync as fallback
+        try:
+            self._last_sync_key = None
+            self.after(300, self._host_sync_tick)
+        except Exception:
+            pass
 
     def _build_ui(self):
         frm = ttk.Frame(self); frm.pack(fill="both",expand=True,padx=8,pady=8)
@@ -724,6 +757,8 @@ class AutomatedTesterGUI(tk.Toplevel):
         ttk.Button(frm, text="Load Excel...", command=self._load_excel).grid(row=0,column=3,sticky="w")
         self.use_tsp_var = tk.BooleanVar(value=self.params.use_tsp)
         ttk.Checkbutton(frm, text="Use embedded TSP (Keithley 2401)", variable=self.use_tsp_var).grid(row=1,column=0,columnspan=2,sticky="w")
+        self.debug_mode_var = tk.BooleanVar(value=self.params.debug_mode)
+        ttk.Checkbutton(frm, text="Debug mode (bypass precheck)", variable=self.debug_mode_var).grid(row=1,column=2,columnspan=2,sticky="w")
         # basic params...
         ttk.Label(frm, text="V_read (V):").grid(row=2,column=0,sticky="w")
         self.vread_var = tk.DoubleVar(value=self.params.V_read); ttk.Entry(frm,textvariable=self.vread_var,width=10).grid(row=2,column=1)
@@ -744,20 +779,75 @@ class AutomatedTesterGUI(tk.Toplevel):
         ttk.Label(frm, text="Pulse widths (ms comma):").grid(row=6,column=2,sticky="w")
         self.pulse_widths_var = tk.StringVar(value=",".join(str(int(w*1e3)) for w in self.params.pulse_widths_s)); ttk.Entry(frm,textvariable=self.pulse_widths_var,width=24).grid(row=6,column=3)
         ttk.Label(frm, text="Device ID:").grid(row=7,column=0,sticky="w")
-        self.device_id_var = tk.StringVar(value="D1_G1"); ttk.Entry(frm,textvariable=self.device_id_var,width=12).grid(row=7,column=1)
+        self.device_id_var = tk.StringVar(value=self.current_device_id)
+        ttk.Entry(frm,textvariable=self.device_id_var,width=12).grid(row=7,column=1)
+        ttk.Label(frm, text="Device # (1-10):").grid(row=7,column=2,sticky="w")
+        self.device_num_var = tk.IntVar(value=1)
+        ttk.Spinbox(frm, from_=1, to=10, textvariable=self.device_num_var, width=6).grid(row=7,column=3)
         ttk.Label(frm, text="Chip ID:").grid(row=7,column=2,sticky="w")
         self.chip_id_var = tk.StringVar(value="chip1"); ttk.Entry(frm,textvariable=self.chip_id_var,width=12).grid(row=7,column=3)
         ttk.Label(frm, text="Section ID:").grid(row=8,column=0,sticky="w")
-        self.section_id_var = tk.StringVar(value="A"); ttk.Entry(frm,textvariable=self.section_id_var,width=12).grid(row=8,column=1)
+        self.section_id_var = tk.StringVar(value=self.current_section or "A"); ttk.Entry(frm,textvariable=self.section_id_var,width=12).grid(row=8,column=1)
         ttk.Label(frm, text="Area (um^2):").grid(row=8,column=2,sticky="w")
         self.area_var = tk.DoubleVar(value=DEFAULTS["area_um2"]); ttk.Entry(frm,textvariable=self.area_var,width=12).grid(row=8,column=3)
-        ttk.Button(frm, text="Start Single Test", command=self._start_single_test).grid(row=9,column=0,pady=8)
-        ttk.Button(frm, text="Run batch (Excel devices)", command=self._start_batch).grid(row=9,column=1,pady=8)
+        self.measure_one_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frm, text="Measure one device only", variable=self.measure_one_var).grid(row=9,column=0,sticky="w")
+        ttk.Button(frm, text="Start Single Test", command=self._start_single_test).grid(row=9,column=1,pady=8)
+        ttk.Button(frm, text="Run batch (Excel devices)", command=self._start_batch).grid(row=9,column=2,pady=8)
         ttk.Button(frm, text="Stop (safe)", command=self._stop_requested).grid(row=9,column=2,pady=8)
         ttk.Button(frm, text="Save params...", command=self._save_params).grid(row=9,column=3)
         ttk.Button(frm, text="Open data folder", command=self._open_data_folder).grid(row=9,column=4)
         self.status = tk.Text(frm, height=16); self.status.grid(row=10,column=0,columnspan=5,pady=8)
         self._append_status("Ready. Load Excel and run batch or start single test.")
+
+    def _sync_from_host(self):
+        try:
+            # Try to pull current device/section from host GUI if available
+            host = self.host_gui if self.host_gui is not None else self.master
+            section_letter = None
+            device_num = None
+            # Prefer explicit fields from Measurement GUI
+            if hasattr(host, 'device_section_and_number'):
+                text = str(getattr(host, 'device_section_and_number'))
+                # parse like 'A1'...'Z10'
+                letters = ''.join([c for c in text if c.isalpha()])
+                digits = ''.join([c for c in text if c.isdigit()])
+                section_letter = letters or None
+                device_num = int(digits) if digits else None
+            # Fallback to section attribute
+            if section_letter is None and hasattr(host, 'section'):
+                section_letter = str(getattr(host, 'section'))
+            # Fallback to current_index mapping (1-10)
+            if device_num is None and hasattr(host, 'current_index'):
+                try:
+                    idx = int(getattr(host, 'current_index'))
+                    device_num = (idx % 10) + 1
+                except Exception:
+                    device_num = None
+            # Update UI if new
+            key = f"{section_letter}-{device_num}"
+            if key != getattr(self, '_last_sync_key', None) and (section_letter or device_num):
+                if section_letter:
+                    self.section_id_var.set(section_letter)
+                if device_num:
+                    self.device_num_var.set(device_num)
+                    # Update device/chip IDs to match convention
+                    self.device_id_var.set(f"device_{device_num}")
+                    # keep chip id numeric 1-10
+                    if hasattr(self, 'chip_id_var'):
+                        self.chip_id_var.set(str(device_num))
+                self._last_sync_key = key
+        except Exception:
+            pass
+
+    def _host_sync_tick(self):
+        try:
+            self._sync_from_host()
+        finally:
+            try:
+                self.after(300, self._host_sync_tick)
+            except Exception:
+                pass
 
     def _append_status(self, msg: str):
         ts = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -792,6 +882,7 @@ class AutomatedTesterGUI(tk.Toplevel):
         except Exception:
             self._append_status("Pulse widths parse error; keeping old values.")
         self.params.use_tsp = bool(self.use_tsp_var.get())
+        self.params.debug_mode = bool(self.debug_mode_var.get())
         self.autotester.params = self.params
 
     def _start_single_test(self):
@@ -812,6 +903,19 @@ class AutomatedTesterGUI(tk.Toplevel):
         try:
             self.autotester.test_device(device_meta)
             self._append_status(f"Finished {device_meta['device_id']}")
+            # If measuring multiple devices, request next from host GUI
+            if not self.measure_one_var.get():
+                next_dev = None
+                try:
+                    if self.get_next_device_cb:
+                        next_dev = self.get_next_device_cb()
+                except Exception:
+                    next_dev = None
+                if next_dev:
+                    # Update UI fields and start next device automatically
+                    self.device_id_var.set(next_dev)
+                    self._append_status(f"Auto-advancing to next device: {next_dev}")
+                    self._start_single_test()
         except Exception as e:
             self._append_status(f"Exception: {e}")
 
