@@ -1,5 +1,6 @@
 from pymeasure.instruments.keithley import Keithley2400
 import time
+import math
 from typing import Optional, Dict, Any, List, Tuple
 
 """https://pymeasure.readthedocs.io/en/latest/api/instruments/keithley/keithley2400.html#pymeasure.instruments.keithley.Keithley2400.compliance_current"""
@@ -227,6 +228,7 @@ class Keithley2400Controller:
 
             # consume lines until marker or timeout
             got_abort = False
+            last_line = ""
             while True:
                 # timeout guard
                 if time.time() - start_time > timeout:
@@ -249,6 +251,7 @@ class Keithley2400Controller:
                     raw = raw.strip()
                     if not raw:
                         continue
+                    last_line = raw
                     # handle markers
                     if raw.startswith("DATA:"):
                         payload = raw.split(":", 1)[1].strip()
@@ -274,7 +277,7 @@ class Keithley2400Controller:
                         # normal end
                         break
                     # other prints (TSP_STARTED etc) - ignore or log
-                if got_abort or raw == "SWEEP_DONE":
+                if got_abort or last_line == "SWEEP_DONE":
                     break
 
             # post-process and safety check
@@ -282,17 +285,8 @@ class Keithley2400Controller:
                 # last recorded point may be the cause (or none if failed earlier)
                 last_v = voltages[-1] if voltages else None
                 last_i = currents[-1] if currents else None
-                # optionally save trace file
+                # optionally save trace file (omitted here)
                 trace_file = None
-                try:
-                    if voltages and currents:
-                        trace_file = f"tsp_trace_{timestamp()}.csv"
-                        with open(trace_file, "w") as f:
-                            f.write("V_V,I_A\n")
-                            for vv, ii in zip(voltages, currents):
-                                f.write(f"{vv},{ii}\n")
-                except Exception:
-                    trace_file = None
                 return {"status": "DAMAGE", "message": "Instrument-side abort: current exceeded burn threshold",
                         "V_last": last_v, "I_last": last_i, "voltages": voltages, "currents": currents, "trace_file": trace_file}
 
@@ -301,16 +295,8 @@ class Keithley2400Controller:
             for vv, ii in zip(voltages[1:], currents[1:]):
                 if abs(ii) >= (self.jump_factor if hasattr(self, 'jump_factor') else 100.0) * prev_i:
                     # formation event detected
+                    # optionally save trace file (omitted here)
                     trace_file = None
-                    try:
-                        if voltages and currents:
-                            trace_file = f"tsp_trace_{timestamp()}.csv"
-                            with open(trace_file, "w") as f:
-                                f.write("V_V,I_A\n")
-                                for vvv, iii in zip(voltages, currents):
-                                    f.write(f"{vvv},{iii}\n")
-                    except Exception:
-                        trace_file = None
                     return {"status": "FORMED", "V_form": vv, "voltages": voltages, "currents": currents, "trace_file": trace_file}
                 prev_i = abs(ii)
 
