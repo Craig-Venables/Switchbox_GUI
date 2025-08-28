@@ -411,7 +411,7 @@ class MeasurementGUI:
             self.master.after(100, self._pump_test_logs)
         elif drained:
             self.master.after(100, self._pump_test_logs)
-
+#extra 
     def show_test_preferences(self):
         t = load_thresholds()
         info = (
