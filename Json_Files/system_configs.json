@@ -1,7 +1,7 @@
 {
     "Lab Small-2401": {
         "SMU_address": "GPIB0::24::INSTR",
-        "SMU Type": "Keithley 2400",
+        "SMU Type": "Keithley 2401",
         "psu_address": "USB0::0x05E6::0x2220::9210734::INSTR",
         "temp_address": "ASRL12::INSTR",
         "temp_controller": "Oxford ITC4"
@@ -12,7 +12,7 @@
     },
     "Olegs_lab-2401": {
         "SMU_address": "GPIB0::9::INSTR",
-        "SMU Type": "Keithley 2400",
+        "SMU Type": "Keithley 2401",
         "temp_address": "12",
         "temp_controller": "Lakeshore 335"
     },
