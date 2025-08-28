@@ -16,6 +16,8 @@ import atexit
 from pathlib import Path
 import queue
 
+from telegram import PassportData
+
 from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller  # Import the Keithley class
 from Equipment_Classes.iv_controller_manager import IVControllerManager
 from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
@@ -81,6 +83,9 @@ class MeasurementGUI:
         self.lakeshore = None
         self.psu_needed = False
         self._telegram_bot = None
+        # Runtime controls for custom sweeps
+        self.pause_requested = False
+        self.sweep_runtime_overrides = {}
 
         # Data storage
         self.measurement_data = {}  # Store measurement results
@@ -776,60 +781,107 @@ class MeasurementGUI:
     def plot_current_time(self):
         while True:
             if self.measuring:
-                self.line_ct_rt.set_data(self.t_arr_disp, self.c_arr_disp)
-                self.ax_ct_rt.relim()
-                self.ax_ct_rt.autoscale_view()
-                self.canvas_ct_rt.draw()
+                try:
+                    x = list(self.t_arr_disp)
+                    y = list(self.c_arr_disp)
+                    n = min(len(x), len(y))
+                    if n > 0:
+                        self.line_ct_rt.set_data(x[:n], y[:n])
+                        self.ax_ct_rt.relim()
+                        self.ax_ct_rt.autoscale_view()
+                        self.canvas_ct_rt.draw()
+                except Exception:
+                    pass
             time.sleep(0.1)
 
     def plot_vi_logilogv(self):
         while True:
             if self.measuring:
-                self.line_rt_vi.set_data(self.c_arr_disp, self.v_arr_disp)
-                self.ax_rt_vi.relim()
-                self.ax_rt_vi.autoscale_view()
-                self.canvas_rt_vi.draw()
+                try:
+                    x = list(self.c_arr_disp)
+                    y = list(self.v_arr_disp)
+                    n = min(len(x), len(y))
+                    if n > 0:
+                        self.line_rt_vi.set_data(x[:n], y[:n])
+                        self.ax_rt_vi.relim()
+                        self.ax_rt_vi.autoscale_view()
+                        self.canvas_rt_vi.draw()
+                except Exception:
+                    pass
 
-                if np.any(np.array(self.v_arr_disp_abs) > 0) and np.any(np.isfinite(self.c_arr_disp)):
-                    # it never makes it into here!
-                    self.line_rt_logilogv.set_data(self.v_arr_disp, self.c_arr_disp)
-                    self.ax_rt_logilogv.relim()
-                    self.ax_rt_logilogv.autoscale_view()
-                    self.canvas_rt_logilogv.draw()
+                try:
+                    vx = list(self.v_arr_disp)
+                    vy = list(self.c_arr_disp)
+                    n2 = min(len(vx), len(vy))
+                    if n2 > 0 and np.any(np.array(vx[:n2]) > 0):
+                        self.line_rt_logilogv.set_data(vx[:n2], vy[:n2])
+                        self.ax_rt_logilogv.relim()
+                        self.ax_rt_logilogv.autoscale_view()
+                        self.canvas_rt_logilogv.draw()
+                except Exception:
+                    pass
 
             time.sleep(0.1)
 
     def plot_voltage_current(self):
         while True:
             if self.measuring:
-                self.line_rt_iv.set_data(self.v_arr_disp, self.c_arr_disp)
-                self.ax_rt_iv.relim()
-                self.ax_rt_iv.autoscale_view()
-                self.canvas_rt_iv.draw()
+                try:
+                    x = list(self.v_arr_disp)
+                    y = list(self.c_arr_disp)
+                    n = min(len(x), len(y))
+                    if n > 0:
+                        self.line_rt_iv.set_data(x[:n], y[:n])
+                        self.ax_rt_iv.relim()
+                        self.ax_rt_iv.autoscale_view()
+                        self.canvas_rt_iv.draw()
+                except Exception:
+                    pass
 
-                self.line_rt_logiv.set_data(self.v_arr_disp, self.c_arr_disp_abs)
-                self.ax_rt_logiv.relim()
-                self.ax_rt_logiv.autoscale_view()
-                self.canvas_rt_logiv.draw()
+                try:
+                    x2 = list(self.v_arr_disp)
+                    y2 = list(self.c_arr_disp_abs)
+                    n2 = min(len(x2), len(y2))
+                    if n2 > 0:
+                        self.line_rt_logiv.set_data(x2[:n2], y2[:n2])
+                        self.ax_rt_logiv.relim()
+                        self.ax_rt_logiv.autoscale_view()
+                        self.canvas_rt_logiv.draw()
+                except Exception:
+                    pass
 
             time.sleep(0.1)
 
     def plot_resistance_time(self):
         while True:
             if self.measuring:
-                self.line_rt_rt.set_data(self.t_arr_disp, self.r_arr_disp)
-                self.ax_rt_rt.relim()
-                self.ax_rt_rt.autoscale_view()
-                self.canvas_rt_rt.draw()
+                try:
+                    x = list(self.t_arr_disp)
+                    y = list(self.r_arr_disp)
+                    n = min(len(x), len(y))
+                    if n > 0:
+                        self.line_rt_rt.set_data(x[:n], y[:n])
+                        self.ax_rt_rt.relim()
+                        self.ax_rt_rt.autoscale_view()
+                        self.canvas_rt_rt.draw()
+                except Exception:
+                    pass
             time.sleep(0.1)
 
     def plot_Temp_time(self):
         while True:
             if self.measuring:
-                self.line_tt_rt.set_data(self.t_arr_disp, self.c_arr_disp)
-                self.ax_tt_rt.relim()
-                self.ax_tt_rt.autoscale_view()
-                self.canvas_tt_rt.draw()
+                try:
+                    x = list(self.t_arr_disp)
+                    y = list(self.c_arr_disp)
+                    n = min(len(x), len(y))
+                    if n > 0:
+                        self.line_tt_rt.set_data(x[:n], y[:n])
+                        self.ax_tt_rt.relim()
+                        self.ax_tt_rt.autoscale_view()
+                        self.canvas_tt_rt.draw()
+                except Exception:
+                    pass
             time.sleep(0.1)
 
     ###################################################################
@@ -1127,6 +1179,8 @@ class MeasurementGUI:
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
         self.adaptive_button.grid(row=12, column=1, columnspan=1, pady=10)
 
+        # Note: Detailed sweep controls moved to popup editor; only Pause remains in main panel
+
     def start_automated_tests(self):
         if self.tests_running:
             messagebox.showinfo("Tests", "Automated tests already running.")
@@ -1272,6 +1326,7 @@ class MeasurementGUI:
 
     def set_measurment_flag_true(self):
         self.stop_measurement_flag = True
+    
     def create_custom_measurement_section(self,parent):
         """Custom measurements section"""
         frame = tk.LabelFrame(parent, text="Custom Measurements", padx=5, pady=5)
@@ -1293,11 +1348,101 @@ class MeasurementGUI:
         self.run_custom_button = tk.Button(frame, text="Run Custom", command=start_thread)
         self.run_custom_button.grid(row=1, column=0, columnspan=2, pady=5)
 
+        # Pause button (kept in main UI, positioned under Run Custom)
+        def toggle_pause():
+            self.pause_requested = not self.pause_requested
+            self.pause_button_custom.config(text=("Resume" if self.pause_requested else "Pause"))
+        self.pause_button_custom = tk.Button(frame, text="Pause", width=10, command=toggle_pause)
+        self.pause_button_custom.grid(row=2, column=0, padx=5, pady=2, sticky="w")
+
+        # Open sweep editor popup (under Run Custom)
+        tk.Button(frame, text="Edit Sweeps", command=self.open_sweep_editor_popup).grid(row=2, column=1, padx=5, pady=2, sticky="w")
+
+    def open_sweep_editor_popup(self):
+        try:
+            selected = self.custom_measurement_var.get()
+            plan = self.custom_sweeps.get(selected, {}).get('sweeps', {})
+        except Exception:
+            plan = {}
+
+        win = tk.Toplevel(self.master)
+        win.title("Edit Sweeps")
+        win.geometry("500x500")
+        try:
+            win.grid_rowconfigure(1, weight=1)
+            win.grid_columnconfigure(0, weight=1)
+        except Exception:
+            pass
+
+        # Header
+        header = tk.Frame(win)
+        header.grid(row=0, column=0, columnspan=2, sticky="ew", padx=6, pady=4)
+        tk.Label(header, text="Sweep", width=8).grid(row=0, column=0)
+        tk.Label(header, text="stop_v", width=10).grid(row=0, column=1)
+        tk.Label(header, text="Skip", width=6).grid(row=0, column=2)
+
+        # Body with rows (grid-based layout)
+        rows = tk.Frame(win)
+        rows.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=6, pady=4)
+        try:
+            rows.grid_rowconfigure(0, weight=1)
+            rows.grid_columnconfigure(0, weight=1)
+        except Exception:
+            pass
+
+        # Scrollable area if many sweeps
+        canvas = tk.Canvas(rows)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(rows, orient="vertical", command=canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        inner = tk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        self._sweep_editor_vars = {}
+        for idx, (key, params) in enumerate(sorted(plan.items(), key=lambda kv: int(kv[0]))):
+            key_str = str(key)
+            stopv_val = params.get('stop_v', '')
+            tk.Label(inner, text=key_str, width=8).grid(row=idx, column=0, padx=2, pady=2)
+            v = tk.StringVar(value=str(stopv_val))
+            e = ttk.Entry(inner, textvariable=v, width=10)
+            e.grid(row=idx, column=1, padx=2, pady=2)
+            skip_var = tk.IntVar(value=1 if params.get('__skip__') else 0)
+            cb = ttk.Checkbutton(inner, variable=skip_var)
+            cb.grid(row=idx, column=2, padx=2, pady=2)
+            self._sweep_editor_vars[key_str] = {'stop_v': v, 'skip': skip_var}
+
+        # Footer with actions
+        footer = tk.Frame(win)
+        footer.grid(row=2, column=0, columnspan=2, sticky="ew", padx=6, pady=6)
+
+        def apply_changes():
+            edits = {}
+            for key_str, vars_dict in self._sweep_editor_vars.items():
+                entry_val = vars_dict['stop_v'].get().strip()
+                skip_flag = bool(vars_dict['skip'].get())
+                entry_num = None
+                if entry_val != "":
+                    try:
+                        entry_num = float(entry_val)
+                    except Exception:
+                        entry_num = None
+                edits[key_str] = {}
+                if entry_num is not None:
+                    edits[key_str]['stop_v'] = entry_num
+                if skip_flag:
+                    edits[key_str]['skip'] = True
+            self.sweep_runtime_overrides = edits
+            win.destroy()
+
+        ttk.Button(footer, text="Apply", command=apply_changes).grid(row=0, column=1, sticky="e")
+
     def signal_messaging(self,parent):
         # Keep a handle to the frame so we can manage stacking/visibility
         self.signal_frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
         frame = self.signal_frame
-        frame.grid(row=6, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
+        frame.grid(row=7, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
 
         # Toggle switch: Measure one device
         tk.Label(frame, text="Do you want to use the bot?").grid(row=0, column=0, sticky="w")
@@ -1594,10 +1739,11 @@ class MeasurementGUI:
 
                     np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
 
-                    #change device
-                    self.sample_gui.next_device()
-                    time.sleep(0.1)
-                    self.sample_gui.change_relays()
+                    # change device only if measuring all devices
+                    if not self.single_device_flag:
+                        self.sample_gui.next_device()
+                        time.sleep(0.1)
+                        self.sample_gui.change_relays()
 
                 count_pass += 1
                 time.sleep(self.sq_time_delay.get()) # delay for the time between measurements
@@ -1614,7 +1760,7 @@ class MeasurementGUI:
             else:
                 start_index = 0  # Default to the first device if current one is not found
 
-            device_count = len(self.device_list)
+            device_count = 1 if self.single_device_flag else len(self.device_list)
             # Initialize empty arrays for each device
 
             for j in range(device_count):
@@ -1680,17 +1826,17 @@ class MeasurementGUI:
                                                 start_index, interrupted=True)  # Removed device_count parameter
                         return  # Exit the function
 
-                    #when changing device ensure voltage is 0
-                    self.keithley.set_voltage(0,self.icc.get())
-                    # let current drop/voltage to decrease
-                    time.sleep(0.1)
-
-                    # Change to next device
-                    self.sample_gui.next_device()
-                    time.sleep(0.1)
-                    self.sample_gui.change_relays()
-                    print("Switching Device")
-                    time.sleep(0.1)
+                    # when changing device, only do so if measuring all devices
+                    if not self.single_device_flag:
+                        # ensure voltage is 0 before switching
+                        self.keithley.set_voltage(0,self.icc.get())
+                        time.sleep(0.1)
+                        # Change to next device
+                        self.sample_gui.next_device()
+                        time.sleep(0.1)
+                        self.sample_gui.change_relays()
+                        print("Switching Device")
+                        time.sleep(0.1)
 
                 # Auto-save every 5 cycles
                 if (i + 1) % 5 == 0:
@@ -1935,6 +2081,19 @@ class MeasurementGUI:
         if sequence is not None:
             sequence = str(sequence)
 
+        # Determine if LED is needed at all for this run
+        try:
+            led_requested_any = (str(sequence).find('1') != -1) if sequence is not None else bool(led)
+        except Exception:
+            led_requested_any = bool(led)
+
+        # Ensure PSU is connected if any LED use is requested
+        try:
+            if led_requested_any and not getattr(self, 'psu_connected', False):
+                self.connect_keithley_psu()
+        except Exception:
+            pass
+
         start_time = time.time()
         v_arr = []
         c_arr = []
@@ -1967,10 +2126,17 @@ class MeasurementGUI:
                 led_state = sequence[sweep_num]
 
             if led_state == '1':
-                self.psu.led_on_380(power)
+                try:
+                    self.psu.led_on_380(power)
+                except Exception:
+                    pass
             else:
-                if self.psu_needed:
-                    self.psu.led_off_380()
+                # Explicitly turn LED off when sequence/flag says so
+                try:
+                    if led == 1:
+                        self.psu.led_off_380()
+                except Exception:
+                    pass
 
             if self.stop_measurement_flag:  # Check if stop was pressed
                 print("Measurement interrupted!")
@@ -1984,13 +2150,10 @@ class MeasurementGUI:
                 measure_time = time.time() - start_time
 
 
-
                 # append information
                 v_arr.append(v)
                 c_arr.append(current[1])
                 time_stamps.append(measure_time)
-
-
 
 
                 # appending info for real time graphs.
@@ -2015,8 +2178,13 @@ class MeasurementGUI:
                             print('pausing for',pause," seconds")
                             time.sleep(pause)
                 previous_v = v
-        if self.psu_needed:
-            self.psu.led_off_380()  # ensure LED is off at the end
+        # Always attempt to turn LED off at the end if PSU is available
+        try:
+            self.psu.led_off_380()
+        except Exception:
+            pass
+        self.keithley.set_voltage(0, icc)
+        
         return v_arr, c_arr, time_stamps
 
     def run_custom_measurement(self):
@@ -2045,13 +2213,18 @@ class MeasurementGUI:
         self.check_for_sample_name()
 
         selected_measurement = self.custom_measurement_var.get()
+        # Reset any prior sweep edits from the popup for a fresh run
+        try:
+            self.sweep_runtime_overrides = {}
+        except Exception:
+            pass
         print(f"Running custom measurement: {selected_measurement}")
 
         print(self.get_messaged_var)
         # use the bot to send a message
         a = self.get_messaged_var.get()
         #b = self.get_messaged_switch.get()
-        print(a)
+        #print(a)
         if self.get_messaged_var.get() == 1:
             bot = TelegramBot(self.token_var.get(), self.chatid_var.get())
             var = self.custom_measurement_var.get()
@@ -2084,6 +2257,7 @@ class MeasurementGUI:
                 start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 sweeps = self.custom_sweeps[selected_measurement]["sweeps"]
+                # Initial merge disabled; we now apply live edits per-sweep inside the loop
                 code_name = self.custom_sweeps[selected_measurement].get("code_name", "unknown")
 
                 # checks psu connection only if any sweep explicitly requires LED
@@ -2106,6 +2280,19 @@ class MeasurementGUI:
                     self.connect_keithley_psu()
 
                 for key, params in sweeps.items():
+                    # Apply live edits for this sweep (skip/stop_v) so mid-run changes take effect
+                    try:
+                        live_edits = getattr(self, 'sweep_runtime_overrides', {}) or {}
+                        per = live_edits.get(str(key), {})
+                        if per.get('skip'):
+                            continue
+                        if 'stop_v' in per:
+                            try:
+                                params['stop_v'] = float(per['stop_v'])
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
                     if self.stop_measurement_flag:  # Check if stop was pressed
                         print("Measurement interrupted!")
                         break  # Exit measurement loop immediately
@@ -2113,9 +2300,35 @@ class MeasurementGUI:
                     self.measurment_number = key
                     print("Working on device -", device, ": Measurement -", key)
 
+                    # Runtime: pause between sweeps if requested
+                    while getattr(self, 'pause_requested', False) and not self.stop_measurement_flag:
+                        time.sleep(0.1)
+
+                    # Runtime: skip forward to a specific sweep number, if set
+                    skip_to = getattr(self, 'skip_to_sweep_target', None)
+                    if skip_to is not None:
+                        try:
+                            current_idx = int(str(key))
+                            if current_idx < int(skip_to):
+                                continue
+                            else:
+                                # Clear the target once reached
+                                self.skip_to_sweep_target = None
+                        except Exception:
+                            pass
+
                     # default values
                     start_v = params.get("start_v", 0)
                     stop_v = params.get("stop_v", 1)
+                    # Runtime: override stop_v for a configured sweep range
+                    override = getattr(self, 'override_range', None)
+                    if override is not None:
+                        try:
+                            cur_idx = int(str(key))
+                            if override["start"] <= cur_idx <= override["end"]:
+                                stop_v = float(override["stop_v"])
+                        except Exception:
+                            pass
                     sweeps = params.get("sweeps", 1)
                     step_v = params.get("step_v", 0.1)
                     step_delay = params.get("step_delay", 0.05)
@@ -2195,7 +2408,14 @@ class MeasurementGUI:
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
 
-                    name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}-{sweeps}"
+                    if self.additional_info_var != "":
+                        #extra_info = "-" + str(self.additional_info_entry.get())
+                        # or
+                        extra_info = "-" + self.additional_info_entry.get().strip()
+                    else:
+                        extra_info = ""
+
+                    name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}-{sweeps}{extra_info}"
                     file_path = f"{save_dir}\\{name}.txt"
 
                     if os.path.exists(file_path):
@@ -2211,14 +2431,24 @@ class MeasurementGUI:
                     # give time to sleep between measurements!
                     time.sleep(2)
                 try:
-                    self.psu.led_off_380()
-                except:
-                    continue
+                    if getattr(self, 'psu_needed', False) and hasattr(self, 'psu'):
+                        self.psu.led_off_380()
+                except Exception:
+                    # Do not skip the rest of the per-device finalization
+                    pass
 
                 plot_filename_iv = f"{save_dir}\\All_graphs_IV.png"
                 plot_filename_log = f"{save_dir}\\All_graphs_LOG.png"
                 self.ax_all_iv.figure.savefig(plot_filename_iv, dpi=400)
                 self.ax_all_logiv.figure.savefig(plot_filename_log, dpi=400)
+                # Save final sweep plot(s)
+                final_iv_path, final_log_path = self._save_final_sweep_plot(save_dir)
+                # Create combined BEFORE clearing axes so "All" plots retain data
+                try:
+                    combined_now = self._save_combined_summary_plot(save_dir)
+                    self._last_combined_summary_path = combined_now
+                except Exception:
+                    self._last_combined_summary_path = None
                 self.ax_all_iv.clear()
                 self.ax_all_logiv.clear()
                 self.keithley.enable_output(False)
@@ -2228,47 +2458,104 @@ class MeasurementGUI:
 
                 self.create_log_file(save_dir, start_time, selected_measurement)
 
+                print(self.single_device_flag,device_count)
+                
                 if self.single_device_flag:
                     print("Measuring one device only")
-                    break  # Exit measurement loop immediately
+                    # Stop iterating further devices by exiting the device loop
+                    
+                    break
+                if not self.single_device_flag:
+                    self.sample_gui.next_device()
+                    time.sleep(0.1)
+                    self.sample_gui.change_relays()
+                    print("Switching Device")
 
-                self.sample_gui.next_device()
 
-            if self._bot_enabled():
-                self._send_bot_message("Measurements finished")
-                try:
-                    self._send_bot_image(plot_filename_log, "Final_graphs_LOG")
-                except Exception:
-                    pass
+            # Always mark measurement complete in GUI
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
-            messagebox.showinfo("Complete", "Measurements finished.")
-
-
+            if self._bot_enabled():
+                # Offload interactive flow to background thread so GUI is not blocked
+                try:
+                    import threading
+                    combined = getattr(self, '_last_combined_summary_path', None)
+                    threading.Thread(target=self._post_measurement_options_worker,
+                                     args=(save_dir, combined),
+                                     daemon=True).start()
+                except Exception:
+                    # Fallback to simple message
+                    self._send_bot_message("Measurements finished")
+            else:
+                # Only show blocking popup when bot is disabled
+                messagebox.showinfo("Complete", "Measurements finished.")
         else:
             print("Selected measurement not found in JSON file.")
+
+    def _show_message_async(self, kind: str, *args, **kwargs):
+        try:
+            self.master.after(0, lambda: getattr(messagebox, kind)(*args, **kwargs))
+        except Exception:
+            pass
+
+    def _safe_get_float(self, var, name: str, default=None):
+        try:
+            return float(var.get())
+        except Exception:
+            if default is not None:
+                try:
+                    return float(default)
+                except Exception:
+                    return None
+            self._show_message_async("showerror", "Invalid input", f"{name} is empty or invalid.")
+            return None
 
     def start_measurement(self):
         """Start single measurementt on the device! """
 
         if not self.connected:
-            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            self._show_message_async("showwarning", "Warning", "Not connected to Keithley!")
             return
         self.measuring = True
 
 
-        start_v = self.start_voltage.get()
-        stop_v = self.voltage_high.get()
-        sweeps = self.sweeps.get()
-        step_v = self.step_size.get()
+        start_v = self._safe_get_float(self.start_voltage, "Start Voltage")
+        if start_v is None:
+            self.measuring = False
+            return
+        stop_v = self._safe_get_float(self.voltage_high, "Stop Voltage")
+        if stop_v is None:
+            self.measuring = False
+            return
+        sweeps_val = self._safe_get_float(self.sweeps, "Sweeps", default=1)
+        if sweeps_val is None:
+            self.measuring = False
+            return
+        sweeps = int(sweeps_val)
+        step_v = self._safe_get_float(self.step_size, "Step Size", default=0.1)
+        if step_v is None:
+            self.measuring = False
+            return
         sweep_type = "FS"
-        step_delay = self.step_delay.get()
-        icc = self.icc.get()
-        device_count = len(self.device_list)
-        pause = self.pause.get()
+        step_delay = self._safe_get_float(self.step_delay, "Step Delay", default=0.05)
+        if step_delay is None:
+            self.measuring = False
+            return
+        icc = self._safe_get_float(self.icc, "Compliance (Icc)", default=1e-3)
+        if icc is None:
+            self.measuring = False
+            return
+        device_count = 1 if self.single_device_flag else len(self.device_list)
+        pause = self._safe_get_float(self.pause, "Pause", default=0.0)
+        if pause is None:
+            self.measuring = False
+            return
 
         led = self.led.get()
-        led_power = self.led_power.get()
+        led_power = self._safe_get_float(self.led_power, "LED Power", default=1.0)
+        if led_power is None:
+            self.measuring = False
+            return
         sequence = self.sequence.get().strip()
         # if led != 1:
         #     led_power = 1
@@ -2378,7 +2665,29 @@ class MeasurementGUI:
 
         self.measuring = False
         self.status_box.config(text="Measurement Complete")
-        messagebox.showinfo("Complete", "Measurements finished.")
+        # Only show popup if bot is disabled; otherwise let bot drive the follow-up
+        show_popup = not self._bot_enabled()
+        if show_popup:
+            messagebox.showinfo("Complete", "Measurements finished.")
+        try:
+            # Also send post-measurement flow for single/normal measurement path
+            if self._bot_enabled():
+                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+                try:
+                    # Save all plots to ensure combined has the latest
+                    self.ax_all_iv.figure.savefig(f"{save_dir}\\All_graphs_IV.png", dpi=400)
+                    self.ax_all_logiv.figure.savefig(f"{save_dir}\\All_graphs_LOG.png", dpi=400)
+                except Exception:
+                    pass
+                combined = self._save_combined_summary_plot(save_dir)
+                # Store last combined for consistency with custom flow
+                self._last_combined_summary_path = combined
+                import threading
+                threading.Thread(target=self._post_measurement_options_worker,
+                                 args=(save_dir, combined),
+                                 daemon=True).start()
+        except Exception:
+            pass
 
     def retention_measure(self,set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time):
         icc = 0.0001
@@ -2416,7 +2725,11 @@ class MeasurementGUI:
         smu_type = getattr(self, 'SMU_type', 'Keithley 2400')
         try:
             self.keithley = IVControllerManager(smu_type, address)
-            self.connected = True
+            # Verify the connection using controller's handle
+            try:
+                self.connected = bool(self.keithley.is_connected())
+            except Exception:
+                self.connected = True
             self.status_box.config(text="Status: Connected")
             # Optional beep if supported
             if hasattr(self.keithley, 'beep'):
@@ -3039,6 +3352,12 @@ class MeasurementGUI:
         # self.ax_rt_iv.plot(v_arr, c_arr, marker='o', markersize=2, color='k')
         # self.canvas_rt_iv.draw()
 
+        # Remember last sweep for summary/final plot sharing
+        try:
+            self._last_sweep_data = (list(v_arr), list(c_arr))
+        except Exception:
+            self._last_sweep_data = (v_arr, c_arr)
+
         self.ax_all_iv.plot(v_arr, c_arr, marker='o', markersize=2, label=key + "_" + str(stop_v) + "v", alpha=0.8)
         self.ax_all_iv.legend(loc="best", fontsize="5")
         self.ax_all_logiv.plot(v_arr, np.abs(c_arr), marker='o', markersize=2, label=key + "_" + str(stop_v) + "v",
@@ -3048,6 +3367,351 @@ class MeasurementGUI:
         self.canvas_all_logiv.draw()
         self.master.update_idletasks()
         self.master.update()
+
+    def _save_final_sweep_plot(self, save_dir: str) -> tuple[str | None, str | None]:
+        """Save final sweep plots (linear and log) using Agg backend. Returns (iv_path, log_path)."""
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+            v_arr, c_arr = getattr(self, '_last_sweep_data', (None, None))
+            if v_arr is None or c_arr is None:
+                return (None, None)
+            iv_path = f"{save_dir}\\Final_graph_IV.png"
+            log_path = f"{save_dir}\\Final_graph_LOG.png"
+            try:
+                fig_iv = Figure(figsize=(4, 3))
+                _ = FigureCanvas(fig_iv)
+                ax_iv = fig_iv.add_subplot(111)
+                ax_iv.set_title("Final Sweep (IV)")
+                ax_iv.set_xlabel("Voltage (V)")
+                ax_iv.set_ylabel("Current (A)")
+                ax_iv.plot(v_arr, c_arr, marker='o', markersize=2, color='k')
+                fig_iv.savefig(iv_path, dpi=300)
+            except Exception:
+                iv_path = None
+            try:
+                fig_log = Figure(figsize=(4, 3))
+                _ = FigureCanvas(fig_log)
+                ax_log = fig_log.add_subplot(111)
+                ax_log.set_title("Final Sweep (|I|)")
+                ax_log.set_xlabel("Voltage (V)")
+                ax_log.set_ylabel("|Current| (A)")
+                ax_log.semilogy(v_arr, np.abs(c_arr), marker='o', markersize=2, color='k')
+                fig_log.savefig(log_path, dpi=300)
+            except Exception:
+                log_path = None
+            return (iv_path, log_path)
+        except Exception:
+            return (None, None)
+
+    def _save_combined_summary_plot(self, save_dir: str) -> str | None:
+        """Create a 2x2 summary figure using Agg: (All IV, All log, Final IV, Final log). Returns image path or None."""
+        try:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+            combined_path = f"{save_dir}\\Combined_summary.png"
+            fig = Figure(figsize=(8, 6))
+            _ = FigureCanvas(fig)
+            ax_all_iv = fig.add_subplot(221)
+            ax_all_log = fig.add_subplot(222)
+            ax_final_iv = fig.add_subplot(223)
+            ax_final_log = fig.add_subplot(224)
+
+            # Re-plot from existing lines in the GUI axes
+            try:
+                for line in self.ax_all_iv.get_lines():
+                    x = line.get_xdata()
+                    y = line.get_ydata()
+                    ax_all_iv.plot(x, y, marker='o', markersize=2, alpha=0.8)
+                ax_all_iv.set_title("All sweeps (IV)")
+                ax_all_iv.set_xlabel("V (V)")
+                ax_all_iv.set_ylabel("I (A)")
+            except Exception:
+                pass
+
+            try:
+                for line in self.ax_all_logiv.get_lines():
+                    x = line.get_xdata()
+                    y = np.abs(line.get_ydata())
+                    ax_all_log.semilogy(x, y, marker='o', markersize=2, alpha=0.8)
+                ax_all_log.set_title("All sweeps (|I|)")
+                ax_all_log.set_xlabel("V (V)")
+                ax_all_log.set_ylabel("|I| (A)")
+            except Exception:
+                pass
+
+            # Final sweep from last remembered data
+            try:
+                v_arr, c_arr = getattr(self, '_last_sweep_data', (None, None))
+                if v_arr is not None and c_arr is not None:
+                    ax_final_iv.plot(v_arr, c_arr, marker='o', markersize=2, color='k')
+                    ax_final_iv.set_title("Final sweep (IV)")
+                    ax_final_iv.set_xlabel("V (V)")
+                    ax_final_iv.set_ylabel("I (A)")
+
+                    ax_final_log.semilogy(v_arr, np.abs(c_arr), marker='o', markersize=2, color='k')
+                    ax_final_log.set_title("Final sweep (|I|)")
+                    ax_final_log.set_xlabel("V (V)")
+                    ax_final_log.set_ylabel("|I| (A)")
+            except Exception:
+                pass
+
+            fig.tight_layout()
+            fig.savefig(combined_path, dpi=300)
+            return combined_path
+        except Exception:
+            return None
+
+    def _post_measurement_options_worker(self, save_dir: str, combined_path: str | None = None):
+        """Runs in background: sends summary and asks what to do next via Telegram."""
+        try:
+            bot = self._get_bot()
+            if not bot:
+                return
+            # Send completion message and images
+            try:
+                bot.send_message("Measurement finished")
+            except Exception:
+                pass
+            try:
+                if combined_path:
+                    bot.send_image(combined_path, caption="Summary (All + Final)")
+            except Exception:
+                pass
+
+            # Ask for next steps
+            choices = {
+                "1": "Finish",
+                "2": "Pick another custom sweep",
+                "3": "Do a normal measurement",
+                "4": "Endurance or retention",
+            }
+            reply = None
+            try:
+                reply = bot.ask_and_wait("Would you like to continue measuring?", choices, timeout_s=900)
+            except Exception:
+                reply = None
+            if not reply:
+                return
+            r = reply.strip().lower()
+            # Normalize number selections
+            if r.startswith("1") or "finish" in r:
+                try:
+                    bot.send_message("Okay, finishing.")
+                except Exception:
+                    pass
+                # Send final image again at end as confirmation
+                try:
+                    v_path, l_path = self._save_final_sweep_plot(save_dir)
+                    for p in (v_path, l_path):
+                        if p:
+                            bot.send_image(p, caption="Final measurement")
+                except Exception:
+                    pass
+                return
+            if r.startswith("2") or r == "2" or "custom" in r:
+                # Offer list of custom sweeps
+                names = list(self.custom_sweeps.keys()) if hasattr(self, 'custom_sweeps') else []
+                listing = "\n".join([f"{i+1}. {n}" for i, n in enumerate(names)]) or "No custom sweeps available"
+                try:
+                    bot.send_message("Available custom sweeps:\n" + listing + "\n\nReply with number or name.")
+                except Exception:
+                    pass
+                selected = bot.wait_for_text_reply(timeout_s=900)
+                if not selected:
+                    return
+                sel = selected.strip()
+                chosen = None
+                try:
+                    idx = int(sel) - 1
+                    if 0 <= idx < len(names):
+                        chosen = names[idx]
+                except Exception:
+                    pass
+                if chosen is None:
+                    # match by name
+                    for n in names:
+                        if n.lower() == sel.lower():
+                            chosen = n
+                            break
+                if chosen is None:
+                    try:
+                        bot.send_message("Could not recognise that sweep. Aborting.")
+                    except Exception:
+                        pass
+                    return
+                # Confirm start
+                try:
+                    bot.send_message(f"Starting custom sweep: {chosen}")
+                except Exception:
+                    pass
+                def start_custom():
+                    try:
+                        self.custom_measurement_var.set(chosen)
+                    except Exception:
+                        pass
+                    try:
+                        self.run_custom_measurement()
+                    except Exception:
+                        pass
+                self.master.after(0, start_custom)
+                return
+            if r.startswith("3") or r == "3" or "normal" in r or "manual" in r:
+                # Ask for optional overrides
+                try:
+                    # Summarise current parameters for convenience
+                    cur = {
+                        'start_v': getattr(self, 'start_voltage').get() if hasattr(self, 'start_voltage') else None,
+                        'stop_v': getattr(self, 'voltage_high').get() if hasattr(self, 'voltage_high') else None,
+                        'step_v': getattr(self, 'step_size').get() if hasattr(self, 'step_size') else None,
+                        'sweeps': getattr(self, 'sweeps').get() if hasattr(self, 'sweeps') else None,
+                        'step_delay': getattr(self, 'step_delay').get() if hasattr(self, 'step_delay') else None,
+                        'icc': getattr(self, 'icc').get() if hasattr(self, 'icc') else None,
+                        'pause': getattr(self, 'pause').get() if hasattr(self, 'pause') else None,
+                        'led': getattr(self, 'led').get() if hasattr(self, 'led') else None,
+                        'led_power': getattr(self, 'led_power').get() if hasattr(self, 'led_power') else None,
+                        'sequence': getattr(self, 'sequence').get() if hasattr(self, 'sequence') else None,
+                    }
+                    msg = (
+                        "Okay, please specify options as key=value pairs (comma separated).\n"
+                        "Supported: start_v, stop_v (alias: V), step_v (alias: Sv), sweeps, step_delay, icc, pause, led, led_power, sequence.\n"
+                        "Example: start_v=0, V=1, Sv=0.1, sweeps=1, step_delay=0.05, icc=1e-3\n"
+                        "Send 'default' to keep current settings.\n\n"
+                        f"Current: start_v={cur['start_v']}, stop_v={cur['stop_v']}, step_v={cur['step_v']}, sweeps={cur['sweeps']}, step_delay={cur['step_delay']}, icc={cur['icc']}, pause={cur['pause']}, led={cur['led']}, led_power={cur['led_power']}, sequence={cur['sequence']}"
+                    )
+                    bot.send_message(msg)
+                except Exception:
+                    pass
+                opts = bot.wait_for_text_reply(timeout_s=900)
+                if opts:
+                    o = opts.strip()
+                    if o.lower() != "default":
+                        # Parse key=value
+                        try:
+                            pairs = [p.strip() for p in o.replace("\n", ",").split(",") if p.strip()]
+                            kv = {}
+                            for p in pairs:
+                                if "=" in p:
+                                    k, v = p.split("=", 1)
+                                    key_norm = k.strip()
+                                    key_low = key_norm.lower()
+                                    # Aliases for brevity in chat: V -> stop_v, Sv -> step_v
+                                    if key_low in ("v",):
+                                        key_low = "stop_v"
+                                    if key_low in ("sv",):
+                                        key_low = "step_v"
+                                    kv[key_low] = v.strip()
+                            def set_var(name, conv=float):
+                                if name in kv:
+                                    try:
+                                        getattr(self, name_map[name]).set(conv(kv[name]))
+                                    except Exception:
+                                        pass
+                            # Map keys to Tk vars
+                            name_map = {
+                                'start_v': 'start_voltage',
+                                'stop_v': 'voltage_high',
+                                'step_v': 'step_size',
+                                'sweeps': 'sweeps',
+                                'step_delay': 'step_delay',
+                                'icc': 'icc',
+                                'pause': 'pause',
+                                'led': 'led',
+                                'led_power': 'led_power',
+                                'sequence': 'sequence',
+                            }
+                            set_var('start_v', float)
+                            set_var('stop_v', float)
+                            set_var('step_v', float)
+                            set_var('sweeps', float)
+                            set_var('step_delay', float)
+                            set_var('icc', float)
+                            set_var('pause', float)
+                            # led, led_power, sequence: handle separately
+                            if 'led' in kv:
+                                try:
+                                    getattr(self, 'led').set(int(kv['led']))
+                                except Exception:
+                                    pass
+                            if 'led_power' in kv:
+                                try:
+                                    getattr(self, 'led_power').set(float(kv['led_power']))
+                                except Exception:
+                                    pass
+                            if 'sequence' in kv:
+                                try:
+                                    getattr(self, 'sequence').set(kv['sequence'])
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                # Summarise final parameters that will be used
+                try:
+                    cur = {
+                        'start_v': getattr(self, 'start_voltage').get() if hasattr(self, 'start_voltage') else None,
+                        'stop_v': getattr(self, 'voltage_high').get() if hasattr(self, 'voltage_high') else None,
+                        'step_v': getattr(self, 'step_size').get() if hasattr(self, 'step_size') else None,
+                        'sweeps': getattr(self, 'sweeps').get() if hasattr(self, 'sweeps') else None,
+                        'step_delay': getattr(self, 'step_delay').get() if hasattr(self, 'step_delay') else None,
+                        'icc': getattr(self, 'icc').get() if hasattr(self, 'icc') else None,
+                        'pause': getattr(self, 'pause').get() if hasattr(self, 'pause') else None,
+                        'led': getattr(self, 'led').get() if hasattr(self, 'led') else None,
+                        'led_power': getattr(self, 'led_power').get() if hasattr(self, 'led_power') else None,
+                        'sequence': getattr(self, 'sequence').get() if hasattr(self, 'sequence') else None,
+                    }
+                    bot.send_message(
+                        f"Using: start_v={cur['start_v']}, stop_v={cur['stop_v']} (V), step_v={cur['step_v']} (Sv), sweeps={cur['sweeps']}, step_delay={cur['step_delay']}, icc={cur['icc']}, pause={cur['pause']}, led={cur['led']}, led_power={cur['led_power']}, sequence={cur['sequence']}"
+                    )
+                except Exception:
+                    pass
+                try:
+                    bot.send_message("Type 'Start' to begin now, or anything else to cancel.")
+                except Exception:
+                    pass
+                conf = bot.wait_for_text_reply(timeout_s=900)
+                if conf and conf.strip().lower() in ("start", "yes", "y"):
+                    def start_norm():
+                        try:
+                            self.start_measurement()
+                        except Exception:
+                            pass
+                    self.master.after(0, start_norm)
+                return
+            if r.startswith("4") or r == "4" or "endurance" in r or "retention" in r:
+                try:
+                    bot.send_message("Reply with 'endurance' or 'retention'. Defaults from GUI will be used.")
+                except Exception:
+                    pass
+                m = bot.wait_for_text_reply(timeout_s=900)
+                if not m:
+                    return
+                ml = m.strip().lower()
+                if "endurance" in ml:
+                    def start_end():
+                        try:
+                            self.start_manual_endurance()
+                        except Exception:
+                            pass
+                    try:
+                        bot.send_message("Starting endurance...")
+                    except Exception:
+                        pass
+                    self.master.after(0, start_end)
+                    return
+                if "retention" in ml:
+                    def start_ret():
+                        try:
+                            self.start_manual_retention()
+                        except Exception:
+                            pass
+                    try:
+                        bot.send_message("Starting retention...")
+                    except Exception:
+                        pass
+                    self.master.after(0, start_ret)
+                    return
+        except Exception:
+            pass
 
     def load_custom_sweeps(self, filename):
         try:
