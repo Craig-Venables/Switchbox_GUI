@@ -24,7 +24,7 @@ class IVControllerManager:
     """
 
     SUPPORTED: Dict[str, Any] = {
-        'Keithley 2400': {
+        'Keithley 2401': {
             'class': Keithley2400Controller,
             'address_key': 'SMU_address',
         },
