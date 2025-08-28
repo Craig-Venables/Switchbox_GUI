@@ -22,12 +22,12 @@ from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller  # Import 
 from Equipment_Classes.iv_controller_manager import IVControllerManager
 from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
-#from tests.config import Thresholds
-#from tests.runner import TestRunner
-#from tests.driver import MeasurementDriver
-#from tests.preferences import load_thresholds, save_thresholds
-from automated_memristor_tester import AutomatedTesterGUI
-
+#from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
+from measurement_service import MeasurementService, VoltageRangeMode
+from tests.config import Thresholds
+from tests.runner import TestRunner
+from tests.driver import MeasurementDriver
+from tests.preferences import load_thresholds, save_thresholds
 
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
@@ -38,77 +38,6 @@ logging.getLogger("pymeasure").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 
-
-class SMUAdapter:
-	"""Adapter to expose the IVControllerManager with the interface expected by
-	AutomatedTesterGUI/AutoTester (set_voltage, measure_current, enable_output, etc.)."""
-
-	def __init__(self, iv_manager):
-		self._iv = iv_manager
-		# For ad-hoc TSP fallback, expose an attribute named 'device' if available
-		self.device = None
-		try:
-			inst = getattr(self._iv, 'instrument', None)
-			if inst is not None and hasattr(inst, 'device'):
-				self.device = inst.device
-		except Exception:
-			self.device = None
-
-	def safe_init(self) -> None:
-		return None
-
-	def set_voltage(self, voltage: float, Icc: float = None) -> None:
-		if Icc is None:
-			# Use a reasonable default if not specified
-			Icc = 1e-3
-		return self._iv.set_voltage(voltage, Icc)
-
-	def set_current(self, current: float, Vcc: float = None) -> None:
-		if Vcc is None:
-			Vcc = 10.0
-		return self._iv.set_current(current, Vcc)
-
-	def measure_voltage(self) -> float:
-		val = self._iv.measure_voltage()
-		try:
-			# Some controllers return tuples; normalize to float
-			if isinstance(val, (list, tuple)):
-				return float(val[0] if len(val) > 0 else 0.0)
-			return float(val)
-		except Exception:
-			return 0.0
-
-	def measure_current(self) -> float:
-		val = self._iv.measure_current()
-		try:
-			# Manager may return tuple (None, current)
-			if isinstance(val, (list, tuple)):
-				return float(val[-1])
-			return float(val)
-		except Exception:
-			return 0.0
-
-	def enable_output(self, enable: bool) -> None:
-		return self._iv.enable_output(bool(enable))
-
-	def close(self) -> None:
-		try:
-			return self._iv.close()
-		except Exception:
-			return None
-
-	# Optional fast-path: if underlying controller implements run_tsp_sweep, expose it
-	def run_tsp_sweep(self, start_v: float, stop_v: float, step_v: float,
-					 icc_start: float, icc_factor: float = 10.0,
-					 icc_max: float = None, delay_s: float = 0.005,
-					 burn_abort_A: float = None):
-		inst = getattr(self._iv, 'instrument', None)
-		if inst is not None and hasattr(inst, 'run_tsp_sweep'):
-			return inst.run_tsp_sweep(start_v=start_v, stop_v=stop_v, step_v=step_v,
-									  icc_start=icc_start, icc_factor=icc_factor,
-									  icc_max=icc_max, delay_s=delay_s,
-									  burn_abort_A=burn_abort_A)
-		raise NotImplementedError("Underlying instrument does not support run_tsp_sweep")
 
 class MeasurementGUI:
     def __init__(self, master, sample_type, section, device_list, sample_gui):
@@ -171,6 +100,9 @@ class MeasurementGUI:
         self.c_arr_disp_abs_log = []
         self.r_arr_disp = []
         self.temp_time_disp = []
+
+        # Central measurement engine
+        self.measurement_service = MeasurementService()
 
 
         # Load custom sweeps from JSON
@@ -242,8 +174,7 @@ class MeasurementGUI:
         self.connect_keithley()
         #self.connect_keithley_psu()
 
-        # Bottom log spanning left and middle columns
-        self.create_tests_log_frame()
+        # Removed automated tests log frame
 
         atexit.register(self.cleanup)
 
@@ -310,58 +241,10 @@ class MeasurementGUI:
         self.master.after(250, self._status_update_tick)
 
     def log_test(self, msg: str):
-        try:
-            if hasattr(self, 'tests_log') and self.tests_log:
-                self.tests_log.config(state=tk.NORMAL)
-                self.tests_log.insert(tk.END, msg + "\n")
-                self.tests_log.config(state=tk.DISABLED)
-                self.tests_log.see(tk.END)
-            else:
-                print(msg)
-        except Exception:
-            print(msg)
-
-    def open_autotest(self):
-        try:
-            if not self.keithley:
-                self.connect_keithley()
-            if not self.keithley:
-                messagebox.showerror("Instrument", "Keithley not connected.")
-                return
-            adapter = SMUAdapter(self.keithley)
-            # Provide section and device helpers to the automated tester
-            current_section_name = self.section  # already set in this GUI
-            # next-device callback: advance the GUI's device index and return the next device id string
-            def get_next_device():
-                try:
-                    # Advance internal index, wrap safely
-                    self.current_index = (self.current_index + 1) % max(1, len(self.device_list))
-                    self.current_device = self.device_list[self.current_index]
-                    # Update any GUI labels that display the device name
-                    self.device_section_and_number = self.convert_to_name(self.current_index)
-                    self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
-                    try:
-                        self.device_label.config(text=f"Device: {self.display_index_section_number}")
-                    except Exception:
-                        pass
-                    try:
-                        # Notify any listeners
-                        self.master.event_generate('<<DeviceChanged>>', when='tail')
-                    except Exception:
-                        pass
-                    return self.current_device
-                except Exception:
-                    return None
-
-            AutomatedTesterGUI(self.master,
-                                instrument=adapter,
-                                current_section=current_section_name,
-                                device_list=self.device_list,
-                                get_next_device_cb=get_next_device,
-                                current_device_id=self.current_device,
-                                host_gui=self)
-        except Exception as e:
-            messagebox.showerror("AutoTester", str(e))
+        self.tests_log.config(state=tk.NORMAL)
+        self.tests_log.insert(tk.END, msg + "\n")
+        self.tests_log.config(state=tk.DISABLED)
+        self.tests_log.see(tk.END)
 
     # ---------------- Telegram helpers -----------------
     def _bot_enabled(self) -> bool:
@@ -429,16 +312,25 @@ class MeasurementGUI:
         frame = tk.LabelFrame(parent, text="Automated Tests", padx=5, pady=5)
         frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
-        # Only one button: open AutoTester GUI on demand
-        self.autopress_btn = tk.Button(frame, text="AutoPress", command=self.open_autotest)
-        self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+        # Row 0: Run / Stop
+        self.start_tests_btn = tk.Button(frame, text="Run Automated Tests", command=self.start_automated_tests)
+        self.start_tests_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
 
+        self.stop_tests_btn = tk.Button(frame, text="Stop", command=self.stop_automated_tests)
+        self.stop_tests_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        # Row 1: Live plotting / Preferences
+        self.live_plot_cb = tk.Checkbutton(frame, text="Live plotting", variable=self.live_plot_enabled)
+        self.live_plot_cb.grid(row=1, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        self.pref_btn = tk.Button(frame, text="Test Preferences", command=self.show_test_preferences)
+        self.pref_btn.grid(row=1, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        # Two columns only
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
-    def create_tests_log_frame(self):
-        # Removed legacy automated tests log UI
-        pass
+    # Automated tests log removed per request
 
     ###################################################################
     # Graph empty shells setting up for plotting
@@ -989,9 +881,51 @@ class MeasurementGUI:
                     pass
             time.sleep(0.1)
 
+    ###################################################################
+    # seequencial plotting
+    ###################################################################
+
+    # Add to your GUI initialization
+    def create_plot_menu(self):
+        """Create menu options for plotting."""
+        # Add to your menu bar
+        plot_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="Plot", menu=plot_menu)
+
+        plot_menu.add_command(label="Open Live Plotter", command=self.open_live_plotter)
+        plot_menu.add_separator()
+        plot_menu.add_command(label="Export All Plots", command=self.export_all_plots)
+        plot_menu.add_command(label="Save Current Plot", command=self.save_current_plot)
+
+    def open_live_plotter(self):
+        """Open a standalone live plotter window."""
+        if not hasattr(self, 'standalone_plotter') or not self.standalone_plotter.window.winfo_exists():
+            measurement_type = self.Sequential_measurement_var.get()
+            if measurement_type == "Iv Sweep":
+                plot_type = "IV Sweep"
+            elif measurement_type == "Single Avg Measure":
+                plot_type = "Single Avg Measure"
+            else:
+                plot_type = "Unknown"
+
+            self.standalone_plotter = MeasurementPlotter(self.root, measurement_type=plot_type)
+
+    def export_all_plots(self):
+        """Export plots from the current plotter."""
+        if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
+            self.plotter.export_data()
+        else:
+            tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
+
+    def save_current_plot(self):
+        """Save the current plot as an image."""
+        if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
+            self.plotter.save_current_plot()
+        else:
+            tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
 
     ###################################################################
-    # GUI Methods
+    # GUI mETHODS
     ###################################################################
 
 
@@ -1048,7 +982,8 @@ class MeasurementGUI:
 
     def load_systems(self):
         """Load system configurations from JSON file"""
-        config_file = "Json_Files/system_configs.json"
+        config_file = "system_configs.json"
+
         try:
             with open(config_file, 'r') as f:
                 self.system_configs = json.load(f)
@@ -1189,8 +1124,60 @@ class MeasurementGUI:
         self.icc = tk.DoubleVar(value=0.1)
         tk.Entry(frame, textvariable=self.icc).grid(row=5, column=1)
 
+        # Sweep Mode selector
+        tk.Label(frame, text="Sweep Mode:").grid(row=6, column=0, sticky="w")
+        self.sweep_mode_var = tk.StringVar(value=VoltageRangeMode.FIXED_STEP)
+        self.sweep_mode_menu = ttk.Combobox(frame, textvariable=self.sweep_mode_var,
+                                            values=[VoltageRangeMode.FIXED_STEP,
+                                                    VoltageRangeMode.FIXED_SWEEP_RATE,
+                                                    VoltageRangeMode.FIXED_VOLTAGE_TIME], state="readonly")
+        self.sweep_mode_menu.grid(row=6, column=1, sticky="ew")
+
+        # Dynamic params container
+        dyn = tk.Frame(frame)
+        dyn.grid(row=7, column=0, columnspan=2, sticky="ew")
+        dyn.columnconfigure(1, weight=1)
+        self._dyn_params_frame = dyn
+
+        # Variables for dynamic options
+        self.var_sweep_rate = tk.DoubleVar(value=1.0)     # V/s
+        self.var_total_time = tk.DoubleVar(value=5.0)     # s
+        self.var_num_steps = tk.IntVar(value=101)
+
+        def render_dynamic_params(*_):
+            for w in list(self._dyn_params_frame.children.values()):
+                try: w.destroy()
+                except Exception: pass
+            mode = self.sweep_mode_var.get()
+            r = 0
+            if mode == VoltageRangeMode.FIXED_STEP:
+                # Show step size entry already present above; no extras needed
+                tk.Label(self._dyn_params_frame, text="Using fixed voltage step.").grid(row=r, column=0, sticky="w")
+            elif mode == VoltageRangeMode.FIXED_SWEEP_RATE:
+                tk.Label(self._dyn_params_frame, text="Sweep rate (V/s):").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._dyn_params_frame, textvariable=self.var_sweep_rate).grid(row=r, column=1, sticky="ew")
+                r += 1
+                tk.Label(self._dyn_params_frame, text="# Steps (optional):").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._dyn_params_frame, textvariable=self.var_num_steps).grid(row=r, column=1, sticky="ew")
+            elif mode == VoltageRangeMode.FIXED_VOLTAGE_TIME:
+                tk.Label(self._dyn_params_frame, text="Total sweep time (s):").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._dyn_params_frame, textvariable=self.var_total_time).grid(row=r, column=1, sticky="ew")
+                r += 1
+                tk.Label(self._dyn_params_frame, text="# Steps (optional):").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._dyn_params_frame, textvariable=self.var_num_steps).grid(row=r, column=1, sticky="ew")
+
+        self.sweep_mode_menu.bind("<<ComboboxSelected>>", render_dynamic_params)
+        render_dynamic_params()
+
+        # Sweep Type selector (FS/PS/NS)
+        tk.Label(frame, text="Sweep Type:").grid(row=8, column=0, sticky="w")
+        self.sweep_type_var = tk.StringVar(value="FS")
+        self.sweep_type_menu = ttk.Combobox(frame, textvariable=self.sweep_type_var,
+                                            values=["FS", "PS", "NS"], state="readonly")
+        self.sweep_type_menu.grid(row=8, column=1, sticky="ew")
+
         # LED Controls mini title
-        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=6, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=20, column=0, columnspan=2, sticky="w",
                                                                              pady=(10, 2))
 
         # LED Toggle Button
@@ -1211,23 +1198,23 @@ class MeasurementGUI:
 
         self.led_button = tk.Button(frame, text="OFF", bg="red", fg="white",
                                     width=8, command=toggle_led)
-        self.led_button.grid(row=7, column=1, sticky="w")
+        self.led_button.grid(row=21, column=1, sticky="w")
 
-        tk.Label(frame, text="Led_Power (0-1):").grid(row=8, column=0, sticky="w")
+        tk.Label(frame, text="Led_Power (0-1):").grid(row=22, column=0, sticky="w")
         self.led_power = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.led_power).grid(row=8, column=1)
+        tk.Entry(frame, textvariable=self.led_power).grid(row=22, column=1)
 
-        tk.Label(frame, text="Sequence: (01010)").grid(row=9, column=0, sticky="w")
+        tk.Label(frame, text="Sequence: (01010)").grid(row=23, column=0, sticky="w")
         self.sequence = tk.StringVar()
-        tk.Entry(frame, textvariable=self.sequence).grid(row=9, column=1)
+        tk.Entry(frame, textvariable=self.sequence).grid(row=23, column=1)
 
         # Other Controls mini title
-        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=10, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=24, column=0, columnspan=2, sticky="w",
                                                                       pady=(10, 2))
 
-        tk.Label(frame, text="Pause at end?:").grid(row=11, column=0, sticky="w")
+        tk.Label(frame, text="Pause at end?:").grid(row=25, column=0, sticky="w")
         self.pause = tk.DoubleVar(value=0.0)
-        tk.Entry(frame, textvariable=self.pause).grid(row=11, column=1)
+        tk.Entry(frame, textvariable=self.pause).grid(row=25, column=1)
 
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.start_measurement)
@@ -1235,11 +1222,11 @@ class MeasurementGUI:
             self.measurement_thread.start()
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=start_thread)
-        self.measure_button.grid(row=12, column=0, columnspan=1, pady=5)
+        self.measure_button.grid(row=26, column=0, columnspan=1, pady=5)
 
         # stop button
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
-        self.adaptive_button.grid(row=12, column=1, columnspan=1, pady=10)
+        self.adaptive_button.grid(row=26, column=1, columnspan=1, pady=10)
 
         # Note: Detailed sweep controls moved to popup editor; only Pause remains in main panel
 
@@ -1247,7 +1234,7 @@ class MeasurementGUI:
         if self.tests_running:
             messagebox.showinfo("Tests", "Automated tests already running.")
             return
-        # Connected flag is set when using IVControllerManager; don't require a raw Keithley2400 instance
+        # Connected flag is set when using IVControllerManager; don't require a raw Keithley2401 instance
         if not self.connected or self.keithley is None:
             messagebox.showerror("Instrument", "Keithley not connected.")
             return
@@ -1783,7 +1770,27 @@ class MeasurementGUI:
                         print("Measurement interrupted!")
                         break  # Exit measurement loop immediately
                     time.sleep(0.5)
-                    v_arr, c_arr, timestamps = self.measure(voltage_arr)
+                    # Use centralized service for a default FS sweep
+                    icc_val = float(self.icc.get())
+                    def _on_point(v, i, t_s):
+                        self.v_arr_disp.append(v)
+                        self.c_arr_disp.append(i)
+                        self.t_arr_disp.append(t_s)
+                    v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                        keithley=self.keithley,
+                        icc=icc_val,
+                        sweeps=1,
+                        step_delay=0.05,
+                        voltage_range=voltage_arr,
+                        psu=getattr(self, 'psu', None),
+                        led=False,
+                        power=1.0,
+                        sequence=None,
+                        pause_s=0.0,
+                        smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                        should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                        on_point=_on_point,
+                    )
                     data = np.column_stack((v_arr, c_arr, timestamps))
 
                     # save the current data in a folder called multiplexer and the name of the sample
@@ -2126,128 +2133,7 @@ class MeasurementGUI:
         else:
             print(message)
 
-    def measure(self, voltage_range, sweeps= 1, step_delay=0.05, led=0, power=1, sequence=None, pause=0):
-        """Start measurement for device.
-
-        Parameters:
-            voltage_range : iterable of voltages to apply.
-            sweeps        : number of sweeps to perform.
-            step_delay    : delay between each voltage step.
-            led           : if 1, LED will be controlled (default: 0 = off).
-            power         : LED power level between 0-1.
-            sequence      : optional string like '0101' determining LED status per sweep.
-        """
-        self.stop_measurement_flag = False
-
-
-        if sequence is not None:
-            sequence = str(sequence)
-
-        # Determine if LED is needed at all for this run
-        try:
-            led_requested_any = (str(sequence).find('1') != -1) if sequence is not None else bool(led)
-        except Exception:
-            led_requested_any = bool(led)
-
-        # Ensure PSU is connected if any LED use is requested
-        try:
-            if led_requested_any and not getattr(self, 'psu_connected', False):
-                self.connect_keithley_psu()
-        except Exception:
-            pass
-
-        start_time = time.time()
-        v_arr = []
-        c_arr = []
-        c_arr_abs = []
-
-        self.v_arr_disp = []
-        self.v_arr_disp_abs = []
-        self.v_arr_disp_abs_log = []
-        self.c_arr_disp = []
-        self.c_arr_disp_log = []
-        self.t_arr_disp = []
-        self.c_arr_disp_abs = []
-        self.c_arr_disp_abs_log = []
-        self.r_arr_disp = []
-        self.temp_time_disp = []
-
-        time_stamps = []
-        icc = self.icc.get()
-        v_max = np.max(voltage_range)
-        v_min = np.min(voltage_range)
-
-        previous_v = 0
-
-        for sweep_num in range(int(sweeps)):
-            self.sweep_num = sweep_num
-
-            # Determine LED state for this sweep
-            led_state = '1' if led == 1 else '0'  # default if no sequence is given
-            if sequence and sweep_num < len(sequence):
-                led_state = sequence[sweep_num]
-
-            if led_state == '1':
-                try:
-                    self.psu.led_on_380(power)
-                except Exception:
-                    pass
-            else:
-                # Explicitly turn LED off when sequence/flag says so
-                try:
-                    if led == 1:
-                        self.psu.led_off_380()
-                except Exception:
-                    pass
-
-            if self.stop_measurement_flag:  # Check if stop was pressed
-                print("Measurement interrupted!")
-                break  # Exit measurement loop immediately
-
-            for v in voltage_range:
-                self.keithley.set_voltage(v, icc)
-                time.sleep(0.1)  # Allow measurement to settle
-
-                current = self.keithley.measure_current()
-                measure_time = time.time() - start_time
-
-
-                # append information
-                v_arr.append(v)
-                c_arr.append(current[1])
-                time_stamps.append(measure_time)
-
-
-                # appending info for real time graphs.
-                self.v_arr_disp.append(v)
-                self.v_arr_disp_abs.append(abs(v))
-                #self.v_arr_disp_abs_log.append(np.log(abs(v)))
-                self.c_arr_disp.append(current[1])
-                #self.c_arr_disp_log.append(np.log(current[1]))
-                self.c_arr_disp_abs.append(abs(current[1]))
-                self.c_arr_disp_abs_log.append(np.log(abs(current[1])))
-                self.t_arr_disp.append(measure_time)
-                self.r_arr_disp.append(zero_devision_check(v,current[1]))
-
-
-                time.sleep(step_delay)
-
-                # pause feature at v_max
-                if v == v_max or v == v_min:
-                    if v != previous_v:
-                        if pause != 0:
-                            self.keithley.set_voltage(0, icc)
-                            print('pausing for',pause," seconds")
-                            time.sleep(pause)
-                previous_v = v
-        # Always attempt to turn LED off at the end if PSU is available
-        try:
-            self.psu.led_off_380()
-        except Exception:
-            pass
-        self.keithley.set_voltage(0, icc)
-        
-        return v_arr, c_arr, time_stamps
+    # Old measure method removed; logic centralized in MeasurementService
 
     def run_custom_measurement(self):
         """ when custom measurements has been ran"""
@@ -2428,26 +2314,77 @@ class MeasurementGUI:
 
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
-                    if sweep_type == "NS":
+                    if sweep_type in ("NS", "PS", "FS"):
                         voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
-                        # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence,pause)
-                    elif sweep_type == "PS":
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
-                        # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence,pause)
+                        icc_val = float(self.icc.get())
+                        def _on_point(v, i, t_s):
+                            self.v_arr_disp.append(v)
+                            self.c_arr_disp.append(i)
+                            self.t_arr_disp.append(t_s)
+                        v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                            keithley=self.keithley,
+                            icc=icc_val,
+                            sweeps=sweeps,
+                            step_delay=step_delay,
+                            voltage_range=voltage_range,
+                            psu=getattr(self, 'psu', None),
+                            led=bool(led),
+                            power=power,
+                            sequence=sequence,
+                            pause_s=pause,
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=_on_point,
+                        )
                     elif sweep_type == "Endurance":
+                        icc_val = float(self.icc.get())
+                        def _on_point(v, i, t_s):
+                            self.v_arr_disp.append(v)
+                            self.c_arr_disp.append(i)
+                            self.t_arr_disp.append(t_s)
+                        v_arr, c_arr, timestamps = self.measurement_service.run_endurance(
+                            keithley=self.keithley,
+                            set_voltage=set_voltage,
+                            reset_voltage=reset_voltage,
+                            pulse_width_s=max(0.001, float(led_time) if isinstance(led_time, (int,float)) else 0.01),
+                            num_cycles=int(number),
+                            read_voltage=read_voltage,
+                            inter_cycle_delay_s=float(repeat_delay) if isinstance(repeat_delay, (int,float)) else 0.0,
+                            icc=icc_val,
+                            psu=getattr(self, 'psu', None),
+                            led=bool(led),
+                            power=power,
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=_on_point,
+                        )
                         print("endurance")
-                        #self.endurance_measure()
                     elif sweep_type == "Retention":
-                        self.retention_measure(set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time,pause)
+                        v_arr, c_arr, timestamps = self.retention_measure(set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time,pause)
                         print("retention")
-                    # elif sweep_type == "FS_pause":
-                    #     v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence)
-                    else:  # sweep_type == "FS":
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
-                        # print(sweep_type,voltage_range)
-                        v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, power, sequence,pause)
+                    else:
+                        # default to FS using service
+                        voltage_range = get_voltage_range(start_v, stop_v, step_v, "FS")
+                        icc_val = float(self.icc.get())
+                        def _on_point(v, i, t_s):
+                            self.v_arr_disp.append(v)
+                            self.c_arr_disp.append(i)
+                            self.t_arr_disp.append(t_s)
+                        v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                            keithley=self.keithley,
+                            icc=icc_val,
+                            sweeps=sweeps,
+                            step_delay=step_delay,
+                            voltage_range=voltage_range,
+                            psu=getattr(self, 'psu', None),
+                            led=bool(led),
+                            power=power,
+                            sequence=sequence,
+                            pause_s=pause,
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=_on_point,
+                        )
 
                     # this isnt being used yet i dont think
                     if device not in self.measurement_data:
@@ -2624,7 +2561,24 @@ class MeasurementGUI:
         # if led == 0:
         #     sequence = None
 
-        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
+        # Build voltage range according to selected mode
+        mode = self.sweep_mode_var.get() if hasattr(self, 'sweep_mode_var') else VoltageRangeMode.FIXED_STEP
+        sweep_rate = float(self.var_sweep_rate.get()) if mode == VoltageRangeMode.FIXED_SWEEP_RATE else None
+        total_time = float(self.var_total_time.get()) if mode == VoltageRangeMode.FIXED_VOLTAGE_TIME else None
+        nsteps = int(self.var_num_steps.get()) if mode in (VoltageRangeMode.FIXED_SWEEP_RATE, VoltageRangeMode.FIXED_VOLTAGE_TIME) else None
+        # Choose sweep type from dropdown if available
+        try:
+            sweep_type = self.sweep_type_var.get().strip().upper() or sweep_type
+        except Exception:
+            pass
+        voltage_range = self.measurement_service.compute_voltage_range(
+            start_v, stop_v, step_v, sweep_type,
+            mode=mode,
+            sweep_rate_v_per_s=sweep_rate,
+            voltage_time_s=total_time,
+            step_delay_s=step_delay,
+            num_steps=nsteps,
+        )
         self.stop_measurement_flag = False  # Reset the stop flag
 
         # make sure it is on the top
@@ -2659,8 +2613,31 @@ class MeasurementGUI:
 
             #def measure(self, voltage_range, sweeps, step_delay, led=0, power=1, sequence=None, pause=0):
 
-            # measure device
-            v_arr, c_arr, timestamps = self.measure(voltage_range, sweeps, step_delay, led, led_power, sequence,pause)
+            # measure device using centralized service
+            def _on_point(v, i, t_s):
+                self.v_arr_disp.append(v)
+                self.c_arr_disp.append(i)
+                self.t_arr_disp.append(t_s)
+            icc_val = float(self.icc.get())
+            v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                keithley=self.keithley,
+                icc=icc_val,
+                sweeps=sweeps,
+                step_delay=step_delay,
+                voltage_range=voltage_range,
+                mode=mode,
+                sweep_rate_v_per_s=sweep_rate,
+                total_time_s=total_time,
+                num_steps=nsteps,
+                psu=getattr(self, 'psu', None),
+                led=bool(led),
+                power=led_power,
+                sequence=sequence,
+                pause_s=pause,
+                smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                on_point=_on_point,
+            )
             
             # If endurance selected as a custom mode via UI in future, we could branch here
             # For now, update endurance/retention plots if arrays exist from tests
@@ -2751,31 +2728,36 @@ class MeasurementGUI:
         except Exception:
             pass
 
-    def retention_measure(self,set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time):
+    def retention_measure(self,set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time, pause=None):
+        """Run retention via MeasurementService and return (v_arr, c_arr, timestamps)."""
         icc = 0.0001
-        time_data = []
-        current_data = []
-        start_time = time.time()
-        self.keithley.enable_output(True)
 
-        #apply pulse
-        self.keithley.set_voltage(set_voltage, icc)
-        time.sleep(set_time)
-        # apply read
-        self.keithley.set_voltage(read_voltage, icc)
+        def _on_point(v, i, t_s):
+            # Update plotting arrays minimally so existing plots keep working
+            try:
+                self.v_arr_disp.append(v)
+                self.c_arr_disp.append(i)
+                self.t_arr_disp.append(t_s)
+            except Exception:
+                pass
 
-        for i in range(number):
-            current_value = self.keithley.measure_current()
-            elapsed_time = time.time() - start_time
+        v_arr, c_arr, t_arr = self.measurement_service.run_retention(
+            keithley=self.keithley,
+            set_voltage=set_voltage,
+            set_time_s=set_time,
+            read_voltage=read_voltage,
+            repeat_delay_s=repeat_delay,
+            number=number,
+            icc=icc,
+            psu=getattr(self, 'psu', None),
+            led=bool(led),
+            led_time_s=led_time,
+            sequence=sequence,
+            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+            on_point=_on_point,
+        )
 
-            time_data.append(elapsed_time)
-            current_data.append(current_value[1])
-            time.sleep(repeat_delay)
-
-            #add in an iteration for led
-
-        self.keithley.shutdown()
-        return current_data,time_data
+        return v_arr, c_arr, t_arr
 
 
     ###################################################################
@@ -2784,7 +2766,7 @@ class MeasurementGUI:
     def connect_keithley(self):
         """Connect to the selected IV controller via GPIB using system config SMU Type"""
         address = self.keithley_address_var.get()
-        smu_type = getattr(self, 'SMU_type', 'Keithley 2400')
+        smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
         try:
             self.keithley = IVControllerManager(smu_type, address)
             # Verify the connection using controller's handle
@@ -3873,28 +3855,29 @@ class MeasurementGUI:
 
 
 def get_voltage_range(start_v, stop_v, step_v, sweep_type):
-    def frange(start, stop, step):
-        while start <= stop if step > 0 else start >= stop:
-            yield round(start, 3)
-            start += step
+    """Compatibility wrapper routing to MeasurementService to compute voltage ranges.
 
-    # this method takes the readings twice at all ends of the ranges.
-    if sweep_type == "NS":
-        voltage_range = (list(frange(start_v, -stop_v, -step_v)) +
-                         list(frange(-stop_v, start_v, step_v)))
-
-        return voltage_range
-    if sweep_type == "PS":
-        voltage_range = (list(frange(start_v, stop_v, step_v)) +
-                         list(frange(stop_v, start_v, -step_v)))
-
-        return voltage_range
-    else:
-        voltage_range = (list(frange(start_v, stop_v, step_v)) +
-                         list(frange(stop_v, -stop_v, -step_v)) +
-                         list(frange(-stop_v, start_v, step_v)))
-
-        return voltage_range
+    Existing code calls this function from several places; keep the signature and
+    delegate to the centralized service to avoid divergence.
+    """
+    try:
+        svc = MeasurementService()
+        return svc.compute_voltage_range(start_v, stop_v, step_v, sweep_type, mode=VoltageRangeMode.FIXED_STEP)
+    except Exception:
+        # Fallback to legacy behavior if service import/usage fails for any reason
+        def frange(start, stop, step):
+            while start <= stop if step > 0 else start >= stop:
+                yield round(start, 3)
+                start += step
+        if sweep_type == "NS":
+            return list(frange(start_v, -stop_v, -step_v)) + list(frange(-stop_v, start_v, step_v))
+        if sweep_type == "PS":
+            return list(frange(start_v, stop_v, step_v)) + list(frange(stop_v, start_v, -step_v))
+        return (
+            list(frange(start_v, stop_v, step_v))
+            + list(frange(stop_v, -stop_v, -step_v))
+            + list(frange(-stop_v, start_v, step_v))
+        )
 
 
 def extract_number_from_filename(filename):
