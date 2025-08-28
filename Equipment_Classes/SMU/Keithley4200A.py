@@ -103,7 +103,7 @@ class Keithley4200AController:
                         ch = int(token.split(":")[-1])
                     except Exception:
                         ch = 1
-                self._pmu_channel = ch or 1
+                self._pmu_channel = (ch - 1) if ch else 0
                 self._is_pmu = True
         else:
             self._card_name = "SMU1"
@@ -237,11 +237,11 @@ class Keithley4200AController:
             self.lpt.limiti(self._instr_id, float(i_limit))
 
 
+
 class Keithley4200A_PMUController:
     """Dedicated helper for PMU operation on 4200A using LPT.
 
-    Construct with the same address string format as Keithley4200AController but
-    include a PMU channel selection, e.g. "192.168.0.10:8888|PMU1-CH1".
+    Construct with address like '192.168.0.10:8888|PMU1-CH1'.
     """
 
     def __init__(self, address: str) -> None:
@@ -255,92 +255,77 @@ class Keithley4200A_PMUController:
         self._card_id = base._instr_id
         self._chan = base._pmu_channel or 1
 
-        # Default pulse configuration (similar to examples)
+        # Default config
         self.configure_pulse(
-            v_src_range=10.0,
-            v_meas_range_type=0,
-            v_meas_range=10.0,
-            i_meas_range_type=0,
-            i_meas_range=0.2,
-            v_limit=5.0,
-            i_limit=1.0,
-            power_limit=10.0,
-            start_pct=0.5,
-            stop_pct=0.7,
-            num_pulses=1,
-            period=2e-6,
-            delay=2e-8,
-            width=5e-7,
-            rise=1e-7,
-            fall=1e-7,
+            v_src_range=5.0,
+            v_meas_range_type=0, v_meas_range=5.0,
+            i_meas_range_type=0, i_meas_range=0.1,
+            v_limit=5.0, i_limit=0.1, power_limit=1.0,
+            start_pct=0.1, stop_pct=0.9, num_pulses=1,
+            period=5e-6, delay=1e-7, width=1e-6, rise=5e-8, fall=5e-8,
             load_ohm=1e6,
         )
 
-    def configure_pulse(self,
-                         v_src_range: float,
-                         v_meas_range_type: int,
-                         v_meas_range: float,
-                         i_meas_range_type: int,
-                         i_meas_range: float,
-                         v_limit: float,
-                         i_limit: float,
-                         power_limit: float,
-                         start_pct: float,
-                         stop_pct: float,
-                         num_pulses: int,
-                         period: float,
-                         delay: float,
-                         width: float,
-                         rise: float,
-                         fall: float,
-                         load_ohm: float) -> None:
-        # Mode init
+    # -----------------------
+    # PMU-Specific Functions
+    # -----------------------
+    def configure_pulse(self, v_src_range, v_meas_range_type, v_meas_range,
+                        i_meas_range_type, i_meas_range,
+                        v_limit, i_limit, power_limit,
+                        start_pct, stop_pct, num_pulses,
+                        period, delay, width, rise, fall,
+                        load_ohm):
+        """Configure pulse parameters for this channel."""
         self.lpt.pg2_init(self._card_id, 0)
-
-        # Route RPM to pulse
-        self.lpt.rpm_config(self._card_id, self._chan, self.param.KI_RPM_PATHWAY, self.param.KI_RPM_PULSE)
-
-        # Spot-mean meas config (V and I amplitude; timestamp; LLEC on)
+        self.lpt.rpm_config(self._card_id, self._chan,
+                            self.param.KI_RPM_PATHWAY, self.param.KI_RPM_PULSE)
         self.lpt.pulse_meas_sm(self._card_id, self._chan, 0, 1, 0, 1, 0, 1, 1)
-
-        # Ranges and limits
-        self.lpt.pulse_ranges(self._card_id, self._chan, v_src_range, v_meas_range_type, v_meas_range,
-                               i_meas_range_type, i_meas_range)
+        self.lpt.pulse_ranges(self._card_id, self._chan, v_src_range,
+                              v_meas_range_type, v_meas_range,
+                              i_meas_range_type, i_meas_range)
         self.lpt.pulse_limits(self._card_id, self._chan, v_limit, i_limit, power_limit)
-
-        # Meas timing and source timing
-        self.lpt.pulse_meas_timing(self._card_id, self._chan, start_pct, stop_pct, int(num_pulses))
-        self.lpt.pulse_source_timing(self._card_id, self._chan, period, delay, width, rise, fall)
-
-        # Load
+        self.lpt.pulse_meas_timing(self._card_id, self._chan,
+                                   start_pct, stop_pct, int(num_pulses))
+        self.lpt.pulse_source_timing(self._card_id, self._chan,
+                                     period, delay, width, rise, fall)
         self.lpt.pulse_load(self._card_id, self._chan, load_ohm)
 
     def arm_single_pulse(self, amplitude_v: float, base_v: float = 0.0):
-        # Single-point sweep (start=stop=value)
-        self.lpt.pulse_sweep_linear(self._card_id, self._chan, self.param.PULSE_AMPLITUDE_SP,
-                                    float(amplitude_v), float(amplitude_v), 0.0)
-        # Ensure output relay on
+        """Prepare a single pulse with given amplitude."""
+        self.lpt.pulse_sweep_linear(self._card_id, self._chan,
+                                    self.param.PULSE_AMPLITUDE_SP,
+                                    float(amplitude_v), float(amplitude_v), float(base_v))
         self.lpt.pulse_output(self._card_id, self._chan, 1)
 
-    def exec_and_fetch(self) -> tuple[list[float], list[float], list[float], list[int]]:
-        # Execute simple pulse
+    def exec_and_fetch(self, as_dataframe: bool = True):
+        """Execute the pulse and fetch results."""
         self.lpt.pulse_exec(self.param.PULSE_MODE_SIMPLE)
 
-        # Wait until finished (simple polling)
-        timeout = 30.0
-        t0 = time.time()
+        # Poll for completion
+        timeout, t0 = 30.0, time.time()
         while True:
-            status, elapsed = self.lpt.pulse_exec_status()
+            status, _ = self.lpt.pulse_exec_status()
             if status != self.param.PMU_TEST_STATUS_RUNNING:
                 break
-            if (time.time() - t0) > timeout:
+            if time.time() - t0 > timeout:
                 self.lpt.dev_abort()
-                break
+                raise TimeoutError("PMU pulse execution timed out")
             time.sleep(0.05)
 
-        # Determine buffer size and fetch
+        # Fetch data
         buf_size = self.lpt.pulse_chan_status(self._card_id, self._chan)
         v, i, ts, statuses = self.lpt.pulse_fetch(self._card_id, self._chan, 0, buf_size - 1)
+
+        if as_dataframe:
+            df = pd.DataFrame({
+                "t (s)": ts,
+                "V (V)": v,
+                "I (A)": i,
+                "Status": statuses,
+            })
+            df["Channel"] = self._chan
+            return df
+
         return v, i, ts, statuses
 
     def output(self, enable: bool):
@@ -353,230 +338,69 @@ class Keithley4200A_PMUController:
             pass
         self._base.close()
 
-
-    def get_identifier(self) -> str:
-        """Return IDN."""
-        self.port.write("*IDN?")
-        return self.port.read()
-
-    def get_options(self) -> str:
-        """Return OPT."""
-        self.port.write("*OPT?")
-        return self.port.read()
-
-    def set_resolution(self, resolution: int) -> str:
-        """Set the resolution of the device."""
-        if self.command_set == "US":
-            self.port.write(f"RS {int(resolution)}")
-        return self.read_tcpip_port()
-
-    def set_current_range(self, channel: str, current_range: float, compliance: float) -> str:
-        """Set the current range of the device."""
-        if self.command_set == "US":
-            self.port.write(f"RI {channel}, {current_range}, {compliance}")
-        return self.read_tcpip_port()
-
-    def set_current_range_limited(self, channel: str, current: float) -> str:
-        """Set the current range of the device."""
-        if self.command_set == "US":
-            self.port.write(f"RG {channel}, {current}")
-        return self.read_tcpip_port()
-
-    def switch_off(self, channel: str) -> str:
-        """Switch off the device."""
-        if self.command_set == "US":
-            self.port.write(f"DV{channel}")
-        return self.read_tcpip_port()
-
-    def clear_buffer(self) -> str:
-        """Clear the buffer of the device."""
-        self.port.write("BC")
-        return self.read_tcpip_port()
-
-    def set_to_4200(self) -> str:
-        """Set the device to 4200 mode."""
-        self.port.write("EM 1,0")  # set to 4200 mode for this session
-        return self.read_tcpip_port()
-
-    def enable_user_mode(self) -> str:
-        """Enable user mode."""
-        self.port.write("US")  # user mode
-        return self.read_tcpip_port()
-
-    def set_data_service(self) -> str:
-        """Set data ready service."""
-        if self.command_set == "US":
-            self.port.write("DR0")  # data ready service request
-        return self.read_tcpip_port()
-
-    def set_integration_time(self, nplc: int) -> str:
-        """Set the integration time of the device."""
-        if self.command_set == "US":
-            self.port.write("IT" + str(nplc))
-        return self.read_tcpip_port()
-
-    def set_current(self, channel: str, current_range: int, value: float, protection: float) -> str:
-        """Set the current of the given channel."""
-        if self.command_set == "US":
-            self.port.write(f"DI{channel}, {current_range}, {value}, {protection}")
-        return self.read_tcpip_port()
-
-    def set_voltage(self, channel: str, voltage_range: int, value: float, protection: float) -> str:
-        """Set the voltage of the given channel."""
-        if self.command_set == "US":
-            self.port.write(f"DV{channel}, {voltage_range}, {value}, {protection}")
-        return self.read_tcpip_port()
-
-    def get_voltage(self, channel: str) -> float:
-        """Request voltage of given channel."""
-        voltage = float("nan")
-        overflow_value = 1e37
-        if self.command_set == "US":
-            self.port.write("TV" + str(channel))
-            answer = self.port.read()
-            voltage = float(answer[3:])
-            if voltage > overflow_value:
-                voltage = float("nan")
-        return voltage
-
-        # • N: Normal
-        # • L: Interval too short
-        # • V: Overflow reading (A/D converter saturated)
-        # • X: Oscillation
-        # • C: This channel in compliance
-        # • T: Other channel in compliance
-
-    def get_current(self, channel: str) -> float:
-        """Request current of given channel."""
-        current = float("nan")
-        overflow_value = 1e37
-        if self.command_set == "US":
-            self.port.write("TI" + str(channel))
-            answer = self.port.read()
-            current = float(answer[3:])
-            if current > overflow_value:
-                current = float("nan")
-        return current
-
-    def set_pulse_impedance(self, channel: str, impedance: str) -> str:
-        """Set the pulse impedance of the device."""
-        impedance = float(impedance)
-        minimum_impedance = 1.0
-        maximum_impedance = 1e6
-        if impedance < minimum_impedance:
-            msg = f"Impedance of {impedance} too low. Must be between 1.0 and 1e6."
-            raise ValueError(msg)
-        if impedance > maximum_impedance:
-            msg = f"Impedance of {impedance} too high. Must be between 1.0 and 1e6."
-            raise ValueError(msg)
-
-        self.port.write(f"PD {channel}, {impedance}")
-
-        return self.read_tcpip_port()
-
-    def set_pulse_trigger_mode(self, channel: str, mode: int, count: int) -> str:
-        """Set pulse trigger mode.
-
-        Mode:
-            Burst mode: 0
-            Continuous: 1 (default)
-            Trigger burst: 2
-
-        Count:
-            Burst or trigger burst only: Pulse count in number of pulses: 1 to 232-1; set to 1 for
-            continuous (default 1)
-        """
-        self.port.write(f"PG {channel}, {mode}, {count}")
-        return self.read_tcpip_port()
-
-    def set_pulse_stop(self, channel: str) -> str:
-        """Stop pulse output for given channel."""
-        self.port.write(f"PH {channel}")
-        return self.read_tcpip_port()
-
-    def set_pulse_output(self, channel: str, output: str) -> str:
-        """Set pulse output of given channel."""
-        self.port.write(f"PO {channel}, {output}")
-        return self.read_tcpip_port()
-
-    def set_pulse_reset(self, channel: str) -> str:
-        """Reset pulse for given channel."""
-        self.port.write(f"PS {channel}")
-        return self.read_tcpip_port()
-
-    def set_pulse_timing(self, channel: str, period: str, width: str, rise_time: str, fall_time: str) -> str:
-        """Set pulse timing for given channel."""
-        self.port.write(f"PT {channel}, {period}, {width}, {rise_time}, {fall_time}")
-        return self.read_tcpip_port()
-
-    def set_pulse_levels(self, channel: str, pulse_high: str, pulse_low: str, range: str, current_limit: str) -> str:
-        """This command sets pulse high, pulse low, range, and current limit independently the given channel."""
-        self.port.write(f"PV {channel}, {pulse_high}, {pulse_low}, {range}, {current_limit}")
-        return self.read_tcpip_port()
-
-    def set_pulse_output_parameters(self, channel: str, pulse_delay: str, trigger_polarity: str) -> str:
-        """This command sets the trigger output parameters for pulse delay and trigger polarity."""
-        self.port.write(f"TO {channel}, {pulse_delay}, {trigger_polarity}")
-        return self.read_tcpip_port()
-
-    def set_pulse_source(self, channel: str, trigger_source: str) -> str:
-        """This command sets the trigger source that is used to trigger the pulse card to start its output."""
-        self.port.write(f"TS {channel}, {trigger_source}")
-        return self.read_tcpip_port()
-
-    def kult_get_module_description(self, library: str, module: str) -> str:
-        """Returns a description of the Library module.
-
-        Attention: only works after EX command has been used before.
-        """
-        self.port.write(f"GD {library} {module}")
-        return self.port.read()
-
-    def kult_execute_module(self, library: str, module: str, *args) -> str:
-        arguments = ", ".join([str(x) for x in args])
-        self.port.write(f"EX {library} {module}({arguments})")
-
-        if self.port_string.startswith("TCPIP"):
-            answer = self.port.read()
-            print("EX TCPIP read:", answer)
-
-        return self.port.read()
-
-    def kult_abort(self) -> None:
-        """Abort KULT."""
-        self.port.write("AB")
-
-    def kult_get_parameter(self, name_or_index: str | int, num_values=None) -> None:
-        """Retrieves information about the function arguments.
-
-        Args:
-            name_or_index: define parameter by name using string or by index using integer
-            num_values: in case of an array, the number of values can be defined
-        """
-        if isinstance(name_or_index, str):
-            command = f"GN {name_or_index}"
-            if num_values:
-                command += " %i" % int(num_values)
-            self.port.write(command)
-
 if __name__ == "__main__":
-    # Basic connectivity and measure test
+    # Test script for Keithley 4200A SMU and PMU controllers
     import sys
     import time
+    import argparse
 
-    address = "192.168.0.10:8888"
-    print(f"Connecting to 4200A at {address} ...")
-    ctrl = Keithley4200AController(address)
-    try:
-        print(ctrl.get_idn())
-        ctrl.set_voltage(0.5, Icc=1e-3)
-        time.sleep(0.1)
-        v = ctrl.measure_voltage()
-        i = ctrl.measure_current()
-        print(f"Measured V={v:.6g} V, I={i:.6g} A")
-        ctrl.enable_output(False)
-        ctrl.close()
-        
-    except Exception as e:
-        print(f"Error: {e}")
-    pass
+    def test_smu_controller(address: str):
+        """Test the basic SMU controller functionality."""
+        print(f"\n=== Testing SMU Controller at {address} ===")
+        print(f"Connecting to 4200A at {address} ...")
+        ctrl = Keithley4200AController(address)
+        try:
+            print(f"Device ID: {ctrl.get_idn()}")
+            
+            # Test voltage source mode
+            print("\n--- Testing Voltage Source Mode ---")
+            ctrl.set_voltage(0.5, Icc=1e-3)
+            time.sleep(0.1)
+            v = ctrl.measure_voltage()
+            i = ctrl.measure_current()
+            print(f"Set V=0.5V, Measured V={v:.6g} V, I={i:.6g} A")
+            
+            # Test current source mode
+            print("\n--- Testing Current Source Mode ---")
+            ctrl.set_current(1e-6, Vcc=10.0)
+            time.sleep(0.1)
+            v = ctrl.measure_voltage()
+            i = ctrl.measure_current()
+            print(f"Set I=1μA, Measured V={v:.6g} V, I={i:.6g} A")
+            
+            # Test voltage sweep
+            print("\n--- Testing Voltage Sweep ---")
+            sweep_data = ctrl.voltage_sweep(0.0, 1.0, 0.1, delay_s=0.05, v_limit=10.0, i_limit=1e-3)
+            print(f"Sweep completed: {len(sweep_data)} points")
+            print("First 3 points:", sweep_data[:3])
+            
+            ctrl.enable_output(False)
+            ctrl.close()
+            print("\n✓ SMU test completed successfully")
+            
+        except Exception as e:
+            print(f"✗ SMU test failed: {e}")
+
+    def test_pmu_connection():
+        pmu = Keithley4200A_PMUController("192.168.0.10:8888")  # adjust to your server
+        try:
+            pmu.connect()
+
+            # Run a test pulse
+            print("Running test pulse...")
+            data = pmu.pulse_measure(channel=1, width=1e-3, amplitude=0.5)
+
+            print("Pulse measurement complete.")
+            return data
+
+        finally:
+            pmu.disconnect()
+
+    
+    print("Keithley 4200A Controller Test Script")
+    print("=" * 50)
+
+    result = test_pmu_connection()
+    print("Measurement result:", result)
+    
+    print("\nTest script completed.")
