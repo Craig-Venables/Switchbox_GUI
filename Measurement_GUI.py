@@ -32,11 +32,83 @@ from tests.preferences import load_thresholds, save_thresholds
 from Check_Connection import CheckConnection
 from TelegramBot import TelegramBot
 from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
+from automated_memristor_tester import AutomatedTesterGUI
 
 # Set logging level to WARNING (hides INFO messages)
 logging.getLogger("pymeasure").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+class SMUAdapter:
+	"""Adapter to expose the IVControllerManager with the interface expected by
+	AutomatedTesterGUI/AutoTester (set_voltage, measure_current, enable_output, etc.)."""
+
+	def __init__(self, iv_manager):
+		self._iv = iv_manager
+		# For ad-hoc TSP fallback, expose an attribute named 'device' if available
+		self.device = None
+		try:
+			inst = getattr(self._iv, 'instrument', None)
+			if inst is not None and hasattr(inst, 'device'):
+				self.device = inst.device
+		except Exception:
+			self.device = None
+
+	def safe_init(self) -> None:
+		return None
+
+	def set_voltage(self, voltage: float, Icc: float = None) -> None:
+		if Icc is None:
+			# Use a reasonable default if not specified
+			Icc = 1e-3
+		return self._iv.set_voltage(voltage, Icc)
+
+	def set_current(self, current: float, Vcc: float = None) -> None:
+		if Vcc is None:
+			Vcc = 10.0
+		return self._iv.set_current(current, Vcc)
+
+	def measure_voltage(self) -> float:
+		val = self._iv.measure_voltage()
+		try:
+			# Some controllers return tuples; normalize to float
+			if isinstance(val, (list, tuple)):
+				return float(val[0] if len(val) > 0 else 0.0)
+			return float(val)
+		except Exception:
+			return 0.0
+
+	def measure_current(self) -> float:
+		val = self._iv.measure_current()
+		try:
+			# Manager may return tuple (None, current)
+			if isinstance(val, (list, tuple)):
+				return float(val[-1])
+			return float(val)
+		except Exception:
+			return 0.0
+
+	def enable_output(self, enable: bool) -> None:
+		return self._iv.enable_output(bool(enable))
+
+	def close(self) -> None:
+		try:
+			return self._iv.close()
+		except Exception:
+			return None
+
+	# Optional fast-path: if underlying controller implements run_tsp_sweep, expose it
+	def run_tsp_sweep(self, start_v: float, stop_v: float, step_v: float,
+					 icc_start: float, icc_factor: float = 10.0,
+					 icc_max: float = None, delay_s: float = 0.005,
+					 burn_abort_A: float = None):
+		inst = getattr(self._iv, 'instrument', None)
+		if inst is not None and hasattr(inst, 'run_tsp_sweep'):
+			return inst.run_tsp_sweep(start_v=start_v, stop_v=stop_v, step_v=step_v,
+									  icc_start=icc_start, icc_factor=icc_factor,
+									  icc_max=icc_max, delay_s=delay_s,
+									  burn_abort_A=burn_abort_A)
+		raise NotImplementedError("Underlying instrument does not support run_tsp_sweep")
 
 
 class MeasurementGUI:
@@ -241,10 +313,59 @@ class MeasurementGUI:
         self.master.after(250, self._status_update_tick)
 
     def log_test(self, msg: str):
-        self.tests_log.config(state=tk.NORMAL)
-        self.tests_log.insert(tk.END, msg + "\n")
-        self.tests_log.config(state=tk.DISABLED)
-        self.tests_log.see(tk.END)
+        try:
+            if hasattr(self, 'tests_log') and self.tests_log:
+                self.tests_log.config(state=tk.NORMAL)
+                self.tests_log.insert(tk.END, msg + "\n")
+                self.tests_log.config(state=tk.DISABLED)
+                self.tests_log.see(tk.END)
+            else:
+                print(msg)
+        except Exception:
+            print(msg)
+    
+    def open_autotest(self):
+        try:
+            if not self.keithley:
+                self.connect_keithley()
+            if not self.keithley:
+                messagebox.showerror("Instrument", "Keithley not connected.")
+                return
+            adapter = SMUAdapter(self.keithley)
+            # Provide section and device helpers to the automated tester
+            current_section_name = self.section  # already set in this GUI
+            # next-device callback: advance the GUI's device index and return the next device id string
+            def get_next_device():
+                try:
+                    # Advance internal index, wrap safely
+                    self.current_index = (self.current_index + 1) % max(1, len(self.device_list))
+                    self.current_device = self.device_list[self.current_index]
+                    # Update any GUI labels that display the device name
+                    self.device_section_and_number = self.convert_to_name(self.current_index)
+                    self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
+                    try:
+                        self.device_label.config(text=f"Device: {self.display_index_section_number}")
+                    except Exception:
+                        pass
+                    try:
+                        # Notify any listeners
+                        self.master.event_generate('<<DeviceChanged>>', when='tail')
+                    except Exception:
+                        pass
+                    return self.current_device
+                except Exception:
+                    return None
+
+            AutomatedTesterGUI(self.master,
+                                instrument=adapter,
+                                current_section=current_section_name,
+                                device_list=self.device_list,
+                                get_next_device_cb=get_next_device,
+                                current_device_id=self.current_device,
+                                host_gui=self)
+        except Exception as e:
+            messagebox.showerror("AutoTester", str(e))
+
 
     # ---------------- Telegram helpers -----------------
     def _bot_enabled(self) -> bool:
@@ -294,7 +415,7 @@ class MeasurementGUI:
             self.master.after(100, self._pump_test_logs)
         elif drained:
             self.master.after(100, self._pump_test_logs)
-#extra 
+
     def show_test_preferences(self):
         t = load_thresholds()
         info = (
@@ -312,25 +433,14 @@ class MeasurementGUI:
         frame = tk.LabelFrame(parent, text="Automated Tests", padx=5, pady=5)
         frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
-        # Row 0: Run / Stop
-        self.start_tests_btn = tk.Button(frame, text="Run Automated Tests", command=self.start_automated_tests)
-        self.start_tests_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+        # Only one button: open AutoTester GUI on demand
+        self.autopress_btn = tk.Button(frame, text="AutoPress", command=self.open_autotest)
+        self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
 
-        self.stop_tests_btn = tk.Button(frame, text="Stop", command=self.stop_automated_tests)
-        self.stop_tests_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
-
-        # Row 1: Live plotting / Preferences
-        self.live_plot_cb = tk.Checkbutton(frame, text="Live plotting", variable=self.live_plot_enabled)
-        self.live_plot_cb.grid(row=1, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
-
-        self.pref_btn = tk.Button(frame, text="Test Preferences", command=self.show_test_preferences)
-        self.pref_btn.grid(row=1, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
-
-        # Two columns only
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
-    # Automated tests log removed per request
+    
 
     ###################################################################
     # Graph empty shells setting up for plotting
@@ -982,7 +1092,7 @@ class MeasurementGUI:
 
     def load_systems(self):
         """Load system configurations from JSON file"""
-        config_file = "system_configs.json"
+        config_file = "Json_Files/system_configs.json"
 
         try:
             with open(config_file, 'r') as f:
