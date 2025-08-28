@@ -308,10 +308,15 @@ class AutoTester:
                 return label
         return "UNFORMED"
 
-    def _run_triangular_sweep(self, vmax: float, steps: int = 81, delay_s: float = 0.02):
+    def _run_triangular_sweep(self, vmax: float, steps: int = 81, delay_s: float = 0.02, vneg: Optional[float] = None):
         trace = []
         half = steps//2
-        voltages = [i*(vmax/half) for i in range(half+1)] + [i*(vmax/half) for i in range(half-1,-1,-1)]
+        neg_target = -abs(vneg if vneg is not None else vmax)
+        pos_segment = [i*(vmax/half) for i in range(half+1)]
+        neg_segment = [pos_segment[i] for i in range(half-1,-1,-1)]
+        # scale negative segment to reach neg_target magnitude
+        scale = abs(neg_target)/max(vmax, 1e-12)
+        voltages = pos_segment + [ -abs(v)*scale for v in neg_segment ]
         try:
             with self.lock:
                 self.instrument.set_voltage(0.0, Icc=min(self.params.I_comp_start_A, self.params.I_comp_max_A))

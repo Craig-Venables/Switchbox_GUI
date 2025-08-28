@@ -24,6 +24,7 @@ from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersuppl
 from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
 #from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
 from measurement_service import MeasurementService, VoltageRangeMode
+from typing import Optional
 from tests.config import Thresholds
 from tests.runner import TestRunner
 from tests.driver import MeasurementDriver
@@ -436,6 +437,15 @@ class MeasurementGUI:
         # Only one button: open AutoTester GUI on demand
         self.autopress_btn = tk.Button(frame, text="AutoPress", command=self.open_autotest)
         self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        # PMU testing button: opens a lightweight PMU Testing GUI
+        try:
+            from PMU_Testing_GUI import PMUTestingGUI
+            self.pmu_btn = tk.Button(frame, text="PMU Testing", command=lambda: PMUTestingGUI(self.master, provider=self))
+            self.pmu_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+        except Exception:
+            # If import fails, keep UI functional without PMU
+            pass
 
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
@@ -1218,34 +1228,39 @@ class MeasurementGUI:
         self.voltage_high = tk.DoubleVar(value=1)
         tk.Entry(frame, textvariable=self.voltage_high).grid(row=1, column=1)
 
-        tk.Label(frame, text="Step Size (V):").grid(row=2, column=0, sticky="w")
+        # Optional asymmetric negative voltage limit
+        tk.Label(frame, text="Voltage Low (V, optional):").grid(row=2, column=0, sticky="w")
+        self.voltage_low_str = tk.StringVar(value="")
+        tk.Entry(frame, textvariable=self.voltage_low_str).grid(row=2, column=1)
+
+        tk.Label(frame, text="Step Size (V):").grid(row=3, column=0, sticky="w")
         self.step_size = tk.DoubleVar(value=0.1)
-        tk.Entry(frame, textvariable=self.step_size).grid(row=2, column=1)
+        tk.Entry(frame, textvariable=self.step_size).grid(row=3, column=1)
 
-        tk.Label(frame, text="Step Delay (S):").grid(row=3, column=0, sticky="w")
+        tk.Label(frame, text="Step Delay (S):").grid(row=4, column=0, sticky="w")
         self.step_delay = tk.DoubleVar(value=0.05)
-        tk.Entry(frame, textvariable=self.step_delay).grid(row=3, column=1)
+        tk.Entry(frame, textvariable=self.step_delay).grid(row=4, column=1)
 
-        tk.Label(frame, text="# Sweeps:").grid(row=4, column=0, sticky="w")
+        tk.Label(frame, text="# Sweeps:").grid(row=5, column=0, sticky="w")
         self.sweeps = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.sweeps).grid(row=4, column=1)
+        tk.Entry(frame, textvariable=self.sweeps).grid(row=5, column=1)
 
-        tk.Label(frame, text="Icc:").grid(row=5, column=0, sticky="w")
+        tk.Label(frame, text="Icc:").grid(row=6, column=0, sticky="w")
         self.icc = tk.DoubleVar(value=0.1)
-        tk.Entry(frame, textvariable=self.icc).grid(row=5, column=1)
+        tk.Entry(frame, textvariable=self.icc).grid(row=6, column=1)
 
         # Sweep Mode selector
-        tk.Label(frame, text="Sweep Mode:").grid(row=6, column=0, sticky="w")
+        tk.Label(frame, text="Sweep Mode:").grid(row=7, column=0, sticky="w")
         self.sweep_mode_var = tk.StringVar(value=VoltageRangeMode.FIXED_STEP)
         self.sweep_mode_menu = ttk.Combobox(frame, textvariable=self.sweep_mode_var,
                                             values=[VoltageRangeMode.FIXED_STEP,
                                                     VoltageRangeMode.FIXED_SWEEP_RATE,
                                                     VoltageRangeMode.FIXED_VOLTAGE_TIME], state="readonly")
-        self.sweep_mode_menu.grid(row=6, column=1, sticky="ew")
+        self.sweep_mode_menu.grid(row=7, column=1, sticky="ew")
 
         # Dynamic params container
         dyn = tk.Frame(frame)
-        dyn.grid(row=7, column=0, columnspan=2, sticky="ew")
+        dyn.grid(row=8, column=0, columnspan=2, sticky="ew")
         dyn.columnconfigure(1, weight=1)
         self._dyn_params_frame = dyn
 
@@ -1280,18 +1295,18 @@ class MeasurementGUI:
         render_dynamic_params()
 
         # Sweep Type selector (FS/PS/NS)
-        tk.Label(frame, text="Sweep Type:").grid(row=8, column=0, sticky="w")
+        tk.Label(frame, text="Sweep Type:").grid(row=9, column=0, sticky="w")
         self.sweep_type_var = tk.StringVar(value="FS")
         self.sweep_type_menu = ttk.Combobox(frame, textvariable=self.sweep_type_var,
                                             values=["FS", "PS", "NS"], state="readonly")
-        self.sweep_type_menu.grid(row=8, column=1, sticky="ew")
+        self.sweep_type_menu.grid(row=9, column=1, sticky="ew")
 
         # LED Controls mini title
         tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=20, column=0, columnspan=2, sticky="w",
                                                                              pady=(10, 2))
 
         # LED Toggle Button
-        tk.Label(frame, text="LED Status:").grid(row=7, column=0, sticky="w")
+        tk.Label(frame, text="LED Status:").grid(row=21, column=0, sticky="w")
         self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
 
         def toggle_led():
@@ -1856,7 +1871,7 @@ class MeasurementGUI:
             for i in range(int(self.sequential_number_of_sweeps.get())):
                 print("Starting pass #",i + 1)
                 voltage = int(self.sq_voltage.get())
-                voltage_arr = get_voltage_range(0, voltage, 0.05, "FS")
+                voltage_arr = get_voltage_range(0, voltage, 0.05, "FS", neg_stop_v=None)
 
                 self.stop_measurement_flag = False  # Reset the stop flag
 
@@ -2425,7 +2440,20 @@ class MeasurementGUI:
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
                     if sweep_type in ("NS", "PS", "FS"):
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type)
+                        # Optional per-sweep negative stop voltage: params override UI field
+                        neg_stop_v_param = None
+                        try:
+                            if 'neg_stop_v' in params:
+                                neg_stop_v_param = float(params.get('neg_stop_v'))
+                            elif 'Vneg' in params:
+                                neg_stop_v_param = float(params.get('Vneg'))
+                            else:
+                                raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
+                                if raw_neg != "":
+                                    neg_stop_v_param = float(raw_neg)
+                        except Exception:
+                            neg_stop_v_param = None
+                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v=neg_stop_v_param)
                         icc_val = float(self.icc.get())
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -2474,7 +2502,20 @@ class MeasurementGUI:
                         print("retention")
                     else:
                         # default to FS using service
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, "FS")
+                        # Reuse same neg_stop_v_param logic
+                        neg_stop_v_param = None
+                        try:
+                            if 'neg_stop_v' in params:
+                                neg_stop_v_param = float(params.get('neg_stop_v'))
+                            elif 'Vneg' in params:
+                                neg_stop_v_param = float(params.get('Vneg'))
+                            else:
+                                raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
+                                if raw_neg != "":
+                                    neg_stop_v_param = float(raw_neg)
+                        except Exception:
+                            neg_stop_v_param = None
+                        voltage_range = get_voltage_range(start_v, stop_v, step_v, "FS", neg_stop_v=neg_stop_v_param)
                         icc_val = float(self.icc.get())
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -2636,6 +2677,14 @@ class MeasurementGUI:
         if stop_v is None:
             self.measuring = False
             return
+        # Optional asymmetric negative stop voltage support; fallback to |stop_v|
+        neg_stop_v = None
+        try:
+            raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
+            if raw_neg != "":
+                neg_stop_v = float(raw_neg)
+        except Exception:
+            neg_stop_v = None
         sweeps_val = self._safe_get_float(self.sweeps, "Sweeps", default=1)
         if sweeps_val is None:
             self.measuring = False
@@ -2681,14 +2730,6 @@ class MeasurementGUI:
             sweep_type = self.sweep_type_var.get().strip().upper() or sweep_type
         except Exception:
             pass
-        voltage_range = self.measurement_service.compute_voltage_range(
-            start_v, stop_v, step_v, sweep_type,
-            mode=mode,
-            sweep_rate_v_per_s=sweep_rate,
-            voltage_time_s=total_time,
-            step_delay_s=step_delay,
-            num_steps=nsteps,
-        )
         self.stop_measurement_flag = False  # Reset the stop flag
 
         # make sure it is on the top
@@ -2721,8 +2762,6 @@ class MeasurementGUI:
 
             time.sleep(1)
 
-            #def measure(self, voltage_range, sweeps, step_delay, led=0, power=1, sequence=None, pause=0):
-
             # measure device using centralized service
             def _on_point(v, i, t_s):
                 self.v_arr_disp.append(v)
@@ -2734,7 +2773,11 @@ class MeasurementGUI:
                 icc=icc_val,
                 sweeps=sweeps,
                 step_delay=step_delay,
-                voltage_range=voltage_range,
+                start_v=start_v,
+                stop_v=stop_v,
+                neg_stop_v=neg_stop_v,
+                step_v=step_v,
+                sweep_type=sweep_type,
                 mode=mode,
                 sweep_rate_v_per_s=sweep_rate,
                 total_time_s=total_time,
@@ -3964,7 +4007,7 @@ class MeasurementGUI:
 
 
 
-def get_voltage_range(start_v, stop_v, step_v, sweep_type):
+def get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v: Optional[float] = None):
     """Compatibility wrapper routing to MeasurementService to compute voltage ranges.
 
     Existing code calls this function from several places; keep the signature and
@@ -3972,7 +4015,7 @@ def get_voltage_range(start_v, stop_v, step_v, sweep_type):
     """
     try:
         svc = MeasurementService()
-        return svc.compute_voltage_range(start_v, stop_v, step_v, sweep_type, mode=VoltageRangeMode.FIXED_STEP)
+        return svc.compute_voltage_range(start_v, stop_v, step_v, sweep_type, mode=VoltageRangeMode.FIXED_STEP, neg_stop_v=neg_stop_v)
     except Exception:
         # Fallback to legacy behavior if service import/usage fails for any reason
         def frange(start, stop, step):
@@ -3980,13 +4023,15 @@ def get_voltage_range(start_v, stop_v, step_v, sweep_type):
                 yield round(start, 3)
                 start += step
         if sweep_type == "NS":
-            return list(frange(start_v, -stop_v, -step_v)) + list(frange(-stop_v, start_v, step_v))
+            neg_target = -abs(neg_stop_v if neg_stop_v is not None else stop_v)
+            return list(frange(start_v, neg_target, -abs(step_v))) + list(frange(neg_target, start_v, abs(step_v)))
         if sweep_type == "PS":
-            return list(frange(start_v, stop_v, step_v)) + list(frange(stop_v, start_v, -step_v))
+            return list(frange(start_v, stop_v, abs(step_v))) + list(frange(stop_v, start_v, -abs(step_v)))
+        neg_target = -abs(neg_stop_v if neg_stop_v is not None else stop_v)
         return (
-            list(frange(start_v, stop_v, step_v))
-            + list(frange(stop_v, -stop_v, -step_v))
-            + list(frange(-stop_v, start_v, step_v))
+            list(frange(start_v, stop_v, abs(step_v)))
+            + list(frange(stop_v, neg_target, -abs(step_v)))
+            + list(frange(neg_target, start_v, abs(step_v)))
         )
 
 
