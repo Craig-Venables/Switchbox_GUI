@@ -1,0 +1,74 @@
+{
+    "Keithley 2400": {
+        "summary": "General-purpose SourceMeter for I–V sweeps and quasi-static measurements.",
+        "advantages": [
+            "Wide voltage range (±200 V)",
+            "Good for DC I–V sweeps, forming, and compliance-limited operation",
+            "Mature driver and programming support"
+        ],
+        "disadvantages": [
+            "Not suited for fast pulsed testing (ms limit on pulse width)",
+            "Slower measurement timing compared to 4200 series",
+            "Compliance resolution only down to µA"
+        ],
+        "best_use": "Forming tests, DC sweeps, slow staircase pulses"
+    },
+    "Keithley 2401": {
+        "summary": "Lower-voltage variant of the 2400 with otherwise similar performance.",
+        "advantages": [
+            "Cheaper and simpler than 2400",
+            "Suitable for devices needing only ±20 V",
+            "Same measurement resolution as 2400"
+        ],
+        "disadvantages": [
+            "Restricted voltage range (±20 V)",
+            "Not useful for high-voltage forming",
+            "Still limited to ms-range pulsing"
+        ],
+        "best_use": "Low-voltage device sweeps, compliance-controlled forming"
+    },
+    "Keithley 4200A_smu": {
+        "summary": "High-performance SMU with lower noise and higher precision than 2400 series.",
+        "advantages": [
+            "Excellent low-noise performance",
+            "Wide voltage range (±210 V)",
+            "nA resolution compliance settings",
+            "Good for precision DC sweeps, CV, and retention testing"
+        ],
+        "disadvantages": [
+            "Not designed for fast µs pulsing",
+            "Pulse width limit ~0.5 ms",
+            "Larger, more complex system compared to benchtop SMUs"
+        ],
+        "best_use": "Precision I–V sweeps, low-noise leakage studies, retention"
+    },
+    "Keithley 4200A_pmu": {
+        "summary": "Pulse Measurement Unit add-on for 4200A, optimized for fast transient testing.",
+        "advantages": [
+            "Fastest timing resolution (10 µs)",
+            "Can generate and measure µs–ms pulses",
+            "High-speed digitization up to 10 kHz update rate",
+            "Excellent for endurance and transient switching studies"
+        ],
+        "disadvantages": [
+            "Reduced voltage range (±10 V)",
+            "Limited to ±100 mA current",
+            "Requires coordination with SMU for DC bias + pulse overlay"
+        ],
+        "best_use": "Transient dynamics, switching speed, endurance cycling"
+    },
+    "HP4140B": {
+        "summary": "Classic picoammeter/DC source, excellent for ultra-low current measurements.",
+        "advantages": [
+            "Very high current sensitivity (10 fA resolution)",
+            "Stable DC sourcing up to ±100 V",
+            "Excellent for leakage and retention measurements"
+        ],
+        "disadvantages": [
+            "Extremely slow compared to modern SMUs",
+            "No fast pulsing capability (integration times 5–100 ms/point)",
+            "Obsolete interface, more complex to automate"
+        ],
+        "best_use": "Ultra-low current leakage, quasi-static sweeps, retention drift"
+    }
+}
