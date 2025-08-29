@@ -22,6 +22,8 @@ import time
 import numpy as np
 import pandas as pd
 
+
+
 # Ensure project root on sys.path for absolute imports when run as script
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -240,39 +242,60 @@ class Keithley4200AController:
 
 
 class Keithley4200A_PMUController:
-    """Dedicated helper for PMU operation on 4200A using LPT.
+    """Standalone PMU controller for the Keithley 4200A using the LPT server.
 
-    Construct with address like '192.168.0.10:8888|PMU1-CH1'.
+    Usage:
+        pmu = Keithley4200A_PMUController("192.168.0.10:8888|PMU1-CH1")
+        pmu.configure_pulse(...)
+        df = pmu.run_fixed_amplitude_pulses(...)
     """
 
-    def __init__(self, address: str) -> None:
-        """Connect to the PMU on the given address.
+    def __init__(self, address: str):
+        """Connect to a PMU channel.
 
         Address examples:
           - "192.168.0.10:8888|PMU1-CH1"
-          - "192.168.0.10|PMU1-CH2"
-          - "192.168.0.10:8888" (defaults to PMU1-CH1)
+          - "192.168.0.10:8888|PMU1-CH2"
         """
-        base = Keithley4200AController(address if "|" in address else address + "|PMU1-CH1")
-        if not base._is_pmu:
-            raise ValueError("PMUController requires a PMU address like '...|PMU1-CH1'")
+        # Parse address
+        if "|" in address:
+            addr, instr_sel = address.split("|", 1)
+            instr_sel = instr_sel.strip().upper()
+        else:
+            addr, instr_sel = address, "PMU1-CH1"
 
-        self._base = base
-        self.lpt = base.lpt
-        self.param = base.param
-        self._card_id = base._instr_id
-        self._chan = base._pmu_channel or 1
+        if ":" in addr:
+            ip, port = addr.split(":", 1)
+            self._ip = ip
+            self._port = int(port)
+        else:
+            self._ip = addr
+            self._port = 8888
 
-        # Set conservative safe defaults within 4200A PMU limits
-        self.configure_pulse(
-            v_src_range=5.0,
-            v_meas_range_type=0, v_meas_range=5.0,
-            i_meas_range_type=0, i_meas_range=0.1,
-            v_limit=5.0, i_limit=0.1, power_limit=1.0,
-            start_pct=0.1, stop_pct=0.9, num_pulses=1,
-            period=20e-6, delay=1e-7, width=10e-6, rise=1e-7, fall=1e-7,
-            load_ohm=1e6,
-        )
+        # Parse instrument + channel
+        if "CH" in instr_sel:
+            card = instr_sel.split("-")[0]   # e.g. "PMU1"
+            ch = int(instr_sel.split("CH")[-1])  # 1/2
+        else:
+            card, ch = instr_sel, 1
+
+        self.card = card
+        self.channel = ch  # keep channel as 1‑ or 2‑based (VALID for LPT API)
+
+        # Proxies
+        self.lpt = Proxy(self._ip, self._port, "lpt")
+        self.param = Proxy(self._ip, self._port, "param")
+
+        # Initialize tester
+        self.lpt.initialize()
+        self.lpt.tstsel(1)
+        self.lpt.devint()
+        self.lpt.dev_abort()
+
+        self.card_id = self.lpt.getinstid(self.card)
+
+        self._configured = False
+        print(f"[PMU] Connected to {self.card} channel {self.channel}, ID={self.card_id}")
 
     # -----------------------
     # PMU-Specific Functions
@@ -283,60 +306,81 @@ class Keithley4200A_PMUController:
                         start_pct, stop_pct, num_pulses,
                         period, delay, width, rise, fall,
                         load_ohm):
-        """Configure pulse parameters for this channel.
+        """Configure the pulse generator and measurement settings"""
 
-        This method keeps the configuration minimal and readable. Values are not
-        validated here; use helper validate methods if needed before calling.
-        """
-        self.lpt.pg2_init(self._card_id, 0)
-        self.lpt.rpm_config(self._card_id, self._chan,
-                            self.param.KI_RPM_PATHWAY, self.param.KI_RPM_PULSE)
-        self.lpt.pulse_meas_sm(self._card_id, self._chan, 0, 1, 0, 1, 0, 1, 1)
-        self.lpt.pulse_ranges(self._card_id, self._chan, v_src_range,
+        self.lpt.rpm_config(self.card_id, self.channel,
+                            self.param.KI_RPM_PATHWAY,
+                            self.param.KI_RPM_PULSE)
+
+        self.lpt.pulse_meas_sm(self.card_id, self.channel,
+                               acquire_type=0,
+                               acquire_meas_v_ampl=1,
+                               acquire_meas_v_base=0,
+                               acquire_meas_i_ampl=1,
+                               acquire_meas_i_base=0,
+                               acquire_time_stamp=1,
+                               llecomp=0)
+
+        self.lpt.pulse_ranges(self.card_id, self.channel,
+                              v_src_range,
                               v_meas_range_type, v_meas_range,
                               i_meas_range_type, i_meas_range)
-        self.lpt.pulse_limits(self._card_id, self._chan, v_limit, i_limit, power_limit)
-        self.lpt.pulse_meas_timing(self._card_id, self._chan,
-                                   start_pct, stop_pct, int(num_pulses))
-        self.lpt.pulse_source_timing(self._card_id, self._chan,
-                                     period, delay, width, rise, fall)
-        self.lpt.pulse_load(self._card_id, self._chan, load_ohm)
 
-    # ---- Simple setters to adjust parts of config without resending all ----
+        self.lpt.pulse_limits(self.card_id, self.channel,
+                              v_limit, i_limit, power_limit)
+
+        self.lpt.pulse_meas_timing(self.card_id, self.channel,
+                                   start_pct, stop_pct, int(num_pulses))
+
+        self.lpt.pulse_source_timing(self.card_id, self.channel,
+                                     period, delay, width, rise, fall)
+
+        self.lpt.pulse_load(self.card_id, self.channel, load_ohm)
+
+        self._configured = True
+
     def set_pulse_source_timing(self, period: float, delay: float, width: float, rise: float, fall: float):
-        self.lpt.pulse_source_timing(self._card_id, self._chan, period, delay, width, rise, fall)
+        self.lpt.pulse_source_timing(self.card_id, self.channel, period, delay, width, rise, fall)
 
     def set_pulse_meas_timing(self, start_pct: float, stop_pct: float, num_pulses: int):
-        self.lpt.pulse_meas_timing(self._card_id, self._chan, start_pct, stop_pct, int(num_pulses))
+        self.lpt.pulse_meas_timing(self.card_id, self.channel, start_pct, stop_pct, int(num_pulses))
 
     def set_pulse_limits(self, v_limit: float, i_limit: float, power_limit: float):
-        self.lpt.pulse_limits(self._card_id, self._chan, v_limit, i_limit, power_limit)
+        self.lpt.pulse_limits(self.card_id, self.channel, v_limit, i_limit, power_limit)
 
     def set_ranges(self, v_src_range: float, v_meas_range_type: int, v_meas_range: float,
                    i_meas_range_type: int, i_meas_range: float):
-        self.lpt.pulse_ranges(self._card_id, self._chan, v_src_range,
-                              v_meas_range_type, v_meas_range,
+        self.lpt.pulse_ranges(self.card_id, self.channel,
+                              v_src_range, v_meas_range_type, v_meas_range,
                               i_meas_range_type, i_meas_range)
 
     def set_load(self, load_ohm: float):
-        self.lpt.pulse_load(self._card_id, self._chan, load_ohm)
+        self.lpt.pulse_load(self.card_id, self.channel, load_ohm)
+
+    def _ensure_configured_with_defaults(self):
+        if getattr(self, "_configured", False):
+            return
+        # Conservative defaults; run methods will override timing per-call
+        self.configure_pulse(
+            v_src_range=10.0,
+            v_meas_range_type=0, v_meas_range=10.0,
+            i_meas_range_type=0, i_meas_range=0.2,
+            v_limit=5.0, i_limit=1.0, power_limit=10.0,
+            start_pct=0.1, stop_pct=0.9, num_pulses=1,
+            period=20e-6, delay=1e-7, width=10e-6, rise=1e-7, fall=1e-7,
+            load_ohm=1e6,
+        )
 
     def arm_single_pulse(self, amplitude_v: float, base_v: float = 0.0):
-        """Prepare a single pulse with given amplitude.
-
-        Use together with exec_and_fetch() to execute and read back data.
-        """
-        self.lpt.pulse_sweep_linear(self._card_id, self._chan,
+        self.lpt.pulse_sweep_linear(self.card_id, self.channel,
                                     self.param.PULSE_AMPLITUDE_SP,
                                     float(amplitude_v), float(amplitude_v), float(base_v))
-        self.lpt.pulse_output(self._card_id, self._chan, 1)
+        self.lpt.pulse_output(self.card_id, self.channel, 1)
 
-    def exec_and_fetch(self, as_dataframe: bool = True):
-        """Execute the pulse sequence configured and fetch results."""
+    def exec_and_fetch(self, as_dataframe: bool = True, timeout: float = 10.0):
         self.lpt.pulse_exec(self.param.PULSE_MODE_SIMPLE)
 
-        # Poll for completion
-        timeout, t0 = 30.0, time.time()
+        t0 = time.time()
         while True:
             status, _ = self.lpt.pulse_exec_status()
             if status != self.param.PMU_TEST_STATUS_RUNNING:
@@ -346,19 +390,16 @@ class Keithley4200A_PMUController:
                 raise TimeoutError("PMU pulse execution timed out")
             time.sleep(0.05)
 
-        # Fetch data
-        buf_size = self.lpt.pulse_chan_status(self._card_id, self._chan)
-        v, i, ts, statuses = self.lpt.pulse_fetch(self._card_id, self._chan, 0, max(0, buf_size - 1))
+        buf_size = self.lpt.pulse_chan_status(self.card_id, self.channel)
+        v, i, ts, statuses = self.lpt.pulse_fetch(self.card_id, self.channel, 0, buf_size - 1)
 
         if as_dataframe:
-            df = pd.DataFrame({
-                "t (s)": ts,
+            return pd.DataFrame({
                 "V (V)": v,
                 "I (A)": i,
+                "t (s)": ts,
                 "Status": statuses,
             })
-            df["Channel"] = self._chan
-            return df
 
         return v, i, ts, statuses
 
@@ -367,41 +408,35 @@ class Keithley4200A_PMUController:
                                    width_s: float, period_s: float,
                                    rise_s: float = 1e-7, fall_s: float = 1e-7,
                                    as_dataframe: bool = True):
-        """Run a simple pulse train of identical pulses and fetch results."""
+        self._ensure_configured_with_defaults()
         self.set_pulse_source_timing(period_s, 1e-7, width_s, rise_s, fall_s)
         self.set_pulse_meas_timing(0.1, 0.9, num_pulses)
-        self.lpt.pulse_sweep_linear(self._card_id, self._chan,
+        self.lpt.pulse_sweep_linear(self.card_id, self.channel,
                                     self.param.PULSE_AMPLITUDE_SP,
                                     float(amplitude_v), float(amplitude_v), float(base_v))
-        self.lpt.pulse_output(self._card_id, self._chan, 1)
+        self.lpt.pulse_output(self.card_id, self.channel, 1)
         return self.exec_and_fetch(as_dataframe=as_dataframe)
 
     def run_amplitude_sweep(self, start_v: float, stop_v: float, step_v: float,
                             base_v: float, width_s: float, period_s: float,
                             num_pulses: int | None = None,
                             as_dataframe: bool = True):
-        """Run a linear amplitude sweep and fetch results."""
+        self._ensure_configured_with_defaults()
         if num_pulses is None:
-            try:
-                num_pulses = int(abs(stop_v - start_v) / abs(step_v)) + 1
-            except Exception:
-                num_pulses = 1
+            num_pulses = int(abs(stop_v - start_v) / abs(step_v)) + 1
         self.set_pulse_source_timing(period_s, 1e-7, width_s, 1e-7, 1e-7)
         self.set_pulse_meas_timing(0.1, 0.9, num_pulses)
-        self.lpt.pulse_sweep_linear(self._card_id, self._chan,
+        self.lpt.pulse_sweep_linear(self.card_id, self.channel,
                                     self.param.PULSE_AMPLITUDE_SP,
                                     float(start_v), float(stop_v), float(step_v))
-        self.lpt.pulse_output(self._card_id, self._chan, 1)
+        self.lpt.pulse_output(self.card_id, self.channel, 1)
         return self.exec_and_fetch(as_dataframe=as_dataframe)
 
     def run_bitstring(self, pattern: str, amplitude_v: float, base_v: float,
                       width_s: float, period_s: float,
                       rise_s: float = 1e-7, fall_s: float = 1e-7,
                       as_dataframe: bool = True):
-        """Run a pulse pattern like "1011"; '1' applies amplitude_v, '0' applies base_v.
-
-        Implementation executes one pulse at a time and concatenates results.
-        """
+        self._ensure_configured_with_defaults()
         dfs = []
         for ch in str(pattern):
             level = amplitude_v if ch == '1' else base_v
@@ -409,47 +444,169 @@ class Keithley4200A_PMUController:
             self.set_pulse_meas_timing(0.1, 0.9, 1)
             self.arm_single_pulse(level, base_v)
             df = self.exec_and_fetch(as_dataframe=True)
-            dfs.append(df if isinstance(df, pd.DataFrame) else pd.DataFrame({
-                "t (s)": df[2], "V (V)": df[0], "I (A)": df[1], "Status": df[3]
-            }))
-        out = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
-        return out if as_dataframe else (
-            out.get("V (V)", []).to_list(),
-            out.get("I (A)", []).to_list(),
-            out.get("t (s)", []).to_list(),
-        )
+            dfs.append(df)
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
 
     def output(self, enable: bool):
-        self.lpt.pulse_output(self._card_id, self._chan, 1 if enable else 0)
+        self.lpt.pulse_output(self.card_id, self.channel, 1 if enable else 0)
 
     def close(self):
         try:
             self.output(False)
         except Exception:
             pass
-        self._base.close()
-
-    # ---- Introspection helpers ----
-    def is_connected(self) -> bool:
         try:
-            return self._card_id is not None and self.lpt is not None
+            self.lpt.devint()
+            self.lpt.tstdsl()
         except Exception:
-            return False
+            pass
+
+    def is_connected(self) -> bool:
+        return self.card_id is not None and self.lpt is not None
+
+# #----------------Proxy Class----------------
+
+# logger = logging.getLogger("TCPClientProxy")
+
+# import json
+# import builtins
+# import asyncio
+# import logging
+
+# class RemoteException(Exception):
+#     """
+#     A generic exception that is raised when the server-side code encountered an exception. As there is no universal
+#     specification on how an exception (in particular custom exception) looks like and can be created, we have
+#     to use a generic one and print the original traceback and exception type as the message.
+#     """
+
+
+# class RemoteVar:
+#     def __init__(self, variable_reference_name):
+#         self._variable_reference_name = variable_reference_name
+
+
+# class Proxy:
+#     _target_class: str
+
+#     def __init__(self, address: str, port: int, target_class: str):
+#         self.loop = asyncio.new_event_loop()
+#         self._target_class = target_class
+#         self.address = address
+#         self.port = port
+        
+#     def __del__(self):
+#         self.loop.close()
+
+#     def _convert_argument_from_json(self, arg):
+#         if isinstance(arg, list):
+#             return [self._convert_argument_from_json(element) for element in arg]
+#         arg_type = arg["type"]
+#         arg_value = arg["value"]
+#         if arg_type == "RemoteVar":
+#             return RemoteVar(arg_value)
+#         elif arg_type == "NoneType":
+#             return None
+#         return getattr(builtins, arg_type)(arg_value)
+
+#     def _convert_argument_to_json(self, arg):
+#         # tuples become lists in json anyway, so treat them the same here
+#         if isinstance(arg, list) or isinstance(arg, tuple):
+#             return [self._convert_argument_to_json(element) for element in arg]
+#         arg_type = type(arg).__name__
+#         # complex types are not transferred but saved locally and only a reference is sent back
+#         if arg_type == "RemoteVar":
+#             arg = arg._variable_reference_name
+#         return {
+#             "type": arg_type,
+#             "value": arg
+#         }
+
+#     async def _async_send_to_server(self, command: str) -> str:
+#         reader, writer = await asyncio.open_connection(
+#             self.address, self.port)
+
+#         writer.write(command.encode("utf-8") + b'\n')
+#         await writer.drain()
+
+#         data = await reader.readline()
+
+#         writer.close()
+#         return data.decode("utf-8")
+
+#     def _send_to_server(self, command: str) -> str:
+#         result = self.loop.run_until_complete(self._async_send_to_server(command))
+#         return result
+
+#     def unpack_result(self, response):
+#         result = json.loads(response)
+#         status = result.get("status", "invalid")
+#         if status == "success":
+#             return result
+#         if status == "exception":
+#             message = result["message"]
+            
+#              # only used if tblib was imported 
+#             if tblib_imported:
+#                 tb = Traceback.from_dict(result["traceback"]).as_traceback() 
+#             else:
+#                 tb = None
+
+#             reraise(
+#                 RemoteException,
+#                 RemoteException(f"Server-side processing failed with {message}"),
+#                 tb,
+#                 )
+                
+#         raise Exception("Error decoding the response from the server")
+
+#     def __getattr__(self, function):
+#         def handle_call(*args, **kwargs):
+#             args = args or []
+#             kwargs = kwargs or {}
+#             command_json = {
+#                 "class": self._target_class,
+#                 "function": function,
+#                 "args": [self._convert_argument_to_json(arg) for arg in args],
+#                 "kwargs": {k: self._convert_argument_to_json(v) for k, v in kwargs.items()}
+#             }
+#             command = json.dumps(command_json)
+#             logger.debug(f"Request: {command}")
+#             result = self._send_to_server(command)
+#             logger.debug(f"Response: {result}")
+#             result_json = self.unpack_result(result)
+#             return self._convert_argument_from_json(result_json["return"])
+
+#         if function[0] != "_":
+#             # try to determine if it is an attribute and not a function
+#             command_json = {
+#                 "class": self._target_class,
+#                 "attribute": function
+#             }
+#             command = json.dumps(command_json)
+#             result = self._send_to_server(command)
+#             result_json = self.unpack_result(result)
+#             if result_json["return"]["type"] == "callable":
+#                 return handle_call
+#             logger.debug(f"Request: {command}")
+#             logger.debug(f"Response: {result}")
+#             return self._convert_argument_from_json(result_json["return"])
+#         return None
+
 
 if __name__ == "__main__":
-    # Minimal self-test (requires reachable 4200A LPT server). Adjust IP as needed.
-    addr = "192.168.0.10:8888"
-    print("Keithley 4200A Controller Test")
-    try:
-        ctrl = Keithley4200AController(addr)
-        print(ctrl.get_idn())
-        ctrl.enable_output(False)
-        pmu = Keithley4200A_PMUController(addr + "|PMU1-CH1")
-        print("PMU connected:", pmu.is_connected())
-        df = pmu.run_fixed_amplitude_pulses(amplitude_v=0.5, base_v=0.0, num_pulses=1,
-                                            width_s=10e-6, period_s=20e-6)
-        print("Fetched rows:", len(df) if isinstance(df, pd.DataFrame) else "n/a")
-        pmu.close()
-        ctrl.close()
-    except Exception as exc:
-        print("Self-test skipped/failed:", exc)
+    addr = "192.168.0.10:8888|PMU1-CH1"
+    pmu = Keithley4200A_PMUController(addr)
+    pmu.configure_pulse(
+        v_src_range=10.0,
+        v_meas_range_type=0, v_meas_range=10.0,
+        i_meas_range_type=0, i_meas_range=0.2,
+        v_limit=5.0, i_limit=1.0, power_limit=10.0,
+        start_pct=0.2, stop_pct=0.8, num_pulses=4,
+        period=20e-6, delay=1e-7, width=10e-6, rise=1e-7, fall=1e-7,
+        load_ohm=1e6,
+    )
+    df = pmu.run_fixed_amplitude_pulses(amplitude_v=0.5, base_v=0.0,
+                                        num_pulses=10, width_s=10e-6, period_s=20e-6)
+    print(df)
+    pmu.close()
