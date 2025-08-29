@@ -258,6 +258,31 @@ class SiglentSDG1032X:
                 return False
             time.sleep(0.05)
 
+    def upload_csv_waveform(self, channel: int, csv_filename: str, waveform_name: str = "USER"):
+        """
+        Upload a CSV file containing waveform data to the function generator.
+        The CSV should contain one voltage value per line.
+        """
+        try:
+            # Read the CSV file
+            with open(csv_filename, 'r') as f:
+                data = f.read().strip()
+
+            # Convert to the format expected by Siglent
+            # Siglent expects comma-separated values
+            values = [line.strip() for line in data.split('\n') if line.strip()]
+            if not values:
+                raise ValueError("CSV file is empty or contains no valid data")
+
+            # Upload the data
+            data_str = ",".join(values)
+            self.write(f"C{channel}:ARWV NAME,{waveform_name},DATA,{data_str}")
+
+            return True
+        except Exception as e:
+            print(f"Error uploading CSV waveform: {e}")
+            return False
+
 
 def safe_float_or_str(val: Union[str, float, int]) -> Union[str, float]:
     return val if isinstance(val, str) else float(val)

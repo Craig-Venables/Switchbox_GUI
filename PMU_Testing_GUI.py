@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("TkAgg")
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -19,10 +19,82 @@ from Equipment_Classes.SMU.Keithley4200A import Keithley4200A_PMUController
 from Equipment_Classes.Function_Generator.Siglent_SDG1032X import SiglentSDG1032X
 
 
+class Tooltip:
+    """Simple hover tooltip for Tk widgets."""
+    def __init__(self, widget, text: str, delay_ms: int = 400):
+        self.widget = widget
+        self.text = text
+        self.delay_ms = max(0, int(delay_ms))
+        self.tipwindow = None
+        self._after_id = None
+        try:
+            self.widget.bind("<Enter>", self._on_enter, add="+")
+            self.widget.bind("<Leave>", self._on_leave, add="+")
+            self.widget.bind("<Motion>", self._on_motion, add="+")
+        except Exception:
+            pass
+
+    def _on_enter(self, _event=None):
+        self._schedule()
+
+    def _on_leave(self, _event=None):
+        self._unschedule()
+        self._hide()
+
+    def _on_motion(self, _event=None):
+        # restart delay on motion to reduce flicker
+        self._unschedule()
+        self._schedule()
+
+    def _schedule(self):
+        try:
+            self._after_id = self.widget.after(self.delay_ms, self._show)
+        except Exception:
+            pass
+
+    def _unschedule(self):
+        try:
+            if self._after_id is not None:
+                self.widget.after_cancel(self._after_id)
+                self._after_id = None
+        except Exception:
+            pass
+
+    def _show(self):
+        if self.tipwindow or not self.text:
+            return
+        try:
+            x, y, cx, cy = self.widget.bbox("insert") if hasattr(self.widget, "bbox") else (0, 0, 0, 0)
+        except Exception:
+            x, y, cx, cy = 0, 0, 0, 0
+        try:
+            x = x + self.widget.winfo_rootx() + 20
+            y = y + self.widget.winfo_rooty() + cy + 20
+        except Exception:
+            return
+        try:
+            self.tipwindow = tw = tk.Toplevel(self.widget)
+            tw.wm_overrideredirect(True)
+            tw.wm_geometry(f"+{x}+{y}")
+            label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                             background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                             font=("TkDefaultFont", 8))
+            label.pack(ipadx=4, ipy=2)
+        except Exception:
+            self.tipwindow = None
+
+    def _hide(self):
+        try:
+            if self.tipwindow is not None:
+                self.tipwindow.destroy()
+                self.tipwindow = None
+        except Exception:
+            pass
+
 class PMUTestingGUI(tk.Toplevel):
     """PMU and Laser generator testing window with granular controls and live previews."""
 
-    def __init__(self, master, pmu_address: str = "192.168.0.10:8888|PMU1-CH1", provider=None):
+    def __init__(self, master, pmu_address: str = "192.168.0.10:8888", provider=None):
         super().__init__(master)
         self.title("PMU & Laser Pulse Testing")
         try:
@@ -142,10 +214,12 @@ class PMUTestingGUI(tk.Toplevel):
 
         tk.Label(conn_frame, text="Visa Addr:").grid(row=0, column=0, sticky="w")
         self.gen_addr_var = tk.StringVar(value="USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR")
-        tk.Entry(conn_frame, textvariable=self.gen_addr_var, width=35).grid(row=0, column=1, sticky="ew", padx=(5,0))
+        gen_addr_entry = tk.Entry(conn_frame, textvariable=self.gen_addr_var, width=35)
+        gen_addr_entry.grid(row=0, column=1, sticky="ew", padx=(5,0))
         tk.Button(conn_frame, text="Connect GEN", command=self.connect_gen).grid(row=0, column=2, padx=5)
         self.gen_status = tk.StringVar(value="GEN: Disconnected")
         tk.Label(conn_frame, textvariable=self.gen_status).grid(row=0, column=3, sticky="w", padx=(5,0))
+        Tooltip(gen_addr_entry, "VISA resource string, e.g. USB...INSTR or TCPIP0::...::INSTR")
 
         # Channel and waveform section
         ch_wave_frame = tk.Frame(genf)
@@ -159,12 +233,18 @@ class PMUTestingGUI(tk.Toplevel):
             return var
 
         self.gen_channel_var = tk.IntVar(value=1)
-        tk.Label(ch_wave_frame, text="Channel:").grid(row=0, column=0, sticky="w")
-        ttk.Combobox(ch_wave_frame, values=[1,2], textvariable=self.gen_channel_var, width=6, state="readonly").grid(row=0, column=1, sticky="ew", padx=(5,10))
+        ch_label = tk.Label(ch_wave_frame, text="Channel:")
+        ch_label.grid(row=0, column=0, sticky="w")
+        ch_combo = ttk.Combobox(ch_wave_frame, values=[1,2], textvariable=self.gen_channel_var, width=6, state="readonly")
+        ch_combo.grid(row=0, column=1, sticky="ew", padx=(5,10))
+        Tooltip(ch_label, "Select output channel (1 or 2)")
 
         self.gen_wave = tk.StringVar(value="PULSE")
-        tk.Label(ch_wave_frame, text="Waveform:").grid(row=0, column=2, sticky="w")
-        ttk.Combobox(ch_wave_frame, values=["PULSE","SQUARE","SINE","RAMP","DC"], textvariable=self.gen_wave, width=10, state="readonly").grid(row=0, column=3, sticky="ew")
+        wv_label = tk.Label(ch_wave_frame, text="Waveform:")
+        wv_label.grid(row=0, column=2, sticky="w")
+        wv_combo = ttk.Combobox(ch_wave_frame, values=["PULSE","SQUARE","SINE","RAMP","DC"], textvariable=self.gen_wave, width=10, state="readonly")
+        wv_combo.grid(row=0, column=3, sticky="ew")
+        Tooltip(wv_label, "Choose waveform type. Fields below adapt to the selection.")
 
         # Basic waveform parameters section
         basic_wave_frame = tk.Frame(genf)
@@ -177,6 +257,13 @@ class PMUTestingGUI(tk.Toplevel):
         self.gen_duty = mk_gen_spin(1, 1, "Duty (%):", 50, basic_wave_frame)
         self.gen_phase = mk_gen_spin(2, 0, "Phase (deg):", 0, basic_wave_frame)
         self.gen_load = mk_gen_spin(2, 1, "Load:", "50OHM", basic_wave_frame)
+        # Tooltips explaining key concepts
+        Tooltip(self._entry_for(self.gen_amp), "Amplitude in Vpp for SINE/SQUARE/RAMP/PULSE. For DC, use Offset.")
+        Tooltip(self._entry_for(self.gen_offset), "Offset (V) shifts the waveform vertically. For DC, Offset sets the output level.")
+        Tooltip(self._entry_for(self.gen_freq), "Frequency in Hz for periodic waveforms.")
+        Tooltip(self._entry_for(self.gen_duty), "Duty cycle (%). Effective for SQUARE/PULSE and some RAMP modes.")
+        Tooltip(self._entry_for(self.gen_phase), "Starting phase in degrees (SINE/SQUARE/RAMP)")
+        Tooltip(self._entry_for(self.gen_load), "Output load: 50OHM, HIGHZ, or numeric impedance like 75")
 
         # Burst and timing controls section
         burst_frame = tk.Frame(genf)
@@ -184,16 +271,25 @@ class PMUTestingGUI(tk.Toplevel):
         burst_frame.columnconfigure([1,3], weight=1)
 
         self.gen_burst_mode = tk.StringVar(value="NCYC")
-        tk.Label(burst_frame, text="Burst Mode:").grid(row=0, column=0, sticky="w")
-        ttk.Combobox(burst_frame, values=["OFF","NCYC","GATE","INF"], textvariable=self.gen_burst_mode, width=8, state="readonly").grid(row=0, column=1, sticky="ew", padx=(5,10))
+        bm_label = tk.Label(burst_frame, text="Burst Mode:")
+        bm_label.grid(row=0, column=0, sticky="w")
+        bm_combo = ttk.Combobox(burst_frame, values=["OFF","NCYC","GATE","INF"], textvariable=self.gen_burst_mode, width=8, state="readonly")
+        bm_combo.grid(row=0, column=1, sticky="ew", padx=(5,10))
+        Tooltip(bm_label, "OFF: no burst. NCYC: finite cycles per trigger. GATE: output while gate active. INF: continuous cycles after trigger.")
 
         self.gen_cycles = mk_gen_spin(0, 1, "Cycles:", 3, burst_frame)
         self.gen_trig_src = tk.StringVar(value="BUS")
-        tk.Label(burst_frame, text="Trig Src:").grid(row=1, column=0, sticky="w")
-        ttk.Combobox(burst_frame, values=["BUS","INT","EXT"], textvariable=self.gen_trig_src, width=8, state="readonly").grid(row=1, column=1, sticky="ew", padx=(5,10))
+        ts_label = tk.Label(burst_frame, text="Trig Src:")
+        ts_label.grid(row=1, column=0, sticky="w")
+        ts_combo = ttk.Combobox(burst_frame, values=["BUS","INT","EXT"], textvariable=self.gen_trig_src, width=8, state="readonly")
+        ts_combo.grid(row=1, column=1, sticky="ew", padx=(5,10))
+        Tooltip(ts_label, "BUS: software trigger (button). INT: internal rate. EXT: rear BNC trigger.")
 
         self.gen_int_period = mk_gen_spin(1, 1, "INT Period (s):", 0.01, burst_frame)
         self.gen_trig_delay = mk_gen_spin(2, 0, "Trig Delay (s):", 0.0, burst_frame)
+        Tooltip(self._entry_for(self.gen_cycles), "Cycles for NCYC mode (number of waveform cycles per trigger)")
+        Tooltip(self._entry_for(self.gen_int_period), "Internal trigger period when Trig Src = INT")
+        Tooltip(self._entry_for(self.gen_trig_delay), "Trigger-to-output delay (if supported)")
 
         # Multi-shot control section
         multi_frame = tk.Frame(genf)
@@ -211,18 +307,24 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Button(btn_frame, text="Apply Settings", command=self.apply_generator_settings).grid(row=0, column=0, padx=5, pady=2)
         tk.Button(btn_frame, text="Preview Waveform", command=self.preview_generator_waveform).grid(row=0, column=1, padx=5, pady=2)
         tk.Button(btn_frame, text="Run Burst(s)", command=self.fire_laser_pulse).grid(row=0, column=2, padx=5, pady=2)
+        # Separate output control buttons
+        out_btns = tk.Frame(genf)
+        out_btns.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(3,0))
+        out_btns.columnconfigure([0,1], weight=1)
+        tk.Button(out_btns, text="Output ON", command=lambda: self._set_gen_output(True)).grid(row=0, column=0, padx=5, pady=2, sticky="ew")
+        tk.Button(out_btns, text="Output OFF", command=lambda: self._set_gen_output(False)).grid(row=0, column=1, padx=5, pady=2, sticky="ew")
 
-        # Update enabled generator fields when waveform changes
-        gen_wave_cb = [w for w in genf.winfo_children() if isinstance(w, ttk.Combobox) and w.cget('state')=='readonly' and w.get() in ("PULSE","SQUARE","SINE","RAMP","DC")]
+        # Update enabled generator fields when waveform/burst/trigger changes
         try:
-            # Bind more robustly to the known combobox we created
-            self.gen_wave_combo = [w for w in genf.winfo_children() if isinstance(w, ttk.Combobox) and w.cget('state')=='readonly' and w is not None][0]
-        except Exception:
-            self.gen_wave_combo = None
-        try:
-            (self.gen_wave_combo or ttk.Combobox(genf)).bind("<<ComboboxSelected>>", lambda _e: self._update_gen_controls())
+            self.gen_wave_combo = wv_combo
+            self.gen_wave_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_gen_controls())
+            bm_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_gen_controls())
+            ts_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_gen_controls())
         except Exception:
             pass
+        # Initial state update
+        try: self._update_gen_controls()
+        except Exception: pass
 
         # ---------------- Plots ----------------
         # PMU figure (top-right area)
@@ -581,8 +683,8 @@ class PMUTestingGUI(tk.Toplevel):
                     self.gen.set_burst_params(ch, {"DLAY": float(self.gen_trig_delay.get())})
                 except Exception:
                     pass
-            self.gen.output(ch, True)
-            self.gen_status.set("GEN: Settings applied")
+            # Do not auto-enable output; user controls via Output ON/OFF buttons
+            self.gen_status.set("GEN: Settings applied (output unchanged)")
         except Exception as exc:
             messagebox.showerror("Generator", f"Apply error: {exc}")
 
@@ -641,6 +743,17 @@ class PMUTestingGUI(tk.Toplevel):
             self.gen_status.set("GEN: Pulse fired")
         except Exception as exc:
             messagebox.showerror("GEN", f"Pulse error: {exc}")    
+
+    def _set_gen_output(self, enable: bool):
+        try:
+            if not self.gen or not self.gen.is_connected():
+                messagebox.showwarning("GEN", "Connect generator first.")
+                return
+            ch = int(self.gen_channel_var.get())
+            self.gen.output(ch, bool(enable))
+            self.gen_status.set(f"GEN: Output {'ON' if enable else 'OFF'}")
+        except Exception as exc:
+            messagebox.showerror("GEN", f"Output error: {exc}")
 
     # ------- helpers: context/saving/UI -------
     def _run_decay(self):
@@ -967,21 +1080,35 @@ class PMUTestingGUI(tk.Toplevel):
                 except Exception: pass
             # Enable per-type
             if wv == 'DC':
+                # DC: Offset sets level; frequency/amplitude/duty/phase not applicable
                 for k in ('offset','load'):
                     try: widgets[k].config(state='normal')
                     except Exception: pass
             elif wv == 'SINE':
+                # SINE: amplitude, offset, freq, phase, load
                 for k in ('amp','offset','freq','phase','load'):
                     try: widgets[k].config(state='normal')
                     except Exception: pass
             elif wv in ('SQUARE','PULSE'):
+                # SQUARE/PULSE: includes duty
                 for k in ('amp','offset','freq','duty','phase','load'):
                     try: widgets[k].config(state='normal')
                     except Exception: pass
             elif wv == 'RAMP':
+                # RAMP: some units support duty as symmetry; we leave it disabled to avoid confusion
                 for k in ('amp','offset','freq','phase','load'):
                     try: widgets[k].config(state='normal')
                     except Exception: pass
+            # Also toggle burst-related fields: cycles only matters in NCYC; INT period only when INT trigger
+            try:
+                cycles_entry = self._entry_for(self.gen_cycles)
+                int_per_entry = self._entry_for(self.gen_int_period)
+                trig_src = self.gen_trig_src.get().upper()
+                mode = self.gen_burst_mode.get().upper()
+                cycles_entry.config(state='normal' if mode == 'NCYC' else 'disabled')
+                int_per_entry.config(state='normal' if trig_src == 'INT' else 'disabled')
+            except Exception:
+                pass
         except Exception:
             pass
 

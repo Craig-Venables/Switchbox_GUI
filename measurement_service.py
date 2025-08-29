@@ -43,7 +43,7 @@ class SMULimits:
             "Keithley 4200A_pmu": {
                 "min_timing_us": 10,
                 "max_update_rate": 10000,
-                "rise_fall_time_us": 1,
+                "rise_fall_time_us": 0.01,
                 "min_pulse_width_ms": 0.00005,  # 50 µs
                 "voltage_range_V": (-10, 10),
                 "current_range_A": (-0.1, 0.1),  # ±100 mA
@@ -737,8 +737,11 @@ class MeasurementService:
             raise ValueError(f"Pulse amplitude {amplitude_v} V exceeds range {vmin}..{vmax} V for {smu_type}")
         if period_s <= width_s:
             raise ValueError("Period must be greater than pulse width")
+        
         if (rise_s * 1e6) < float(min_rise_us) or (fall_s * 1e6) < float(min_rise_us):
+            print((rise_s * 1e6), min_rise_us)
             raise ValueError(f"Rise/Fall times must be >= {min_rise_us} us for {smu_type}")
+        
 
     def run_pmu_pulse_train(
         self,
@@ -769,7 +772,7 @@ class MeasurementService:
         v_arr: List[float] = []
         i_arr: List[float] = []
         t_arr: List[float] = []
-
+        print("b")
         try:
             result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, int(num_pulses),
                                                     width_s, period_s, as_dataframe=False)
