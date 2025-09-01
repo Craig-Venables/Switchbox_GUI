@@ -201,6 +201,9 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Button(btn_frame, text="Run", command=self.run_selected).grid(row=0, column=0, padx=5, pady=2)
         tk.Button(btn_frame, text="Preview PMU", command=self.preview_pmu_waveform).grid(row=0, column=1, padx=5, pady=2)
         tk.Button(btn_frame, text="Close", command=self.destroy).grid(row=0, column=2, padx=5, pady=2)
+        # Auto-trigger checkbox for GEN when measurement starts
+        self.auto_trigger_gen = tk.BooleanVar(value=False)
+        tk.Checkbutton(btn_frame, text="Trigger function generator at start", variable=self.auto_trigger_gen).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=(2,0))
 
         # ---------------- Controls: Laser Generator ----------------
         genf = tk.LabelFrame(self, text="Laser Pulse Generator", padx=5, pady=3)
@@ -221,9 +224,82 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Label(conn_frame, textvariable=self.gen_status).grid(row=0, column=3, sticky="w", padx=(5,0))
         Tooltip(gen_addr_entry, "VISA resource string, e.g. USB...INSTR or TCPIP0::...::INSTR")
 
+        # Presets row
+        presets_row = tk.Frame(genf)
+        presets_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        tk.Label(presets_row, text="Presets:").pack(side="left")
+        self.preset_var = tk.StringVar(value="Custom")
+        presets = [
+            "Custom",
+            "Short pulse (5us/20us, 1V)",
+            "Mid pulse (50us/200us, 2V)",
+            "Long pulse (1ms/5ms, 3V)",
+        ]
+        preset_cb = ttk.Combobox(presets_row, values=presets, textvariable=self.preset_var, state="readonly", width=28)
+        preset_cb.pack(side="left", padx=(5,10))
+        preset_cb.bind("<<ComboboxSelected>>", lambda _e: self._apply_preset())
+
+        # Pulse setup
+        simplef = tk.LabelFrame(genf, text="Pulse Setup", padx=5, pady=3)
+        simplef.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        simplef.columnconfigure([1,3], weight=1)
+
+        def mk_simple(row, col, label, init):
+            tk.Label(simplef, text=label).grid(row=row, column=col*2, sticky="w")
+            var = tk.StringVar(value=str(init))
+            tk.Entry(simplef, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
+            return var
+
+        # Channel (reuse shared var if already created later)
+        self.gen_channel_var = getattr(self, 'gen_channel_var', tk.IntVar(value=1))
+        tk.Label(simplef, text="Channel:").grid(row=0, column=0, sticky="w")
+        self.simple_ch_combo = ttk.Combobox(simplef, values=[1,2], textvariable=self.gen_channel_var, width=6, state="readonly")
+        self.simple_ch_combo.grid(row=0, column=1, sticky="ew", padx=(5,10))
+
+        # Wave params (defaults per request)
+        self.simple_period_s = mk_simple(1, 0, "Period (s):", 20e-6)
+        self.simple_high_v   = mk_simple(1, 1, "High (V):", 1.0)
+        self.simple_low_v    = mk_simple(2, 0, "Low (V):", 0.0)
+        self.simple_width_s  = mk_simple(2, 1, "Pulse width (s):", 5e-6)
+        self.simple_rise_s   = mk_simple(3, 0, "Rise (s):", 16.8e-9)
+        self.simple_fall_s   = mk_simple(3, 1, "Fall (s):", 16.8e-9)
+        self.simple_delay_s  = mk_simple(4, 0, "Delay (s):", 0.0)
+
+        # Burst setup in separate section
+        burst_simplef = tk.LabelFrame(genf, text="Burst Setup", padx=5, pady=3)
+        burst_simplef.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        burst_simplef.columnconfigure([1,3], weight=1)
+
+        def mk_burst(row, col, label, init):
+            tk.Label(burst_simplef, text=label).grid(row=row, column=col*2, sticky="w")
+            var = tk.StringVar(value=str(init))
+            tk.Entry(burst_simplef, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
+            return var
+
+        self.simple_cycles   = mk_burst(0, 0, "Cycles:", 1)
+        self.simple_burst_period = mk_burst(0, 1, "Burst period (s):", 10e-3)
+        # Trigger source (default EXT)
+        self.simple_trig_src = tk.StringVar(value="EXT")
+        tk.Label(burst_simplef, text="Trigger:").grid(row=1, column=0, sticky="w")
+        ttk.Combobox(burst_simplef, values=["EXT","INT","MAN"], textvariable=self.simple_trig_src, width=8, state="readonly").grid(row=1, column=1, sticky="ew")
+
+        # Buttons row
+        sbtn = tk.Frame(genf)
+        sbtn.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4,0))
+        sbtn.columnconfigure([0,1,2], weight=1)
+        tk.Button(sbtn, text="Apply All", command=self.apply_all_simple_settings).grid(row=0, column=0, padx=5, pady=2)
+        tk.Button(sbtn, text="Preview Pulse", command=self.preview_pulse_waveform).grid(row=0, column=1, padx=5, pady=2)
+        # Output toggle button that turns green when ON
+        self.output_on = False
+        self.output_btn = tk.Button(sbtn, text="Output OFF", command=self.toggle_output)
+        self.output_btn.grid(row=0, column=2, padx=5, pady=2)
+
+        # Advanced sections (kept hidden)
+        self.show_advanced = tk.BooleanVar(value=False)
+
         # Channel and waveform section
         ch_wave_frame = tk.Frame(genf)
-        ch_wave_frame.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        ch_wave_frame.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0,5))
         ch_wave_frame.columnconfigure([1,3], weight=1)
 
         def mk_gen_spin(row, col, label, init, frm=ch_wave_frame):
@@ -232,7 +308,7 @@ class PMUTestingGUI(tk.Toplevel):
             tk.Entry(frm, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
             return var
 
-        self.gen_channel_var = tk.IntVar(value=1)
+        self.gen_channel_var = getattr(self, 'gen_channel_var', tk.IntVar(value=1))
         ch_label = tk.Label(ch_wave_frame, text="Channel:")
         ch_label.grid(row=0, column=0, sticky="w")
         ch_combo = ttk.Combobox(ch_wave_frame, values=[1,2], textvariable=self.gen_channel_var, width=6, state="readonly")
@@ -248,7 +324,7 @@ class PMUTestingGUI(tk.Toplevel):
 
         # Basic waveform parameters section
         basic_wave_frame = tk.Frame(genf)
-        basic_wave_frame.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        basic_wave_frame.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0,5))
         basic_wave_frame.columnconfigure([1,3], weight=1)
 
         self.gen_amp = mk_gen_spin(0, 0, "Amplitude (Vpp):", 1.0, basic_wave_frame)
@@ -267,7 +343,7 @@ class PMUTestingGUI(tk.Toplevel):
 
         # Burst and timing controls section
         burst_frame = tk.Frame(genf)
-        burst_frame.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        burst_frame.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(0,5))
         burst_frame.columnconfigure([1,3], weight=1)
 
         self.gen_burst_mode = tk.StringVar(value="NCYC")
@@ -293,7 +369,7 @@ class PMUTestingGUI(tk.Toplevel):
 
         # Multi-shot control section
         multi_frame = tk.Frame(genf)
-        multi_frame.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        multi_frame.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(0,5))
         multi_frame.columnconfigure([1,3], weight=1)
 
         self.gen_shots = mk_gen_spin(0, 0, "Shots:", 1, multi_frame)
@@ -301,7 +377,7 @@ class PMUTestingGUI(tk.Toplevel):
 
         # Buttons section
         btn_frame = tk.Frame(genf)
-        btn_frame.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(5,0))
+        btn_frame.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(5,0))
         btn_frame.columnconfigure([0,1,2], weight=1)
 
         tk.Button(btn_frame, text="Apply Settings", command=self.apply_generator_settings).grid(row=0, column=0, padx=5, pady=2)
@@ -309,10 +385,13 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Button(btn_frame, text="Run Burst(s)", command=self.fire_laser_pulse).grid(row=0, column=2, padx=5, pady=2)
         # Separate output control buttons
         out_btns = tk.Frame(genf)
-        out_btns.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(3,0))
+        out_btns.grid(row=8, column=0, columnspan=4, sticky="ew", pady=(3,0))
         out_btns.columnconfigure([0,1], weight=1)
         tk.Button(out_btns, text="Output ON", command=lambda: self._set_gen_output(True)).grid(row=0, column=0, padx=5, pady=2, sticky="ew")
         tk.Button(out_btns, text="Output OFF", command=lambda: self._set_gen_output(False)).grid(row=0, column=1, padx=5, pady=2, sticky="ew")
+
+        # Keep references to advanced frames for show/hide (remain hidden)
+        self._adv_frames = [ch_wave_frame, basic_wave_frame, burst_frame, multi_frame, btn_frame, out_btns]
 
         # Update enabled generator fields when waveform/burst/trigger changes
         try:
@@ -323,7 +402,10 @@ class PMUTestingGUI(tk.Toplevel):
         except Exception:
             pass
         # Initial state update
-        try: self._update_gen_controls()
+        try:
+            self._update_gen_controls()
+            # Hide advanced by default
+            self._toggle_advanced(show=False)
         except Exception: pass
 
         # ---------------- Plots ----------------
@@ -488,6 +570,8 @@ class PMUTestingGUI(tk.Toplevel):
 
         def do_run():
             try:
+                # Optional: issue generator trigger at start
+                self._maybe_trigger_gen_start()
                 if mode == "Pulse Train":
                     v, i, t = self.service.run_pmu_pulse_train(pmu=self.pmu, amplitude_v=amp, base_v=base,
                                                                width_s=wid, period_s=per, num_pulses=n)
@@ -648,80 +732,108 @@ class PMUTestingGUI(tk.Toplevel):
             messagebox.showerror("Generator", f"Connection failed: {exc}")
             self.gen_status.set("GEN: Failed")
 
-    def apply_generator_settings(self):
+    def apply_simple_generator_settings(self):
         if not self.gen or not self.gen.is_connected():
             messagebox.showwarning("GEN", "Connect generator first.")
             return
         try:
             ch = int(self.gen_channel_var.get())
-            wv = self.gen_wave.get()
-            amp = f"{self.gen_amp.get()}VPP"
-            off = f"{self.gen_offset.get()}V"
-            freq = float(self.gen_freq.get())
-            duty = float(self.gen_duty.get())
-            phase = float(self.gen_phase.get())
-            load = self.gen_load.get()
+            period = float(self.simple_period_s.get())
+            high = float(self.simple_high_v.get())
+            low = float(self.simple_low_v.get())
+            width = float(self.simple_width_s.get())
+            rise = float(self.simple_rise_s.get())
+            fall = float(self.simple_fall_s.get())
+            delay = float(self.simple_delay_s.get())
 
-            self.gen.set_output_load(ch, load)
-            self.gen.set_basic_waveform(channel=ch, wvtype=wv, frequency=freq,
-                                        amplitude=amp, offset=off, phase_deg=phase,
-                                        duty_cycle=duty if wv in ("SQUARE","PULSE","RAMP") else None)
+            # Frequency and duty for PULSE
+            freq = 1.0 / max(1e-12, period)
+            duty_pct = max(0.0, min(100.0, (width / max(1e-12, period)) * 100.0))
+            amp_vpp = max(0.0, high - low)
+            offset_v = (high + low) / 2.0
 
-            # Burst
-            mode = self.gen_burst_mode.get()
-            trig = self.gen_trig_src.get()
-            cycles = int(float(self.gen_cycles.get()))
-            int_per = float(self.gen_int_period.get())
-            # Apply delay if supported
-            if mode == "OFF":
-                self.gen.disable_burst(ch)
-            else:
-                self.gen.enable_burst(channel=ch, mode=mode, cycles=cycles,
-                                      trigger_source=trig, internal_period=int_per if trig=="INT" else None)
-                # Additional parameters via BTWV (like DLAY) when needed
-                try:
-                    self.gen.set_burst_params(ch, {"DLAY": float(self.gen_trig_delay.get())})
-                except Exception:
-                    pass
-            # Do not auto-enable output; user controls via Output ON/OFF buttons
-            self.gen_status.set("GEN: Settings applied (output unchanged)")
+            # Apply as PULSE using high/low and edges
+            self.gen.set_pulse_shape(channel=ch, frequency_hz=freq,
+                                     high_level_v=high, low_level_v=low,
+                                     pulse_width_s=width, duty_pct=duty_pct,
+                                     rise_s=rise, fall_s=fall, delay_s=delay)
+
+            self.gen_status.set("GEN: Pulse applied")
         except Exception as exc:
-            messagebox.showerror("Generator", f"Apply error: {exc}")
+            messagebox.showerror("GEN", f"Apply error: {exc}")
+
+    def trigger_simple_now(self):
+        if not self.gen or not self.gen.is_connected():
+            messagebox.showwarning("GEN", "Connect generator first.")
+            return
+        try:
+            ch = int(self.gen_channel_var.get())
+            self.gen.trigger_now(ch)
+            self.gen_status.set("GEN: Trigger sent")
+        except Exception as exc:
+            messagebox.showerror("GEN", f"Trigger error: {exc}")
+
+    def apply_burst_settings_only(self):
+        if not self.gen or not self.gen.is_connected():
+            messagebox.showwarning("GEN", "Connect generator first.")
+            return
+        try:
+            ch = int(self.gen_channel_var.get())
+            cycles = int(float(self.simple_cycles.get()))
+            burst_period = float(self.simple_burst_period.get())
+            trig_src_ui = self.simple_trig_src.get().upper()
+            delay = float(self.simple_delay_s.get())
+
+            mode = "NCYC"
+            trig = {"MAN": "BUS", "EXT": "EXT", "INT": "INT"}.get(trig_src_ui, "EXT")
+            if cycles < 1:
+                cycles = 1
+            internal_period = burst_period if trig == "INT" else None
+            self.gen.enable_burst(channel=ch, mode=mode, cycles=cycles,
+                                  trigger_source=trig, internal_period=internal_period,
+                                  burst_delay_s=delay)
+            self.gen_status.set("GEN: Burst applied")
+        except Exception as exc:
+            messagebox.showerror("GEN", f"Burst error: {exc}")
+
+    def apply_generator_settings(self):
+        # Legacy advanced apply retained but redirect to simple apply + burst
+        self.apply_all_simple_settings()
 
     def preview_generator_waveform(self):
         try:
-            amp = float(self.gen_amp.get())
-            freq = float(self.gen_freq.get())
-            duty = float(self.gen_duty.get())
-            cyc = int(float(self.gen_cycles.get()))
-            # Inter-shot affects multiple bursts preview when BUS shots > 1
-            shots = int(float(self.gen_shots.get()))
-            inter_shot = float(self.gen_inter_shot.get())
+            period = float(self.simple_period_s.get())
+            width = float(self.simple_width_s.get())
+            high_v = float(self.simple_high_v.get())
+            low_v = float(self.simple_low_v.get())
+            cycles = max(1, int(float(self.simple_cycles.get() or 1)))
 
+            # Build repeated cycles
             t_prev = []
             v_prev = []
-            per = 1.0 / max(1e-12, freq)
-            high = duty/100.0 * per
             t0 = 0.0
-            for s in range(max(1, shots)):
-                for _ in range(max(1, cyc)):
-                    t_prev.extend([t0, t0, t0 + high, t0 + high])
-                    v_prev.extend([0, amp, amp, 0])
-                    t0 += per
-                t0 += inter_shot
+            for _ in range(cycles):
+                t_prev.extend([t0, t0, t0 + width, t0 + width])
+                v_prev.extend([low_v, high_v, high_v, low_v])
+                t0 += period
 
             self.ax_pmu_gen.clear()
             self.ax_pmu_gen.set_xlabel("t (s)")
-            self.ax_pmu_gen.set_ylabel("Laser Volt (V)")
+            self.ax_pmu_gen.set_ylabel("GEN V (V)")
             self.ax_pmu_gen.plot(t_prev, v_prev, "m-")
-            # Annotate timing
-            self._annotate_timing(self.ax_pmu_gen, t_prev, v_prev,
-                                  width=high, period=per, label_prefix="GEN",
-                                  extra_delays=[("Inter-shot", inter_shot)])
+            self._annotate_timing(self.ax_pmu_gen, t_prev, v_prev, width=width, period=period, label_prefix="GEN",
+                                  extra_delays=[("cycles", cycles)])
             self.canvas_pmu.draw()
             self._sync_time_axes()
         except Exception as exc:
             messagebox.showerror("Generator", str(exc))
+
+    def preview_pulse_waveform(self):
+        # Alias for UI button: reuse generator preview using simple fields
+        try:
+            self.preview_generator_waveform()
+        except Exception:
+            pass
 
     def fire_laser_pulse(self):
         if not self.gen or not self.gen.is_connected():
@@ -752,8 +864,77 @@ class PMUTestingGUI(tk.Toplevel):
             ch = int(self.gen_channel_var.get())
             self.gen.output(ch, bool(enable))
             self.gen_status.set(f"GEN: Output {'ON' if enable else 'OFF'}")
+            # Reflect state on toggle button if present
+            try:
+                self.output_on = bool(enable)
+                self._refresh_output_button()
+            except Exception:
+                pass
         except Exception as exc:
             messagebox.showerror("GEN", f"Output error: {exc}")
+
+    def _maybe_trigger_gen_start(self):
+        try:
+            if not getattr(self, 'auto_trigger_gen', tk.BooleanVar(value=False)).get():
+                return
+            if not self.gen or not self.gen.is_connected():
+                return
+            # Prefer simple UI trigger selection if present
+            trig_src = getattr(self, 'simple_trig_src', tk.StringVar(value="EXT")).get().upper()
+            # Only software trigger when MAN/BUS
+            if trig_src in ("MAN", "BUS"):
+                ch = int(self.gen_channel_var.get())
+                self.gen.trigger_now(ch)
+                self.gen_status.set("GEN: Trigger at start")
+        except Exception:
+            pass
+
+    # --- Simple/apply/output helpers ---
+    def apply_all_simple_settings(self):
+        # Apply waveform first, then burst, per request
+        self.apply_simple_generator_settings()
+        self.apply_burst_settings_only()
+
+        # Keep output state unchanged here
+
+    def toggle_output(self):
+        try:
+            new_state = not getattr(self, 'output_on', False)
+            self._set_gen_output(new_state)
+        except Exception:
+            pass
+
+    def _refresh_output_button(self):
+        if getattr(self, 'output_btn', None) is None:
+            return
+        on = bool(getattr(self, 'output_on', False))
+        self.output_btn.config(text=("Output ON" if on else "Output OFF"),
+                               bg=("#6cc644" if on else "SystemButtonFace"))
+
+    def _apply_preset(self):
+        name = self.preset_var.get()
+        try:
+            if name == "Short pulse (5us/20us, 1V)":
+                self.simple_period_s.set(str(20e-6))
+                self.simple_width_s.set(str(5e-6))
+                self.simple_high_v.set(str(1.0))
+                self.simple_low_v.set(str(0.0))
+            elif name == "Mid pulse (50us/200us, 2V)":
+                self.simple_period_s.set(str(200e-6))
+                self.simple_width_s.set(str(50e-6))
+                self.simple_high_v.set(str(2.0))
+                self.simple_low_v.set(str(0.0))
+            elif name == "Long pulse (1ms/5ms, 3V)":
+                self.simple_period_s.set(str(5e-3))
+                self.simple_width_s.set(str(1e-3))
+                self.simple_high_v.set(str(3.0))
+                self.simple_low_v.set(str(0.0))
+            # Keep rise/fall/delay as selected; refresh preview
+            self.preview_pulse_waveform()
+        except Exception:
+            pass
+
+    # removed run_burst_once per user request
 
     # ------- helpers: context/saving/UI -------
     def _run_decay(self):
@@ -1109,6 +1290,24 @@ class PMUTestingGUI(tk.Toplevel):
                 int_per_entry.config(state='normal' if trig_src == 'INT' else 'disabled')
             except Exception:
                 pass
+        except Exception:
+            pass
+
+    def _toggle_advanced(self, show: bool = None):
+        try:
+            if show is None:
+                show = bool(self.show_advanced.get())
+        except Exception:
+            show = False
+        try:
+            for frm in getattr(self, '_adv_frames', []):
+                try:
+                    if show:
+                        frm.grid()
+                    else:
+                        frm.grid_remove()
+                except Exception:
+                    pass
         except Exception:
             pass
 
