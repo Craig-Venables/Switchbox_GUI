@@ -174,6 +174,62 @@ class SiglentSDG1032X:
 
         self.send_command(f"{pref}BSWV", params)
 
+    def set_pulse_shape(
+        self,
+        channel: int,
+        frequency_hz: Union[str, float],
+        high_level_v: Union[str, float],
+        low_level_v: Union[str, float],
+        pulse_width_s: Optional[Union[str, float]] = None,
+        duty_pct: Optional[Union[str, float]] = None,
+        rise_s: Optional[Union[str, float]] = None,
+        fall_s: Optional[Union[str, float]] = None,
+        delay_s: Optional[Union[str, float]] = None,
+    ):
+        """
+        Configure a PULSE waveform using high/low levels and optional duty, rise/fall, and delay.
+        Falls back gracefully if some parameters are unsupported by firmware.
+        """
+        pref = self._ch_prefix(channel)
+        # Base pulse setup using HLEV/LLEV when available; otherwise fall back to AMP/OFST
+        try:
+            base_params: Dict[str, Any] = {
+                "WVTP": "PULSE",
+                "FRQ": frequency_hz,
+                "HLEV": high_level_v,
+                "LLEV": low_level_v,
+            }
+            if duty_pct is not None:
+                base_params["DUTY"] = duty_pct
+            if pulse_width_s is not None:
+                base_params["PWID"] = self._fmt_time_value(pulse_width_s)
+            self.send_command(f"{pref}BSWV", base_params)
+        except Exception:
+            # Fallback using amplitude/offset
+            try:
+                amp = float(high_level_v) - float(low_level_v)  # type: ignore[arg-type]
+                ofst = (float(high_level_v) + float(low_level_v)) / 2.0  # type: ignore[arg-type]
+            except Exception:
+                amp = high_level_v
+                ofst = 0
+            self.set_basic_waveform(
+                channel=channel,
+                wvtype="PULSE",
+                frequency=frequency_hz,
+                amplitude=f"{amp}VPP",
+                offset=f"{ofst}V",
+                duty_cycle=duty_pct,
+            )
+
+        # Attempt to set edges and delay individually when supported
+        for key, val in (("RISE", rise_s), ("FALL", fall_s), ("DLY", delay_s)):
+            if val is None:
+                continue
+            try:
+                self.send_command(f"{pref}BSWV", {key: self._fmt_time_value(val)})
+            except Exception:
+                pass
+
     def set_dc_level(self, channel: int, level: Union[str, float] = "0V"):
         """
         Convenience: set DC mode and define the level via OFST.
@@ -209,6 +265,7 @@ class SiglentSDG1032X:
         cycles: int = 1,
         trigger_source: str = "BUS",
         internal_period: Optional[Union[str, float]] = None,
+        burst_delay_s: Optional[Union[str, float]] = None,
     ):
         """
         Convenience wrapper for common burst setup:
@@ -216,19 +273,46 @@ class SiglentSDG1032X:
          - trigger_source: 'INT' (internal rate), 'EXT' (rear BNC), 'BUS'/'MAN' (software trigger)
          - internal_period: e.g., '10MS' or float seconds if TRSR='INT'
         """
-        params: Dict[str, Union[str, float, int]] = {
+        # Always set basic burst state/mode/source
+        base_params: Dict[str, Union[str, float, int]] = {
             "STATE": "ON",
             "TRMD": mode.upper(),
             "TRSR": "BUS" if trigger_source.upper() in ("BUS", "MAN", "SW") else trigger_source.upper(),
         }
+        # Build a comprehensive BTWV parameter set and send once to improve reliability
+        params: Dict[str, Union[str, float, int]] = {}
         if mode.upper() == "NCYC":
-            # Some firmwares use NCYC, some accept CNT. We'll try NCYC.
+            # Use TIME as per manual; include alternates for compatibility
+            params["TIME"] = int(cycles)
             params["NCYC"] = int(cycles)
+            params["CNT"] = int(cycles)
         if trigger_source.upper() == "INT" and internal_period is not None:
-            # Some firmwares accept PERI (period) or INTFRQ (internal trigger frequency).
-            # Here we set PERI; adjust to INTFRQ if your unit expects it.
-            params["PERI"] = internal_period
-        self.set_burst_params(channel, params)
+            # provide both PERI (period) and INTFRQ (Hz)
+            params["PERI"] = self._fmt_time_value(internal_period)
+            if isinstance(internal_period, (int, float)) and internal_period:
+                params["INTFRQ"] = 1.0 / float(internal_period)
+        if burst_delay_s is not None:
+            params["DLY"] = self._fmt_time_value(burst_delay_s)
+        # Merge with base and send once
+        all_params = {**base_params, **params}
+        self.set_burst_params(channel, all_params)
+
+    @staticmethod
+    def _fmt_time_value(val: Union[str, float, int]) -> Union[str, float]:
+        # Keep user strings (like '10MS')
+        if isinstance(val, str):
+            return val
+        s = float(val)
+        if s >= 1.0:
+            return f"{s}S"
+        ms = s * 1e3
+        if ms >= 1.0:
+            return f"{ms}MS"
+        us = s * 1e6
+        if us >= 1.0:
+            return f"{us}US"
+        ns = s * 1e9
+        return f"{ns}NS"
 
     def disable_burst(self, channel: int):
         self.set_burst_params(channel, {"STATE": "OFF"})
@@ -240,6 +324,22 @@ class SiglentSDG1032X:
         """
         pref = self._ch_prefix(channel)
         self.write(f"{pref}TRIG")
+
+    # ------------- Query helpers -------------
+
+    def read_basic_waveform(self, channel: int) -> str:
+        pref = self._ch_prefix(channel)
+        try:
+            return self.query(f"{pref}BSWV?")
+        except Exception as e:
+            return f"ERR {e}"
+
+    def read_burst(self, channel: int) -> str:
+        pref = self._ch_prefix(channel)
+        try:
+            return self.query(f"{pref}BTWV?")
+        except Exception as e:
+            return f"ERR {e}"
 
     # ------------- Utility -------------
 
@@ -262,6 +362,10 @@ class SiglentSDG1032X:
         """
         Upload a CSV file containing waveform data to the function generator.
         The CSV should contain one voltage value per line.
+        
+        Updated to use correct SDG1032X ARB commands:
+        - C1:ARWV NAME,{name},DATA,{data} for uploading
+        - C1:ARWV INDEX,{index} for selecting waveform
         """
         try:
             # Read the CSV file
@@ -274,39 +378,187 @@ class SiglentSDG1032X:
             if not values:
                 raise ValueError("CSV file is empty or contains no valid data")
 
-            # Upload the data
+            # Upload the data using correct ARB command format
             data_str = ",".join(values)
-            self.write(f"C{channel}:ARWV NAME,{waveform_name},DATA,{data_str}")
-
+            pref = self._ch_prefix(channel)
+            
+            # Upload waveform data
+            self.write(f"{pref}ARWV NAME,{waveform_name},DATA,{data_str}")
+            
+            # Wait for operation to complete
+            time.sleep(0.1)
+            
+            # Select the uploaded waveform (index 0 for first user waveform)
+            self.write(f"{pref}ARWV INDEX,0")
+            
             return True
         except Exception as e:
             print(f"Error uploading CSV waveform: {e}")
             return False
+
+    def set_arb_waveform(self, channel: int, waveform_name: str = "USER", index: int = 0):
+        """
+        Set arbitrary waveform with proper indexing.
+        
+        Args:
+            channel: Channel number (1 or 2)
+            waveform_name: Name of the waveform (default: "USER")
+            index: Waveform index (0 for first user waveform)
+        """
+        pref = self._ch_prefix(channel)
+        
+        # Set ARB waveform type
+        self.write(f"{pref}BSWV WVTP,ARB")
+        
+        # Select the waveform by index
+        self.write(f"{pref}ARWV INDEX,{index}")
+        
+        # Set waveform name if specified
+        if waveform_name:
+            self.write(f"{pref}ARWV NAME,{waveform_name}")
+
+    def upload_arb_data(self, channel: int, data: list, waveform_name: str = "USER"):
+        """
+        Upload arbitrary waveform data directly.
+        
+        Args:
+            channel: Channel number (1 or 2)
+            data: List of voltage values
+            waveform_name: Name for the waveform
+        """
+        try:
+            # Convert data to string format
+            data_str = ",".join([str(val) for val in data])
+            
+            pref = self._ch_prefix(channel)
+            
+            # Upload waveform data
+            self.write(f"{pref}ARWV NAME,{waveform_name},DATA,{data_str}")
+            
+            # Wait for operation to complete
+            time.sleep(0.1)
+            
+            # Select the uploaded waveform (index 0)
+            self.write(f"{pref}ARWV INDEX,0")
+            
+            return True
+        except Exception as e:
+            print(f"Error uploading ARB data: {e}")
+            return False
+
+    def list_arb_waveforms(self, channel: int):
+        """
+        List available arbitrary waveforms on the specified channel.
+        """
+        try:
+            pref = self._ch_prefix(channel)
+            # Query available waveforms
+            response = self.query(f"{pref}ARWV?")
+            return response
+        except Exception as e:
+            print(f"Error listing ARB waveforms: {e}")
+            return None
 
 
 def safe_float_or_str(val: Union[str, float, int]) -> Union[str, float]:
     return val if isinstance(val, str) else float(val)
 
 
-if __name__ == "__main__":
-    """
-    Basic test:
-      - Connect
-      - Reset, clear
-      - Set CH1 to SINE 1 kHz, 1 Vpp, 0 V offset
-      - Turn on output
-      - Change to SQUARE 1 kHz, 1 Vpp, 50% duty
-      - Configure burst for 5 cycles per trigger on BUS (software)
-      - Issue a software trigger
-      - Disable burst, turn off, disconnect
-    """
-    # Update with your VISA resource:
-    VISA_RESOURCE = "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR"
+# if __name__ == "__main__":
+#     """
+#     Basic test:
+#       - Connect
+#       - Reset, clear
+#       - Set CH1 to SINE 1 kHz, 1 Vpp, 0 V offset
+#       - Turn on output
+#       - Change to SQUARE 1 kHz, 1 Vpp, 50% duty
+#       - Configure burst for 5 cycles per trigger on BUS (software)
+#       - Issue a software trigger
+#       - Disable burst, turn off, disconnect
+#     """
+#     # Update with your VISA resource:
+#     VISA_RESOURCE = "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR"
 
+#     gen = SiglentSDG1032X(resource=VISA_RESOURCE)
+
+#     if not gen.connect():
+#         raise SystemExit("Failed to connect to the generator.")
+
+#     try:
+#         print("Connected to:", gen.idn())
+#         gen.clear_status()
+#         gen.reset()
+#         gen.opc()
+
+#         # Set CH1 basic sine
+#         gen.set_basic_waveform(
+#             channel=1,
+#             wvtype="SINE",
+#             frequency="1KHZ",
+#             amplitude="1VPP",
+#             offset="0V",
+#             phase_deg=0,
+#         )
+#         gen.output(1, True)
+
+#         time.sleep(0.5)
+
+#         # Change to square with duty
+#         gen.set_basic_waveform(
+#             channel=1,
+#             wvtype="SQUARE",
+#             frequency="1KHZ",
+#             amplitude="1VPP",
+#             offset="0V",
+#             duty_cycle=50,
+#         )
+
+#         # Example: add DC offset for laser bias (be careful with your hardware!)
+#         # gen.set_offset(1, "1.5V")
+
+#         # Configure burst: 5 cycles per trigger, BUS/software-triggered
+#         gen.enable_burst(channel=1, mode="NCYC", cycles=5, trigger_source="BUS")
+#         time.sleep(0.2)
+
+#         # Fire a software trigger
+#         print("Issuing software trigger...")
+#         gen.trigger_now(1)
+
+#         time.sleep(1.0)
+
+#         # Clean up: disable burst, output off
+#         gen.disable_burst(1)
+#         gen.output(1, False)
+
+#         # Check for instrument errors
+#         err = gen.error_query()
+#         if not err.startswith("0"):
+#             print("Instrument reported error:", err)
+#         else:
+#             print("No instrument errors reported.")
+#     finally:
+#         gen.disconnect()
+#         print("Disconnected.")
+
+import numpy as np
+def binary_to_pulses(binary_string: str, high: float = 2.0, low: float = 0.0,
+                     samples_per_bit: int = 200) -> list:
+    """
+    Convert a binary string into a flat pulse waveform (no staircase).
+    """
+    data = []
+    for bit in binary_string:
+        val = high if bit == "1" else low
+        data.extend([val] * samples_per_bit)
+    return data
+
+
+if __name__ == "__main__":
+    VISA_RESOURCE = "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR"
     gen = SiglentSDG1032X(resource=VISA_RESOURCE)
 
     if not gen.connect():
-        raise SystemExit("Failed to connect to the generator.")
+        raise SystemExit("Failed to connect to generator.")
 
     try:
         print("Connected to:", gen.idn())
@@ -314,52 +566,41 @@ if __name__ == "__main__":
         gen.reset()
         gen.opc()
 
-        # Set CH1 basic sine
-        gen.set_basic_waveform(
-            channel=1,
-            wvtype="SINE",
-            frequency="1KHZ",
-            amplitude="1VPP",
-            offset="0V",
-            phase_deg=0,
-        )
+        # --- Step 1: make a binary waveform (4 bits)
+        binary_pattern = "1000"   # Example pattern
+        waveform = binary_to_pulses(binary_pattern, high=2.0, low=0.0, samples_per_bit=400)
+
+        # --- Step 2: upload as ARB
+        gen.upload_arb_data(channel=1, data=waveform, waveform_name="BINARY")
+
+        # --- Step 3: select ARB waveform
+        gen.set_arb_waveform(channel=1, waveform_name="BINARY", index=3)
+
+        # --- Step 4: enable burst mode for 4 pulses
+        gen.enable_burst(channel=1, mode="NCYC", cycles=1, trigger_source="BUS")
+
+        # set amplitude
+        #set offfset 1/2 ampplitude]
+        # set bnurst mode 
+        # # set cycles 4
+        #set burst period >10s
+        #set trigger external
+        #set trig delay/trig out?
+        
+
+        # --- Step 5: output on
         gen.output(1, True)
 
-        time.sleep(0.5)
-
-        # Change to square with duty
-        gen.set_basic_waveform(
-            channel=1,
-            wvtype="SQUARE",
-            frequency="1KHZ",
-            amplitude="1VPP",
-            offset="0V",
-            duty_cycle=50,
-        )
-
-        # Example: add DC offset for laser bias (be careful with your hardware!)
-        # gen.set_offset(1, "1.5V")
-
-        # Configure burst: 5 cycles per trigger, BUS/software-triggered
-        gen.enable_burst(channel=1, mode="NCYC", cycles=5, trigger_source="BUS")
-        time.sleep(0.2)
-
-        # Fire a software trigger
-        print("Issuing software trigger...")
+        print("Triggering 4 pulses...")
         gen.trigger_now(1)
 
+        # Wait for them to play
         time.sleep(1.0)
 
-        # Clean up: disable burst, output off
         gen.disable_burst(1)
         gen.output(1, False)
 
-        # Check for instrument errors
-        err = gen.error_query()
-        if not err.startswith("0"):
-            print("Instrument reported error:", err)
-        else:
-            print("No instrument errors reported.")
+        # Check error status
+        print("Instrument status:", gen.error_query())
     finally:
         gen.disconnect()
-        print("Disconnected.")

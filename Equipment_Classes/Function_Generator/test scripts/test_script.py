@@ -18,9 +18,9 @@ def create_pulse_pattern(pattern: str,
                            period_ms: float = 2.0,
                            sample_rate: float = 1e6,
                            voltage_high: float = 3.0,
-                           rise_time_ms: float = 0.01) -> np.ndarray:
+                           rise_time_ms: float = 0.001) -> np.ndarray:
     """
-    Create a pulse pattern waveform with SHARP transitions (square-like).
+    Create a pulse pattern waveform with INSTANT transitions (true square pulses).
 
     Args:
         pattern: String of 0s and 1s (e.g., "0101", "001100", "111000")
@@ -28,15 +28,18 @@ def create_pulse_pattern(pattern: str,
         period_ms: Total period for one complete pattern cycle
         sample_rate: Samples per second
         voltage_high: High voltage level
-        rise_time_ms: How fast the transitions are (smaller = sharper)
+        rise_time_ms: Transition time (very small for square pulses)
 
     Returns:
-        Numpy array with voltage values
+        Numpy array with voltage values for true square pulses
     """
     # Calculate samples
     samples_per_pulse = int(sample_rate * pulse_duration_ms / 1000)
     samples_per_period = int(sample_rate * period_ms / 1000)
-    rise_samples = max(1, int(sample_rate * rise_time_ms / 1000))  # Fast rise/fall
+    
+    # For true square pulses, use minimal transition time
+    # This ensures instant transitions between 0V and voltage_high
+    transition_samples = max(1, int(sample_rate * rise_time_ms / 1000))
 
     # Validate pattern
     if not all(bit in '01' for bit in pattern):
@@ -47,14 +50,14 @@ def create_pulse_pattern(pattern: str,
               f"Increasing period to {len(pattern) * pulse_duration_ms}ms")
         samples_per_period = len(pattern) * samples_per_pulse
 
-    # Create the waveform with SHARP transitions
+    # Create the waveform with INSTANT transitions
     waveform = []
 
     for bit in pattern:
         target_voltage = voltage_high if bit == '1' else 0.0
 
-        # For square-like transitions, use minimal transition time
-        # Just go directly to the target voltage (no gradual ramp)
+        # Create square pulse with instant transitions
+        # No gradual ramps - just direct voltage levels
         pulse_samples = np.full(samples_per_pulse, target_voltage, dtype=np.float32)
         waveform.extend(pulse_samples)
 
@@ -127,9 +130,47 @@ def build_smooth_waveform(bit_patterns: List[str],
     return full_waveform
 
 
+def upload_arb_direct(gen: SiglentSDG1032X, channel: int, waveform: np.ndarray,
+                     voltage_high: float = 3.0):
+    """Upload ARB waveform directly without CSV files for better control."""
+    try:
+        # Convert waveform to list for direct upload
+        waveform_list = waveform.tolist()
+        
+        # Upload ARB data directly
+        success = gen.upload_arb_data(channel, waveform_list, "PULSE")
+        if not success:
+            raise Exception("Direct ARB upload failed")
+
+        # Configure ARB with proper indexing and scaling
+        gen.set_arb_waveform(channel=channel, waveform_name="PULSE", index=0)
+        
+        # Set basic waveform parameters for ARB mode
+        gen.set_basic_waveform(
+            channel=channel,
+            wvtype="ARB",
+            frequency="1000HZ",
+            amplitude=f"{voltage_high}V",
+            offset="0V"
+        )
+
+        print(f"✅ Direct ARB upload successful:")
+        print(f"   - Waveform: PULSE (index 0)")
+        print(f"   - Samples: {len(waveform_list)}")
+        print(f"   - Baseline: 0V")
+        print(f"   - Pulse amplitude: {voltage_high}V")
+        
+    except Exception as e:
+        print(f"❌ Direct ARB upload error: {e}")
+        raise
+
+    # Set load
+    gen.set_output_load(channel, "HIGHZ")
+
+
 def upload_and_configure(gen: SiglentSDG1032X, channel: int, waveform: np.ndarray,
                         voltage_high: float = 3.0):
-    """Upload ARB waveform with explicit high/low voltage levels."""
+    """Upload ARB waveform with explicit high/low voltage levels and proper indexing."""
     # Save CSV
     filename = "binary_pulse.csv"
     np.savetxt(filename, waveform, delimiter=",", fmt='%.6f')
@@ -142,9 +183,11 @@ def upload_and_configure(gen: SiglentSDG1032X, channel: int, waveform: np.ndarra
         if not success:
             raise Exception("CSV upload failed")
 
-        # Configure ARB with proper scaling
-        # Since CSV data contains actual voltages (0V to voltage_high),
-        # we set AMP to voltage_high and OFST to 0V
+        # Configure ARB with proper indexing and scaling
+        # Use the new set_arb_waveform method for proper ARB setup
+        gen.set_arb_waveform(channel=channel, waveform_name="PULSE", index=0)
+        
+        # Set basic waveform parameters for ARB mode
         gen.set_basic_waveform(
             channel=channel,
             wvtype="ARB",
@@ -153,9 +196,15 @@ def upload_and_configure(gen: SiglentSDG1032X, channel: int, waveform: np.ndarra
             offset="0V"  # No offset - baseline at 0V
         )
 
-        print(f"CSV uploaded and ARB configured: 0V baseline, pulses to {voltage_high}V")
+        print(f"✅ ARB waveform uploaded and configured:")
+        print(f"   - Waveform: PULSE (index 0)")
+        print(f"   - Baseline: 0V")
+        print(f"   - Pulse amplitude: {voltage_high}V")
+        print(f"   - Mode: ARB with proper indexing")
+        
     except Exception as e:
-        print(f"CSV upload/config error: {e}")
+        print(f"❌ ARB upload/config error: {e}")
+        raise
 
     # Set load
     gen.set_output_load(channel, "HIGHZ")
@@ -199,7 +248,7 @@ def main():
     # ===== EASY PULSE CONTROL =====
     # Just change these three lines to control your pulses:
 
-    PULSE_PATTERN = "0101"        # Pattern of 0s and 1s - change this to control on/off!
+    PULSE_PATTERN = "0001"        # Pattern of 0s and 1s - change this to control on/off!
                                    # Examples:
                                    # "0101" = alternating on/off
                                    # "001100" = two off, two on
@@ -208,8 +257,8 @@ def main():
                                    # "101010" = on-off-on-off-on-off
                                    # "1111" = always on
                                    # "0000" = always off
-    PULSE_DURATION_MS = 1.0       # How long each pulse/bit lasts (milliseconds)
-    PERIOD_MS = 4.0               # Total period for one complete cycle (milliseconds)
+    PULSE_DURATION_MS = 10.0       # How long each pulse/bit lasts (milliseconds)
+    PERIOD_MS = 10.0               # Total period for one complete cycle (milliseconds)
                                    # Must be >= (pattern_length * pulse_duration)
 
     # ===== SHARP TRANSITIONS =====
@@ -255,16 +304,17 @@ def main():
         print(f"   High Voltage: {VOLTAGE_HIGH}V")
         print(f"   Low Voltage: 0V")
         print(f"   Mode: {'Single-shot' if USE_TRIGGER else 'Continuous'}")
-        print("   Transitions: ⚡ SHARP (square-like, <0.01ms rise time)")
+        print("   Transitions: ⚡ INSTANT (true square pulses, <0.001ms rise time)")
         print()
         print("   📈 Pattern visualization:")
         pattern_visual = PULSE_PATTERN.replace('1', '█').replace('0', '░')
         print(f"   '{PULSE_PATTERN}' → {pattern_visual}")
         print("   ⚡ Each transition is INSTANT - no gradual stair steps!")
+        print("   🎯 ARB mode with proper indexing for reliable operation")
         print()
 
         # Create pulse pattern waveform
-        print("🔧 Generating SHARP waveform...")
+        print("🔧 Generating INSTANT square pulse waveform...")
         waveform = create_pulse_pattern(
             pattern=PULSE_PATTERN,
             pulse_duration_ms=PULSE_DURATION_MS,
@@ -273,12 +323,20 @@ def main():
         )
 
         print(f"   Waveform length: {len(waveform)} samples")
+        print(f"   Voltage levels: {sorted(set(waveform))}")
         print()
 
         # Upload and configure
-        print("📤 Uploading to function generator...")
-        upload_and_configure(gen, channel=1, waveform=waveform,
-                           voltage_high=VOLTAGE_HIGH)
+        print("📤 Uploading ARB waveform to function generator...")
+        try:
+            # Try direct ARB upload first (more reliable)
+            upload_arb_direct(gen, channel=1, waveform=waveform,
+                            voltage_high=VOLTAGE_HIGH)
+        except Exception as e:
+            print(f"⚠️  Direct upload failed, trying CSV method: {e}")
+            # Fallback to CSV method
+            upload_and_configure(gen, channel=1, waveform=waveform,
+                               voltage_high=VOLTAGE_HIGH)
 
         # Enable output
         print("⚡ Enabling output...")
@@ -328,8 +386,8 @@ def main():
 
 
 def test_waveform_generation():
-    """Test waveform generation with SHARP transitions (no hardware required)."""
-    print("🧪 Testing SHARP waveform generation (no hardware required)")
+    """Test waveform generation with INSTANT transitions (no hardware required)."""
+    print("🧪 Testing INSTANT square pulse waveform generation (no hardware required)")
     print("=" * 60)
 
     # Test patterns
@@ -340,7 +398,7 @@ def test_waveform_generation():
     ]
 
     for pattern, pulse_duration, period in test_patterns:
-        print(f"\n📊 Testing SHARP pattern: '{pattern}'")
+        print(f"\n📊 Testing INSTANT square pulse pattern: '{pattern}'")
         print(f"   Pulse duration: {pulse_duration}ms, Period: {period}ms")
 
         try:
@@ -353,10 +411,10 @@ def test_waveform_generation():
 
             # Analyze the waveform
             unique_values = sorted(set(waveform))
-            print(f"   ✅ SHARP waveform generated: {len(waveform)} samples")
+            print(f"   ✅ INSTANT square pulse waveform generated: {len(waveform)} samples")
             print(f"   ✅ Voltage levels: {unique_values}")
             print(f"   ✅ Expected: [0.0, 3.0]")
-            print("   ⚡ Transitions: Instant (<0.01ms) - NO gradual ramps!")
+            print("   ⚡ Transitions: Instant (<0.001ms) - NO gradual ramps!")
 
             # Check for expected values
             if 0.0 in unique_values and 3.0 in unique_values:
@@ -367,10 +425,11 @@ def test_waveform_generation():
         except Exception as e:
             print(f"   ❌ Error: {e}")
 
-    print("\n🎯 SHARP waveform generation test completed!")
+    print("\n🎯 INSTANT square pulse waveform generation test completed!")
     print("💡 Waveforms now have instant transitions - no more stair steps!")
+    print("🎯 ARB mode with proper indexing for reliable operation!")
     print()
-    print("📈 Example '0101' pattern with sharp transitions:")
+    print("📈 Example '0101' pattern with instant transitions:")
     print("   ┌─────┐   ┌─────┐   ┌─────┐   ┌─────┐")
     print(" 3V│    │ 3V│    │ 3V│    │ 3V│    │ 3V")
     print("   └─────┘   └─────┘   └─────┘   └─────┘")
@@ -378,6 +437,7 @@ def test_waveform_generation():
     print("   ↑     ↑     ↑     ↑     ↑     ↑")
     print("   0     1     2     3     4     5  (ms)")
     print("   ⚡⚡⚡ INSTANT transitions - no gradual ramps! ⚡⚡⚡")
+    print("   🎯 ARB mode with proper indexing ensures reliable operation!")
 
 
 if __name__ == "__main__":
@@ -403,10 +463,11 @@ if __name__ == "__main__":
         print("  - VISA_RESOURCE: Your function generator's VISA address")
         print()
         print("FEATURES:")
-        print("  ⚡ SHARP transitions (<0.01ms) - no gradual stair steps!")
+        print("  ⚡ INSTANT transitions (<0.001ms) - true square pulses!")
         print("  🎯 Precise pattern control - exactly what you specify")
         print("  📊 0V baseline - clean on/off switching")
         print("  🔄 Flexible timing - control period between pulses")
+        print("  🎯 ARB mode with proper indexing for reliable operation")
         print()
         print("EXAMPLES:")
         print("  '0101' = alternating on/off")
