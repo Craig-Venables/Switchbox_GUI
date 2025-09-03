@@ -1109,6 +1109,77 @@ class MeasurementService:
 
         return t_arr, i_arr
 
+    def run_moku_decay(
+        self,
+        *,
+        keithley,
+        laser,  # LaserFunctionGenerator
+        bias_v: float = 0.2,
+        capture_time_s: float = 0.02,
+        sample_dt_s: float = 0.001,
+        prep_delay_s: float = 0.01,
+        high_v: float = 1.0,
+        width_s: float = 100e-9,
+        period_s: float = 200e-9,
+        edge_s: float = 16e-9,
+        pulses: int = 1,
+        continuous_duration_s: float = 0.0,
+    ) -> Tuple[List[float], List[float]]:
+        """
+        Apply a Moku laser pulse (single/burst/continuous) while sampling current at a DC bias.
+        Returns (t_arr, i_arr).
+        """
+        t_arr: List[float] = []
+        i_arr: List[float] = []
+
+        # Bias and settle
+        try:
+            keithley.enable_output(True)
+            keithley.set_voltage(float(bias_v), 1e-3)
+        except Exception:
+            pass
+
+        if prep_delay_s and prep_delay_s > 0:
+            time.sleep(prep_delay_s)
+
+        # Fire laser according to mode in background to avoid blocking sampling
+        import threading
+        def _fire():
+            try:
+                if pulses and pulses > 1:
+                    laser.run_burst(high_v, width_s, period_s, edge_s, count=int(pulses))
+                elif continuous_duration_s and continuous_duration_s > 0:
+                    laser.start_continuous(high_v, width_s, period_s, edge_s)
+                    time.sleep(float(continuous_duration_s))
+                    laser.stop_output()
+                else:
+                    laser.send_single_pulse(high_v, width_s, edge_s, period_s)
+            except Exception:
+                pass
+
+        th = threading.Thread(target=_fire, daemon=True)
+        th.start()
+
+        t0 = time.time()
+        while (time.time() - t0) < float(capture_time_s):
+            try:
+                i_val = keithley.measure_current()
+                i_val = i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
+            except Exception:
+                i_val = float('nan')
+            t_arr.append(time.time() - t0)
+            i_arr.append(i_val)
+            if sample_dt_s and sample_dt_s > 0:
+                time.sleep(max(0.0, float(sample_dt_s)))
+
+        try:
+            keithley.set_voltage(0.0, 1e-3)
+            keithley.enable_output(False)
+        except Exception:
+            pass
+
+        return t_arr, i_arr
+
     def run_laser_4bit_sequences(
         self,
         *,

@@ -16,7 +16,7 @@ from measurement_service import MeasurementService
 from Equipment_Classes.SMU.Keithley4200A import Keithley4200A_PMUController
 
 
-from Equipment_Classes.Function_Generator.Siglent_SDG1032X import SiglentSDG1032X
+from Equipment_Classes.Moku.laser_controller import MonkuGoController, LaserFunctionGenerator
 
 
 class Tooltip:
@@ -109,7 +109,12 @@ class PMUTestingGUI(tk.Toplevel):
 
         self.service = MeasurementService()
         self.pmu = None
-        self.gen = None  # function generator handle
+        self.moku_ctrl = None  # Moku:Go controller
+        self.laser = None      # LaserFunctionGenerator
+        self._moku_run_thread = None
+        self._moku_stop = None
+        self._exp_thread = None
+        self._exp_stop = None
         self.pulses_applied = 0
         self.provider = provider
 
@@ -212,87 +217,84 @@ class PMUTestingGUI(tk.Toplevel):
 
         # Connection section
         conn_frame = tk.Frame(genf)
-        conn_frame.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0,5))
+        conn_frame.grid(row=0, column=0, columnspan=6, sticky="ew", pady=(0,5))
         conn_frame.columnconfigure(1, weight=1)
 
-        tk.Label(conn_frame, text="Visa Addr:").grid(row=0, column=0, sticky="w")
-        self.gen_addr_var = tk.StringVar(value="USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR")
+        tk.Label(conn_frame, text="Moku IP:").grid(row=0, column=0, sticky="w")
+        self.gen_addr_var = tk.StringVar(value="192.168.0.45")
         gen_addr_entry = tk.Entry(conn_frame, textvariable=self.gen_addr_var, width=35)
         gen_addr_entry.grid(row=0, column=1, sticky="ew", padx=(5,0))
-        tk.Button(conn_frame, text="Connect GEN", command=self.connect_gen).grid(row=0, column=2, padx=5)
-        self.gen_status = tk.StringVar(value="GEN: Disconnected")
-        tk.Label(conn_frame, textvariable=self.gen_status).grid(row=0, column=3, sticky="w", padx=(5,0))
-        Tooltip(gen_addr_entry, "VISA resource string, e.g. USB...INSTR or TCPIP0::...::INSTR")
+        tk.Button(conn_frame, text="Connect Moku", command=self.connect_moku).grid(row=0, column=2, padx=5)
+        self.moku_status = tk.StringVar(value="Moku: Disconnected")
+        tk.Label(conn_frame, textvariable=self.moku_status).grid(row=0, column=3, sticky="w", padx=(5,0))
+        Tooltip(gen_addr_entry, "Moku:Go IP address, e.g. 192.168.0.45")
 
-        # Presets row
-        presets_row = tk.Frame(genf)
-        presets_row.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0,5))
-        tk.Label(presets_row, text="Presets:").pack(side="left")
-        self.preset_var = tk.StringVar(value="Custom")
-        presets = [
-            "Custom",
-            "Short pulse (5us/20us, 1V)",
-            "Mid pulse (50us/200us, 2V)",
-            "Long pulse (1ms/5ms, 3V)",
-        ]
-        preset_cb = ttk.Combobox(presets_row, values=presets, textvariable=self.preset_var, state="readonly", width=28)
-        preset_cb.pack(side="left", padx=(5,10))
-        preset_cb.bind("<<ComboboxSelected>>", lambda _e: self._apply_preset())
+        # Pulse definition
+        pulsef = tk.LabelFrame(genf, text="Pulse Definition", padx=5, pady=3)
+        pulsef.grid(row=1, column=0, columnspan=6, sticky="ew", pady=(0,5))
+        pulsef.columnconfigure([1,3,5], weight=1)
 
-        # Pulse setup
-        simplef = tk.LabelFrame(genf, text="Pulse Setup", padx=5, pady=3)
-        simplef.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0,5))
-        simplef.columnconfigure([1,3], weight=1)
-
-        def mk_simple(row, col, label, init):
-            tk.Label(simplef, text=label).grid(row=row, column=col*2, sticky="w")
+        def mk_field(row, col, label, init):
+            tk.Label(pulsef, text=label).grid(row=row, column=col*2, sticky="w")
             var = tk.StringVar(value=str(init))
-            tk.Entry(simplef, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
+            tk.Entry(pulsef, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
             return var
 
-        # Channel (reuse shared var if already created later)
         self.gen_channel_var = getattr(self, 'gen_channel_var', tk.IntVar(value=1))
-        tk.Label(simplef, text="Channel:").grid(row=0, column=0, sticky="w")
-        self.simple_ch_combo = ttk.Combobox(simplef, values=[1,2], textvariable=self.gen_channel_var, width=6, state="readonly")
+        tk.Label(pulsef, text="Channel:").grid(row=0, column=0, sticky="w")
+        self.simple_ch_combo = ttk.Combobox(pulsef, values=[1,2], textvariable=self.gen_channel_var, width=6, state="readonly")
         self.simple_ch_combo.grid(row=0, column=1, sticky="ew", padx=(5,10))
 
-        # Wave params (defaults per request)
-        self.simple_period_s = mk_simple(1, 0, "Period (s):", 20e-6)
-        self.simple_high_v   = mk_simple(1, 1, "High (V):", 1.0)
-        self.simple_low_v    = mk_simple(2, 0, "Low (V):", 0.0)
-        self.simple_width_s  = mk_simple(2, 1, "Pulse width (s):", 5e-6)
-        self.simple_rise_s   = mk_simple(3, 0, "Rise (s):", 16.8e-9)
-        self.simple_fall_s   = mk_simple(3, 1, "Fall (s):", 16.8e-9)
-        self.simple_delay_s  = mk_simple(4, 0, "Delay (s):", 0.0)
+        self.simple_high_v   = mk_field(1, 0, "High (V):", 1.0)
+        self.simple_width_s  = mk_field(1, 1, "Width (s):", 100e-9)
+        self.simple_period_s = mk_field(1, 2, "Period (s):", 200e-9)
+        self.simple_rise_s   = mk_field(2, 0, "Edge (s):", 16e-9)
+        self.simple_cycles   = mk_field(2, 1, "Burst cycles:", 10)
+        self.simple_duration = mk_field(2, 2, "Duration (s):", 1.0)
 
-        # Burst setup in separate section
-        burst_simplef = tk.LabelFrame(genf, text="Burst Setup", padx=5, pady=3)
-        burst_simplef.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0,5))
-        burst_simplef.columnconfigure([1,3], weight=1)
+        # Mode & actions
+        modef = tk.LabelFrame(genf, text="Mode & Actions", padx=5, pady=3)
+        modef.grid(row=2, column=0, columnspan=6, sticky="ew", pady=(0,5))
+        modef.columnconfigure([1,3,5], weight=1)
 
-        def mk_burst(row, col, label, init):
-            tk.Label(burst_simplef, text=label).grid(row=row, column=col*2, sticky="w")
-            var = tk.StringVar(value=str(init))
-            tk.Entry(burst_simplef, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
-            return var
+        tk.Label(modef, text="Mode:").grid(row=0, column=0, sticky="w")
+        self.moku_mode = tk.StringVar(value="manual")
+        ttk.Combobox(modef, values=["manual","burst","continuous","external"], textvariable=self.moku_mode, width=12, state="readonly").grid(row=0, column=1, sticky="ew")
+        tk.Button(modef, text="Preview", command=self.preview_pulse_waveform).grid(row=0, column=2, padx=5)
+        tk.Button(modef, text="Start", command=self._moku_start).grid(row=0, column=3, padx=5)
+        tk.Button(modef, text="Manual Fire", command=self.trigger_simple_now).grid(row=0, column=4, padx=5)
+        tk.Button(modef, text="Stop", command=lambda: self._set_gen_output(False)).grid(row=0, column=5, padx=5)
 
-        self.simple_cycles   = mk_burst(0, 0, "Cycles:", 1)
-        self.simple_burst_period = mk_burst(0, 1, "Burst period (s):", 10e-3)
-        # Trigger source (default EXT)
-        self.simple_trig_src = tk.StringVar(value="EXT")
-        tk.Label(burst_simplef, text="Trigger:").grid(row=1, column=0, sticky="w")
-        ttk.Combobox(burst_simplef, values=["EXT","INT","MAN"], textvariable=self.simple_trig_src, width=8, state="readonly").grid(row=1, column=1, sticky="ew")
+        # Binary Pattern panel
+        binf = tk.LabelFrame(genf, text="Binary Pattern (AWG)", padx=5, pady=3)
+        binf.grid(row=4, column=0, columnspan=6, sticky="ew", pady=(0,5))
+        binf.columnconfigure([1,3,5], weight=1)
+        tk.Label(binf, text="Pattern:").grid(row=0, column=0, sticky="w")
+        self.binary_pattern = tk.StringVar(value="10110011")
+        tk.Entry(binf, textvariable=self.binary_pattern, width=20).grid(row=0, column=1, sticky="ew", padx=(5,10))
+        tk.Label(binf, text="Bit Period (s):").grid(row=0, column=2, sticky="w")
+        self.binary_bitp = tk.StringVar(value=str(100e-9))
+        tk.Entry(binf, textvariable=self.binary_bitp, width=14).grid(row=0, column=3, sticky="ew", padx=(5,10))
+        tk.Label(binf, text="High (V):").grid(row=0, column=4, sticky="w")
+        self.binary_high = tk.StringVar(value=str(1.0))
+        tk.Entry(binf, textvariable=self.binary_high, width=10).grid(row=0, column=5, sticky="ew", padx=(5,10))
+        tk.Label(binf, text="Samples/bit:").grid(row=1, column=0, sticky="w")
+        self.binary_spb = tk.StringVar(value="10")
+        tk.Entry(binf, textvariable=self.binary_spb, width=10).grid(row=1, column=1, sticky="ew", padx=(5,10))
+        tk.Button(binf, text="Send Once", command=self._binary_send_once).grid(row=1, column=2, padx=5)
+        tk.Button(binf, text="Continuous", command=self._binary_send_continuous).grid(row=1, column=3, padx=5)
+        tk.Button(binf, text="Stop", command=self._binary_stop).grid(row=1, column=4, padx=5)
 
-        # Buttons row
-        sbtn = tk.Frame(genf)
-        sbtn.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(4,0))
-        sbtn.columnconfigure([0,1,2], weight=1)
-        tk.Button(sbtn, text="Apply All", command=self.apply_all_simple_settings).grid(row=0, column=0, padx=5, pady=2)
-        tk.Button(sbtn, text="Preview Pulse", command=self.preview_pulse_waveform).grid(row=0, column=1, padx=5, pady=2)
-        # Output toggle button that turns green when ON
-        self.output_on = False
-        self.output_btn = tk.Button(sbtn, text="Output OFF", command=self.toggle_output)
-        self.output_btn.grid(row=0, column=2, padx=5, pady=2)
+        # Experiments (simple preset loader)
+        expf = tk.LabelFrame(genf, text="Experiments", padx=5, pady=3)
+        expf.grid(row=3, column=0, columnspan=6, sticky="ew", pady=(0,5))
+        expf.columnconfigure(1, weight=1)
+        tk.Label(expf, text="Preset:").grid(row=0, column=0, sticky="w")
+        self.exp_preset = tk.StringVar(value="None")
+        ttk.Combobox(expf, values=["None","Write (50ns/200ns, 1.5V)","Read (16ns/200ns, 0.5V)","Endurance (100ns/200ns, 1.0V)"], textvariable=self.exp_preset, state="readonly", width=28).grid(row=0, column=1, sticky="ew")
+        tk.Button(expf, text="Load Preset", command=self._load_exp_preset).grid(row=0, column=2, padx=5)
+        tk.Button(expf, text="Save Settings", command=self._save_moku_settings).grid(row=0, column=3, padx=5)
+        tk.Button(expf, text="Load Settings", command=self._load_moku_settings).grid(row=0, column=4, padx=5)
 
         # Advanced sections (kept hidden)
         self.show_advanced = tk.BooleanVar(value=False)
@@ -401,6 +403,17 @@ class PMUTestingGUI(tk.Toplevel):
             ts_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_gen_controls())
         except Exception:
             pass
+        # Live preview: update when pulse fields change
+        try:
+            for var in (self.simple_high_v, self.simple_width_s, self.simple_period_s, self.simple_rise_s, self.simple_cycles):
+                def _bind(v=var):
+                    try:
+                        v.trace_add('write', lambda *_: self.preview_generator_waveform())
+                    except Exception:
+                        pass
+                _bind()
+        except Exception:
+            pass
         # Initial state update
         try:
             self._update_gen_controls()
@@ -443,52 +456,82 @@ class PMUTestingGUI(tk.Toplevel):
         self.canvas_data.get_tk_widget().grid(row=0, column=0, sticky="nsew")
 
         # Combined tests controls (bottom row, spans both columns)
-        combo = tk.LabelFrame(self, text="Combined PMU + Generator Tests", padx=5, pady=3)
+        combo = tk.LabelFrame(self, text="Experiments (PMU + Moku)", padx=5, pady=3)
         combo.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
-        # Decay test section
-        decay_frame = tk.Frame(combo)
-        decay_frame.grid(row=0, column=0, columnspan=6, sticky="ew", pady=(0,5))
-        decay_frame.columnconfigure([1,3,5], weight=1)
+        # Experiment selection
+        row0 = tk.Frame(combo)
+        row0.grid(row=0, column=0, columnspan=10, sticky="ew", pady=(0,5))
+        row0.columnconfigure([1,3,5,7,9], weight=1)
+        tk.Label(row0, text="Experiment:").grid(row=0, column=0, sticky="w")
+        self.exp_select = tk.StringVar(value="Photoelectric Decay")
+        self.exp_combo = ttk.Combobox(row0, values=["Photoelectric Decay"], textvariable=self.exp_select, state="readonly", width=28)
+        self.exp_combo.grid(row=0, column=1, sticky="ew")
+        tk.Button(row0, text="Load Library", command=self._load_experiment_library).grid(row=0, column=4, padx=6)
+        tk.Button(row0, text="Run", command=self._run_experiment).grid(row=0, column=2, padx=6)
+        tk.Button(row0, text="Stop", command=self._stop_experiment).grid(row=0, column=3, padx=6)
+        tk.Button(row0, text="Save Current", command=self._save_current_experiment_to_library).grid(row=0, column=5, padx=6)
 
-        tk.Label(decay_frame, text="Bias V:").grid(row=0, column=0, sticky="w")
-        self.combo_bias = tk.StringVar(value="0.2")
-        tk.Entry(decay_frame, textvariable=self.combo_bias, width=10).grid(row=0, column=1, sticky="ew", padx=(5,10))
+        # Parameters row 1: PMU (separate boxed section)
+        row1 = tk.LabelFrame(combo, text="PMU Parameters", padx=5, pady=3)
+        row1.grid(row=1, column=0, columnspan=10, sticky="ew", pady=(0,5))
+        row1.columnconfigure([1,3,5], weight=1)
+        tk.Label(row1, text="Bias V:").grid(row=0, column=0, sticky="w")
+        self.exp_bias = tk.StringVar(value="0.2")
+        tk.Entry(row1, textvariable=self.exp_bias, width=10).grid(row=0, column=1, sticky="ew", padx=(5,10))
+        tk.Label(row1, text="Capture (s):").grid(row=0, column=2, sticky="w")
+        self.exp_cap = tk.StringVar(value="0.02")
+        tk.Entry(row1, textvariable=self.exp_cap, width=10).grid(row=0, column=3, sticky="ew", padx=(5,10))
+        tk.Label(row1, text="dt (s):").grid(row=0, column=4, sticky="w")
+        self.exp_dt = tk.StringVar(value="0.001")
+        tk.Entry(row1, textvariable=self.exp_dt, width=10).grid(row=0, column=5, sticky="ew", padx=(5,10))
+        tk.Label(row1, text="Tip: Use smaller dt for finer decay capture.", fg="#666").grid(row=1, column=0, columnspan=6, sticky="w")
 
-        tk.Label(decay_frame, text="Capture (s):").grid(row=0, column=2, sticky="w")
-        self.combo_cap = tk.StringVar(value="0.02")
-        tk.Entry(decay_frame, textvariable=self.combo_cap, width=10).grid(row=0, column=3, sticky="ew", padx=(5,10))
+        # Parameters row 2: Laser (separate boxed section)
+        row2 = tk.LabelFrame(combo, text="Laser Parameters", padx=5, pady=3)
+        row2.grid(row=2, column=0, columnspan=10, sticky="ew", pady=(0,5))
+        row2.columnconfigure([1,3,5,7], weight=1)
+        tk.Label(row2, text="High (V):").grid(row=0, column=0, sticky="w")
+        self.exp_high = tk.StringVar(value="1.0")
+        tk.Entry(row2, textvariable=self.exp_high, width=10).grid(row=0, column=1, sticky="ew", padx=(5,10))
+        tk.Label(row2, text="Width (s):").grid(row=0, column=2, sticky="w")
+        self.exp_width = tk.StringVar(value="1e-7")
+        tk.Entry(row2, textvariable=self.exp_width, width=10).grid(row=0, column=3, sticky="ew", padx=(5,10))
+        tk.Label(row2, text="Period (s):").grid(row=0, column=4, sticky="w")
+        self.exp_period = tk.StringVar(value="2e-7")
+        tk.Entry(row2, textvariable=self.exp_period, width=10).grid(row=0, column=5, sticky="ew", padx=(5,10))
+        tk.Label(row2, text="Edge (s):").grid(row=0, column=6, sticky="w")
+        self.exp_edge = tk.StringVar(value="1.6e-8")
+        tk.Entry(row2, textvariable=self.exp_edge, width=10).grid(row=0, column=7, sticky="ew", padx=(5,10))
 
-        tk.Label(decay_frame, text="dt (s):").grid(row=0, column=4, sticky="w")
-        self.combo_dt = tk.StringVar(value="0.001")
-        tk.Entry(decay_frame, textvariable=self.combo_dt, width=10).grid(row=0, column=5, sticky="ew", padx=(5,10))
-
-        tk.Button(decay_frame, text="Run Decay", command=self._run_decay).grid(row=0, column=6, padx=10)
-
-        # 4-bit sequence test section
-        seq_frame = tk.Frame(combo)
-        seq_frame.grid(row=1, column=0, columnspan=8, sticky="ew", pady=(0,5))
-        seq_frame.columnconfigure([1,3,5,7], weight=1)
-
-        tk.Label(seq_frame, text="Bit period (s):").grid(row=0, column=0, sticky="w")
-        self.combo_bit = tk.StringVar(value="0.001")
-        tk.Entry(seq_frame, textvariable=self.combo_bit, width=10).grid(row=0, column=1, sticky="ew", padx=(5,10))
-
-        tk.Label(seq_frame, text="Relax bit (s):").grid(row=0, column=2, sticky="w")
-        self.combo_relax_bit = tk.StringVar(value="0.001")
-        tk.Entry(seq_frame, textvariable=self.combo_relax_bit, width=10).grid(row=0, column=3, sticky="ew", padx=(5,10))
-
-        tk.Label(seq_frame, text="Relax pattern (s):").grid(row=0, column=4, sticky="w")
-        self.combo_relax_pat = tk.StringVar(value="0.002")
-        tk.Entry(seq_frame, textvariable=self.combo_relax_pat, width=10).grid(row=0, column=5, sticky="ew", padx=(5,10))
-
-        tk.Label(seq_frame, text="Repeats:").grid(row=0, column=6, sticky="w")
-        self.combo_repeats = tk.StringVar(value="1")
-        tk.Entry(seq_frame, textvariable=self.combo_repeats, width=6).grid(row=0, column=7, sticky="ew", padx=(5,10))
-
-        tk.Button(seq_frame, text="Run 4-bit sweep", command=self._run_4bit).grid(row=0, column=8, padx=10)
-
-        # Trigger mode note
-        tk.Label(combo, text="Trigger: BUS (software) recommended; EXT requires cabling", fg="#555").grid(row=2, column=0, columnspan=8, sticky="w", pady=(4,0))
+        # Parameters row 3: Repeats & ramping (boxed with hints)
+        row3 = tk.LabelFrame(combo, text="Repeats & Ramping", padx=5, pady=3)
+        row3.grid(row=3, column=0, columnspan=10, sticky="ew", pady=(0,5))
+        row3.columnconfigure([1,3,5,7,9], weight=1)
+        tk.Label(row3, text="Repeats:").grid(row=0, column=0, sticky="w")
+        self.exp_repeats = tk.StringVar(value="1")
+        tk.Entry(row3, textvariable=self.exp_repeats, width=10).grid(row=0, column=1, sticky="ew", padx=(5,10))
+        tk.Label(row3, text="Ramp ΔV:").grid(row=0, column=2, sticky="w")
+        self.exp_ramp_step = tk.StringVar(value="0.0")
+        tk.Entry(row3, textvariable=self.exp_ramp_step, width=10).grid(row=0, column=3, sticky="ew", padx=(5,10))
+        tk.Label(row3, text="Every N:").grid(row=0, column=4, sticky="w")
+        self.exp_ramp_every = tk.StringVar(value="1")
+        tk.Entry(row3, textvariable=self.exp_ramp_every, width=10).grid(row=0, column=5, sticky="ew", padx=(5,10))
+        tk.Label(row3, text="Max V:").grid(row=0, column=6, sticky="w")
+        self.exp_ramp_max = tk.StringVar(value="3.3")
+        tk.Entry(row3, textvariable=self.exp_ramp_max, width=10).grid(row=0, column=7, sticky="ew", padx=(5,10))
+        tk.Label(row3, text="Cont. sec:").grid(row=0, column=8, sticky="w")
+        self.exp_cont = tk.StringVar(value="0.0")
+        tk.Entry(row3, textvariable=self.exp_cont, width=10).grid(row=0, column=9, sticky="ew", padx=(5,10))
+        tk.Label(row3, text="Tip: Ramp increases High(V) by ΔV every N runs up to Max V.", fg="#666").grid(row=1, column=0, columnspan=10, sticky="w")
+        # Help note
+        tk.Label(combo, text="Photoelectric Decay: applies Moku pulse(s) at bias and samples current.", fg="#555").grid(row=4, column=0, columnspan=10, sticky="w", pady=(4,0))
+        # Trigger role: PMU waits vs Moku triggers
+        row4 = tk.Frame(combo)
+        row4.grid(row=5, column=0, columnspan=10, sticky="ew", pady=(0,5))
+        tk.Label(row4, text="Trigger role:").pack(side="left")
+        self.trigger_role = tk.StringVar(value="moku_sends")
+        ttk.Combobox(row4, values=["moku_sends","pmu_waits"], textvariable=self.trigger_role, state="readonly", width=14).pack(side="left", padx=6)
+        tk.Button(row4, text="Send Trigger (CH2)", command=self._send_trigger_ch2).pack(side="left", padx=6)
 
         # Make frames flexible
         self.grid_columnconfigure(0, weight=1)  # Controls column
@@ -720,81 +763,55 @@ class PMUTestingGUI(tk.Toplevel):
             messagebox.showerror("Preview PMU", f"Error generating preview: {exc}")
     # ---------------- Generator methods ----------------
     
-    def connect_gen(self):
+    def connect_moku(self):
         try:
-            addr = self.gen_addr_var.get().strip()
-            self.gen = SiglentSDG1032X(addr)
-            if self.gen.connect():
-                self.gen_status.set("GEN: Connected")
-            else:
-                self.gen_status.set("GEN: Failed")
+            ip = self.gen_addr_var.get().strip()
+            ch = int(self.gen_channel_var.get()) if hasattr(self, 'gen_channel_var') else 1
+            self.moku_ctrl = MonkuGoController(ip)
+            # Touch WaveformGenerator to validate connection
+            self.moku_ctrl.wavegen()
+            self.laser = LaserFunctionGenerator(self.moku_ctrl, channel=ch)
+            self.moku_status.set("Moku: Connected")
         except Exception as exc:
-            messagebox.showerror("Generator", f"Connection failed: {exc}")
-            self.gen_status.set("GEN: Failed")
+            messagebox.showerror("Moku", f"Connection failed: {exc}")
+            self.moku_status.set("Moku: Failed")
 
     def apply_simple_generator_settings(self):
-        if not self.gen or not self.gen.is_connected():
-            messagebox.showwarning("GEN", "Connect generator first.")
-            return
+        # For Moku: no pre-apply needed; just ensure channel is reflected in LaserFunctionGenerator
         try:
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
+                return
             ch = int(self.gen_channel_var.get())
-            period = float(self.simple_period_s.get())
-            high = float(self.simple_high_v.get())
-            low = float(self.simple_low_v.get())
-            width = float(self.simple_width_s.get())
-            rise = float(self.simple_rise_s.get())
-            fall = float(self.simple_fall_s.get())
-            delay = float(self.simple_delay_s.get())
-
-            # Frequency and duty for PULSE
-            freq = 1.0 / max(1e-12, period)
-            duty_pct = max(0.0, min(100.0, (width / max(1e-12, period)) * 100.0))
-            amp_vpp = max(0.0, high - low)
-            offset_v = (high + low) / 2.0
-
-            # Apply as PULSE using high/low and edges
-            self.gen.set_pulse_shape(channel=ch, frequency_hz=freq,
-                                     high_level_v=high, low_level_v=low,
-                                     pulse_width_s=width, duty_pct=duty_pct,
-                                     rise_s=rise, fall_s=fall, delay_s=delay)
-
-            self.gen_status.set("GEN: Pulse applied")
+            # Recreate laser with new channel if changed
+            if self.laser.channel != ch:
+                self.laser = LaserFunctionGenerator(self.moku_ctrl, channel=ch)
+            self.moku_status.set("Moku: Ready")
         except Exception as exc:
-            messagebox.showerror("GEN", f"Apply error: {exc}")
+            messagebox.showerror("Moku", f"Apply error: {exc}")
 
     def trigger_simple_now(self):
-        if not self.gen or not self.gen.is_connected():
-            messagebox.showwarning("GEN", "Connect generator first.")
-            return
+        # Map to a single pulse on Moku
         try:
-            ch = int(self.gen_channel_var.get())
-            self.gen.trigger_now(ch)
-            self.gen_status.set("GEN: Trigger sent")
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
+                return
+            high = float(self.simple_high_v.get())
+            width = float(self.simple_width_s.get())
+            period = float(self.simple_period_s.get())
+            rise = float(self.simple_rise_s.get())
+            # Use safe wrapper to handle session resets transparently
+            self.laser.safe_send_single_pulse(voltage_high=high, pulse_width=width, edge_time=rise, period=period)
+            self.moku_status.set("Moku: Single pulse sent")
         except Exception as exc:
-            messagebox.showerror("GEN", f"Trigger error: {exc}")
+            messagebox.showerror("Moku", f"Trigger error: {exc}")
 
     def apply_burst_settings_only(self):
-        if not self.gen or not self.gen.is_connected():
-            messagebox.showwarning("GEN", "Connect generator first.")
-            return
+        # Not applicable for Moku; kept as no-op to preserve UI flow
         try:
-            ch = int(self.gen_channel_var.get())
-            cycles = int(float(self.simple_cycles.get()))
-            burst_period = float(self.simple_burst_period.get())
-            trig_src_ui = self.simple_trig_src.get().upper()
-            delay = float(self.simple_delay_s.get())
-
-            mode = "NCYC"
-            trig = {"MAN": "BUS", "EXT": "EXT", "INT": "INT"}.get(trig_src_ui, "EXT")
-            if cycles < 1:
-                cycles = 1
-            internal_period = burst_period if trig == "INT" else None
-            self.gen.enable_burst(channel=ch, mode=mode, cycles=cycles,
-                                  trigger_source=trig, internal_period=internal_period,
-                                  burst_delay_s=delay)
-            self.gen_status.set("GEN: Burst applied")
-        except Exception as exc:
-            messagebox.showerror("GEN", f"Burst error: {exc}")
+            self.moku_status.set("Moku: Burst ready")
+        except Exception:
+            pass
 
     def apply_generator_settings(self):
         # Legacy advanced apply retained but redirect to simple apply + burst
@@ -805,7 +822,11 @@ class PMUTestingGUI(tk.Toplevel):
             period = float(self.simple_period_s.get())
             width = float(self.simple_width_s.get())
             high_v = float(self.simple_high_v.get())
-            low_v = float(self.simple_low_v.get())
+            # Moku Pulse baseline is 0 V; keep preview consistent. If legacy field exists, use it.
+            try:
+                low_v = float(self.simple_low_v.get())
+            except Exception:
+                low_v = 0.0
             cycles = max(1, int(float(self.simple_cycles.get() or 1)))
 
             # Build repeated cycles
@@ -828,6 +849,42 @@ class PMUTestingGUI(tk.Toplevel):
         except Exception as exc:
             messagebox.showerror("Generator", str(exc))
 
+    # --- Binary actions ---
+    def _binary_send_once(self):
+        try:
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
+                return
+            pat = self.binary_pattern.get().strip()
+            bitp = float(self.binary_bitp.get())
+            high = float(self.binary_high.get())
+            spb = int(float(self.binary_spb.get()))
+            import threading
+            threading.Thread(target=lambda: self.laser.send_binary_pattern(pat, bitp, high, samples_per_bit=spb, continuous=False), daemon=True).start()
+        except Exception as exc:
+            messagebox.showerror("Moku", f"Binary error: {exc}")
+
+    def _binary_send_continuous(self):
+        try:
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
+                return
+            pat = self.binary_pattern.get().strip()
+            bitp = float(self.binary_bitp.get())
+            high = float(self.binary_high.get())
+            spb = int(float(self.binary_spb.get()))
+            import threading
+            threading.Thread(target=lambda: self.laser.send_binary_pattern(pat, bitp, high, samples_per_bit=spb, continuous=True), daemon=True).start()
+        except Exception as exc:
+            messagebox.showerror("Moku", f"Binary error: {exc}")
+
+    def _binary_stop(self):
+        try:
+            if self.laser:
+                self.laser.stop_all()
+        except Exception:
+            pass
+
     def preview_pulse_waveform(self):
         # Alias for UI button: reuse generator preview using simple fields
         try:
@@ -836,34 +893,77 @@ class PMUTestingGUI(tk.Toplevel):
             pass
 
     def fire_laser_pulse(self):
-        if not self.gen or not self.gen.is_connected():
-            messagebox.showwarning("GEN", "Connect generator first.")
+        if not self.laser:
+            messagebox.showwarning("Moku", "Connect Moku first.")
             return
         try:
-            # Fire multi-shot sequence according to controls
-            ch = int(self.gen_channel_var.get())
-            shots = int(float(self.gen_shots.get()))
-            inter = float(self.gen_inter_shot.get())
-            mode = self.gen_burst_mode.get()
-            if mode == "OFF":
-                messagebox.showinfo("GEN", "Enable burst (NCYC/GATE/INF) to run shots.")
-                return
-            for s in range(max(1, shots)):
-                self.gen.trigger_now(ch)
-                time.sleep(max(0.0, inter))
+            # Use current definition and burst cycles
+            high = float(self.simple_high_v.get())
+            width = float(self.simple_width_s.get())
+            period = float(self.simple_period_s.get())
+            rise = float(self.simple_rise_s.get())
+            cycles = int(float(self.simple_cycles.get() or 1))
 
-            self.gen_status.set("GEN: Pulse fired")
+            import threading
+            def _run():
+                try:
+                    self.laser.run_burst(high, width, period, rise, count=max(1, cycles))
+                    self.moku_status.set("Moku: Burst complete")
+                except Exception as exc:
+                    messagebox.showerror("Moku", f"Burst error: {exc}")
+
+            threading.Thread(target=_run, daemon=True).start()
         except Exception as exc:
-            messagebox.showerror("GEN", f"Pulse error: {exc}")    
+            messagebox.showerror("Moku", f"Burst error: {exc}")
+    def _moku_start(self):
+        if not self.laser:
+            messagebox.showwarning("Moku", "Connect Moku first.")
+            return
+        try:
+            mode = self.moku_mode.get()
+            high = float(self.simple_high_v.get())
+            width = float(self.simple_width_s.get())
+            period = float(self.simple_period_s.get())
+            rise = float(self.simple_rise_s.get())
+            cycles = int(float(self.simple_cycles.get()))
+            duration = float(self.simple_duration.get())
+
+            if mode == 'manual':
+                self.trigger_simple_now()
+                return
+            if mode == 'burst':
+                threading.Thread(target=lambda: self.laser.safe_run_burst(high, width, period, rise, count=max(1, cycles)), daemon=True).start()
+                self.moku_status.set("Moku: Burst running")
+            elif mode == 'continuous':
+                self._set_gen_output(True)
+            elif mode == 'external':
+                messagebox.showinfo("Moku", "External trigger arming requires SDK trigger API; not yet implemented.")
+            else:
+                messagebox.showwarning("Moku", f"Unknown mode: {mode}")
+        except Exception as exc:
+            messagebox.showerror("Moku", f"Start error: {exc}")
 
     def _set_gen_output(self, enable: bool):
         try:
-            if not self.gen or not self.gen.is_connected():
-                messagebox.showwarning("GEN", "Connect generator first.")
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
                 return
-            ch = int(self.gen_channel_var.get())
-            self.gen.output(ch, bool(enable))
-            self.gen_status.set(f"GEN: Output {'ON' if enable else 'OFF'}")
+            if enable:
+                period = float(self.simple_period_s.get())
+                width = float(self.simple_width_s.get())
+                high = float(self.simple_high_v.get())
+                rise = float(self.simple_rise_s.get())
+                try:
+                    self.laser.safe_start_continuous(high, width, period, rise)
+                    self.moku_status.set("Moku: Output ON")
+                except Exception as exc:
+                    messagebox.showerror("Moku", f"Output error: {exc}")
+            else:
+                try:
+                    self.laser.stop_all()
+                except Exception:
+                    pass
+                self.moku_status.set("Moku: Output OFF")
             # Reflect state on toggle button if present
             try:
                 self.output_on = bool(enable)
@@ -871,21 +971,77 @@ class PMUTestingGUI(tk.Toplevel):
             except Exception:
                 pass
         except Exception as exc:
-            messagebox.showerror("GEN", f"Output error: {exc}")
+            messagebox.showerror("Moku", f"Output error: {exc}")
+
+    # --- Settings save/load and presets ---
+    def _save_moku_settings(self):
+        try:
+            from tkinter.filedialog import asksaveasfilename
+            cfg = {
+                'ip': self.gen_addr_var.get(),
+                'channel': int(self.gen_channel_var.get()),
+                'high_v': float(self.simple_high_v.get()),
+                'width_s': float(self.simple_width_s.get()),
+                'period_s': float(self.simple_period_s.get()),
+                'edge_s': float(self.simple_rise_s.get()),
+                'cycles': float(self.simple_cycles.get()),
+                'duration_s': float(self.simple_duration.get()),
+            }
+            path = asksaveasfilename(defaultextension=".json", filetypes=[["JSON","*.json"]], initialfile="moku_pulse_settings.json")
+            if not path:
+                return
+            import json
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, indent=2)
+            self.moku_status.set(f"Saved settings: {os.path.basename(path)}")
+        except Exception as exc:
+            messagebox.showerror("Moku", f"Save failed: {exc}")
+
+    def _load_moku_settings(self):
+        try:
+            from tkinter.filedialog import askopenfilename
+            path = askopenfilename(filetypes=[["JSON","*.json"]])
+            if not path:
+                return
+            import json
+            with open(path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            self.gen_addr_var.set(cfg.get('ip', self.gen_addr_var.get()))
+            self.gen_channel_var.set(cfg.get('channel', int(self.gen_channel_var.get())))
+            self.simple_high_v.set(str(cfg.get('high_v', self.simple_high_v.get())))
+            self.simple_width_s.set(str(cfg.get('width_s', self.simple_width_s.get())))
+            self.simple_period_s.set(str(cfg.get('period_s', self.simple_period_s.get())))
+            self.simple_rise_s.set(str(cfg.get('edge_s', self.simple_rise_s.get())))
+            self.simple_cycles.set(str(cfg.get('cycles', self.simple_cycles.get())))
+            self.simple_duration.set(str(cfg.get('duration_s', self.simple_duration.get())))
+            self.moku_status.set(f"Loaded settings: {os.path.basename(path)}")
+        except Exception as exc:
+            messagebox.showerror("Moku", f"Load failed: {exc}")
+
+    def _load_exp_preset(self):
+        try:
+            p = self.exp_preset.get()
+            if p == "Write (50ns/200ns, 1.5V)":
+                self.simple_high_v.set(str(1.5)); self.simple_width_s.set(str(50e-9)); self.simple_period_s.set(str(200e-9)); self.simple_rise_s.set(str(16e-9))
+            elif p == "Read (16ns/200ns, 0.5V)":
+                self.simple_high_v.set(str(0.5)); self.simple_width_s.set(str(16e-9)); self.simple_period_s.set(str(200e-9)); self.simple_rise_s.set(str(16e-9))
+            elif p == "Endurance (100ns/200ns, 1.0V)":
+                self.simple_high_v.set(str(1.0)); self.simple_width_s.set(str(100e-9)); self.simple_period_s.set(str(200e-9)); self.simple_rise_s.set(str(16e-9))
+            self.preview_pulse_waveform()
+        except Exception:
+            pass
 
     def _maybe_trigger_gen_start(self):
         try:
             if not getattr(self, 'auto_trigger_gen', tk.BooleanVar(value=False)).get():
                 return
-            if not self.gen or not self.gen.is_connected():
+            if not self.laser:
                 return
-            # Prefer simple UI trigger selection if present
-            trig_src = getattr(self, 'simple_trig_src', tk.StringVar(value="EXT")).get().upper()
-            # Only software trigger when MAN/BUS
-            if trig_src in ("MAN", "BUS"):
-                ch = int(self.gen_channel_var.get())
-                self.gen.trigger_now(ch)
-                self.gen_status.set("GEN: Trigger at start")
+            # Start continuous output at measurement start
+            try:
+                self._set_gen_output(True)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -1002,6 +1158,177 @@ class PMUTestingGUI(tk.Toplevel):
             self._save_combined_trace("4bit", t, v_arr, i, meta)
         except Exception as exc:
             messagebox.showerror("Combined", f"4-bit error: {exc}")
+
+    # --- Experiments panel handlers ---
+    def _run_experiment(self):
+        try:
+            if self.pmu is None:
+                messagebox.showwarning("PMU", "Connect PMU/SMU first.")
+                return
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
+                return
+            # Collect params
+            bias = float(self.exp_bias.get()); cap = float(self.exp_cap.get()); dt = float(self.exp_dt.get())
+            high = float(self.exp_high.get()); width = float(self.exp_width.get()); period = float(self.exp_period.get()); edge = float(self.exp_edge.get())
+            repeats = int(float(self.exp_repeats.get() or 1))
+            ramp_step = float(self.exp_ramp_step.get() or 0.0)
+            ramp_every = max(1, int(float(self.exp_ramp_every.get() or 1)))
+            ramp_max = float(self.exp_ramp_max.get() or 3.3)
+            cont_sec = float(self.exp_cont.get() or 0.0)
+
+            import threading
+            import threading as _th
+            self._exp_stop = _th.Event()
+
+            def _loop():
+                v_high = high
+                try:
+                    for k in range(max(1, repeats)):
+                        if self._exp_stop.is_set():
+                            break
+                        # Run one decay capture using current v_high
+                        t_arr, i_arr = self.service.run_moku_decay(
+                            keithley=self.pmu._base if hasattr(self.pmu, '_base') else self.pmu,
+                            laser=self.laser,
+                            bias_v=bias,
+                            capture_time_s=cap,
+                            sample_dt_s=dt,
+                            prep_delay_s=0.01,
+                            high_v=v_high,
+                            width_s=width,
+                            period_s=period,
+                            edge_s=edge,
+                            pulses=1 if float(self.exp_cont.get() or 0.0) == 0.0 else 0,
+                            continuous_duration_s=cont_sec,
+                        )
+                        # Plot to Latest Data Preview
+                        try:
+                            self.ax_data_i.clear(); self.ax_data_v.clear()
+                            self.ax_data_i.plot(t_arr, i_arr, "-")
+                            self.ax_data_i.set_xlabel("t (s)"); self.ax_data_i.set_ylabel("I (A)")
+                            self.canvas_data.draw()
+                        except Exception:
+                            pass
+
+                        # Ramping rule
+                        if ramp_step and ((k + 1) % ramp_every == 0):
+                            v_high = min(ramp_max, v_high + ramp_step)
+                except Exception as exc:
+                    messagebox.showerror("Experiment", f"Run error: {exc}")
+
+            self._exp_thread = threading.Thread(target=_loop, daemon=True)
+            self._exp_thread.start()
+        except Exception as exc:
+            messagebox.showerror("Experiment", f"Start error: {exc}")
+
+    def _stop_experiment(self):
+        try:
+            if self._exp_stop:
+                self._exp_stop.set()
+        except Exception:
+            pass
+
+    def _load_experiment_library(self):
+        try:
+            import json
+            from tkinter.filedialog import askopenfilename
+            path = askopenfilename(filetypes=[["JSON","*.json"]], initialdir="Equipment_Classes/Moku")
+            if not path:
+                return
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            names = [item.get('name','') for item in data if isinstance(item, dict)]
+            names = [n for n in names if n]
+            if not names:
+                messagebox.showwarning("Experiments", "No experiment names found in JSON.")
+                return
+            self.exp_combo['values'] = names
+            self.exp_select.set(names[0])
+            # Populate fields from first experiment
+            first = next((item for item in data if item.get('name') == names[0]), None)
+            if first:
+                pmu = first.get('pmu', {})
+                laser = first.get('laser', {})
+                self.exp_bias.set(str(pmu.get('bias_v', self.exp_bias.get())))
+                self.exp_cap.set(str(pmu.get('capture_s', self.exp_cap.get())))
+                self.exp_dt.set(str(pmu.get('dt_s', self.exp_dt.get())))
+                self.exp_high.set(str(laser.get('high_v', self.exp_high.get())))
+                self.exp_width.set(str(laser.get('width_s', self.exp_width.get())))
+                self.exp_period.set(str(laser.get('period_s', self.exp_period.get())))
+                self.exp_edge.set(str(laser.get('edge_s', self.exp_edge.get())))
+                self.exp_repeats.set(str(first.get('repeats', self.exp_repeats.get())))
+                ramp = first.get('ramp', {})
+                self.exp_ramp_step.set(str(ramp.get('step_v', self.exp_ramp_step.get())))
+                self.exp_ramp_every.set(str(ramp.get('every', self.exp_ramp_every.get())))
+                self.exp_ramp_max.set(str(ramp.get('max_v', self.exp_ramp_max.get())))
+                self.exp_cont.set(str(first.get('continuous_duration_s', self.exp_cont.get())))
+            self.status_var.set("Loaded experiments library")
+        except Exception as exc:
+            messagebox.showerror("Experiments", f"Load failed: {exc}")
+
+    def _save_current_experiment_to_library(self):
+        try:
+            import json
+            from tkinter.filedialog import asksaveasfilename
+            entry = {
+                "name": self.exp_select.get() or "Custom Experiment",
+                "type": "decay",
+                "pmu_mode": "read_dc",
+                "laser_mode": "pulse" if float(self.exp_cont.get() or 0.0) == 0.0 else "dc",
+                "pmu": {
+                    "bias_v": float(self.exp_bias.get()),
+                    "capture_s": float(self.exp_cap.get()),
+                    "dt_s": float(self.exp_dt.get())
+                },
+                "laser": {
+                    "high_v": float(self.exp_high.get()),
+                    "width_s": float(self.exp_width.get()),
+                    "period_s": float(self.exp_period.get()),
+                    "edge_s": float(self.exp_edge.get()),
+                    "dc_v": float(self.exp_high.get())
+                },
+                "repeats": int(float(self.exp_repeats.get() or 1)),
+                "ramp": {
+                    "step_v": float(self.exp_ramp_step.get() or 0.0),
+                    "every": int(float(self.exp_ramp_every.get() or 1)),
+                    "max_v": float(self.exp_ramp_max.get() or 3.3)
+                },
+                "continuous_duration_s": float(self.exp_cont.get() or 0.0)
+            }
+            path = asksaveasfilename(defaultextension=".json", filetypes=[["JSON","*.json"]], initialfile="experiments_custom.json")
+            if not path:
+                return
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    data.append(entry)
+                else:
+                    data = [data, entry]
+            except Exception:
+                data = [entry]
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            self.status_var.set("Saved current experiment to library")
+        except Exception as exc:
+            messagebox.showerror("Experiments", f"Save failed: {exc}")
+
+    def _send_trigger_ch2(self):
+        try:
+            if not self.laser:
+                messagebox.showwarning("Moku", "Connect Moku first.")
+                return
+            # Use wrapper to send a single trigger pulse on CH2
+            # Reuse current laser timing for consistency
+            high = float(self.simple_high_v.get())
+            width = float(self.simple_width_s.get())
+            period = float(self.simple_period_s.get())
+            edge = float(self.simple_rise_s.get())
+            self.laser.safe_send_trigger_pulse_on_ch2(voltage_high=high, pulse_width=width, period=period, edge_time=edge)
+            self.moku_status.set("Moku: Trigger sent on CH2")
+        except Exception as exc:
+            messagebox.showerror("Moku", f"Trigger CH2 error: {exc}")
     def _poll_context(self):
         try:
             if self.provider is not None:

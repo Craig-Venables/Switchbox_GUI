@@ -1,0 +1,27 @@
+Metadata-Version: 2.3
+Name: mokucli
+Version: 4.0.1
+Summary: Moku command line interface
+Author: Sashi Yalamarthi
+Author-email: sashi@liquidinstruments.com
+Requires-Python: >= 3.10, <3.13
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Provides-Extra: api
+Provides-Extra: test
+Requires-Dist: charset-normalizer (<3.0)
+Requires-Dist: fastapi (>=0.95.0) ; extra == "test"
+Requires-Dist: httpx (>=0.24.0) ; extra == "test"
+Requires-Dist: minio (>=7.1.0)
+Requires-Dist: moku (>=3.0.0) ; extra == "api"
+Requires-Dist: moku (>=4.0.0,<4.1.0)
+Requires-Dist: pydantic (>=2.0.0)
+Requires-Dist: pytest (>=7.0.0) ; extra == "test"
+Requires-Dist: pytest-cov (>=4.0.0) ; extra == "test"
+Requires-Dist: pyyaml (>=6.0)
+Requires-Dist: requests (>=2.28.1)
+Requires-Dist: typer (>=0.16.0)
+Requires-Dist: uvicorn (>=0.21.0) ; extra == "test"
+Requires-Dist: zeroconf (>=0.39.4,<=0.52.0)

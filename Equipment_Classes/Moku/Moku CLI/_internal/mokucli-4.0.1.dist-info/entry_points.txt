@@ -1,0 +1,3 @@
+[console_scripts]
+mokucli=mokucli.main:app
+
