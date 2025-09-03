@@ -1,0 +1,35 @@
+[
+  {
+    "name": "Photoelectric Decay",
+    "type": "decay",
+    "pmu_mode": "read_dc", 
+    "laser_mode": "pulse", 
+    "pmu": { "bias_v": 0.2, "capture_s": 0.02, "dt_s": 0.001 },
+    "laser": { "high_v": 1.0, "width_s": 1e-7, "period_s": 2e-7, "edge_s": 1.6e-8 },
+    "repeats": 1,
+    "ramp": { "step_v": 0.0, "every": 1, "max_v": 3.3 },
+    "continuous_duration_s": 0.0
+  },
+  {
+    "name": "Decay (0.5V, 50ns)",
+    "type": "decay",
+    "pmu_mode": "read_dc",
+    "laser_mode": "pulse",
+    "pmu": { "bias_v": 0.2, "capture_s": 0.05, "dt_s": 0.0005 },
+    "laser": { "high_v": 0.5, "width_s": 5e-8, "period_s": 2e-7, "edge_s": 1.6e-8 },
+    "repeats": 3,
+    "ramp": { "step_v": 0.1, "every": 2, "max_v": 2.0 },
+    "continuous_duration_s": 0.0
+  },
+  {
+    "name": "Decay (continuous 1s)",
+    "type": "decay",
+    "pmu_mode": "read_dc",
+    "laser_mode": "dc",
+    "pmu": { "bias_v": 0.1, "capture_s": 1.2, "dt_s": 0.001 },
+    "laser": { "dc_v": 1.0 },
+    "repeats": 1,
+    "ramp": { "step_v": 0.0, "every": 1, "max_v": 3.3 },
+    "continuous_duration_s": 1.0
+  }
+]
