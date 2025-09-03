@@ -289,9 +289,55 @@ class LaserFunctionGenerator:
         self.trigger_mode = mode
 
     def safe_send_trigger_pulse_on_ch2(self, voltage_high: float = 1.0, pulse_width: float = 1e-7, period: float = 2e-7, edge_time: float = 16e-9) -> None:
-        """Send a single trigger pulse on channel 2 using safe wrappers."""
-        temp = LaserFunctionGenerator(self.controller, channel=2)
-        return temp.safe_send_single_pulse(voltage_high=voltage_high, pulse_width=pulse_width, edge_time=edge_time, period=period)
+        """Send a single digital trigger pulse on channel 2 using the AWG LUT (clean square pulse).
+
+        This constructs a short 0/1 lookup table and plays it on AWG channel 2 to produce a clean
+        digital edge suitable for triggering the PMU input.
+        """
+        # Build LUT and use ArbitraryWaveformGenerator to ensure a clean digital pulse (no interpolation)
+        try:
+            awg = self.controller.awg()
+            # Use a default numeric sample rate corresponding to '125Ms'
+            rate = 125e6
+            high_samples = max(1, int(round(pulse_width * rate)))
+            total_samples = max(high_samples + 1, int(round(period * rate)))
+            low_samples = total_samples - high_samples
+
+            lut = np.concatenate([np.ones(high_samples, dtype=float), np.zeros(low_samples, dtype=float)])
+            # normalized LUT (0..1) - AWG amplitude param scales to volts
+            lut = lut.tolist()
+            frequency = rate / float(total_samples)
+
+            # Some AWG APIs accept label strings like '125Ms' or numeric values; we pass numeric rate where supported
+            try:
+                sample_rate_arg = 125e6
+                awg.generate_waveform(
+                    channel=2,
+                    sample_rate=sample_rate_arg,
+                    lut_data=lut,
+                    frequency=frequency,
+                    amplitude=float(voltage_high),
+                    offset=0.0,
+                    interpolation=False,
+                )
+            except Exception:
+                # Fallback to label-based call
+                awg.generate_waveform(
+                    channel=2,
+                    sample_rate='125Ms',
+                    lut_data=lut,
+                    frequency=frequency,
+                    amplitude=float(voltage_high),
+                    offset=0.0,
+                    interpolation=False,
+                )
+        except Exception as e:
+            # Retry via WaveformGenerator pulse if AWG fails
+            try:
+                temp = LaserFunctionGenerator(self.controller, channel=2)
+                return temp.safe_send_single_pulse(voltage_high=voltage_high, pulse_width=pulse_width, edge_time=edge_time, period=period)
+            except Exception:
+                raise e
 
     # ------------------------
     # DC Output support

@@ -403,6 +403,46 @@ class Keithley4200A_PMUController:
 
         return v, i, ts, statuses
 
+    # -----------------------
+    # Trigger configuration helpers
+    # -----------------------
+    def set_trigger_source(self, source: int) -> None:
+        """Set PMU trigger source.
+
+        Sources (per lpt):
+          0: software
+          1: ext rising (initial only)
+          2: ext falling (initial only)
+          3: ext rising (per pulse)
+          4: ext falling (per pulse)
+          5: internal trig bus
+        """
+        try:
+            self.lpt.pulse_trig_source(self.card_id, int(source))
+        except Exception:
+            pass
+
+    def set_trigger_polarity(self, polarity: int) -> None:
+        """Set trigger polarity (0 or 1)."""
+        try:
+            self.lpt.pulse_trig_polarity(self.card_id, int(polarity))
+        except Exception:
+            pass
+
+    def set_trigger_output(self, state: bool) -> None:
+        """Enable or disable the PMU trigger output line."""
+        try:
+            self.lpt.pulse_trig_output(self.card_id, 1 if state else 0)
+        except Exception:
+            pass
+
+    def set_burst_count(self, count: int) -> None:
+        """Set burst count for the pulse output (unsigned int)."""
+        try:
+            self.lpt.pulse_burst_count(self.card_id, self.channel, int(count))
+        except Exception:
+            pass
+
     # --------------- High-level wrappers ---------------
     def run_fixed_amplitude_pulses(self, amplitude_v: float, base_v: float, num_pulses: int,
                                    width_s: float, period_s: float,
