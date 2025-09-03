@@ -528,10 +528,21 @@ class PMUTestingGUI(tk.Toplevel):
         # Trigger role: PMU waits vs Moku triggers
         row4 = tk.Frame(combo)
         row4.grid(row=5, column=0, columnspan=10, sticky="ew", pady=(0,5))
-        tk.Label(row4, text="Trigger role:").pack(side="left")
-        self.trigger_role = tk.StringVar(value="moku_sends")
-        ttk.Combobox(row4, values=["moku_sends","pmu_waits"], textvariable=self.trigger_role, state="readonly", width=14).pack(side="left", padx=6)
-        tk.Button(row4, text="Send Trigger (CH2)", command=self._send_trigger_ch2).pack(side="left", padx=6)
+        tk.Label(row4, text="Trigger role:").grid(row=0, column=0, sticky="w")
+        # Options: Moku -> PMU (Moku sends, PMU waits) or PMU -> Moku (PMU sends, Moku waits)
+        self.trigger_role = tk.StringVar(value="Moku -> PMU")
+        ttk.Combobox(row4, values=["Moku -> PMU","PMU -> Moku"], textvariable=self.trigger_role, state="readonly", width=14).grid(row=0, column=1, sticky="w", padx=(6,10))
+        tk.Button(row4, text="Send Trigger (CH2)", command=self._send_trigger_ch2).grid(row=0, column=2, padx=6)
+        # Trigger pulse params for CH2
+        tk.Label(row4, text="Trig High (V):").grid(row=0, column=3, sticky="w")
+        self.trig_high_v = tk.StringVar(value="1.0")
+        tk.Entry(row4, textvariable=self.trig_high_v, width=8).grid(row=0, column=4, sticky="w", padx=(4,10))
+        tk.Label(row4, text="Trig Width (s):").grid(row=0, column=5, sticky="w")
+        self.trig_width_s = tk.StringVar(value="1e-7")
+        tk.Entry(row4, textvariable=self.trig_width_s, width=10).grid(row=0, column=6, sticky="w", padx=(4,10))
+        tk.Label(row4, text="Trig Period (s):").grid(row=0, column=7, sticky="w")
+        self.trig_period_s = tk.StringVar(value="2e-7")
+        tk.Entry(row4, textvariable=self.trig_period_s, width=10).grid(row=0, column=8, sticky="w", padx=(4,10))
 
         # Make frames flexible
         self.grid_columnconfigure(0, weight=1)  # Controls column
@@ -1188,20 +1199,76 @@ class PMUTestingGUI(tk.Toplevel):
                         if self._exp_stop.is_set():
                             break
                         # Run one decay capture using current v_high
-                        t_arr, i_arr = self.service.run_moku_decay(
-                            keithley=self.pmu._base if hasattr(self.pmu, '_base') else self.pmu,
-                            laser=self.laser,
-                            bias_v=bias,
-                            capture_time_s=cap,
-                            sample_dt_s=dt,
-                            prep_delay_s=0.01,
-                            high_v=v_high,
-                            width_s=width,
-                            period_s=period,
-                            edge_s=edge,
-                            pulses=1 if float(self.exp_cont.get() or 0.0) == 0.0 else 0,
-                            continuous_duration_s=cont_sec,
-                        )
+                        # Configure trigger roles
+                        trig_role = getattr(self, 'trigger_role', tk.StringVar(value='Moku -> PMU')).get()
+                        pmu_obj = self.pmu._base if hasattr(self.pmu, '_base') else self.pmu
+                        if trig_role == 'Moku -> PMU':
+                            # PMU waits for external trigger, set rising per-pulse
+                            try:
+                                if hasattr(pmu_obj, 'set_trigger_source'):
+                                    pmu_obj.set_trigger_source(3)
+                                if hasattr(pmu_obj, 'set_trigger_polarity'):
+                                    pmu_obj.set_trigger_polarity(1)
+                                if hasattr(pmu_obj, 'set_burst_count'):
+                                    pmu_obj.set_burst_count(1)
+                            except Exception:
+                                pass
+
+                            # Start PMU run in background (it will block until external trigger)
+                            import threading, queue
+                            q = queue.Queue()
+                            def _pmu_run():
+                                try:
+                                    res = pmu_obj.run_fixed_amplitude_pulses(v_high, 0.0, 1, width, period, edge, as_dataframe=False)
+                                    q.put(res)
+                                except Exception as er:
+                                    q.put(er)
+
+                            t_pmu = threading.Thread(target=_pmu_run, daemon=True)
+                            t_pmu.start()
+
+                            # Give PMU a moment to arm
+                            time.sleep(0.05)
+
+                            # Send trigger from Moku on CH2 using TRIG fields
+                            try:
+                                th = float(self.trig_high_v.get())
+                                tw = float(self.trig_width_s.get())
+                                tp = float(self.trig_period_s.get())
+                            except Exception:
+                                th, tw, tp = v_high, 1e-7, period
+                            try:
+                                self.laser.safe_send_trigger_pulse_on_ch2(voltage_high=th, pulse_width=tw, period=tp, edge_time=edge)
+                            except Exception:
+                                pass
+
+                            # Wait for PMU result
+                            try:
+                                res = q.get(timeout=5 + cap)
+                                if isinstance(res, Exception):
+                                    raise res
+                                v_arr, i_arr, t_arr = list(res[0]), list(res[1]), list(res[2])
+                            except Exception:
+                                v_arr, i_arr, t_arr = [], [], []
+                        else:
+                            # PMU -> Moku: PMU will send trigger (software/internal), Moku may be configured to DC or receive trigger
+                            # Configure PMU to software trigger (0) and run; Moku is left configured (or DC started if continuous)
+                            try:
+                                if hasattr(pmu_obj, 'set_trigger_source'):
+                                    pmu_obj.set_trigger_source(0)
+                            except Exception:
+                                pass
+                            try:
+                                # If laser_mode is DC, start DC for continuous; otherwise, ensure pulse ready
+                                if float(self.exp_cont.get() or 0.0) > 0.0:
+                                    try:
+                                        self.laser.safe_start_dc(v_high)
+                                    except Exception:
+                                        pass
+                                res = pmu_obj.run_fixed_amplitude_pulses(v_high, 0.0, 1, width, period, edge, as_dataframe=False)
+                                v_arr, i_arr, t_arr = list(res[0]), list(res[1]), list(res[2])
+                            except Exception:
+                                v_arr, i_arr, t_arr = [], [], []
                         # Plot to Latest Data Preview
                         try:
                             self.ax_data_i.clear(); self.ax_data_v.clear()
