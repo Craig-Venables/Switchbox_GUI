@@ -1,0 +1,50 @@
+{
+  "Pulse Train": {
+    "amplitude_v": 0.5,
+    "base_v": 0.0,
+    "width_s": 1e-05,
+    "period_s": 2e-05,
+    "num_pulses": 10,
+    "pattern": "1011",
+    "step_v": 0.1,
+    "stop_v": 1.0
+  },
+  "Pulse Pattern": {
+    "amplitude_v": 0.5,
+    "base_v": 0.0,
+    "width_s": 1e-05,
+    "period_s": 2e-05,
+    "pattern": "1011"
+  },
+  "Amplitude Sweep": {
+    "base_v": 0.0,
+    "stop_v": 1.0,
+    "step_v": 0.1,
+    "width_s": 1e-05,
+    "period_s": 2e-05
+  },
+  "Width Sweep": {
+    "amplitude_v": 0.5,
+    "base_v": 0.0,
+    "width_s": 1e-05,
+    "period_s": 2e-05,
+    "num_pulses": 5
+  },
+  "Transient": {
+    "amplitude_v": 0.5,
+    "base_v": 0.0,
+    "width_s": 1e-05,
+    "period_s": 2e-05
+  },
+  "Endurance": {
+    "amplitude_v": 0.5,
+    "width_s": 1e-05,
+    "period_s": 2e-05,
+    "num_pulses": 100
+  },
+  "DC Measure": {
+    "dc_voltage": 0.2, 
+    "capture_s": 0.02, 
+    "dt_s": 0.001
+   }
+}

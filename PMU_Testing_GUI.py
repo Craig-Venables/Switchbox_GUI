@@ -13,7 +13,10 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from measurement_service import MeasurementService
-from Equipment_Classes.SMU.Keithley4200A import Keithley4200A_PMUController
+from Equipment_Classes.SMU.Keithley4200A import (
+    Keithley4200A_PMUDualChannel,
+    MemristorMeasurements,
+)
 
 
 from Equipment_Classes.Moku.laser_controller import MonkuGoController, LaserFunctionGenerator
@@ -108,7 +111,9 @@ class PMUTestingGUI(tk.Toplevel):
             pass
 
         self.service = MeasurementService()
-        self.pmu = None
+        self.pmu = None  # legacy reference
+        self.pmu_dc = None  # new dual-channel PMU
+        self.wrap = None     # MemristorMeasurements wrapper
         self.moku_ctrl = None  # Moku:Go controller
         self.laser = None      # LaserFunctionGenerator
         self._moku_run_thread = None
@@ -149,20 +154,33 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Label(mode_frame, text="Mode:").grid(row=0, column=0, sticky="w")
         self.mode_var = tk.StringVar(value="Pulse Train")
         self.mode_combo = ttk.Combobox(mode_frame, textvariable=self.mode_var, values=[
-            "Pulse Train", "Pulse Pattern", "Amplitude Sweep", "Width Sweep", "Transient", "Endurance"
+            "Pulse Train", "Pulse Pattern", "Amplitude Sweep", "Width Sweep", "Transient", "Endurance", "DC Measure"
         ], width=25, state="readonly")
         self.mode_combo.grid(row=0, column=1, columnspan=2, sticky="ew")
-        self.mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_enabled_controls())
+        self.mode_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_mode_changed())
+
+        # Short help text for mode
+        self.mode_help_var = tk.StringVar(value="")
+        self.mode_help = tk.Label(mode_frame, textvariable=self.mode_help_var, wraplength=360, justify="left", fg="#555")
+        self.mode_help.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4,0))
 
         # Basic parameters section
         basic_frame = tk.Frame(ctrl)
         basic_frame.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0,5))
         basic_frame.columnconfigure([1,3], weight=1)
+        self._pmu_basic_frame = basic_frame
 
+        # Map variables to their Entry widgets so we can reliably show/hide/place them later
+        self._pmu_entries = {}
         def mk_spin(row, col, label, init, frm=basic_frame):
             tk.Label(frm, text=label).grid(row=row, column=col*2, sticky="w")
             var = tk.StringVar(value=str(init))
-            tk.Entry(frm, textvariable=var, width=12).grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
+            ent = tk.Entry(frm, textvariable=var, width=12)
+            ent.grid(row=row, column=col*2+1, sticky="ew", padx=(5,10))
+            try:
+                self._pmu_entries[str(var)] = ent
+            except Exception:
+                pass
             return var
 
         self.amp_v = mk_spin(0, 0, "Amplitude V:", 0.5)
@@ -176,6 +194,7 @@ class PMUTestingGUI(tk.Toplevel):
         sweep_frame = tk.Frame(ctrl)
         sweep_frame.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0,5))
         sweep_frame.columnconfigure([1,3], weight=1)
+        self._pmu_sweep_frame = sweep_frame
 
         self.step_v = mk_spin(0, 0, "Step V:", 0.1, sweep_frame)
         self.stop_v = mk_spin(0, 1, "Stop V:", 1.0, sweep_frame)
@@ -184,19 +203,31 @@ class PMUTestingGUI(tk.Toplevel):
         timing_frame = tk.Frame(ctrl)
         timing_frame.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(0,5))
         timing_frame.columnconfigure([1,3], weight=1)
+        self._pmu_timing_frame = timing_frame
 
         self.rise_s = mk_spin(0, 0, "Rise (s):", 1e-7, timing_frame)
         self.fall_s = mk_spin(0, 1, "Fall (s):", 1e-7, timing_frame)
+        # Hide timing section by default per request (not needed for most modes)
+        try:
+            timing_frame.grid_remove()
+        except Exception:
+            pass
         self.start_pct = mk_spin(1, 0, "Meas Start %:", 10, timing_frame)
         self.stop_pct = mk_spin(1, 1, "Meas Stop %:", 90, timing_frame)
 
-        # Limits section
+        # Limits section (toggle visibility)
         limits_frame = tk.Frame(ctrl)
         limits_frame.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(0,5))
         limits_frame.columnconfigure([1,3], weight=1)
+        self._pmu_limits_frame = limits_frame
 
         self.v_limit = mk_spin(0, 0, "V limit (V):", 5.0, limits_frame)
         self.i_limit = mk_spin(0, 1, "I limit (A):", 0.1, limits_frame)
+
+        lim_toggle_row = tk.Frame(ctrl)
+        lim_toggle_row.grid(row=5, column=3, sticky="e", padx=(0,5))
+        self.show_limits = tk.BooleanVar(value=False)
+        tk.Checkbutton(lim_toggle_row, text="Show limits", variable=self.show_limits, command=lambda: self._toggle_limits(limits_frame)).grid(row=0, column=0, sticky="e")
 
         # Buttons section
         btn_frame = tk.Frame(ctrl)
@@ -209,6 +240,10 @@ class PMUTestingGUI(tk.Toplevel):
         # Auto-trigger checkbox for GEN when measurement starts
         self.auto_trigger_gen = tk.BooleanVar(value=False)
         tk.Checkbutton(btn_frame, text="Trigger function generator at start", variable=self.auto_trigger_gen).grid(row=1, column=0, columnspan=3, sticky="w", padx=5, pady=(2,0))
+        # PMU mode defaults and trigger actions
+        tk.Button(btn_frame, text="Save Mode Defaults", command=self._save_current_mode_defaults).grid(row=2, column=0, padx=5, pady=(6,2))
+        tk.Button(btn_frame, text="Load Mode Defaults", command=self._load_and_apply_mode_defaults).grid(row=2, column=1, padx=5, pady=(6,2))
+        tk.Button(btn_frame, text="Send Trigger (CH2)", command=self._send_trigger_ch2).grid(row=2, column=2, padx=5, pady=(6,2))
 
         # ---------------- Controls: Laser Generator ----------------
         genf = tk.LabelFrame(self, text="Laser Pulse Generator", padx=5, pady=3)
@@ -589,7 +624,11 @@ class PMUTestingGUI(tk.Toplevel):
         plotf_data.grid_columnconfigure(0, weight=1)
         plotf_data.grid_rowconfigure(0, weight=1)
 
-        # Init state
+        # PMU dynamic UI/init
+        self._init_pmu_mode_defaults()
+        self._on_mode_changed()
+        self._toggle_limits(limits_frame)  # start hidden
+        # Init state for generator panel
         self._update_enabled_controls()
         self.after(500, self._poll_context)
 
@@ -598,21 +637,275 @@ class PMUTestingGUI(tk.Toplevel):
     def connect_pmu(self):
         try:
             addr = self.addr_var.get().strip()
-            self.pmu = Keithley4200A_PMUController(addr)
-            if self.pmu.is_connected():
-                self.status_var.set("PMU: Connected")
-            else:
-                self.status_var.set("PMU: Failed to connect")
+            # Ensure card selector present
+            if "|" not in addr:
+                addr = f"{addr}|PMU1"
+            self.pmu_dc = Keithley4200A_PMUDualChannel(addr)
+            self.wrap = MemristorMeasurements(self.pmu_dc)
+            self.status_var.set("PMU: Connected")
         except Exception as exc:
             messagebox.showerror("PMU", f"Connection failed: {exc}")
             self.status_var.set("PMU: Failed to connect")
 
+    # ---------------- PMU dynamic UI helpers ----------------
+    def _toggle_limits(self, limits_frame):
+        try:
+            if self.show_limits.get():
+                limits_frame.grid()
+            else:
+                limits_frame.grid_remove()
+        except Exception:
+            pass
+
+    def _init_pmu_mode_defaults(self):
+        # Built-in defaults; can be overridden by PMU_modes.json
+        self._pmu_mode_help = {
+            "Pulse Train": "Fixed amplitude pulses repeated N times.",
+            "Pulse Pattern": "Apply a bitstring (e.g., 1011) where 1=amplitude, 0=base.",
+            "Amplitude Sweep": "Sweep amplitude from start/base to stop with a fixed width/period.",
+            "Width Sweep": "Repeat pulses of increasing width to study timing effects.",
+            "Transient": "Single pulse to capture a transient response.",
+            "Endurance": "Alternate +V and -V pulses for N cycles to test endurance.",
+        }
+        self._pmu_defaults_path = str(Path("PMU_modes.json"))
+        self._pmu_defaults = {
+            "Pulse Train": {"amplitude_v": 0.5, "base_v": 0.0, "width_s": 10e-6, "period_s": 20e-6, "num_pulses": 10},
+            "Pulse Pattern": {"amplitude_v": 0.5, "base_v": 0.0, "width_s": 10e-6, "period_s": 20e-6, "pattern": "1011"},
+            "Amplitude Sweep": {"base_v": 0.0, "stop_v": 1.0, "step_v": 0.1, "width_s": 10e-6, "period_s": 20e-6},
+            "Width Sweep": {"amplitude_v": 0.5, "base_v": 0.0, "width_s": 10e-6, "period_s": 20e-6, "num_pulses": 5},
+            "Transient": {"amplitude_v": 0.5, "base_v": 0.0, "width_s": 10e-6, "period_s": 20e-6},
+            "Endurance": {"amplitude_v": 0.5, "width_s": 10e-6, "period_s": 20e-6, "num_pulses": 100},
+            "DC Measure": {"dc_voltage": 0.2, "capture_s": 0.02, "dt_s": 0.001}
+        }
+        # Attempt load from JSON
+        try:
+            import json
+            p = Path(self._pmu_defaults_path)
+            if p.exists():
+                with open(p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        self._pmu_defaults.update(data)
+        except Exception:
+            pass
+
+    def _apply_mode_defaults(self, mode: str):
+        d = self._pmu_defaults.get(mode, {})
+        try:
+            if mode == "DC Measure":
+                # Map DC defaults into shared fields
+                if "dc_voltage" in d: self.amp_v.set(str(d["dc_voltage"]))
+                if "capture_s" in d: self.period_s.set(str(d["capture_s"]))
+                if "dt_s" in d: self.width_s.set(str(d["dt_s"]))
+            else:
+                if "amplitude_v" in d: self.amp_v.set(str(d["amplitude_v"]))
+                if "base_v" in d: self.base_v.set(str(d["base_v"]))
+                if "width_s" in d: self.width_s.set(str(d["width_s"]))
+                if "period_s" in d: self.period_s.set(str(d["period_s"]))
+                if "num_pulses" in d: self.num_pulses.set(str(d["num_pulses"]))
+                if "pattern" in d: self.pattern.set(str(d["pattern"]))
+                if "step_v" in d: self.step_v.set(str(d["step_v"]))
+                if "stop_v" in d: self.stop_v.set(str(d["stop_v"]))
+        except Exception:
+            pass
+
+    def _save_current_mode_defaults(self):
+        try:
+            mode = self.mode_var.get()
+            entry = {}
+            # Collect inputs relevant to all fields
+            for k, sv in {
+                "amplitude_v": self.amp_v,
+                "base_v": self.base_v,
+                "width_s": self.width_s,
+                "period_s": self.period_s,
+                "num_pulses": self.num_pulses,
+                "pattern": self.pattern,
+                "step_v": self.step_v,
+                "stop_v": self.stop_v,
+            }.items():
+                try:
+                    entry[k] = float(sv.get()) if k not in ("pattern",) else sv.get()
+                except Exception:
+                    if k == "pattern":
+                        entry[k] = sv.get()
+            self._pmu_defaults[mode] = entry
+            import json
+            with open(self._pmu_defaults_path, 'w', encoding='utf-8') as f:
+                json.dump(self._pmu_defaults, f, indent=2)
+            self.status_var.set("Saved mode defaults")
+        except Exception as exc:
+            messagebox.showerror("PMU", f"Save defaults failed: {exc}")
+
+    def _load_and_apply_mode_defaults(self):
+        try:
+            self._init_pmu_mode_defaults()  # reload file if changed externally
+            self._apply_mode_defaults(self.mode_var.get())
+            self.preview_pmu_waveform()
+        except Exception:
+            pass
+
+    def _on_mode_changed(self):
+        try:
+            mode = self.mode_var.get()
+            self.mode_help_var.set(self._pmu_mode_help.get(mode, ""))
+            self._apply_mode_defaults(mode)
+            self._arrange_pmu_fields(mode)
+            self.preview_pmu_waveform()
+        except Exception:
+            pass
+
+    def _arrange_pmu_fields(self, mode: str):
+        """Show only relevant PMU fields per mode by hiding row/column widgets."""
+        basic_frame = getattr(self, '_pmu_basic_frame', None)
+        sweep_frame = getattr(self, '_pmu_sweep_frame', None)
+        timing_frame = getattr(self, '_pmu_timing_frame', None)
+        if not basic_frame or not sweep_frame or not timing_frame:
+            return
+        
+        def show_row_cols(frame, rules: dict):
+            # rules: {row_index: set(columns_to_show)}; other rows hidden
+            for w in frame.winfo_children():
+                try:
+                    info = w.grid_info()
+                    r = int(info.get('row', -1)); c = int(info.get('column', -1))
+                except Exception:
+                    continue
+                if r in rules:
+                    cols = rules[r]
+                    if (c in cols) or (cols == 'all'):
+                        w.grid()
+                    else:
+                        w.grid_remove()
+                else:
+                    w.grid_remove()
+
+        # Default: hide sweep_frame rows unless needed
+        if mode == 'Pulse Train':
+            show_row_cols(basic_frame, {0: 'all', 1: 'all', 2: {0,1}})  # num only (col 0/1)
+            show_row_cols(sweep_frame, {})
+            show_row_cols(timing_frame, {})
+        elif mode == 'Pulse Pattern':
+            show_row_cols(basic_frame, {0: 'all', 1: 'all', 2: {2,3}})  # pattern only (col 2/3)
+            show_row_cols(sweep_frame, {})
+            show_row_cols(timing_frame, {})
+        elif mode == 'Amplitude Sweep':
+            show_row_cols(basic_frame, {0: {2,3}, 1: 'all'})  # base only on row0 (col 2/3), width/period
+            show_row_cols(sweep_frame, {0: 'all'})
+            show_row_cols(timing_frame, {})
+        elif mode == 'Width Sweep':
+            show_row_cols(basic_frame, {0: 'all', 1: 'all', 2: {0,1}})  # use num
+            show_row_cols(sweep_frame, {})
+            show_row_cols(timing_frame, {})
+        elif mode == 'Transient':
+            show_row_cols(basic_frame, {0: 'all', 1: 'all'})
+            show_row_cols(sweep_frame, {})
+            show_row_cols(timing_frame, {})
+        elif mode == 'Endurance':
+            show_row_cols(basic_frame, {0: {0,1}, 1: 'all', 2: {0,1}})  # amplitude, width/period, num cycles
+            show_row_cols(sweep_frame, {})
+            show_row_cols(timing_frame, {})
+        elif mode == 'DC Measure':
+            # Show a minimal UI: use basic frame rows to host DC voltage, capture time, dt fields
+            show_row_cols(sweep_frame, {})
+            show_row_cols(timing_frame, {})
+            # Reuse entries: map amp->dc_voltage, period->capture, width->dt for layout simplicity
+            # Hide existing widgets in target rows
+            for w in basic_frame.winfo_children():
+                try:
+                    info = w.grid_info()
+                    r = int(info.get('row', -1))
+                    if r in (0,1,2):
+                        w.grid_remove()
+                except Exception:
+                    pass
+            try:
+                tk.Label(basic_frame, text="DC Voltage (V):").grid(row=0, column=0, sticky="w")
+                self._entry_for(self.amp_v).master = basic_frame
+                self._entry_for(self.amp_v).grid(row=0, column=1, sticky="ew", padx=(5,10))
+                tk.Label(basic_frame, text="Capture (s):").grid(row=1, column=0, sticky="w")
+                self._entry_for(self.period_s).master = basic_frame
+                self._entry_for(self.period_s).grid(row=1, column=1, sticky="ew", padx=(5,10))
+                tk.Label(basic_frame, text="dt (s):").grid(row=2, column=0, sticky="w")
+                self._entry_for(self.width_s).master = basic_frame
+                self._entry_for(self.width_s).grid(row=2, column=1, sticky="ew", padx=(5,10))
+            except Exception:
+                pass
+        # Limits frame visibility unchanged; controlled by checkbox
+
+    def _parse_float(self, s: tk.StringVar, name: str) -> float:
+        try:
+            return float(s.get())
+        except Exception:
+            raise ValueError(f"Invalid value for {name}")
+
+    def _validate_pmu_inputs_for_mode(self, mode: str):
+        # Hard limits per 4200A PMU
+        VMIN, VMAX = -10.0, 10.0
+        MIN_WIDTH = 50e-9
+        MAX_WIDTH = 0.01
+        MIN_PERIOD = 2*MIN_WIDTH
+        amp = base = width = period = None
+        if mode in ("Pulse Train", "Pulse Pattern", "Width Sweep", "Transient", "Endurance"):
+            amp = self._parse_float(self.amp_v, "Amplitude V")
+        if mode != "Amplitude Sweep":
+            base = self._parse_float(self.base_v, "Base V") if mode in ("Pulse Train","Pulse Pattern","Width Sweep","Transient") else 0.0
+        if mode != "Endurance" or True:
+            width = self._parse_float(self.width_s, "Width (s)")
+            period = self._parse_float(self.period_s, "Period (s)")
+        # Range checks
+        if amp is not None and (amp < VMIN or amp > VMAX):
+            raise ValueError(f"Amplitude out of range [{VMIN},{VMAX}] V")
+        if base is not None and (base < VMIN or base > VMAX):
+            raise ValueError(f"Base out of range [{VMIN},{VMAX}] V")
+        if width is not None and (width < MIN_WIDTH or width > MAX_WIDTH):
+            raise ValueError(f"Width must be between {MIN_WIDTH:.1e} and {MAX_WIDTH:.1e} s")
+        # Earlier working behavior: period must exceed width only
+        if mode != 'DC Measure' and period is not None and period <= width:
+            raise ValueError("Period must be greater than Width")
+        if mode == 'DC Measure':
+            # For DC measurement, reuse fields: amp_v = dc voltage, period_s = capture, width_s = dt
+            vdc = self._parse_float(self.amp_v, "DC Voltage")
+            cap = self._parse_float(self.period_s, "Capture (s)")
+            dt = self._parse_float(self.width_s, "dt (s)")
+            if dt <= 0 or cap <= 0:
+                raise ValueError("Capture and dt must be > 0")
+            if not (-10.0 <= vdc <= 10.0):
+                raise ValueError("DC Voltage must be within [-10, 10] V")
+        # Num/pattern
+        if mode in ("Pulse Train","Width Sweep","Endurance"):
+            n = int(float(self.num_pulses.get()))
+            if n < 1:
+                raise ValueError("Num Pulses must be >= 1")
+        if mode == "Pulse Pattern":
+            pat = self.pattern.get().strip()
+            if not pat or any(ch not in '01' for ch in pat):
+                raise ValueError("Pattern must be a binary string, e.g., 1011")
+        if mode == "Amplitude Sweep":
+            base = self._parse_float(self.base_v, "Base V")
+            stopv = self._parse_float(self.stop_v, "Stop V")
+            step = self._parse_float(self.step_v, "Step V")
+            if not (VMIN <= base <= VMAX and VMIN <= stopv <= VMAX):
+                raise ValueError(f"Voltages must be in [{VMIN},{VMAX}] V")
+            if step <= 0:
+                raise ValueError("Step V must be > 0")
+        # Delegate to service timing check
+        try:
+            self.service._validate_pmu_timing(smu_type="Keithley 4200A_pmu",
+                                              width_s=width, period_s=period,
+                                              rise_s=float(self.rise_s.get()), fall_s=float(self.fall_s.get()),
+                                              amplitude_v=amp if amp is not None else base, v_range=None)
+        except Exception as exc:
+            raise ValueError(str(exc))
+
     def run_selected(self):
-        if self.pmu is None or not self.pmu.is_connected():
+        if self.pmu_dc is None:
             messagebox.showwarning("PMU", "Connect to PMU first.")
             return
         mode = self.mode_var.get()
         try:
+            # Validate entries per mode and 4200A limits
+            self._validate_pmu_inputs_for_mode(mode)
             amp = float(self.amp_v.get()); base = float(self.base_v.get())
             wid = float(self.width_s.get()); per = float(self.period_s.get())
             n = int(float(self.num_pulses.get()))
@@ -626,32 +919,73 @@ class PMUTestingGUI(tk.Toplevel):
             try:
                 # Optional: issue generator trigger at start
                 self._maybe_trigger_gen_start()
+                # Apply limits to PMU if requested
+                try:
+                    if getattr(self, 'show_limits', tk.BooleanVar(value=False)).get():
+                        self.pmu._ensure_configured_with_defaults()
+                        self.pmu.set_pulse_limits(float(self.v_limit.get()), float(self.i_limit.get()), 10.0)
+                except Exception:
+                    pass
+                # Route GUI modes to new wrapper tests
+                ch1_df = None
+                ch2_df = None
                 if mode == "Pulse Train":
-                    v, i, t = self.service.run_pmu_pulse_train(pmu=self.pmu, amplitude_v=amp, base_v=base,
-                                                               width_s=wid, period_s=per, num_pulses=n)
+                    # Two-channel: CH1 bias=base, CH2 pulses amp
+                    res = self.wrap.perturb_measure(bias_v=base, pulse_v=amp, width_s=wid, period_s=per,
+                                                    delay_s=min(5e-6, max(1e-7, 0.1*wid)), num_pulses=n,
+                                                    v_meas_range=2.0, i_meas_range=200e-6, fetch_both=True)
+                    ch1_df, ch2_df = res.get("raw_ch1"), res.get("raw_ch2")
                 elif mode == "Pulse Pattern":
-                    v, i, t = self.service.run_pmu_pulse_pattern(pmu=self.pmu, pattern=pat, amplitude_v=amp,
-                                                                 base_v=base, width_s=wid, period_s=per)
+                    # Build a transient pattern using JSON runner style
+                    import json, tempfile
+                    tmp = {
+                        "Pulse Pattern": {
+                            "amplitude_v": amp, "base_v": base, "width_s": wid, "period_s": per, "pattern": pat
+                        }
+                    }
+                    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+                        json.dump(tmp, f)
+                        f.flush()
+                        modes = self.wrap.run_modes_from_json(f.name, bias_v=base)
+                    m = modes.get("Pulse Pattern", {})
+                    ch1_df, ch2_df = m.get("raw_ch1"), m.get("raw_ch2")
                 elif mode == "Amplitude Sweep":
-                    v, i, t = self.service.run_pmu_amplitude_sweep(pmu=self.pmu, start_v=base,
-                                                                   stop_v=stopv, step_v=step, base_v=base,
-                                                                   width_s=wid, period_s=per)
+                    res = self.wrap.pulse_iv_sweep(levels=list(self._frange(base, stopv, step)),
+                                                   width_s=wid, period_s=per, v_meas_range=2.0, i_meas_range=20e-6)
+                    ch1_df = res.get("raw_ch1")
                 elif mode == "Width Sweep":
                     widths = [wid + k*wid for k in range(max(1, n))]
-                    v, i, t = self.service.run_pmu_width_sweep(pmu=self.pmu, amplitude_v=amp, base_v=base,
-                                                               widths_s=widths, period_s=per)
+                    res = self.wrap.pulse_width_sweep(voltage_v=amp, widths_s=widths,
+                                                       v_meas_range=2.0, i_meas_range=20e-6)
+                    ch1_df = res.get("raw_ch1")
                 elif mode == "Transient":
-                    v, i, t = self.service.run_pmu_transient_switching(pmu=self.pmu, amplitude_v=amp,
-                                                                       base_v=base, width_s=wid, period_s=per)
+                    res = self.wrap.perturb_measure(bias_v=base, pulse_v=amp, width_s=wid, period_s=per,
+                                                    num_pulses=1, fetch_both=True)
+                    ch1_df, ch2_df = res.get("raw_ch1"), res.get("raw_ch2")
                 elif mode == "Endurance":
-                    v, i, t = self.service.run_pmu_endurance(pmu=self.pmu, set_voltage=amp, reset_voltage=-amp,
-                                                             pulse_width_s=wid, num_cycles=max(1, n), period_s=per)
+                    res = self.wrap.perturb_measure(bias_v=0.0, pulse_v=amp, width_s=wid, period_s=per,
+                                                    num_pulses=max(1, n), fetch_both=True)
+                    ch1_df, ch2_df = res.get("raw_ch1"), res.get("raw_ch2")
+                elif mode == "DC Measure":
+                    # Approximate DC with fast repeated reads
+                    cap = float(self.period_s.get()); dt = float(self.width_s.get())
+                    pulses = max(1, int(cap / max(dt, 1e-6)))
+                    res = self.wrap.fast_read(read_v=float(self.amp_v.get()), duration_pulses=pulses,
+                                              width_s=dt, period_s=dt, v_meas_range=2.0, i_meas_range=200e-6)
+                    ch1_df = res.get("raw_ch1")
                 else:
-                    v, i, t = [], [], []
+                    ch1_df = pd.DataFrame()
+
+                t = list(ch1_df["t (s)"]) if (ch1_df is not None and not ch1_df.empty) else []
+                v = list(ch1_df["V (V)"]) if (ch1_df is not None and not ch1_df.empty) else []
+                i = list(ch1_df["I (A)"]) if (ch1_df is not None and not ch1_df.empty) else []
+                t2 = list(ch2_df["t (s)"]) if (ch2_df is not None and not ch2_df.empty) else []
+                v2 = list(ch2_df["V (V)"]) if (ch2_df is not None and not ch2_df.empty) else []
+                i2 = list(ch2_df["I (A)"]) if (ch2_df is not None and not ch2_df.empty) else []
 
                 self.pulses_applied += max(1, len(t))
                 self.counter_var.set(f"Pulses applied: {self.pulses_applied}")
-                self.update_plot(t, i, v)
+                self.update_plot_dual(t, i, v, t2, i2, v2)
                 self._save_pmu_trace(t, v, i, mode)
             except Exception as exc:
                 messagebox.showerror("PMU", str(exc))
@@ -690,6 +1024,36 @@ class PMUTestingGUI(tk.Toplevel):
                         self.ax_pmu_v.set_ylim(y0 - pad, y1 + pad)
             except Exception:
                 pass
+            self.canvas_pmu.draw(); self.canvas_data.draw()
+            self._sync_time_axes()
+        except Exception:
+            pass
+
+    def update_plot_dual(self, t1, i1, v1, t2, i2, v2):
+        try:
+            # Top plot: CH1 and CH2 voltages
+            self.ax_pmu_v.clear()
+            self.ax_pmu_v.set_xlabel("t (s)"); self.ax_pmu_v.set_ylabel("V (V)")
+            if t1 and v1:
+                self.ax_pmu_v.plot(t1, v1, "b-", label="CH1 V")
+            if t2 and v2:
+                self.ax_pmu_v.plot(t2, v2, "r-", label="CH2 V")
+            if self.ax_pmu_v.get_legend_handles_labels()[0]:
+                self.ax_pmu_v.legend()
+
+            # Bottom figure: currents
+            self.ax_data_i.clear(); self.ax_data_v.clear()
+            if t1 and i1:
+                self.ax_data_i.plot(t1, i1, "b-")
+            if t2 and i2:
+                self.ax_data_i.plot(t2, i2, "r-")
+            self.ax_data_i.set_xlabel("t (s)"); self.ax_data_i.set_ylabel("I (A)")
+
+            # Optionally show CH1 V again on right to mirror original layout
+            if t1 and v1:
+                self.ax_data_v.plot(t1, v1, "b-")
+                self.ax_data_v.set_xlabel("t (s)"); self.ax_data_v.set_ylabel("V (V)")
+
             self.canvas_pmu.draw(); self.canvas_data.draw()
             self._sync_time_axes()
         except Exception:
@@ -758,6 +1122,11 @@ class PMUTestingGUI(tk.Toplevel):
                     v_prev.extend([base, -amp, -amp, base])
                     t0 += per
 
+            elif mode == "DC Measure":
+                cap = float(self.period_s.get())
+                t_prev = [0.0, 0.0, cap, cap]
+                v_prev = [0.0, amp, amp, 0.0]
+
             # Draw to plot (PMU voltage preview)
             self.ax_pmu_v.clear()
             self.ax_pmu_v.set_xlabel("t (s)")
@@ -772,6 +1141,7 @@ class PMUTestingGUI(tk.Toplevel):
 
         except Exception as exc:
             messagebox.showerror("Preview PMU", f"Error generating preview: {exc}")
+
     # ---------------- Generator methods ----------------
     
     def connect_moku(self):
@@ -1566,10 +1936,13 @@ class PMUTestingGUI(tk.Toplevel):
 
     def _entry_for(self, var: tk.StringVar):
         # Return the associated Entry widget created for this var
-        # Assumes var has a single Entry in same parent
-        for child in self.children.values():
+        try:
+            ent = self._pmu_entries.get(str(var))
+            if ent:
+                return ent
+        except Exception:
             pass
-        # Simpler: walk our control frame
+        # Fallback: search PMU controls frame
         try:
             parent = self.children.get('!labelframe')  # first labelframe (Controls)
             if parent is not None:
