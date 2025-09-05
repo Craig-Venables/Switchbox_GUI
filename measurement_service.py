@@ -735,6 +735,7 @@ class MeasurementService:
             raise ValueError(f"Pulse width {width_s*1e3:.3f} ms below minimum for {smu_type} ({min_width_ms} ms)")
         if amplitude_v < float(vmin) or amplitude_v > float(vmax):
             raise ValueError(f"Pulse amplitude {amplitude_v} V exceeds range {vmin}..{vmax} V for {smu_type}")
+        # Earlier working behavior: period must exceed width only
         if period_s <= width_s:
             raise ValueError("Period must be greater than pulse width")
         
@@ -772,7 +773,7 @@ class MeasurementService:
         v_arr: List[float] = []
         i_arr: List[float] = []
         t_arr: List[float] = []
-        print("b")
+        
         try:
             result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, int(num_pulses),
                                                     width_s, period_s, as_dataframe=False)
@@ -874,9 +875,30 @@ class MeasurementService:
         self._validate_pmu_connected(pmu)
         self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
                                   rise_s=1e-7, fall_s=1e-7, amplitude_v=amplitude_v, v_range=None)
-        v, i, t = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, 1, width_s, period_s,
-                                                 as_dataframe=False)
-        return list(v), list(i), list(t)
+        result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, 1, width_s, period_s,
+                                                as_dataframe=False)
+        return list(result[0]), list(result[1]), list(result[2])
+
+    def run_pmu_dc_measure(
+        self,
+        *,
+        pmu,
+        voltage_v: float,
+        capture_time_s: float,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """Hold a constant voltage using a single long pulse and capture I(t).
+
+        Implemented by issuing a single pulse with width=capture_time_s and period slightly larger.
+        Returns (V, I, t) arrays from the PMU.
+        """
+        self._validate_pmu_connected(pmu)
+        width_s = float(capture_time_s)
+        period_s = float(capture_time_s) * 1.2 if float(capture_time_s) > 0 else 2e-4
+        # Timing guard using existing PMU limits
+        self._validate_pmu_timing(smu_type="Keithley 4200A_pmu", width_s=width_s, period_s=period_s,
+                                  rise_s=1e-7, fall_s=1e-7, amplitude_v=voltage_v, v_range=None)
+        result = pmu.run_fixed_amplitude_pulses(voltage_v, 0.0, 1, width_s, period_s, as_dataframe=False)
+        return list(result[0]), list(result[1]), list(result[2])
 
     def run_pmu_endurance(
         self,
@@ -899,8 +921,9 @@ class MeasurementService:
             for level in (set_voltage, reset_voltage):
                 self._validate_pmu_timing(smu_type=smu_type, width_s=pulse_width_s, period_s=period_s,
                                           rise_s=1e-7, fall_s=1e-7, amplitude_v=level, v_range=None)
-                v, i, t = pmu.run_fixed_amplitude_pulses(level, 0.0, 1, pulse_width_s, period_s,
-                                                         as_dataframe=False)
+                result = pmu.run_fixed_amplitude_pulses(level, 0.0, 1, pulse_width_s, period_s,
+                                                        as_dataframe=False)
+                v, i, t = result[0], result[1], result[2]
                 if t:
                     mid_idx = max(0, min(len(t) - 1, len(t) // 2))
                     v_mid = float(v[mid_idx]); i_mid = float(i[mid_idx]); t_mid = float(t[mid_idx] if not t_out else t_out[-1] + period_s)
@@ -966,8 +989,9 @@ class MeasurementService:
         while (direction > 0 and current_amp <= stop_v) or (direction < 0 and current_amp >= stop_v):
             self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
                                       rise_s=1e-7, fall_s=1e-7, amplitude_v=current_amp, v_range=None)
-            v, i, t = pmu.run_fixed_amplitude_pulses(current_amp, base_v, 1, width_s, period_s,
-                                                     as_dataframe=False)
+            result = pmu.run_fixed_amplitude_pulses(current_amp, base_v, 1, width_s, period_s,
+                                                    as_dataframe=False)
+            v, i, t = result[0], result[1], result[2]
             v_all.extend(v); i_all.extend(i); t_all.extend(t)
             try:
                 mean_i = sum(i) / max(1, len(i))
@@ -977,6 +1001,7 @@ class MeasurementService:
                 break
             current_amp += step_v * direction
         return v_all, i_all, t_all
+    
     def run_pmu_amplitude_sweep(
         self,
         *,
@@ -996,8 +1021,9 @@ class MeasurementService:
         for amp in (start_v, stop_v):
             self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
                                       rise_s=1e-7, fall_s=1e-7, amplitude_v=amp, v_range=None)
-        v, i, t = pmu.run_amplitude_sweep(start_v, stop_v, step_v, base_v, width_s, period_s,
-                                          as_dataframe=False)
+        result = pmu.run_amplitude_sweep(start_v, stop_v, step_v, base_v, width_s, period_s,
+                                         as_dataframe=False)
+        v, i, t = result[0], result[1], result[2]
         if on_point:
             for k in range(len(v)):
                 if should_stop and should_stop():
@@ -1031,8 +1057,9 @@ class MeasurementService:
                 break
             self._validate_pmu_timing(smu_type=smu_type, width_s=float(w), period_s=period_s,
                                       rise_s=1e-7, fall_s=1e-7, amplitude_v=amplitude_v, v_range=None)
-            v, i, t = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, 1, float(w), period_s,
-                                                     as_dataframe=False)
+            result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, 1, float(w), period_s,
+                                                    as_dataframe=False)
+            v, i, t = result[0], result[1], result[2]
             if t:
                 t0 = t[0]
                 t = [t_offset + (tv - t0) for tv in t]

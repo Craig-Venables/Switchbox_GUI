@@ -15,6 +15,7 @@ import threading
 import atexit
 from pathlib import Path
 import queue
+from PMU_Testing_GUI import PMUTestingGUI
 
 from telegram import PassportData
 
@@ -439,11 +440,14 @@ class MeasurementGUI:
         self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
 
         # PMU testing button: opens a lightweight PMU Testing GUI
+        
         try:
-            from PMU_Testing_GUI import PMUTestingGUI
             self.pmu_btn = tk.Button(frame, text="PMU Testing", command=lambda: PMUTestingGUI(self.master, provider=self))
+            
             self.pmu_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+            print("importing PMU_Testing_GUI completed")
         except Exception:
+            print("promblem with pmu testing gui")
             # If import fails, keep UI functional without PMU
             pass
 
