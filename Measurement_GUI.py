@@ -432,12 +432,27 @@ class MeasurementGUI:
         messagebox.showinfo("Test Preferences (read-only)", info)
 
     def create_automated_tests_section(self, parent):
-        frame = tk.LabelFrame(parent, text="Automated Tests", padx=5, pady=5)
+        frame = tk.LabelFrame(parent, text="More Tests", padx=5, pady=5)
         frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
         # Only one button: open AutoTester GUI on demand
         self.autopress_btn = tk.Button(frame, text="AutoPress", command=self.open_autotest)
         self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+
+        # Volatile/Non-volatile popup
+        def open_advanced():
+            try:
+                from advanced_tests_gui import AdvancedTestsGUI
+                AdvancedTestsGUI(self.master, provider=self)
+            except Exception as e:
+                try:
+                    import traceback
+                    traceback.print_exc()
+                except Exception:
+                    pass
+                tk.messagebox.showerror("Advanced Tests", str(e))
+        self.adv_btn = tk.Button(frame, text="Volatile/Non-volatile Testing", command=open_advanced)
+        self.adv_btn.grid(row=0, column=2, padx=(5, 5), pady=(2, 2), sticky='w')
 
         # PMU testing button: opens a lightweight PMU Testing GUI
         
@@ -453,6 +468,7 @@ class MeasurementGUI:
 
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, weight=1)
 
     
 
@@ -1224,93 +1240,354 @@ class MeasurementGUI:
         frame = tk.LabelFrame(parent, text="Sweep Parameters", padx=5, pady=5)
         frame.grid(row=2, column=0,columnspan = 2 ,padx=10, pady=5, sticky="ew")
 
-        tk.Label(frame, text="Start Voltage (V):").grid(row=0, column=0, sticky="w")
-        self.start_voltage = tk.DoubleVar(value=0)
-        tk.Entry(frame, textvariable=self.start_voltage).grid(row=0, column=1)
+        # Measurement Type selector (DC Triangle IV, SMU pulse modes, etc.)
+        tk.Label(frame, text="Measurement Type:").grid(row=0, column=0, sticky="w")
+        self.excitation_var = tk.StringVar(value="DC Triangle IV")
+        self.excitation_menu = ttk.Combobox(frame, textvariable=self.excitation_var,
+                                            values=["DC Triangle IV",
+                                                    "SMU Pulsed IV",
+                                                    "SMU Fast Pulses",
+                                                    "SMU Fast Hold",
+                                                    "ISPP",
+                                                    "Pulse Width Sweep",
+                                                    "Threshold Search",
+                                                    "Transient Decay"], state="readonly")
+        self.excitation_menu.grid(row=0, column=1, sticky="ew")
 
-        tk.Label(frame, text="Voltage High (V):").grid(row=1, column=0, sticky="w")
-        self.voltage_high = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.voltage_high).grid(row=1, column=1)
+        # Dynamic params container for excitation-specific options
+        exc_dyn = tk.Frame(frame)
+        exc_dyn.grid(row=1, column=0, columnspan=2, sticky="ew")
+        exc_dyn.columnconfigure(1, weight=1)
+        self._excitation_params_frame = exc_dyn
 
-        # Optional asymmetric negative voltage limit
-        tk.Label(frame, text="Voltage Low (V, optional):").grid(row=2, column=0, sticky="w")
-        self.voltage_low_str = tk.StringVar(value="")
-        tk.Entry(frame, textvariable=self.voltage_low_str).grid(row=2, column=1)
+        # Tk variables for pulse modes
+        # Pulsed IV
+        self.ex_piv_start = tk.DoubleVar(value=0.0)
+        self.ex_piv_stop = tk.DoubleVar(value=1.0)
+        self.ex_piv_step = tk.DoubleVar(value=0.1)
+        self.ex_piv_nsteps = tk.IntVar(value=0)  # 0 -> ignored
+        self.ex_piv_width_ms = tk.DoubleVar(value=1.0)
+        self.ex_piv_vbase = tk.DoubleVar(value=0.2)
+        self.ex_piv_inter_delay = tk.DoubleVar(value=0.0)
+        # Fast pulses
+        self.ex_fp_voltage = tk.DoubleVar(value=0.2)
+        self.ex_fp_width_ms = tk.DoubleVar(value=1.0)
+        self.ex_fp_num = tk.IntVar(value=10)
+        self.ex_fp_inter_delay = tk.DoubleVar(value=0.0)
+        self.ex_fp_vbase = tk.DoubleVar(value=0.2)
+        self.ex_fp_max_speed = tk.BooleanVar(value=False)
+        # Fast hold
+        self.ex_fh_voltage = tk.DoubleVar(value=0.2)
+        self.ex_fh_duration = tk.DoubleVar(value=5.0)
+        self.ex_fh_sample_dt = tk.DoubleVar(value=0.01)
 
-        tk.Label(frame, text="Step Size (V):").grid(row=3, column=0, sticky="w")
-        self.step_size = tk.DoubleVar(value=0.1)
-        tk.Entry(frame, textvariable=self.step_size).grid(row=3, column=1)
-
-        tk.Label(frame, text="Step Delay (S):").grid(row=4, column=0, sticky="w")
-        self.step_delay = tk.DoubleVar(value=0.05)
-        tk.Entry(frame, textvariable=self.step_delay).grid(row=4, column=1)
-
-        tk.Label(frame, text="# Sweeps:").grid(row=5, column=0, sticky="w")
-        self.sweeps = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.sweeps).grid(row=5, column=1)
-
-        tk.Label(frame, text="Icc:").grid(row=6, column=0, sticky="w")
-        self.icc = tk.DoubleVar(value=0.1)
-        tk.Entry(frame, textvariable=self.icc).grid(row=6, column=1)
-
-        # Sweep Mode selector
-        tk.Label(frame, text="Sweep Mode:").grid(row=7, column=0, sticky="w")
+        # DC Triangle configuration variables used by dynamic UI below
+        # Sweep Mode and Sweep Type
         self.sweep_mode_var = tk.StringVar(value=VoltageRangeMode.FIXED_STEP)
-        self.sweep_mode_menu = ttk.Combobox(frame, textvariable=self.sweep_mode_var,
-                                            values=[VoltageRangeMode.FIXED_STEP,
-                                                    VoltageRangeMode.FIXED_SWEEP_RATE,
-                                                    VoltageRangeMode.FIXED_VOLTAGE_TIME], state="readonly")
-        self.sweep_mode_menu.grid(row=7, column=1, sticky="ew")
-
-        # Dynamic params container
-        dyn = tk.Frame(frame)
-        dyn.grid(row=8, column=0, columnspan=2, sticky="ew")
-        dyn.columnconfigure(1, weight=1)
-        self._dyn_params_frame = dyn
-
-        # Variables for dynamic options
+        self.sweep_type_var = tk.StringVar(value="FS")
+        # Dynamic params variables (used when mode is rate/time based)
         self.var_sweep_rate = tk.DoubleVar(value=1.0)     # V/s
         self.var_total_time = tk.DoubleVar(value=5.0)     # s
         self.var_num_steps = tk.IntVar(value=101)
 
-        def render_dynamic_params(*_):
-            for w in list(self._dyn_params_frame.children.values()):
+        def _min_pulse_width_ms_default() -> float:
+            try:
+                smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+                limits = self.measurement_service.get_smu_limits(smu_type)
+                return float(limits.get("min_pulse_width_ms", 1.0))
+            except Exception:
+                return 1.0
+
+        def render_excitation_params(*_):
+            for w in list(self._excitation_params_frame.children.values()):
                 try: w.destroy()
                 except Exception: pass
-            mode = self.sweep_mode_var.get()
+            sel = self.excitation_var.get()
             r = 0
-            if mode == VoltageRangeMode.FIXED_STEP:
-                # Show step size entry already present above; no extras needed
-                tk.Label(self._dyn_params_frame, text="Using fixed voltage step.").grid(row=r, column=0, sticky="w")
-            elif mode == VoltageRangeMode.FIXED_SWEEP_RATE:
-                tk.Label(self._dyn_params_frame, text="Sweep rate (V/s):").grid(row=r, column=0, sticky="w")
-                tk.Entry(self._dyn_params_frame, textvariable=self.var_sweep_rate).grid(row=r, column=1, sticky="ew")
-                r += 1
-                tk.Label(self._dyn_params_frame, text="# Steps (optional):").grid(row=r, column=0, sticky="w")
-                tk.Entry(self._dyn_params_frame, textvariable=self.var_num_steps).grid(row=r, column=1, sticky="ew")
-            elif mode == VoltageRangeMode.FIXED_VOLTAGE_TIME:
-                tk.Label(self._dyn_params_frame, text="Total sweep time (s):").grid(row=r, column=0, sticky="w")
-                tk.Entry(self._dyn_params_frame, textvariable=self.var_total_time).grid(row=r, column=1, sticky="ew")
-                r += 1
-                tk.Label(self._dyn_params_frame, text="# Steps (optional):").grid(row=r, column=0, sticky="w")
-                tk.Entry(self._dyn_params_frame, textvariable=self.var_num_steps).grid(row=r, column=1, sticky="ew")
+            if sel == "DC Triangle IV":
+                tk.Label(self._excitation_params_frame, text="Triangle IV sweep (FS/PS/NS).", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                # Sweep Mode
+                tk.Label(self._excitation_params_frame, text="Sweep Mode:").grid(row=r, column=0, sticky="w")
+                sweep_mode_menu = ttk.Combobox(self._excitation_params_frame, textvariable=self.sweep_mode_var,
+                                               values=[VoltageRangeMode.FIXED_STEP,
+                                                       VoltageRangeMode.FIXED_SWEEP_RATE,
+                                                       VoltageRangeMode.FIXED_VOLTAGE_TIME], state="readonly")
+                sweep_mode_menu.grid(row=r, column=1, sticky="ew"); r+=1
+                # Sweep Type directly below
+                tk.Label(self._excitation_params_frame, text="Sweep Type:").grid(row=r, column=0, sticky="w")
+                sweep_type_menu = ttk.Combobox(self._excitation_params_frame, textvariable=self.sweep_type_var,
+                                               values=["FS", "PS", "NS"], state="readonly")
+                sweep_type_menu.grid(row=r, column=1, sticky="ew"); r+=1
 
-        self.sweep_mode_menu.bind("<<ComboboxSelected>>", render_dynamic_params)
-        render_dynamic_params()
+                # Dynamic params for mode (rendered in place of Step/Delay at rows 5 and 6 below)
+                # Prepare alternating widgets (created lazily when needed)
+                if not hasattr(self, '_dc_alt_lbl1'):
+                    self._dc_alt_lbl1 = None; self._dc_alt_ent1 = None
+                    self._dc_alt_lbl2 = None; self._dc_alt_ent2 = None
 
-        # Sweep Type selector (FS/PS/NS)
-        tk.Label(frame, text="Sweep Type:").grid(row=9, column=0, sticky="w")
-        self.sweep_type_var = tk.StringVar(value="FS")
-        self.sweep_type_menu = ttk.Combobox(frame, textvariable=self.sweep_type_var,
-                                            values=["FS", "PS", "NS"], state="readonly")
-        self.sweep_type_menu.grid(row=9, column=1, sticky="ew")
+                def _toggle_dc_step_fields(show: bool):
+                    try:
+                        if show:
+                            self._dc_lbl_step.grid()
+                            self._dc_ent_step.grid()
+                            self._dc_lbl_dwell.grid()
+                            self._dc_ent_dwell.grid()
+                        else:
+                            self._dc_lbl_step.grid_remove()
+                            self._dc_ent_step.grid_remove()
+                            self._dc_lbl_dwell.grid_remove()
+                            self._dc_ent_dwell.grid_remove()
+                    except Exception:
+                        pass
+
+                def render_dynamic_params(*_):
+                    # Clear any alternate widgets
+                    try:
+                        if self._dc_alt_lbl1: self._dc_alt_lbl1.grid_remove()
+                        if self._dc_alt_ent1: self._dc_alt_ent1.grid_remove()
+                        if self._dc_alt_lbl2: self._dc_alt_lbl2.grid_remove()
+                        if self._dc_alt_ent2: self._dc_alt_ent2.grid_remove()
+                    except Exception:
+                        pass
+                    mode = self.sweep_mode_var.get()
+                    if mode == VoltageRangeMode.FIXED_STEP:
+                        # Show step size and step delay; nothing extra here
+                        _toggle_dc_step_fields(True)
+                    elif mode == VoltageRangeMode.FIXED_SWEEP_RATE:
+                        _toggle_dc_step_fields(False)
+                        # Row 5: Sweep rate (V/s)
+                        self._dc_alt_lbl1 = tk.Label(frame, text="Sweep rate (V/s):")
+                        self._dc_alt_lbl1.grid(row=5, column=0, sticky="w")
+                        self._dc_alt_ent1 = tk.Entry(frame, textvariable=self.var_sweep_rate)
+                        self._dc_alt_ent1.grid(row=5, column=1, sticky="ew")
+                        # Row 6: # Steps (optional)
+                        self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):")
+                        self._dc_alt_lbl2.grid(row=6, column=0, sticky="w")
+                        self._dc_alt_ent2 = tk.Entry(frame, textvariable=self.var_num_steps)
+                        self._dc_alt_ent2.grid(row=6, column=1, sticky="ew")
+                    elif mode == VoltageRangeMode.FIXED_VOLTAGE_TIME:
+                        _toggle_dc_step_fields(False)
+                        # Row 5: Total sweep time (s)
+                        self._dc_alt_lbl1 = tk.Label(frame, text="Total sweep time (s):")
+                        self._dc_alt_lbl1.grid(row=5, column=0, sticky="w")
+                        self._dc_alt_ent1 = tk.Entry(frame, textvariable=self.var_total_time)
+                        self._dc_alt_ent1.grid(row=5, column=1, sticky="ew")
+                        # Row 6: # Steps (optional)
+                        self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):")
+                        self._dc_alt_lbl2.grid(row=6, column=0, sticky="w")
+                        self._dc_alt_ent2 = tk.Entry(frame, textvariable=self.var_num_steps)
+                        self._dc_alt_ent2.grid(row=6, column=1, sticky="ew")
+                sweep_mode_menu.bind("<<ComboboxSelected>>", render_dynamic_params)
+                render_dynamic_params()
+                # Show DC widgets
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid()  # restore
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "SMU Pulsed IV":
+                # Defaults tied to SMU min pulse width and base 0.2 V
+                try:
+                    self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
+                except Exception:
+                    pass
+                tk.Label(self._excitation_params_frame, text="One pulse per amplitude, read at Vbase; plots A vs I.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                # For pulse modes, hide DC sweep-mode/type, so nothing to render here
+                tk.Label(self._excitation_params_frame, text="Vstart").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_start, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vstop").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_stop, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Step (use or set #steps)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_step, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="#Steps (optional)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_nsteps, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse width (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_width_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Inter-step delay (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_inter_delay, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                # Hide DC widgets
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "SMU Fast Pulses":
+                try:
+                    self.ex_fp_width_ms.set(_min_pulse_width_ms_default())
+                except Exception:
+                    pass
+                tk.Label(self._excitation_params_frame, text="Pulse train; read after each at Vbase.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                # For pulse modes, hide DC sweep-mode/type
+                tk.Label(self._excitation_params_frame, text="Pulse V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fp_voltage, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse width (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fp_width_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="# Pulses").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fp_num, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Inter-pulse delay (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fp_inter_delay, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fp_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Checkbutton(self._excitation_params_frame, text="Max speed (min width, 0 delay)", variable=self.ex_fp_max_speed).grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "SMU Fast Hold":
+                tk.Label(self._excitation_params_frame, text="Hold DC and sample I(t).", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                # For pulse modes, hide DC sweep-mode/type
+                tk.Label(self._excitation_params_frame, text="Hold V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fh_voltage, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Duration (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fh_duration, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Sample dt (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fh_sample_dt, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "ISPP":
+                tk.Label(self._excitation_params_frame, text="Increase pulse amplitude until target |I|.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                # Params: start, stop, step, pulse_ms, vbase, target I, inter-step
+                self._ispp_start = tk.DoubleVar(value=0.0)
+                self._ispp_stop = tk.DoubleVar(value=1.0)
+                self._ispp_step = tk.DoubleVar(value=0.1)
+                self._ispp_pulse_ms = tk.DoubleVar(value=1.0)
+                self._ispp_vbase = tk.DoubleVar(value=0.2)
+                self._ispp_target = tk.DoubleVar(value=1e-5)
+                self._ispp_inter = tk.DoubleVar(value=0.0)
+                tk.Label(self._excitation_params_frame, text="Start V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_start, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Stop V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_stop, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Step V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_step, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Target |I| (A)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_target, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Inter-step (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._ispp_inter, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "Pulse Width Sweep":
+                tk.Label(self._excitation_params_frame, text="Sweep pulse width at fixed amplitude.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                self._pws_amp = tk.DoubleVar(value=0.5)
+                self._pws_widths = tk.StringVar(value="1,2,5,10")
+                self._pws_vbase = tk.DoubleVar(value=0.2)
+                self._pws_inter = tk.DoubleVar(value=0.0)
+                tk.Label(self._excitation_params_frame, text="Amplitude V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._pws_amp, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Widths (ms, csv)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._pws_widths, width=14).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._pws_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Inter-step (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._pws_inter, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "Threshold Search":
+                tk.Label(self._excitation_params_frame, text="Binary search V within range to reach target |I|.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                self._th_lo = tk.DoubleVar(value=0.0)
+                self._th_hi = tk.DoubleVar(value=1.0)
+                self._th_pulse_ms = tk.DoubleVar(value=1.0)
+                self._th_vbase = tk.DoubleVar(value=0.2)
+                self._th_target = tk.DoubleVar(value=1e-5)
+                self._th_iters = tk.IntVar(value=12)
+                tk.Label(self._excitation_params_frame, text="V low").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._th_lo, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="V high").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._th_hi, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._th_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._th_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Target |I| (A)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._th_target, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Max iters").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._th_iters, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "Transient Decay":
+                tk.Label(self._excitation_params_frame, text="Pulse once, then sample I(t) at Vread.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                self._tr_pulse_v = tk.DoubleVar(value=0.8)
+                self._tr_pulse_ms = tk.DoubleVar(value=1.0)
+                self._tr_read_v = tk.DoubleVar(value=0.2)
+                self._tr_cap_s = tk.DoubleVar(value=1.0)
+                self._tr_dt_s = tk.DoubleVar(value=0.001)
+                tk.Label(self._excitation_params_frame, text="Pulse V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._tr_pulse_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._tr_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Read V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._tr_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Capture (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._tr_cap_s, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="dt (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self._tr_dt_s, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+
+        self.excitation_menu.bind("<<ComboboxSelected>>", render_excitation_params)
+        render_excitation_params()
+
+        self._dc_widgets = []
+
+        self._dc_lbl_start = tk.Label(frame, text="Start Voltage (V):")
+        self._dc_lbl_start.grid(row=2, column=0, sticky="w")
+        self.start_voltage = tk.DoubleVar(value=0)
+        self._dc_ent_start = tk.Entry(frame, textvariable=self.start_voltage)
+        self._dc_ent_start.grid(row=2, column=1)
+        self._dc_widgets.extend([self._dc_lbl_start, self._dc_ent_start])
+
+        self._dc_lbl_vhigh = tk.Label(frame, text="Voltage High (V):")
+        self._dc_lbl_vhigh.grid(row=3, column=0, sticky="w")
+        self.voltage_high = tk.DoubleVar(value=1)
+        self._dc_ent_vhigh = tk.Entry(frame, textvariable=self.voltage_high)
+        self._dc_ent_vhigh.grid(row=3, column=1)
+        self._dc_widgets.extend([self._dc_lbl_vhigh, self._dc_ent_vhigh])
+
+        # Optional asymmetric negative voltage limit
+        self._dc_lbl_vlow = tk.Label(frame, text="Voltage Low (V, optional):")
+        self._dc_lbl_vlow.grid(row=4, column=0, sticky="w")
+        self.voltage_low_str = tk.StringVar(value="")
+        self._dc_ent_vlow = tk.Entry(frame, textvariable=self.voltage_low_str)
+        self._dc_ent_vlow.grid(row=4, column=1)
+        self._dc_widgets.extend([self._dc_lbl_vlow, self._dc_ent_vlow])
+
+        self._dc_lbl_step = tk.Label(frame, text="Step Size (V):")
+        self._dc_lbl_step.grid(row=5, column=0, sticky="w")
+        self.step_size = tk.DoubleVar(value=0.1)
+        self._dc_ent_step = tk.Entry(frame, textvariable=self.step_size)
+        self._dc_ent_step.grid(row=5, column=1)
+        self._dc_widgets.extend([self._dc_lbl_step, self._dc_ent_step])
+
+        self._dc_lbl_dwell = tk.Label(frame, text="Step Delay (S):")
+        self._dc_lbl_dwell.grid(row=6, column=0, sticky="w")
+        self.step_delay = tk.DoubleVar(value=0.05)
+        self._dc_ent_dwell = tk.Entry(frame, textvariable=self.step_delay)
+        self._dc_ent_dwell.grid(row=6, column=1)
+        self._dc_widgets.extend([self._dc_lbl_dwell, self._dc_ent_dwell])
+
+        self._dc_lbl_sweeps = tk.Label(frame, text="# Sweeps:")
+        self._dc_lbl_sweeps.grid(row=7, column=0, sticky="w")
+        self.sweeps = tk.DoubleVar(value=1)
+        self._dc_ent_sweeps = tk.Entry(frame, textvariable=self.sweeps)
+        self._dc_ent_sweeps.grid(row=7, column=1)
+        self._dc_widgets.extend([self._dc_lbl_sweeps, self._dc_ent_sweeps])
+
+        self._dc_lbl_icc = tk.Label(frame, text="Icc:")
+        self._dc_lbl_icc.grid(row=8, column=0, sticky="w")
+        self.icc = tk.DoubleVar(value=0.1)
+        self._dc_ent_icc = tk.Entry(frame, textvariable=self.icc)
+        self._dc_ent_icc.grid(row=8, column=1)
+        self._dc_widgets.extend([self._dc_lbl_icc, self._dc_ent_icc])
+
+        # Sweep Type variable already declared above; controls will be shown in DC Triangle UI
 
         # LED Controls mini title
-        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=20, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=22, column=0, columnspan=2, sticky="w",
                                                                              pady=(10, 2))
 
         # LED Toggle Button
-        tk.Label(frame, text="LED Status:").grid(row=21, column=0, sticky="w")
+        tk.Label(frame, text="LED Status:").grid(row=23, column=0, sticky="w")
         self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
 
         def toggle_led():
@@ -1327,23 +1604,23 @@ class MeasurementGUI:
 
         self.led_button = tk.Button(frame, text="OFF", bg="red", fg="white",
                                     width=8, command=toggle_led)
-        self.led_button.grid(row=21, column=1, sticky="w")
+        self.led_button.grid(row=23, column=1, sticky="w")
 
-        tk.Label(frame, text="Led_Power (0-1):").grid(row=22, column=0, sticky="w")
+        tk.Label(frame, text="Led_Power (0-1):").grid(row=24, column=0, sticky="w")
         self.led_power = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.led_power).grid(row=22, column=1)
+        tk.Entry(frame, textvariable=self.led_power).grid(row=24, column=1)
 
-        tk.Label(frame, text="Sequence: (01010)").grid(row=23, column=0, sticky="w")
+        tk.Label(frame, text="Sequence: (01010)").grid(row=25, column=0, sticky="w")
         self.sequence = tk.StringVar()
-        tk.Entry(frame, textvariable=self.sequence).grid(row=23, column=1)
+        tk.Entry(frame, textvariable=self.sequence).grid(row=25, column=1)
 
         # Other Controls mini title
-        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=24, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=26, column=0, columnspan=2, sticky="w",
                                                                       pady=(10, 2))
 
-        tk.Label(frame, text="Pause at end?:").grid(row=25, column=0, sticky="w")
+        tk.Label(frame, text="Pause at end?:").grid(row=27, column=0, sticky="w")
         self.pause = tk.DoubleVar(value=0.0)
-        tk.Entry(frame, textvariable=self.pause).grid(row=25, column=1)
+        tk.Entry(frame, textvariable=self.pause).grid(row=27, column=1)
 
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.start_measurement)
@@ -1351,11 +1628,11 @@ class MeasurementGUI:
             self.measurement_thread.start()
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=start_thread)
-        self.measure_button.grid(row=26, column=0, columnspan=1, pady=5)
+        self.measure_button.grid(row=28, column=0, columnspan=1, pady=5)
 
         # stop button
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
-        self.adaptive_button.grid(row=26, column=1, columnspan=1, pady=10)
+        self.adaptive_button.grid(row=28, column=1, columnspan=1, pady=10)
 
         # Note: Detailed sweep controls moved to popup editor; only Pause remains in main panel
 
@@ -2443,7 +2720,84 @@ class MeasurementGUI:
 
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
-                    if sweep_type in ("NS", "PS", "FS"):
+                    # Optional excitation override for this sweep (default: DC Triangle IV)
+                    try:
+                        excitation_mode = str(params.get("excitation", "DC Triangle IV"))
+                    except Exception:
+                        excitation_mode = "DC Triangle IV"
+
+                    # Helpers for SMU timing defaults
+                    def _min_pw_ms() -> float:
+                        try:
+                            smu_type_loc = getattr(self, 'SMU_type', 'Keithley 2401')
+                            return float(self.measurement_service.get_smu_limits(smu_type_loc).get("min_pulse_width_ms", 1.0))
+                        except Exception:
+                            return 1.0
+
+                    if excitation_mode == "SMU Pulsed IV":
+                        # Parameters
+                        start_amp = float(params.get("start_v", 0.0))
+                        stop_amp = float(params.get("stop_v", 0.2))
+                        step_amp = float(params.get("step_v", 0.0)) if params.get("step_v") is not None else None
+                        num_steps = int(params.get("num_steps", 0)) or None
+                        pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
+                        vbase = float(params.get("vbase", 0.2))
+                        inter_step = float(params.get("inter_delay", 0.0))
+                        icc_val = float(self.icc.get())
+
+                        v_arr, c_arr, timestamps = self.measurement_service.run_pulsed_iv_sweep(
+                            keithley=self.keithley,
+                            start_v=start_amp,
+                            stop_v=stop_amp,
+                            step_v=step_amp,
+                            num_steps=num_steps,
+                            pulse_width_ms=max(_min_pw_ms(), pulse_ms),
+                            vbase=vbase,
+                            inter_step_delay_s=inter_step,
+                            icc=icc_val,
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=None,
+                            validate_timing=True,
+                        )
+                    elif excitation_mode == "SMU Fast Pulses":
+                        pulse_v = float(params.get("pulse_v", 0.2))
+                        pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
+                        num_pulses = int(params.get("num", 10))
+                        inter_delay = float(params.get("inter_delay", 0.0))
+                        vbase = float(params.get("vbase", 0.2))
+                        icc_val = float(self.icc.get())
+                        v_arr, c_arr, timestamps = self.measurement_service.run_pulse_measurement(
+                            keithley=self.keithley,
+                            pulse_voltage=pulse_v,
+                            pulse_width_ms=max(_min_pw_ms(), pulse_ms),
+                            num_pulses=max(1, num_pulses),
+                            read_voltage=vbase,
+                            inter_pulse_delay_s=max(0.0, inter_delay),
+                            icc=icc_val,
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            psu=getattr(self, 'psu', None),
+                            led=False,
+                            power=1.0,
+                            sequence=None,
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=None,
+                            validate_timing=True,
+                        )
+                    elif excitation_mode == "SMU Fast Hold":
+                        hold_v = float(params.get("hold_v", 0.2))
+                        duration = float(params.get("duration_s", 5.0))
+                        sample_dt = float(params.get("sample_dt_s", 0.01))
+                        v_arr, c_arr, timestamps = self.measurement_service.run_dc_capture(
+                            keithley=self.keithley,
+                            voltage_v=hold_v,
+                            capture_time_s=duration,
+                            sample_dt_s=sample_dt,
+                            icc=float(self.icc.get()),
+                            on_point=None,
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                        )
+                    elif sweep_type in ("NS", "PS", "FS"):
                         # Optional per-sweep negative stop voltage: params override UI field
                         neg_stop_v_param = None
                         try:
@@ -2671,6 +3025,392 @@ class MeasurementGUI:
             self._show_message_async("showwarning", "Warning", "Not connected to Keithley!")
             return
         self.measuring = True
+
+        # Branch by excitation mode if available
+        try:
+            excitation = self.excitation_var.get()
+        except Exception:
+            excitation = "DC Triangle IV"
+
+        # Helper: build save directory per-device
+        def _ensure_save_dir() -> str:
+            save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            return save_dir
+
+        # Helper: SMU timing defaults
+        def _min_pulse_width_ms() -> float:
+            try:
+                smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+                limits = self.measurement_service.get_smu_limits(smu_type)
+                return float(limits.get("min_pulse_width_ms", 1.0))
+            except Exception:
+                return 1.0
+
+        # Device routing context
+        if self.current_device in self.device_list:
+            start_index = self.device_list.index(self.current_device)
+        else:
+            start_index = 0
+        device_count = 1 if self.single_device_flag else len(self.device_list)
+
+        if excitation == "SMU Pulsed IV":
+            # One device (or iterate) amplitude-sweep pulsed IV
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag:
+                    break
+                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV)...")
+                self.master.update()
+
+                # Pull parameters
+                start_v = float(self.ex_piv_start.get())
+                stop_v = float(self.ex_piv_stop.get())
+                step_v = float(self.ex_piv_step.get()) if self.ex_piv_step.get() != 0 else None
+                nsteps = int(self.ex_piv_nsteps.get()) if int(self.ex_piv_nsteps.get() or 0) > 0 else None
+                width_ms = float(self.ex_piv_width_ms.get())
+                width_ms = max(_min_pulse_width_ms(), width_ms)
+                vbase = float(self.ex_piv_vbase.get())
+                inter_step = float(self.ex_piv_inter_delay.get())
+                icc_val = float(self.icc.get())
+                smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+
+                # Run measurement
+                v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
+                    keithley=self.keithley,
+                    start_v=start_v,
+                    stop_v=stop_v,
+                    step_v=step_v,
+                    num_steps=nsteps,
+                    pulse_width_ms=width_ms,
+                    vbase=vbase,
+                    inter_step_delay_s=inter_step,
+                    icc=icc_val,
+                    smu_type=smu_type,
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None,
+                    validate_timing=True,
+                )
+
+                # Plot as IV (amplitude vs read current)
+                try:
+                    self.graphs_show(v_out, i_out, "PULSED_IV", stop_v)
+                except Exception:
+                    pass
+
+                # Save
+                save_dir = _ensure_save_dir()
+                key = find_largest_number_in_folder(save_dir)
+                save_key = 0 if key is None else key + 1
+                name = f"{save_key}-PULSED_IV-{stop_v}v-{width_ms}ms-Py-1"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((v_out, i_out, t_out))
+                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Amplitude(V) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False
+            self.status_box.config(text="Measurement Complete")
+            show_popup = not self._bot_enabled()
+            if show_popup:
+                messagebox.showinfo("Complete", "Measurements finished.")
+            return
+
+        if excitation == "SMU Fast Pulses":
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag:
+                    break
+                self.status_box.config(text=f"Measuring {device} (SMU Fast Pulses)...")
+                self.master.update()
+
+                pulse_v = float(self.ex_fp_voltage.get())
+                width_ms = max(_min_pulse_width_ms(), float(self.ex_fp_width_ms.get()))
+                num = max(1, int(self.ex_fp_num.get()))
+                inter = 0.0 if bool(self.ex_fp_max_speed.get()) else float(self.ex_fp_inter_delay.get())
+                vbase = float(self.ex_fp_vbase.get())
+                icc_val = float(self.icc.get())
+                smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+
+                v_arr, c_arr, t_arr = self.measurement_service.run_pulse_measurement(
+                    keithley=self.keithley,
+                    pulse_voltage=pulse_v,
+                    pulse_width_ms=width_ms,
+                    num_pulses=num,
+                    read_voltage=vbase,
+                    inter_pulse_delay_s=inter,
+                    icc=icc_val,
+                    smu_type=smu_type,
+                    psu=getattr(self, 'psu', None),
+                    led=False,
+                    power=1.0,
+                    sequence=None,
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None,
+                    validate_timing=True,
+                )
+
+                # Update time plot buffers
+                try:
+                    self.v_arr_disp.extend(list(v_arr))
+                    self.c_arr_disp.extend(list(c_arr))
+                    self.t_arr_disp.extend(list(t_arr))
+                except Exception:
+                    pass
+
+                # Save
+                save_dir = _ensure_save_dir()
+                key = find_largest_number_in_folder(save_dir)
+                save_key = 0 if key is None else key + 1
+                name = f"{save_key}-FAST_PULSES-{pulse_v}v-{width_ms}ms-N{num}-Py"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((v_arr, c_arr, t_arr))
+                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="ReadV(V) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False
+            self.status_box.config(text="Measurement Complete")
+            show_popup = not self._bot_enabled()
+            if show_popup:
+                messagebox.showinfo("Complete", "Measurements finished.")
+            return
+
+        if excitation == "SMU Fast Hold":
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag:
+                    break
+                self.status_box.config(text=f"Measuring {device} (SMU Fast Hold)...")
+                self.master.update()
+
+                hold_v = float(self.ex_fh_voltage.get())
+                duration = float(self.ex_fh_duration.get())
+                dt = float(self.ex_fh_sample_dt.get())
+                icc_val = float(self.icc.get())
+
+                v_arr, c_arr, t_arr = self.measurement_service.run_dc_capture(
+                    keithley=self.keithley,
+                    voltage_v=hold_v,
+                    capture_time_s=duration,
+                    sample_dt_s=dt,
+                    icc=icc_val,
+                    on_point=None,
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                )
+
+                try:
+                    self.v_arr_disp.extend(list(v_arr))
+                    self.c_arr_disp.extend(list(c_arr))
+                    self.t_arr_disp.extend(list(t_arr))
+                except Exception:
+                    pass
+
+                # Save
+                save_dir = _ensure_save_dir()
+                key = find_largest_number_in_folder(save_dir)
+                save_key = 0 if key is None else key + 1
+                name = f"{save_key}-FAST_HOLD-{hold_v}v-{duration}s-Py"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((v_arr, c_arr, t_arr))
+                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage(V) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False
+            self.status_box.config(text="Measurement Complete")
+            show_popup = not self._bot_enabled()
+            if show_popup:
+                messagebox.showinfo("Complete", "Measurements finished.")
+            return
+
+        if excitation == "ISPP":
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag:
+                    break
+                self.status_box.config(text=f"Measuring {device} (ISPP)..."); self.master.update()
+                start_v = float(getattr(self, '_ispp_start', tk.DoubleVar(value=0.0)).get())
+                stop_v = float(getattr(self, '_ispp_stop', tk.DoubleVar(value=1.0)).get())
+                step_v = float(getattr(self, '_ispp_step', tk.DoubleVar(value=0.1)).get())
+                pulse_ms = float(getattr(self, '_ispp_pulse_ms', tk.DoubleVar(value=1.0)).get())
+                vbase = float(getattr(self, '_ispp_vbase', tk.DoubleVar(value=0.2)).get())
+                target = float(getattr(self, '_ispp_target', tk.DoubleVar(value=1e-5)).get())
+                inter = float(getattr(self, '_ispp_inter', tk.DoubleVar(value=0.0)).get())
+                icc_val = float(self.icc.get())
+                v_arr, c_arr, t_arr = self.measurement_service.run_ispp(
+                    keithley=self.keithley,
+                    start_v=start_v,
+                    stop_v=stop_v,
+                    step_v=step_v,
+                    vbase=vbase,
+                    pulse_width_ms=pulse_ms,
+                    target_current_a=target,
+                    inter_step_delay_s=inter,
+                    icc=icc_val,
+                    smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None,
+                    validate_timing=True,
+                )
+                try:
+                    self.graphs_show(v_arr, c_arr, "ISPP", stop_v)
+                except Exception:
+                    pass
+                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
+                name = f"{save_key}-ISPP-{stop_v}v-{pulse_ms}ms-Py"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((v_arr, c_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Amplitude(V) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False; self.status_box.config(text="Measurement Complete")
+            if not self._bot_enabled(): messagebox.showinfo("Complete", "Measurements finished.")
+            return
+
+        if excitation == "Pulse Width Sweep":
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag: break
+                self.status_box.config(text=f"Measuring {device} (Pulse Width Sweep)..."); self.master.update()
+                amp = float(getattr(self, '_pws_amp', tk.DoubleVar(value=0.5)).get())
+                widths_csv = str(getattr(self, '_pws_widths', tk.StringVar(value="1,2,5,10")).get())
+                try:
+                    widths_ms = [float(x.strip()) for x in widths_csv.split(',') if x.strip()]
+                except Exception:
+                    widths_ms = [1.0, 2.0, 5.0, 10.0]
+                vbase = float(getattr(self, '_pws_vbase', tk.DoubleVar(value=0.2)).get())
+                inter = float(getattr(self, '_pws_inter', tk.DoubleVar(value=0.0)).get())
+                icc_val = float(self.icc.get())
+                w_arr, i_arr, t_arr = self.measurement_service.run_pulse_width_sweep(
+                    keithley=self.keithley,
+                    amplitude_v=amp,
+                    widths_ms=widths_ms,
+                    vbase=vbase,
+                    icc=icc_val,
+                    smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                    inter_step_delay_s=inter,
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None,
+                    validate_timing=True,
+                )
+                try:
+                    # Plot width(ms) vs I
+                    self.graphs_show(w_arr, i_arr, "PWidth", amp)
+                except Exception:
+                    pass
+                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
+                name = f"{save_key}-PWIDTH-{amp}v-Py"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((w_arr, i_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Width(ms) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False; self.status_box.config(text="Measurement Complete")
+            if not self._bot_enabled(): messagebox.showinfo("Complete", "Measurements finished.")
+            return
+
+        if excitation == "Threshold Search":
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag: break
+                self.status_box.config(text=f"Measuring {device} (Threshold Search)..."); self.master.update()
+                v_lo = float(getattr(self, '_th_lo', tk.DoubleVar(value=0.0)).get())
+                v_hi = float(getattr(self, '_th_hi', tk.DoubleVar(value=1.0)).get())
+                pulse_ms = float(getattr(self, '_th_pulse_ms', tk.DoubleVar(value=1.0)).get())
+                vbase = float(getattr(self, '_th_vbase', tk.DoubleVar(value=0.2)).get())
+                target = float(getattr(self, '_th_target', tk.DoubleVar(value=1e-5)).get())
+                iters = int(getattr(self, '_th_iters', tk.IntVar(value=12)).get())
+                icc_val = float(self.icc.get())
+                v_arr, c_arr, t_arr = self.measurement_service.run_threshold_search(
+                    keithley=self.keithley,
+                    v_low=v_lo,
+                    v_high=v_hi,
+                    vbase=vbase,
+                    pulse_width_ms=pulse_ms,
+                    target_current_a=target,
+                    max_iters=iters,
+                    icc=icc_val,
+                    smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None,
+                    validate_timing=True,
+                )
+                try:
+                    self.graphs_show(v_arr, c_arr, "THRESH", v_hi)
+                except Exception:
+                    pass
+                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
+                name = f"{save_key}-THRESH-{v_lo}-{v_hi}v-{pulse_ms}ms-Py"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((v_arr, c_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="TestV(V) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False; self.status_box.config(text="Measurement Complete")
+            if not self._bot_enabled(): messagebox.showinfo("Complete", "Measurements finished.")
+            return
+
+        if excitation == "Transient Decay":
+            for i in range(device_count):
+                device = self.device_list[(start_index + i) % device_count]
+                if self.stop_measurement_flag: break
+                self.status_box.config(text=f"Measuring {device} (Transient Decay)..."); self.master.update()
+                p_v = float(getattr(self, '_tr_pulse_v', tk.DoubleVar(value=0.8)).get())
+                p_ms = float(getattr(self, '_tr_pulse_ms', tk.DoubleVar(value=1.0)).get())
+                r_v = float(getattr(self, '_tr_read_v', tk.DoubleVar(value=0.2)).get())
+                cap_s = float(getattr(self, '_tr_cap_s', tk.DoubleVar(value=1.0)).get())
+                dt_s = float(getattr(self, '_tr_dt_s', tk.DoubleVar(value=0.001)).get())
+                icc_val = float(self.icc.get())
+                t_arr, i_arr, v_arr = self.measurement_service.run_transient_decay(
+                    keithley=self.keithley,
+                    pulse_voltage=p_v,
+                    pulse_width_ms=p_ms,
+                    read_voltage=r_v,
+                    capture_time_s=cap_s,
+                    sample_dt_s=dt_s,
+                    icc=icc_val,
+                    smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None,
+                )
+                # Save time series
+                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
+                name = f"{save_key}-TRANSIENT-{p_v}v-{p_ms}ms-Read{r_v}v-{cap_s}s@{dt_s}s-Py"
+                file_path = f"{save_dir}\\{name}.txt"
+                try:
+                    data = np.column_stack((v_arr, i_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.6E\t%0.6E\t%0.6E", header="Voltage(V) Current(A) Time(s)", comments="")
+                except Exception:
+                    pass
+                if not self.single_device_flag:
+                    self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self.measuring = False; self.status_box.config(text="Measurement Complete")
+            if not self._bot_enabled(): messagebox.showinfo("Complete", "Measurements finished.")
+            return
 
 
         start_v = self._safe_get_float(self.start_voltage, "Start Voltage")

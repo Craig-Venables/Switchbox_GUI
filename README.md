@@ -1,83 +1,186 @@
-Install the following dependancies 
+# Switchbox_GUI
 
-pip install opencv-python
-pip install matplotlib
+## About
+- Real-time graphing (multiple plots, live updates)
+- Temperature measurement/manager ready (ITC/Lakeshore)
+- LED control via PSU
+- Bot messaging (Telegram) for remote prompts/updates
+- Auto-saving data with device/sample folders and incrementing filenames
+- Beep on instrument connect
+- Sequential measurement across devices
 
-https://nodejs.org/en
-https://liquidinstruments.com/software/utilities/
+## Current Multiplexers
+- PySwitchbox: 100-device array (Raven’s creation), Arduino-controlled relay box
+- Multiplexer: simple 1–10 selector (positive inner, negative outer) for basic routing
 
-# Create a custom sweep 
+## Systems
+### Smu (Keithleys)
+- Keithley 2400 (SMU)
+- Keithley 2401 (SMU)
+- Keithley 4200A_smu (SMU)
+- Keithley 4200A_pmu (PMU; waveform capture; in-progress integration)
+- HP4140B (classic picoammeter/SMU)
 
-To create custom sweeps use Custom_sweeps.jason build the sweeps you want and then within the code add it too the ddown list within the code
+### Temp Controllers
+- TemperatureControllerManager abstraction (supports Lakeshore 335, Oxford ITC4)
 
-The following options are along with the defaults: 
-"start_v": 0,
-"stop_v": 0.1,
-"sweeps": 3,
-"step_v": 0.01,
-"step_delay":0.05
-"Sweep_type": "FS" 
-"pause" : 0  #adds pause at the end of the sweep for the indicated time 
-(FS = Full sweep (default),Ps=PositiveHalf-sweep +ve, Ns=NegativeHalf-sweep)
+### Power Supplies (LED control)
+- Keithley 2220 (used for LED driving)
 
-"LED": "OFF"      (colour of the led,options - blue,red,green,white,OFF)
-"LED_TIME": "10" Time led is on before measurements taking place
-"LED_SWEEPS": "2" (Number of sweep the led is on for)
+### Function Generators
+- Siglent (triggered pulses)
+- Moku Go (in the works)
 
+## Measurement Types
 
+- DC Triangle IV: Classic FS/PS/NS triangle sweep. Configurable by Sweep Mode (fixed step, fixed sweep rate, fixed voltage time), Sweep Type (FS/PS/NS), Step/Delay or rate/time.
 
+- SMU Pulsed IV: One pulse per amplitude across a range; device returns to Vbase and a read is taken. Use when you want reduced self-heating compared with DC IV.
 
-# Common Problems
+- SMU Fast Pulses: Pulse train at fixed amplitude and width; measure at Vbase after each pulse. Good for endurance-like stress.
 
-## Manual Endurance and Retention entries
+- SMU Fast Hold: Hold a DC bias and sample current vs time (I–t). Useful for stress/recovery or quick retention checks.
 
-You can define endurance and retention steps inside `Json_Files/Custom_Sweeps.json` using the following formats. These integrate with the GUI and can be combined with other steps.
+- ISPP: Incremental Step Pulse Programming. Increase pulse amplitude stepwise until hitting a target current/resistance. Produces amplitude vs response curves.
 
-Examples (already added):
+- Pulse Width Sweep: Fixed amplitude, sweep pulse width; read at Vbase; width vs response.
 
+- Threshold Search: Find Vset/Vreset using binary/gradient search with minimal pulses.
+
+## Visuals (concept sketches)
+
+- DC Triangle IV
 ```
-"Manual_Endurance_Short": {
-  "code_name": "end_short",
-  "sweeps": {
-    "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
-  }
-},
-"Manual_Retention_Quick": {
-  "code_name": "ret_quick",
-  "sweeps": {
-    "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
-  }
-}
+V: /\\/\\
+I: response vs V
 ```
 
-- mode: `Endurance` or `Retention`
-- Endurance keys: `set_v`, `reset_v`, `pulse_ms`, `cycles`, `read_v`, optional `LED_ON`, `power`
-- Retention keys: `set_v`, `set_ms`, `read_v`, `times_s` (array), optional `LED_ON`, `power`
+- SMU Pulsed IV (Amplitude Sweep)
+```
+A: [A1 A2 A3 ...]
+Pulse: |‾‾|   |‾‾|   |‾‾|
+Read:   r1     r2     r3   at Vbase
+Plot: A vs I_read
+```
 
-### What are Endurance and Retention tests?
+- SMU Fast Pulses
+```
+Pulse train: |‾| |‾| |‾| |‾| ... (fixed A, width)
+Reads: after each at Vbase
+```
 
-- Endurance: Applies repeated SET/RESET voltage pulses and reads the device at a low read voltage between pulses. The ON/OFF current ratio is tracked over cycles to evaluate switching stability and fatigue. Key parameters:
-  - `set_v` and `reset_v`: pulse amplitudes (V)
-  - `pulse_ms`: pulse width in milliseconds
-  - `cycles`: number of SET/RESET repetitions
-  - `read_v`: read voltage used to sample the current after each pulse
+- SMU Fast Hold
+```
+V(t) = Vhold (flat)
+I(t) sampled regularly
+```
 
-- Retention: After driving the device into a known state (SET), the current is measured at a fixed read voltage over time to evaluate state stability and drift. Key parameters:
-  - `set_v`, `set_ms`: SET conditions (voltage and duration)
-  - `read_v`: read voltage for non‑destructive sampling
-  - `times_s`: an array of times (in seconds) at which to take measurements
+- ISPP (Amplitude Ramp to Target)
+```
+Amps:  0.2  0.3  0.4  0.5 ...
+Iread: i1   i2   i3*           (* ≥ target)
+Plot: Amplitude vs I_read
+```
 
-Why multiple times for retention (comma‑separated)?
-- Retention behavior is time‑dependent. Measuring at multiple time points builds a decay curve (often analyzed on a log time scale) and allows fitting a retention exponent. Comma‑separated values let you define custom, non‑uniform sampling (e.g., `1,3,10,30,100,300`) to quickly cover short and long times without taking excessive measurements.
+- Pulse Width Sweep (Fixed Amplitude)
+```
+Widths (ms):  1   2   5   10 ...
+I_read:       i1  i2  i3  i4
+Plot: width vs I_read
+```
 
-### Running from the GUI
+- Threshold Search (Binary Search on V)
+```
+Range: [Vlow --------------------- Vhigh]
+Test mid -> I(mid) ? target -> shrink range toward threshold
+Repeat until |Vhigh - Vlow| small
+```
 
-- Manual controls: Use the “Manual Endurance / Retention” section in the left panel to set parameters and run tests interactively. A local LED toggle is provided for opto‑tests.
-- Automated runs: Add endurance/retention entries (as above) to `Json_Files/Custom_Sweeps.json`. They can be mixed with IV sweeps in the same plan. Results are saved with the same file structure and naming conventions as IV data.
-1. Mapping not correct?\
-1.i. Check the scaling factor or use show box's python code\
-1.ii. check x_max and x_min are the correct way around this causes issues if not!
-2. 
+## Safety & Limits
+
+- SMU-specific minimum pulse width enforced via SMULimits. Defaults are set per model (e.g., 2400/2401 ≥ 1 ms).
+- Planned: optional guard to abort on excessive current jump between samples.
+
+## Timing and "Fast" Pulses
+
+SMU-driven pulses are limited by instrument command latency and OS scheduling; they are appropriate for millisecond-scale pulses, not microseconds.
+
+- SMU limits: `SMULimits.min_pulse_width_ms` enforces device-specific minima (e.g., 2400/2401 ≥ 1 ms). Sub-ms accuracy requires a PMU.
+- Implementation details:
+  - `MeasurementService.run_pulse_measurement` sets the pulse voltage, then busy-waits the pulse duration using ~1 ms sleeps, returns to Vbase, waits ~2 ms for settling, then reads.
+  - Inter-pulse delay is user-configurable; "Max speed" can set it to 0, bounded by device limits.
+- Python/OS timing: `time.sleep(0.001)` is not hard real-time; actual resolution and jitter depend on the OS scheduler (on Windows typically ~1 ms best case). Expect a few ms of timing uncertainty on SMU pulses.
+- Recommendation: For sub-ms or waveform-accurate pulses, use the PMU flows (see PMU_Testing_GUI and PMU_* methods in `measurement_service.py`).
+
+## Specific Measurements
+### Volatile
+- Transient Decay: single pulse then sample I(t) at Vread (extract τ / power-law).
+  Sketch: `|‾‾|____` then hold Vread → I(t) decays.
+- PPF: two identical pulses separated by Δt; PPF index vs Δt.
+  Sketch: `|‾‾|__Δt__|‾‾|` → measure I1 and I2 @ Vread; PPF=(I2−I1)/|I1|.
+- STDP: pre/post pulses with Δt (±); Δw vs Δt curve.
+- SRDP: trains at different frequencies; steady-state/current gain vs rate.
+- Potentiation/Depression: alternating +/− short pulses; immediate and post-delay reads; volatility ratio.
+- Frequency Response: sweep pulse frequency (fixed width/amplitude); response vs frequency.
+- Dynamic Threshold (volatile): minimal pulse amplitude/width that elicits transient change (binary/gradient).
+- Bias-dependent Volatility: repeat transients at multiple Vread; map decay constants vs bias.
+- Temperature-dependent Volatility: repeat at several temperatures; Arrhenius for decay time (future).
+- Noise/RTN: low-bias I(t) segments for PSD/variance.
+
+### Nonvolatile
+- (reserved for future: long retention, endurance, MLC program/verify, half-select disturb, etc.)
+
+## Custom Sweeps
+
+- Each sweep can set a `measurement type` within the GUI. For custom JSON, an `excitation` key enables pulse modes (examples provided in `Json_Files/Custom_Sweeps.json`).
+
+## Signal Messaging
+- Optional Telegram bot integration to drive interactive flows (start/continue tests, send plots/images).
+
+## PMU Testing
+- In the works. See `Equipment_Classes/SMU/Keithley4200A.py` (PMU helpers) and `PMU_Testing_GUI.py`.
+
+## Code Map (where to look)
+
+- Volatile Tests (GUI: More Tests → Volatile)
+  - Transient Decay: single pulse then I(t) at Vread; saves time-series.
+    Sketch:
+    ```
+    |‾‾|____  then hold Vread → I(t) decays
+    ```
+  - PPF (Paired-Pulse Facilitation): two pulses with Δt; PPF index vs Δt.
+    ```
+    |‾‾|__Δt__|‾‾| → measure I1 and I2 @ Vread; PPF=(I2−I1)/|I1|
+    ```
+  - STDP: pre/post with Δt (±); Δw vs Δt.
+    ```
+    pre at t0, post at t0+Δt (or reversed), measure Δw = (I_after−I0)/|I0|
+    ```
+  - SRDP: frequency trains; steady-state vs rate (Hz).
+    ```
+    train at f=1,5,10… → measure I_ss
+    ```
+  - Potentiation/Depression: alternate +/− pulses; immediate/post reads; volatility ratio.
+  - Frequency Response: average read after pulses at each frequency.
+  - Bias-dependent Decay: run multiple transients at different Vread; concatenated time series.
+  - Noise/RTN: low-bias I(t) capture for noise analysis.
+
+- Core service (measurement logic): `measurement_service.py`
+  - DC Triangle IV: `run_iv_sweep(...)`
+  - SMU Pulsed IV: `run_pulse_measurement(...)` (single/sequence), `run_pulsed_iv_sweep(...)` (amplitude sweep)
+  - SMU Fast Hold: `run_dc_capture(...)`
+  - ISPP: `run_ispp(...)`
+  - Pulse Width Sweep: `run_pulse_width_sweep(...)`
+  - Threshold Search: `run_threshold_search(...)`
+
+- GUI wiring and controls: `Measurement_GUI.py`
+  - More Tests popup (Volatile): `advanced_tests_gui.py`
+  - Measurement Type dropdown and dynamic panels: `create_sweep_parameters(...)`
+  - Execution branching and saving: `start_measurement(...)` (branches on Measurement Type)
+
+## Notes
+
+- PMU-based measurements are available separately (see PMU_Testing_GUI) for accurate waveform capture.
 
 
 
