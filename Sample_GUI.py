@@ -90,6 +90,13 @@ class SampleGUI:
                                                  values=list(multiplexer_types.keys()))
         self.Multiplexer_dropdown.grid(row=0, column=1)
         self.Multiplexer_dropdown.bind("<<ComboboxSelected>>", self.update_multiplexer)
+        # Set default multiplexer selection
+        try:
+            self.Multiplexer_type_var.set("Pyswitchbox")
+            # Optionally initialise behavior for default
+            self.update_multiplexer(None)
+        except Exception:
+            pass
 
         # Sample Type Dropdown
         tk.Label(root, text="Sample type").grid(row=1, column=0, sticky='w')
@@ -97,6 +104,7 @@ class SampleGUI:
         self.sample_dropdown = ttk.Combobox(root, textvariable=self.sample_type_var, values=list(sample_config.keys()))
         self.sample_dropdown.grid(row=1, column=1)
         self.sample_dropdown.bind("<<ComboboxSelected>>", self.update_dropdowns)
+        
 
         # Section Dropdown
         tk.Label(root, text="Section").grid(row=2, column=0, sticky='w')
@@ -154,7 +162,15 @@ class SampleGUI:
         self.measure_button.grid(row=8, column=0, columnspan=2, pady=10)
 
         # Automated Tests controls moved to Measurement GUI
-
+        
+        
+        # Set default sample selection and apply
+        try:
+            # Use the key name as defined in sample_config
+            self.sample_type_var.set("Cross_bar")
+            self.update_dropdowns(None)
+        except Exception:
+            pass
         # Placeholder for clicked points
         # self.electrode_points = []
 

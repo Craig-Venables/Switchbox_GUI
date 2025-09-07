@@ -152,6 +152,14 @@
       "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 1,"step_v": 0.1},
       "2": {"start_v": 0, "stop_v": 3, "sweeps": 1, "step_v": 0.1},
       "3": {"start_v": 0, "stop_v": 5, "sweeps": 3, "step_v": 0.2}
+    }
+  },
+  "Examples_Pulsed_Modes": {
+    "code_name": "SMU_PULSE_EX",
+    "sweeps": {
+      "1": {"excitation": "SMU Pulsed IV", "start_v": 0.0, "stop_v": 1.0, "step_v": 0.1, "pulse_ms": 1.0, "vbase": 0.2, "inter_delay": 0.0},
+      "2": {"excitation": "SMU Fast Pulses", "pulse_v": 1.2, "pulse_ms": 1.0, "num": 20, "inter_delay": 0.0, "vbase": 0.2},
+      "3": {"excitation": "SMU Fast Hold", "hold_v": 0.2, "duration_s": 5.0, "sample_dt_s": 0.01}
+    }
   }
-}
 }
