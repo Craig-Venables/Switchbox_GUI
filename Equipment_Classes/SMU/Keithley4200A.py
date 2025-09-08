@@ -51,6 +51,8 @@ class Keithley4200AController:
         self._card_name: str = "SMU1"
         self._pmu_channel: int | None = None
         self._is_pmu: bool = False
+        # Auto-enable three-segment ramp for 4200A sweeps by default; override if needed
+        self._auto_three_segment_ramp: bool = True
 
         self.lpt = None
         self.param = None
@@ -238,6 +240,13 @@ class Keithley4200AController:
             self.lpt.limitv(self._instr_id, float(v_limit))
         if i_limit is not None:
             self.lpt.limiti(self._instr_id, float(i_limit))
+
+    def set_three_segment_ramp_enabled(self, enabled: bool) -> None:
+        """Enable or disable automatic 0 -> +V -> -V -> 0 ramp for voltage sweeps.
+
+        When disabled, voltage_sweep behaves as before (single segment up-down pass).
+        """
+        self._auto_three_segment_ramp = bool(enabled)
 
 
 
@@ -789,14 +798,10 @@ class Keithley4200A_PMUDualChannel:
         except Exception:
             pass
 
-    def close(self) -> None:
+    def set_burst_count(self, count: int) -> None:
+        """Set burst count for the pulse output (unsigned int)."""
         try:
-            self.output(False)
-        except Exception:
-            pass
-        try:
-            self.lpt.devint()
-            self.lpt.tstdsl()
+            self.lpt.pulse_burst_count(self.card_id, self.channel, int(count))
         except Exception:
             pass
 

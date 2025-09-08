@@ -234,6 +234,7 @@ class MeasurementService:
         pause_s: float = 0.0,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        use_fast_ramp: Optional[bool] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Execute IV sweeps and return arrays (v_arr, c_arr, timestamps).
@@ -277,6 +278,72 @@ class MeasurementService:
             keithley.enable_output(True)
         except Exception:
             pass
+
+        # 4200A optimization: optional controller-side three-segment ramp (0->+V->-V->0)
+        # Conditions: smu_type indicates 4200A, controller exposes voltage_sweep, and toggle is enabled.
+        is_4200a = isinstance(smu_type, str) and ("4200" in smu_type.lower())
+        supports_ramp = hasattr(keithley, "voltage_sweep") and hasattr(keithley, "set_three_segment_ramp_enabled")
+        can_ramp = is_4200a and supports_ramp and (start_v is not None) and (stop_v is not None) and (step_v is not None)
+        if can_ramp:
+            try:
+                if use_fast_ramp is not None:
+                    try:
+                        keithley.set_three_segment_ramp_enabled(bool(use_fast_ramp))
+                    except Exception:
+                        pass
+                # LED control and execution
+                for sweep_idx in range(int(sweeps)):
+                    led_state = '1' if led else '0'
+                    if sequence is not None:
+                        try:
+                            seq_list = list(sequence)
+                            if sweep_idx < len(seq_list):
+                                led_state = str(seq_list[sweep_idx])
+                        except Exception:
+                            pass
+                    try:
+                        if psu is not None:
+                            if led_state == '1':
+                                psu.led_on_380(power)
+                            else:
+                                if led:
+                                    psu.led_off_380()
+                    except Exception:
+                        pass
+
+                    vlim = max(abs(float(stop_v)), abs(float(neg_stop_v)) if neg_stop_v is not None else 0.0)
+                    vlim = vlim if vlim > 0 else abs(float(stop_v))
+                    pts = keithley.voltage_sweep(0.0, float(stop_v), float(step_v), delay_s=float(step_delay),
+                                                 v_limit=float(vlim), i_limit=float(icc))
+                    for (vv, ii) in pts:
+                        if should_stop and should_stop():
+                            break
+                        t_now = time.time() - start_time
+                        v_arr.append(float(vv))
+                        c_arr.append(float(ii))
+                        t_arr.append(t_now)
+                        if on_point:
+                            try:
+                                on_point(float(vv), float(ii), t_now)
+                            except Exception:
+                                pass
+                    if should_stop and should_stop():
+                        break
+
+                try:
+                    if psu is not None:
+                        psu.led_off_380()
+                except Exception:
+                    pass
+                try:
+                    keithley.set_voltage(0, icc)
+                    keithley.enable_output(False)
+                except Exception:
+                    pass
+                return v_arr, c_arr, t_arr
+            except Exception:
+                # Fall back to per-point path if ramp path fails
+                pass
 
         for sweep_idx in range(int(sweeps)):
             # Determine LED state for this sweep

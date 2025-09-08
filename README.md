@@ -184,3 +184,30 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
 
 
 
+
+### 4200A SMU sweep optimization (three‑segment ramp)
+
+- When using a Keithley 4200A for DC IV sweeps, the system can execute a three-segment ramp 0 → +V → −V → 0 using fewer instrument round-trips for faster acquisition.
+- This optimization is automatically used when:
+  - `smu_type` indicates a 4200A (e.g., "Keithley 4200A"), and
+  - `run_iv_sweep` is called with `start_v`, `stop_v`, and `step_v`.
+- Data format and file saving are unchanged.
+
+Disable / fallback options:
+- Controller-level: `keithley.set_three_segment_ramp_enabled(False)`
+- Service-level: pass `use_fast_ramp=False` to `run_iv_sweep(...)`.
+
+Example usage:
+```python
+v_arr, i_arr, t_arr = service.run_iv_sweep(
+    keithley=k4200,
+    icc=1e-4,
+    start_v=0.0,
+    stop_v=1.0,
+    step_v=0.01,
+    smu_type="Keithley 4200A",
+    use_fast_ramp=True,
+)
+```
+
+
