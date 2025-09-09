@@ -375,7 +375,13 @@ class AdvancedTestsGUI:
             freqs = [float(x.strip()) for x in str(self.fr_freqs_csv.get()).split(',') if x.strip()]
         except Exception:
             freqs = [1, 5, 10, 20, 50]
-        f_list, i_avg = self.ms.run_frequency_response(
+        # Ensure stop flag is reset at the start of the run
+        try:
+            self.provider.stop_measurement_flag = False
+        except Exception:
+            pass
+        # Request raw samples (freq, current, elapsed time, voltage)
+        f_raw, i_raw, t_raw, v_raw = self.ms.run_frequency_response(
             keithley=self.keithley,
             pulse_voltage=p_v,
             pulse_width_ms=p_ms,
@@ -385,12 +391,13 @@ class AdvancedTestsGUI:
             icc=1e-4,
             smu_type=getattr(self.provider, 'SMU_type', 'Keithley 2401'),
             should_stop=lambda: getattr(self.provider, 'stop_measurement_flag', False),
+            return_raw=True,
         )
         path = self._save_path(f"FREQRESP-{p_v}v-{p_ms}ms-Vbase{vbase}v-Py")
         try:
-            v = np.full_like(np.array(f_list, dtype=float), float(vbase))
-            data = np.column_stack((v, i_avg, f_list))
-            np.savetxt(path, data, fmt="%0.6E\t%0.6E\t%0.6E", header="Voltage(V) Current(A) Freq(Hz)", comments="")
+            # Save as Time(s), Current(A), Voltage(V), Freq(Hz)
+            data = np.column_stack((t_raw, i_raw, v_raw, f_raw))
+            np.savetxt(path, data, fmt="%0.9E\t%0.9E\t%0.6E\t%0.6E", header="Time(s) Current(A) Voltage(V) Freq(Hz)", comments="")
         except Exception:
             pass
         messagebox.showinfo("Frequency Response", f"Saved: {os.path.basename(path)}")

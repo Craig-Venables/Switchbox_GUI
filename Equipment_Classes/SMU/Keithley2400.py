@@ -16,6 +16,10 @@ class Keithley2400Controller:
             print(f"Connected to: {self.get_idn()}")
 
             print(self.get_idn())
+            # Cache for source configuration to avoid reapplying each set
+            self._configured = False
+            self._cached_icc: Optional[float] = None
+            self._cached_vrange: Optional[float] = None
         except Exception as e:
             print("Error initializing Keithley 2400:", e)
             self.device = None
@@ -28,12 +32,97 @@ class Keithley2400Controller:
         """Check instrument error status."""
         return self.device.ask('SYST:ERR?') if self.device else "No Device Connected"
 
-    def set_voltage(self, voltage, Icc=0.1):
-        """Set output voltage and enable source mode."""
-        if self.device:
+    def _configure_voltage_source(self, icc: float, v_range: float = 20.0) -> None:
+        """Configure source range and compliance once or when changed."""
+        if not self.device:
+            return
+        # Only reconfigure if first time or values changed
+        if (not self._configured) or (self._cached_icc != icc) or (self._cached_vrange != v_range):
+            # Apply voltage sourcing with desired range and compliance
+            # Apply voltage sourcing with desired range and compliance
+            self.device.apply_voltage(voltage_range=v_range, compliance_current=icc)
+            # Force fixed range when supported (use discrete ranges only: 0.2/2/20/200)
+            try:
+                if v_range in (0.2, 2.0, 20.0, 200.0):
+                    self.device.write(f"SOUR:VOLT:RANG {v_range}")
+            except Exception:
+                pass
+            self._configured = True
+            self._cached_icc = icc
+            self._cached_vrange = v_range
 
-            self.device.apply_voltage(voltage_range=20, compliance_current=Icc)  # Set compliance current
+    def set_voltage(self, voltage, Icc=0.1):
+        """Set source level without reconfiguring range/compliance each time."""
+        if self.device:
+            # Select discrete range based on requested level
+            v_abs = abs(float(voltage))
+            if v_abs <= 0.2:
+                v_rng = 0.2
+            elif v_abs <= 2.0:
+                v_rng = 2.0
+            elif v_abs <= 20.0:
+                v_rng = 20.0
+            else:
+                v_rng = 200.0
+            self._configure_voltage_source(float(Icc), v_rng)
             self.device.source_voltage = voltage
+
+    def prepare_for_pulses(self, Icc: float = 1e-3, v_range: float = 20.0, ovp: float = 21.0,
+                           use_remote_sense: bool = False, autozero_off: bool = True) -> None:
+        """One-shot prep for pulsed operation: set fixed range/OVP/sense, bias 0 V, enable output.
+
+        - v_range must be a valid discrete range (0.2/2/20/200)
+        - ovp should be above your commanded amplitude (units: V)
+        """
+        if not self.device:
+            return
+        # Function voltage
+        try:
+            self.device.write("SOUR:FUNC VOLT")
+        except Exception:
+            pass
+        # Fixed range and compliance
+        self._configure_voltage_source(float(Icc), float(v_range))
+        # OVP (voltage protection)
+        try:
+            self.device.write(f"SOUR:VOLT:PROT {float(ovp)}")
+        except Exception:
+            pass
+        # Local vs remote sense
+        try:
+            self.device.write("SYST:RSEN ON" if use_remote_sense else "SYST:RSEN OFF")
+        except Exception:
+            pass
+        # Autozero control
+        try:
+            if autozero_off:
+                self.device.write("SYST:AZER OFF")
+        except Exception:
+            pass
+        # Bias at 0 V and enable output
+        try:
+            self.device.source_voltage = 0.0
+            self.device.enable_source()
+        except Exception:
+            pass
+
+    def finish_pulses(self, Icc: float = 1e-3, restore_autozero: bool = True) -> None:
+        """Return to 0 V and (optionally) re-enable autozero, then disable output."""
+        if not self.device:
+            return
+        try:
+            self.device.source_voltage = 0.0
+        except Exception:
+            pass
+        try:
+            if restore_autozero:
+                self.device.write("SYST:AZER ON")
+        except Exception:
+            pass
+        try:
+            self.device.disable_source()
+        except Exception:
+            pass
 
     def set_current(self, current, Vcc=10):
         """Set output current and enable source mode."""
