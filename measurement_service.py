@@ -269,7 +269,7 @@ class MeasurementService:
         v_min = min(v_list)
         prev_v = None
 
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         # Precondition instrument (smu_type is reserved for future device-specific differences)
         try:
@@ -383,10 +383,11 @@ class MeasurementService:
         c_arr: List[float] = []
         t_arr: List[float] = []
 
-        start_t = time.time()
+        start_t = time.perf_counter()
 
         try:
-            keithley.enable_output(True)
+            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
+                                        use_remote_sense=False, autozero_off=True)
         except Exception:
             pass
 
@@ -437,8 +438,7 @@ class MeasurementService:
             pass
 
         try:
-            keithley.set_voltage(0, icc)
-            keithley.enable_output(False)
+            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
         except Exception:
             pass
 
@@ -475,7 +475,8 @@ class MeasurementService:
         start_t = time.time()
 
         try:
-            keithley.enable_output(True)
+            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
+                                        use_remote_sense=False, autozero_off=True)
         except Exception:
             pass
 
@@ -505,7 +506,7 @@ class MeasurementService:
                 i_set_val = i_set[1] if isinstance(i_set, (list, tuple)) and len(i_set) > 1 else float(i_set)
             except Exception:
                 i_set_val = float('nan')
-            t_now = time.time() - start_t
+            t_now = time.perf_counter() - start_t
             v_arr.append(read_voltage); c_arr.append(i_set_val); t_arr.append(t_now)
             if on_point:
                 try: on_point(read_voltage, i_set_val, t_now)
@@ -529,14 +530,34 @@ class MeasurementService:
                 i_reset_val = i_reset[1] if isinstance(i_reset, (list, tuple)) and len(i_reset) > 1 else float(i_reset)
             except Exception:
                 i_reset_val = float('nan')
-            t_now = time.time() - start_t
+            t_now = time.perf_counter() - start_t
             v_arr.append(read_voltage); c_arr.append(i_reset_val); t_arr.append(t_now)
             if on_point:
                 try: on_point(read_voltage, i_reset_val, t_now)
                 except Exception: pass
 
             if inter_cycle_delay_s:
-                time.sleep(max(0.0, float(inter_cycle_delay_s)))
+                post_start = time.perf_counter()
+                buf_i: List[float] = []
+                buf_t: List[float] = []
+                while (time.perf_counter() - post_start) < float(inter_cycle_delay_s):
+                    if should_stop and should_stop():
+                        break
+                    try:
+                        it = keithley.measure_current()
+                        iv = it[1] if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
+                    except Exception:
+                        iv = float('nan')
+                    buf_i.append(iv)
+                    buf_t.append(time.perf_counter() - start_t)
+                if buf_t:
+                    c_arr.extend(buf_i)
+                    t_arr.extend(buf_t)
+                    try:
+                        v_arr.extend([read_voltage] * len(buf_t))
+                    except Exception:
+                        for _ in buf_t:
+                            v_arr.append(read_voltage)
 
         # Cleanup
         try:
@@ -570,6 +591,9 @@ class MeasurementService:
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
         validate_timing: bool = True,
+        start_at_zero: bool = True,
+        return_to_zero_at_end: bool = True,
+        reset_should_stop: Optional[Callable[[], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Run pulse measurements with timing validation and LED control.
@@ -610,11 +634,19 @@ class MeasurementService:
                     f"for {smu_type} ({min_pulse_width} ms)"
                 )
 
-        start_time = time.time()
+        start_time = time.perf_counter()
+        # Optional: reset external stop flag provided by GUI
+        if reset_should_stop:
+            try:
+                reset_should_stop()
+            except Exception:
+                pass
 
         try:
-            keithley.enable_output(True)
-            keithley.set_voltage(0, icc)  # Start at 0V
+            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
+                                        use_remote_sense=False, autozero_off=True)
+            if not start_at_zero:
+                keithley.set_voltage(read_voltage, icc)
         except Exception:
             pass
 
@@ -650,49 +682,71 @@ class MeasurementService:
                 except Exception:
                     pass
 
-            # Apply pulse
+            # Apply pulse (no sampling during the pulse window)
             try:
                 keithley.set_voltage(pulse_voltage, icc)
             except Exception:
                 pass
 
-            pulse_start = time.time()
+            pulse_start = time.perf_counter()
             pulse_width_s = pulse_width_ms / 1000.0
-
-            # Wait for pulse duration
-            while (time.time() - pulse_start) < pulse_width_s:
+            while (time.perf_counter() - pulse_start) < pulse_width_s:
                 if should_stop and should_stop():
                     break
-                time.sleep(0.001)  # Small sleep to avoid busy waiting
+                # Very small sleep to avoid 100% CPU busy-wait
+                time.sleep(0.00001)
 
             if should_stop and should_stop():
                 break
 
-            # Return to read voltage and measure
+            # Return to read voltage
             try:
                 keithley.set_voltage(read_voltage, icc)
-                time.sleep(0.002)  # Brief settling time
+            except Exception:
+                pass
+
+            # Forced immediate single read after returning to read voltage
+            try:
+                #time.sleep(0.0001)  # brief settle
                 current_tuple = keithley.measure_current()
                 current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
             except Exception:
                 current = float('nan')
-
-            t_now = time.time() - start_time
-
-            # Record measurement
+            t_now = time.perf_counter() - start_time
             v_arr.append(read_voltage)
             c_arr.append(current)
             t_arr.append(t_now)
-
             if on_point:
                 try:
                     on_point(read_voltage, current, t_now)
                 except Exception:
                     pass
 
-            # Inter-pulse delay
+            # Continue sampling until inter-pulse delay elapses
             if inter_pulse_delay_s > 0:
-                time.sleep(max(0.0, float(inter_pulse_delay_s)))
+                post_start = time.perf_counter()
+                buf_t: List[float] = []
+                buf_i: List[float] = []
+                while (time.perf_counter() - post_start) < float(inter_pulse_delay_s):
+                    if should_stop and should_stop():
+                        break
+                    try:
+                        current_tuple = keithley.measure_current()
+                        current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                    except Exception:
+                        current = float('nan')
+                    t_now = time.perf_counter() - start_time
+                    buf_t.append(t_now)
+                    buf_i.append(current)
+                # Bulk-extend once at the end to reduce overhead
+                if buf_t:
+                    t_arr.extend(buf_t)
+                    c_arr.extend(buf_i)
+                    try:
+                        v_arr.extend([read_voltage] * len(buf_t))
+                    except Exception:
+                        for _ in buf_t:
+                            v_arr.append(read_voltage)
 
         # Cleanup
         try:
@@ -702,12 +756,96 @@ class MeasurementService:
             pass
 
         try:
-            keithley.set_voltage(0, icc)
-            keithley.enable_output(False)
+            if return_to_zero_at_end:
+                keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
         except Exception:
             pass
 
         return v_arr, c_arr, t_arr
+
+    def run_pulse_measurement_debug(
+        self,
+        *,
+        keithley,
+        pulse_voltage: float,
+        pulse_width_ms: float,
+        read_voltage: float = 0.2,
+        icc: float = 1e-4,
+        smu_type: str = "Keithley 2401",
+        validate_timing: bool = True,
+    ) -> dict:
+        """Fire one pulse and capture measured V/I during pulse and after returning to read voltage.
+
+        Returns a dict with keys:
+        - pulse_v_cmd, pulse_v_meas, pulse_i_meas
+        - read_v_meas, read_i_meas
+        - pulse_width_ms
+        """
+        # Timing guard
+        if validate_timing:
+            limits = self.smu_limits.get_limits(smu_type)
+            min_pulse_width = limits.get("min_pulse_width_ms", 1.0)
+            if float(pulse_width_ms) < float(min_pulse_width):
+                raise ValueError(
+                    f"Pulse width {pulse_width_ms} ms is below minimum for {smu_type} ({min_pulse_width} ms)"
+                )
+
+        def _mv():
+            try:
+                v = keithley.measure_voltage()
+                if isinstance(v, (list, tuple)):
+                    return float(v[-1] if len(v) > 0 else float('nan'))
+                return float(v)
+            except Exception:
+                return float('nan')
+
+        def _mi():
+            try:
+                it = keithley.measure_current()
+                return float(it[1]) if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
+            except Exception:
+                return float('nan')
+
+        out = {
+            "pulse_v_cmd": float(pulse_voltage),
+            "pulse_v_meas": float('nan'),
+            "pulse_i_meas": float('nan'),
+            "read_v_meas": float('nan'),
+            "read_i_meas": float('nan'),
+            "pulse_width_ms": float(pulse_width_ms),
+        }
+
+        # Arm at 0 V to avoid spikes
+        try:
+            keithley.enable_output(True)
+            keithley.set_voltage(0.0, icc)
+        except Exception:
+            pass
+
+        # Pulse
+        try:
+            keithley.set_voltage(float(pulse_voltage), float(icc))
+        except Exception:
+            pass
+        t0 = time.perf_counter()
+        # Hold for requested width
+        while (time.perf_counter() - t0) < (float(pulse_width_ms) / 1000.0):
+            time.sleep(0.0005)
+        # Sample V/I near end of pulse
+        out["pulse_v_meas"] = _mv()
+        out["pulse_i_meas"] = _mi()
+
+        # Return to read voltage and sample
+        try:
+            keithley.set_voltage(float(read_voltage), float(icc))
+        except Exception:
+            pass
+        time.sleep(0.002)
+        out["read_v_meas"] = _mv()
+        out["read_i_meas"] = _mi()
+
+        # Do not force output off here; caller manages lifecycle
+        return out
 
     def run_pulsed_iv_sweep(
         self,
@@ -725,36 +863,61 @@ class MeasurementService:
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
         validate_timing: bool = True,
+        sweep_type: str = "FS",
+        neg_stop_v: Optional[float] = None,
+        reset_should_stop: Optional[Callable[[], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """Amplitude-sweep pulsed IV using a standard SMU.
 
-        For each amplitude in [start_v..stop_v] (by step_v or num_steps), apply a single
-        pulse of width 'pulse_width_ms', then return to 'vbase' and measure the current.
-        The returned arrays are (amplitude_list, measured_current_list, timestamps).
+        Supports single-slope or full-sweep shapes via sweep_type:
+        - PS: start_v → stop_v → start_v
+        - NS: start_v → −|neg_stop_v or stop_v| → start_v
+        - FS (default): start_v → stop_v → −|neg_stop_v or stop_v| → start_v
+
+        For each amplitude point, applies one pulse (pulse_width_ms), returns to vbase,
+        and samples current. The returned arrays are (amplitudes, read_currents, timestamps).
         """
-        # Build amplitude list
+        # Optional: reset external stop flag prior to run
+        if reset_should_stop:
+            try:
+                reset_should_stop()
+            except Exception:
+                pass
+        # Build amplitude list according to sweep_type
         amps: List[float] = []
         sv = float(start_v); ev = float(stop_v)
-        if step_v is not None and float(step_v) != 0.0:
-            s = float(step_v) if ev >= sv else -abs(float(step_v))
-            v = sv
-            if s > 0:
-                while v <= ev + 1e-12:
-                    amps.append(round(v, 6))
-                    v += s
+        # helper to build linear range including endpoint
+        def _linrange(v0: float, v1: float, step_opt: Optional[float], nsteps_opt: Optional[int]) -> List[float]:
+            out: List[float] = []
+            if step_opt is not None and float(step_opt) != 0.0:
+                s = float(step_opt) if v1 >= v0 else -abs(float(step_opt))
+                v = v0
+                if s > 0:
+                    while v <= v1 + 1e-12:
+                        out.append(round(v, 6)); v += s
+                else:
+                    while v >= v1 - 1e-12:
+                        out.append(round(v, 6)); v += s
+            elif nsteps_opt is not None and int(nsteps_opt) > 1:
+                n = int(nsteps_opt)
+                step = (v1 - v0) / float(n - 1)
+                out = [round(v0 + i * step, 6) for i in range(n)]
             else:
-                while v >= ev - 1e-12:
-                    amps.append(round(v, 6))
-                    v += s
-        elif num_steps is not None and int(num_steps) > 1:
-            n = int(num_steps)
-            if n <= 1:
-                amps = [sv]
-            else:
-                step = (ev - sv) / float(n - 1)
-                amps = [round(sv + i * step, 6) for i in range(n)]
-        else:
-            amps = [sv, ev] if sv != ev else [sv]
+                out = [round(v0, 6)] if abs(v1 - v0) < 1e-15 else [round(v0, 6), round(v1, 6)]
+            return out
+
+        if sweep_type == "PS":
+            amps = _linrange(sv, ev, step_v, num_steps) + _linrange(ev, sv, step_v, num_steps)
+        elif sweep_type == "NS":
+            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
+            amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
+        else:  # FS
+            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
+            amps = (
+                _linrange(sv, ev, step_v, num_steps)
+                + _linrange(ev, nv, step_v, num_steps)
+                + _linrange(nv, sv, step_v, num_steps)
+            )
 
         # Default pulse width from SMU limits if not provided
         if pulse_width_ms is None:
@@ -766,7 +929,7 @@ class MeasurementService:
         v_out: List[float] = []
         i_out: List[float] = []
         t_out: List[float] = []
-        t0 = time.time()
+        t0 = time.perf_counter()
 
         for amp in amps:
             if should_stop and should_stop():
@@ -807,7 +970,124 @@ class MeasurementService:
             if inter_step_delay_s and inter_step_delay_s > 0:
                 time.sleep(max(0.0, float(inter_step_delay_s)))
 
+        keithley.enable_output(False)
         return v_out, i_out, t_out
+
+    def run_pulsed_iv_sweep_debug(
+        self,
+        *,
+        keithley,
+        start_v: float,
+        stop_v: float,
+        step_v: Optional[float] = None,
+        num_steps: Optional[int] = None,
+        pulse_width_ms: Optional[float] = None,
+        vbase: float = 0.2,
+        inter_step_delay_s: float = 0.0,
+        icc: float = 1e-4,
+        smu_type: str = "Keithley 2401",
+        should_stop: Optional[Callable[[], bool]] = None,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+        validate_timing: bool = True,
+        sweep_type: str = "FS",
+        neg_stop_v: Optional[float] = None,
+    ) -> Tuple[List[float], List[float], List[float], List[dict]]:
+        """Like run_pulsed_iv_sweep but also records measured V/I during pulse and at read.
+
+        Returns (V_amp_list, I_read_list, t_list, debug_records).
+        Each debug record is a dict from run_pulse_measurement_debug.
+        """
+        # Build amplitude list
+        amps: List[float] = []
+        sv = float(start_v); ev = float(stop_v)
+        def _linrange(v0: float, v1: float, step_opt: Optional[float], nsteps_opt: Optional[int]) -> List[float]:
+            out: List[float] = []
+            if step_opt is not None and float(step_opt) != 0.0:
+                s = float(step_opt) if v1 >= v0 else -abs(float(step_opt))
+                v = v0
+                if s > 0:
+                    while v <= v1 + 1e-12:
+                        out.append(round(v, 6)); v += s
+                else:
+                    while v >= v1 - 1e-12:
+                        out.append(round(v, 6)); v += s
+            elif nsteps_opt is not None and int(nsteps_opt) > 1:
+                n = int(nsteps_opt)
+                step = (v1 - v0) / float(n - 1)
+                out = [round(v0 + i * step, 6) for i in range(n)]
+            else:
+                out = [round(v0, 6)] if abs(v1 - v0) < 1e-15 else [round(v0, 6), round(v1, 6)]
+            return out
+        if sweep_type == "PS":
+            amps = _linrange(sv, ev, step_v, num_steps) + _linrange(ev, sv, step_v, num_steps)
+        elif sweep_type == "NS":
+            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
+            amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
+        else:
+            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
+            amps = (
+                _linrange(sv, ev, step_v, num_steps)
+                + _linrange(ev, nv, step_v, num_steps)
+                + _linrange(nv, sv, step_v, num_steps)
+            )
+
+        # Default pulse width
+        if pulse_width_ms is None:
+            try:
+                pulse_width_ms = float(self.smu_limits.get_limits(smu_type).get("min_pulse_width_ms", 1.0))
+            except Exception:
+                pulse_width_ms = 1.0
+
+        v_out: List[float] = []
+        i_out: List[float] = []
+        t_out: List[float] = []
+        dbg: List[dict] = []
+        t0 = time.perf_counter()
+
+        # Pre-enable output at base
+        try:
+            keithley.enable_output(True)
+            keithley.set_voltage(float(vbase), float(icc))
+        except Exception:
+            pass
+
+        for amp in amps:
+            if should_stop and should_stop():
+                break
+            rec = self.run_pulse_measurement_debug(
+                keithley=keithley,
+                pulse_voltage=float(amp),
+                pulse_width_ms=float(pulse_width_ms),
+                read_voltage=float(vbase),
+                icc=float(icc),
+                smu_type=smu_type,
+                validate_timing=validate_timing,
+            )
+            dbg.append(rec)
+            # Read-back current at read (immediate measurement)
+            i_val = float(rec.get("read_i_meas", float('nan')))
+            v_out.append(float(amp))
+            i_out.append(i_val)
+            t_out.append(time.time() - t0)
+            if on_point:
+                try:
+                    on_point(float(amp), i_val, t_out[-1])
+                except Exception:
+                    pass
+            if inter_step_delay_s and inter_step_delay_s > 0:
+                time.sleep(max(0.0, float(inter_step_delay_s)))
+
+        # Leave output at 0 V for safety
+        try:
+            keithley.set_voltage(0.0, float(icc))
+        except Exception:
+            pass
+        try:
+            keithley.enable_output(False)
+        except Exception:
+            pass
+
+        return v_out, i_out, t_out, dbg
 
     def run_ispp(
         self,
@@ -914,6 +1194,26 @@ class MeasurementService:
             min_ms = float(self.smu_limits.get_limits(smu_type).get("min_pulse_width_ms", 1.0))
         except Exception:
             min_ms = 1.0
+        # Baseline: hold at vbase and take a few readings before any pulses
+        try:
+            keithley.enable_output(True)
+            keithley.set_voltage(float(vbase), float(icc))
+        except Exception:
+            pass
+        baseline_start = time.perf_counter()
+        baseline_duration_s = 0.002
+        while (time.perf_counter() - baseline_start) < baseline_duration_s:
+            if should_stop and should_stop():
+                break
+            try:
+                current_tuple = keithley.measure_current()
+                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+            except Exception:
+                current = float('nan')
+            out_w.append(0.0)
+            out_i.append(current)
+            out_t.append(time.time() - t0)
+        # Sweep widths
         for w in widths_ms:
             if should_stop and should_stop():
                 break
@@ -924,7 +1224,7 @@ class MeasurementService:
                 pulse_width_ms=w_ms,
                 num_pulses=1,
                 read_voltage=float(vbase),
-                inter_pulse_delay_s=0.0,
+                inter_pulse_delay_s=float(inter_step_delay_s),
                 icc=float(icc),
                 smu_type=smu_type,
                 psu=None,
@@ -934,17 +1234,34 @@ class MeasurementService:
                 should_stop=should_stop,
                 on_point=None,
                 validate_timing=validate_timing,
+                start_at_zero=False,
+                return_to_zero_at_end=False,
             )
             try:
                 i_val = float(_i[-1]) if _i else float('nan')
             except Exception:
                 i_val = float('nan')
-            out_w.append(w_ms); out_i.append(i_val); out_t.append(time.time() - t0)
+            out_w.append(w_ms); out_i.append(i_val); out_t.append(time.perf_counter() - t0)
             if on_point:
                 try: on_point(w_ms, i_val, out_t[-1])
                 except Exception: pass
+            # After pulse, keep holding at vbase and sample during the inter-step window
             if inter_step_delay_s and inter_step_delay_s > 0:
-                time.sleep(max(0.0, float(inter_step_delay_s)))
+                post_start = time.perf_counter()
+                while (time.perf_counter() - post_start) < float(inter_step_delay_s):
+                    if should_stop and should_stop():
+                        break
+                    try:
+                        current_tuple = keithley.measure_current()
+                        current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                    except Exception:
+                        current = float('nan')
+                    out_w.append(w_ms)
+                    out_i.append(current)
+                    out_t.append(time.perf_counter() - t0)
+
+        keithley.set_voltage(0)
+        keithley.enable_output(True)
         return out_w, out_i, out_t
 
     def run_threshold_search(
@@ -1040,8 +1357,8 @@ class MeasurementService:
         except Exception:
             pass
 
-        t0 = time.time()
-        while (time.time() - t0) < float(capture_time_s):
+        t0 = time.perf_counter()
+        while (time.perf_counter() - t0) < float(capture_time_s):
             if should_stop and should_stop():
                 break
             try:
@@ -1049,7 +1366,7 @@ class MeasurementService:
                 current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
             except Exception:
                 current = float('nan')
-            t_now = time.time() - t0
+            t_now = time.perf_counter() - t0
             v_arr.append(float(voltage_v))
             i_arr.append(current)
             t_arr.append(t_now)
@@ -1100,8 +1417,8 @@ class MeasurementService:
             keithley.set_voltage(float(pulse_voltage), float(icc))
         except Exception:
             pass
-        t0 = time.time()
-        while (time.time() - t0) < (w_ms / 1000.0):
+        t0 = time.perf_counter()
+        while (time.perf_counter() - t0) < (w_ms / 1000.0):
             if should_stop and should_stop():
                 break
             time.sleep(0.001)
@@ -1115,8 +1432,8 @@ class MeasurementService:
         t_arr: List[float] = []
         i_arr: List[float] = []
         v_arr: List[float] = []
-        t1 = time.time()
-        while (time.time() - t1) < float(capture_time_s):
+        t1 = time.perf_counter()
+        while (time.perf_counter() - t1) < float(capture_time_s):
             if should_stop and should_stop():
                 break
             try:
@@ -1124,7 +1441,7 @@ class MeasurementService:
                 current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
             except Exception:
                 current = float('nan')
-            now = time.time() - t1
+            now = time.perf_counter() - t1
             t_arr.append(now)
             i_arr.append(current)
             v_arr.append(float(read_voltage))
@@ -1138,8 +1455,7 @@ class MeasurementService:
 
         # Safe cleanup
         try:
-            keithley.set_voltage(0.0, float(icc))
-            keithley.enable_output(False)
+            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
         except Exception:
             pass
 
@@ -1158,6 +1474,7 @@ class MeasurementService:
         smu_type: str = "Keithley 2401",
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        timeseries_out: Optional[Tuple[List[float], List[float], List[float]]] = None,
     ) -> Tuple[List[float], List[float], List[float], List[float]]:
         """Paired-pulse facilitation: two pulses separated by Δt; measure I1 and I2 at Vread.
 
@@ -1176,9 +1493,11 @@ class MeasurementService:
         out_ppf: List[float] = []
         eps = 1e-15
         try:
-            keithley.enable_output(True)
+            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
+                                        use_remote_sense=False, autozero_off=True)
         except Exception:
             pass
+        t_ref = time.perf_counter()
         for dt_s in list(dt_list_s or []):
             if should_stop and should_stop():
                 break
@@ -1208,19 +1527,30 @@ class MeasurementService:
             # Wait Δt before pulse 2
             if dt_s and dt_s > 0:
                 t_wait = float(dt_s)
-                t1 = time.time()
-                while (time.time() - t1) < t_wait:
+                t1 = time.perf_counter()
+                while (time.perf_counter() - t1) < t_wait:
                     if should_stop and should_stop():
                         break
-                    time.sleep(0.001)
+                    # sample continuously during the wait at read voltage
+                    try:
+                        itmp = keithley.measure_current()
+                        ival = itmp[1] if isinstance(itmp, (list, tuple)) and len(itmp) > 1 else float(itmp)
+                    except Exception:
+                        ival = float('nan')
+                    if timeseries_out is not None:
+                        v_ts, i_ts, t_ts = timeseries_out
+                        v_ts.append(float(read_voltage))
+                        i_ts.append(ival)
+                        t_ts.append(time.perf_counter() - t_ref)
+                    time.sleep(0.0001)
 
             # Pulse 2
             try:
                 keithley.set_voltage(float(pulse_voltage), float(icc))
             except Exception:
                 pass
-            t2 = time.time()
-            while (time.time() - t2) < (w_ms / 1000.0):
+            t2 = time.perf_counter()
+            while (time.perf_counter() - t2) < (w_ms / 1000.0):
                 if should_stop and should_stop():
                     break
                 time.sleep(0.001)
@@ -1247,7 +1577,7 @@ class MeasurementService:
                 except Exception:
                     pass
         try:
-            keithley.set_voltage(0.0, float(icc)); keithley.enable_output(False)
+            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
         except Exception:
             pass
         return out_dt, out_i1, out_i2, out_ppf
@@ -1265,6 +1595,7 @@ class MeasurementService:
         icc: float = 1e-4,
         smu_type: str = "Keithley 2401",
         should_stop: Optional[Callable[[], bool]] = None,
+        timeseries_out: Optional[Tuple[List[float], List[float], List[float]]] = None,
     ) -> Tuple[List[float], List[float], List[float], List[float]]:
         """Spike-timing dependent plasticity: pre/post pulses separated by Δt (±).
 
@@ -1282,6 +1613,7 @@ class MeasurementService:
         eps = 1e-15
         try: keithley.enable_output(True)
         except Exception: pass
+        t_ref = time.perf_counter()
         for dt in list(delta_t_list_s or []):
             if should_stop and should_stop(): break
             # Baseline
@@ -1296,26 +1628,41 @@ class MeasurementService:
             def pulse(level_v: float):
                 try: keithley.set_voltage(float(level_v), float(icc))
                 except Exception: pass
-                t0 = time.time()
-                while (time.time() - t0) < (w_ms / 1000.0):
+                t0 = time.perf_counter()
+                while (time.perf_counter() - t0) < (w_ms / 1000.0):
                     if should_stop and should_stop(): break
                     time.sleep(0.001)
             if float(dt) >= 0:
                 pulse(pre_voltage)
                 # wait Δt
                 t_wait = float(dt)
-                t1 = time.time()
-                while (time.time() - t1) < t_wait:
+                t1 = time.perf_counter()
+                while (time.perf_counter() - t1) < t_wait:
                     if should_stop and should_stop(): break
-                    time.sleep(0.001)
+                    # sample during wait at read voltage
+                    try:
+                        _it = keithley.measure_current(); _iv = _it[1] if isinstance(_it, (list, tuple)) and len(_it) > 1 else float(_it)
+                    except Exception:
+                        _iv = float('nan')
+                    if timeseries_out is not None:
+                        v_ts, i_ts, t_ts = timeseries_out
+                        v_ts.append(float(read_voltage)); i_ts.append(_iv); t_ts.append(time.perf_counter() - t_ref)
+                    time.sleep(0.0001)
                 pulse(post_voltage)
             else:
                 pulse(post_voltage)
                 t_wait = abs(float(dt))
-                t1 = time.time()
-                while (time.time() - t1) < t_wait:
+                t1 = time.perf_counter()
+                while (time.perf_counter() - t1) < t_wait:
                     if should_stop and should_stop(): break
-                    time.sleep(0.001)
+                    try:
+                        _it = keithley.measure_current(); _iv = _it[1] if isinstance(_it, (list, tuple)) and len(_it) > 1 else float(_it)
+                    except Exception:
+                        _iv = float('nan')
+                    if timeseries_out is not None:
+                        v_ts, i_ts, t_ts = timeseries_out
+                        v_ts.append(float(read_voltage)); i_ts.append(_iv); t_ts.append(time.perf_counter() - t_ref)
+                    time.sleep(0.0001)
                 pulse(pre_voltage)
             # Measure after
             try:
@@ -1329,7 +1676,7 @@ class MeasurementService:
             denom = max(abs(i0), eps)
             dW.append((ia - i0) / denom)
         try:
-            keithley.set_voltage(0.0, float(icc)); keithley.enable_output(False)
+            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
         except Exception:
             pass
         return out_dt, I0_list, I_after_list, dW
@@ -1347,6 +1694,7 @@ class MeasurementService:
         icc: float = 1e-4,
         smu_type: str = "Keithley 2401",
         should_stop: Optional[Callable[[], bool]] = None,
+        timeseries_out: Optional[Tuple[List[float], List[float], List[float]]] = None,
     ) -> Tuple[List[float], List[float]]:
         """Spike-rate dependent plasticity: trains at different frequencies; measure steady-state after each train.
 
@@ -1361,6 +1709,7 @@ class MeasurementService:
         I_ss: List[float] = []
         try: keithley.enable_output(True)
         except Exception: pass
+        t_ref = time.perf_counter()
         for f in list(freq_list_hz or []):
             if should_stop and should_stop(): break
             f = max(0.1, float(f))
@@ -1369,17 +1718,25 @@ class MeasurementService:
             for _ in range(max(1, int(pulses_per_train))):
                 try: keithley.set_voltage(float(pulse_voltage), float(icc))
                 except Exception: pass
-                t0 = time.time()
-                while (time.time() - t0) < w_s:
+                t0 = time.perf_counter()
+                while (time.perf_counter() - t0) < w_s:
                     if should_stop and should_stop(): break
                     time.sleep(0.001)
                 try: keithley.set_voltage(float(read_voltage), float(icc))
                 except Exception: pass
                 t_gap = max(0.0, period - w_s)
-                t1 = time.time()
-                while (time.time() - t1) < t_gap:
+                t1 = time.perf_counter()
+                while (time.perf_counter() - t1) < t_gap:
                     if should_stop and should_stop(): break
-                    time.sleep(0.001)
+                    try:
+                        itgap = keithley.measure_current()
+                        ivgap = itgap[1] if isinstance(itgap, (list, tuple)) and len(itgap) > 1 else float(itgap)
+                    except Exception:
+                        ivgap = float('nan')
+                    if timeseries_out is not None:
+                        v_ts, i_ts, t_ts = timeseries_out
+                        v_ts.append(float(read_voltage)); i_ts.append(ivgap); t_ts.append(time.perf_counter() - t_ref)
+                    time.sleep(0.0001)
             # Measure steady state
             try:
                 time.sleep(max(0.0, float(read_settle_s)))
@@ -1404,9 +1761,13 @@ class MeasurementService:
         cycles: int,
         read_voltage: float = 0.2,
         relax_s: float = 0.1,
+        pulses_per_phase: int = 10,
+        inter_pulse_gap_s: float = 0.0,
         icc: float = 1e-4,
         smu_type: str = "Keithley 2401",
         should_stop: Optional[Callable[[], bool]] = None,
+        timeseries_out: Optional[Tuple[List[float], List[float], List[float]]] = None,
+        return_raw: bool = False,
     ) -> Tuple[List[int], List[float], List[float], List[float]]:
         """Potentiation/Depression: alternate +/− pulses; measure immediate and post-relax; compute volatility ratio.
 
@@ -1416,45 +1777,114 @@ class MeasurementService:
         except Exception: min_ms = 1.0
         w_s = max(min_ms, float(pulse_width_ms)) / 1000.0
         idx: List[int] = []; I_im: List[float] = []; I_post: List[float] = []; ratio: List[float] = []
+        # Raw outputs (optional)
+        f_t: List[float] = []; f_i: List[float] = []; f_v: List[float] = []; f_phase: List[int] = []  # phase: +1=set, -1=reset
         try: keithley.enable_output(True)
         except Exception: pass
+        t_ref = time.perf_counter()
         for c in range(int(max(1, cycles))):
             if should_stop and should_stop(): break
-            # SET pulse
-            try: keithley.set_voltage(float(set_voltage), float(icc))
-            except Exception: pass
-            t0 = time.time()
-            while (time.time() - t0) < w_s:
-                if should_stop and should_stop(): break
-                time.sleep(0.001)
-            # Immediate read
-            try: keithley.set_voltage(float(read_voltage), float(icc))
-            except Exception: pass
-            time.sleep(0.002)
+            # Potentiation phase: apply pulses_per_phase pulses at set_voltage
+            for _ in range(max(1, int(pulses_per_phase))):
+                try: keithley.set_voltage(float(set_voltage), float(icc))
+                except Exception: pass
+                t0 = time.perf_counter()
+                while (time.perf_counter() - t0) < w_s:
+                    if should_stop and should_stop(): break
+                    time.sleep(0.001)
+                try: keithley.set_voltage(float(read_voltage), float(icc))
+                except Exception: pass
+                # optional brief settle
+                time.sleep(0.0002)
+                # Immediate read-back at Vread
+                try:
+                    itp = keithley.measure_current(); ivp = itp[1] if isinstance(itp, (list, tuple)) and len(itp) > 1 else float(itp)
+                except Exception:
+                    ivp = float('nan')
+                if timeseries_out is not None:
+                    v_ts, i_ts, t_ts = timeseries_out
+                    v_ts.append(float(read_voltage)); i_ts.append(ivp); t_ts.append(time.perf_counter() - t_ref)
+                if return_raw:
+                    f_v.append(float(read_voltage)); f_i.append(ivp); f_t.append(time.perf_counter() - t_ref); f_phase.append(+1)
+                # Sample as fast as possible during inter-pulse gap (if any)
+                if inter_pulse_gap_s and inter_pulse_gap_s > 0:
+                    t_gap = time.perf_counter()
+                    while (time.perf_counter() - t_gap) < float(inter_pulse_gap_s):
+                        if should_stop and should_stop(): break
+                        try:
+                            itgp = keithley.measure_current(); ivgp = itgp[1] if isinstance(itgp, (list, tuple)) and len(itgp) > 1 else float(itgp)
+                        except Exception:
+                            ivgp = float('nan')
+                        if timeseries_out is not None:
+                            v_ts, i_ts, t_ts = timeseries_out
+                            v_ts.append(float(read_voltage)); i_ts.append(ivgp); t_ts.append(time.perf_counter() - t_ref)
+                        if return_raw:
+                            f_v.append(float(read_voltage)); f_i.append(ivgp); f_t.append(time.perf_counter() - t_ref); f_phase.append(+1)
+                        time.sleep(0.0001)
+            # Read immediate and relaxed after potentiation burst
             try:
                 i1_t = keithley.measure_current(); i1 = i1_t[1] if isinstance(i1_t, (list, tuple)) and len(i1_t) > 1 else float(i1_t)
             except Exception:
                 i1 = float('nan')
-            # Relax
-            if relax_s and relax_s > 0: time.sleep(max(0.0, float(relax_s)))
+            if relax_s and relax_s > 0:
+                t_rel = time.perf_counter()
+                while (time.perf_counter() - t_rel) < float(relax_s):
+                    if should_stop and should_stop(): break
+                    try: it_rel = keithley.measure_current(); iv_rel = it_rel[1] if isinstance(it_rel, (list, tuple)) and len(it_rel) > 1 else float(it_rel)
+                    except Exception: iv_rel = float('nan')
+                    if timeseries_out is not None:
+                        v_ts, i_ts, t_ts = timeseries_out
+                        v_ts.append(float(read_voltage)); i_ts.append(iv_rel); t_ts.append(time.perf_counter() - t_ref)
+                    time.sleep(0.0001)
             try:
                 i2_t = keithley.measure_current(); i2 = i2_t[1] if isinstance(i2_t, (list, tuple)) and len(i2_t) > 1 else float(i2_t)
             except Exception:
                 i2 = float('nan')
             idx.append(c + 1); I_im.append(i1); I_post.append(i2)
-            denom = max(abs(i1), 1e-15)
-            ratio.append((i1 - i2) / denom)
-            # RESET pulse
-            try: keithley.set_voltage(float(reset_voltage), float(icc))
-            except Exception: pass
-            t1 = time.time()
-            while (time.time() - t1) < w_s:
-                if should_stop and should_stop(): break
-                time.sleep(0.001)
+            denom = max(abs(i1), 1e-15); ratio.append((i1 - i2) / denom)
+            # Depression phase: apply pulses_per_phase pulses at reset_voltage
+            for _ in range(max(1, int(pulses_per_phase))):
+                try: keithley.set_voltage(float(reset_voltage), float(icc))
+                except Exception: pass
+                t1 = time.perf_counter()
+                while (time.perf_counter() - t1) < w_s:
+                    if should_stop and should_stop(): break
+                    time.sleep(0.001)
+                try: keithley.set_voltage(float(read_voltage), float(icc))
+                except Exception: pass
+                time.sleep(0.0002)
+                # Immediate read-back at Vread
+                try:
+                    itd = keithley.measure_current(); ivd = itd[1] if isinstance(itd, (list, tuple)) and len(itd) > 1 else float(itd)
+                except Exception:
+                    ivd = float('nan')
+                if timeseries_out is not None:
+                    v_ts, i_ts, t_ts = timeseries_out
+                    v_ts.append(float(read_voltage)); i_ts.append(ivd); t_ts.append(time.perf_counter() - t_ref)
+                if return_raw:
+                    f_v.append(float(read_voltage)); f_i.append(ivd); f_t.append(time.perf_counter() - t_ref); f_phase.append(-1)
+                # Gap sampling
+                if inter_pulse_gap_s and inter_pulse_gap_s > 0:
+                    t_gap2 = time.perf_counter()
+                    while (time.perf_counter() - t_gap2) < float(inter_pulse_gap_s):
+                        if should_stop and should_stop(): break
+                        try:
+                            itgd = keithley.measure_current(); ivgd = itgd[1] if isinstance(itgd, (list, tuple)) and len(itgd) > 1 else float(itgd)
+                        except Exception:
+                            ivgd = float('nan')
+                        if timeseries_out is not None:
+                            v_ts, i_ts, t_ts = timeseries_out
+                            v_ts.append(float(read_voltage)); i_ts.append(ivgd); t_ts.append(time.perf_counter() - t_ref)
+                        if return_raw:
+                            f_v.append(float(read_voltage)); f_i.append(ivgd); f_t.append(time.perf_counter() - t_ref); f_phase.append(-1)
+                        time.sleep(0.0001)
         try:
             keithley.set_voltage(0.0, float(icc)); keithley.enable_output(False)
         except Exception:
             pass
+        if return_raw:
+            # Overload return with raw stream: phase encoded in f_phase (+1 set, -1 reset)
+            return f_phase, f_i, f_t, f_v  # type: ignore
         return idx, I_im, I_post, ratio
 
     def run_frequency_response(
@@ -1469,17 +1899,30 @@ class MeasurementService:
         icc: float = 1e-4,
         smu_type: str = "Keithley 2401",
         should_stop: Optional[Callable[[], bool]] = None,
+        timeseries_out: Optional[Tuple[List[float], List[float], List[float]]] = None,
+        return_raw: bool = True,
     ) -> Tuple[List[float], List[float]]:
-        """Frequency response via pulse train: at each frequency, average read currents after pulses.
+        """Frequency response via pulse train.
 
-        Returns (freq_list_hz, I_avg_list).
+        When return_raw is False (default): returns (freq_list_hz, I_avg_list) like before.
+        When return_raw is True: returns (freq_per_sample, current_per_sample, elapsed_time_s, v_per_sample).
         """
+        # Enforce minimum pulse width
         try: min_ms = float(self.smu_limits.get_limits(smu_type).get("min_pulse_width_ms", 1.0))
         except Exception: min_ms = 1.0
         w_s = max(min_ms, float(pulse_width_ms)) / 1000.0
-        freqs: List[float] = []; I_avg: List[float] = []
+        # Raw collectors (used when return_raw=True)
+        f_out: List[float] = []
+        i_out: List[float] = []
+        t_out: List[float] = []
+        v_out: List[float] = []
+        # Averaged per-frequency outputs (compat mode)
+        freqs: List[float] = []
+        I_avg: List[float] = []
         try: keithley.enable_output(True)
         except Exception: pass
+        # Reference time for optional timeseries capture
+        t_ref = time.perf_counter()
         for f in list(freq_list_hz or []):
             if should_stop and should_stop(): break
             f = max(0.1, float(f)); period = max(w_s * 1.1, 1.0 / f)
@@ -1487,24 +1930,37 @@ class MeasurementService:
             for _ in range(max(1, int(pulses_per_freq))):
                 try: keithley.set_voltage(float(pulse_voltage), float(icc))
                 except Exception: pass
-                t0 = time.time()
-                while (time.time() - t0) < w_s:
+                # Hold the pulse for w_s (no sampling during pulse)
+                t0 = time.perf_counter()
+                while (time.perf_counter() - t0) < w_s:
                     if should_stop and should_stop(): break
                     time.sleep(0.001)
                 try: keithley.set_voltage(float(vbase), float(icc))
                 except Exception: pass
-                # brief settle and read
+                # Brief settle and take an immediate read
                 time.sleep(0.002)
                 try:
                     it = keithley.measure_current(); iv = it[1] if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
                 except Exception:
                     iv = float('nan')
+                # record immediate read for both raw and average
+                if return_raw:
+                    i_out.append(iv); f_out.append(f); t_out.append(time.perf_counter() - t_ref); v_out.append(float(vbase))
                 reads.append(iv)
+                # Sample as fast as possible during remaining gap; do not extend timing
                 t_gap = max(0.0, period - w_s)
-                t1 = time.time()
-                while (time.time() - t1) < t_gap:
+                t1 = time.perf_counter()
+                while (time.perf_counter() - t1) < t_gap:
                     if should_stop and should_stop(): break
-                    time.sleep(0.001)
+                    try:
+                        itgap = keithley.measure_current(); ivgap = itgap[1] if isinstance(itgap, (list, tuple)) and len(itgap) > 1 else float(itgap)
+                    except Exception:
+                        ivgap = float('nan')
+                    # Always append raw sample when requested
+                    if return_raw:
+                        i_out.append(ivgap); f_out.append(f); t_out.append(time.perf_counter() - t_ref); v_out.append(float(vbase))
+                    time.sleep(0.0001)
+            # Per-frequency average (compat)
             try:
                 avg = float(sum(reads) / max(1, len(reads)))
             except Exception:
@@ -1512,6 +1968,8 @@ class MeasurementService:
             freqs.append(f); I_avg.append(avg)
         try: keithley.set_voltage(0.0, float(icc)); keithley.enable_output(False)
         except Exception: pass
+        if return_raw:
+            return f_out, i_out, t_out, v_out
         return freqs, I_avg
 
     def run_bias_dependent_decay(

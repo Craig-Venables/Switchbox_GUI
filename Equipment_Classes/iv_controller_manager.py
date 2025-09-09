@@ -121,4 +121,23 @@ class IVControllerManager:
                 return self.smu_type
         return self.smu_type
 
+    # Pulse preparation helpers (only effective on instruments that support them)
+    def prepare_for_pulses(self, Icc: float = 1e-3, v_range: float = 20.0, ovp: float = 21.0,
+                           use_remote_sense: bool = False, autozero_off: bool = True) -> None:
+        inst = getattr(self, 'instrument', None)
+        if inst is not None and hasattr(inst, 'prepare_for_pulses'):
+            try:
+                inst.prepare_for_pulses(Icc=Icc, v_range=v_range, ovp=ovp,
+                                        use_remote_sense=use_remote_sense, autozero_off=autozero_off)
+            except Exception:
+                pass
+
+    def finish_pulses(self, Icc: float = 1e-3, restore_autozero: bool = True) -> None:
+        inst = getattr(self, 'instrument', None)
+        if inst is not None and hasattr(inst, 'finish_pulses'):
+            try:
+                inst.finish_pulses(Icc=Icc, restore_autozero=restore_autozero)
+            except Exception:
+                pass
+
 
