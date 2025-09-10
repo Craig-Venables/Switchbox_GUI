@@ -1245,9 +1245,8 @@ class MeasurementGUI:
         self.excitation_var = tk.StringVar(value="DC Triangle IV")
         self.excitation_menu = ttk.Combobox(frame, textvariable=self.excitation_var,
                                             values=["DC Triangle IV",
-                                                    "SMU Pulsed IV",
-                                                    "SMU Pulsed IV (debug)",
-                                                    "SMU Pulsed IV (fixed 20V)",
+                                                    "SMU Pulsed IV <1.5v",
+                                                    "SMU Pulsed IV >1.5v",
                                                     "SMU Fast Pulses",
                                                     "SMU Fast Hold",
                                                     "ISPP",
@@ -1389,7 +1388,7 @@ class MeasurementGUI:
                 except Exception:
                     pass
                 return
-            if sel == "SMU Pulsed IV":
+            if sel == "SMU Pulsed IV <1.5v":
                 # Defaults tied to SMU min pulse width and base 0.2 V
                 try:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
@@ -1411,13 +1410,16 @@ class MeasurementGUI:
                         except Exception: pass
                 except Exception:
                     pass
+                # Notes for <1.5 V mode
+                tk.Label(self._excitation_params_frame, text="Note: Output is typically limited ~1.5 V depending on pulse width.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Tip: Verify pulse width on an oscilloscope; effective width is often slower than the set value.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 return
-            if sel == "SMU Pulsed IV (debug)":
+            if sel == "SMU Pulsed IV >1.5v":
                 try:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
                     pass
-                tk.Label(self._excitation_params_frame, text="Pulsed IV with V/I debug readback.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Fixed 20 V range + OVP.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Vstart").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_start, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Vstop").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_stop, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Step (use or set #steps)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_step, width=10).grid(row=r, column=1, sticky="w"); r+=1
@@ -1431,26 +1433,9 @@ class MeasurementGUI:
                         except Exception: pass
                 except Exception:
                     pass
-                return
-            if sel == "SMU Pulsed IV (fixed 20V)":
-                try:
-                    self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
-                except Exception:
-                    pass
-                tk.Label(self._excitation_params_frame, text="Fixed 20 V range + OVP; pulses with debug.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Vstart").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_start, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Vstop").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_stop, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Step (use or set #steps)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_step, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="#Steps (optional)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_nsteps, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Pulse width (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_width_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Inter-step delay (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_inter_delay, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                try:
-                    for w in self._dc_widgets:
-                        try: w.grid_remove()
-                        except Exception: pass
-                except Exception:
-                    pass
+                # Notes for >1.5 V mode (20 V range)
+                tk.Label(self._excitation_params_frame, text="Note: 20 V range is slower; use ≥100 ms pulse width for reliable amplitude.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Tip: Verify pulses on an oscilloscope; rise/fall can reduce effective width.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 return
             if sel == "SMU Fast Pulses":
                 try:
@@ -2581,6 +2566,17 @@ class MeasurementGUI:
         else:
             print(message)
 
+    def _finalize_output(self):
+        """Set SMU to 0 V and disable output (best-effort)."""
+        try:
+            self.keithley.set_voltage(0, self.icc.get())
+        except Exception:
+            pass
+        try:
+            self.keithley.enable_output(False)
+        except Exception:
+            pass
+
     # Old measure method removed; logic centralized in MeasurementService
 
     def run_custom_measurement(self):
@@ -3098,13 +3094,13 @@ class MeasurementGUI:
             start_index = 0
         device_count = 1 if self.single_device_flag else len(self.device_list)
 
-        if excitation == "SMU Pulsed IV":
+        if excitation == "SMU Pulsed IV <1.5v":
             # One device (or iterate) amplitude-sweep pulsed IV
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV)...")
+                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV <1.5v)...")
                 self.master.update()
 
                 # Pull parameters
@@ -3119,22 +3115,33 @@ class MeasurementGUI:
                 icc_val = float(self.icc.get())
                 smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
 
-                # Run measurement
-                v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
-                    keithley=self.keithley,
-                    start_v=start_v,
-                    stop_v=stop_v,
-                    step_v=step_v,
-                    num_steps=nsteps,
-                    pulse_width_ms=width_ms,
-                    vbase=vbase,
-                    inter_step_delay_s=inter_step,
-                    icc=icc_val,
-                    smu_type=smu_type,
-                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                    on_point=None,
-                    validate_timing=True,
-                )
+                # Prepare fixed 2 V range for faster edges below ~1.5 V
+                try:
+                    self.keithley.prepare_for_pulses(Icc=icc_val, v_range=2.0, ovp=2.2, use_remote_sense=False, autozero_off=True)
+                except Exception:
+                    pass
+                try:
+                    v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
+                        keithley=self.keithley,
+                        start_v=start_v,
+                        stop_v=stop_v,
+                        step_v=step_v,
+                        num_steps=nsteps,
+                        pulse_width_ms=width_ms,
+                        vbase=vbase,
+                        inter_step_delay_s=inter_step,
+                        icc=icc_val,
+                        smu_type=smu_type,
+                        should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                        on_point=None,
+                        validate_timing=True,
+                        manage_session=False,
+                    )
+                finally:
+                    try:
+                        self.keithley.finish_pulses(Icc=icc_val, restore_autozero=True)
+                    except Exception:
+                        pass
 
                 # Plot as IV (amplitude vs read current)
                 try:
@@ -3146,7 +3153,7 @@ class MeasurementGUI:
                 save_dir = _ensure_save_dir()
                 key = find_largest_number_in_folder(save_dir)
                 save_key = 0 if key is None else key + 1
-                name = f"{save_key}-PULSED_IV-{stop_v}v-{width_ms}ms-Py-1"
+                name = f"{save_key}-PULSED_IV_LT1p5-{stop_v}v-{width_ms}ms-Py"
                 file_path = f"{save_dir}\\{name}.txt"
                 try:
                     data = np.column_stack((v_out, i_out, t_out))
@@ -3156,6 +3163,7 @@ class MeasurementGUI:
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
             show_popup = not self._bot_enabled()
@@ -3163,15 +3171,14 @@ class MeasurementGUI:
                 messagebox.showinfo("Complete", "Measurements finished.")
             return
 
-        if excitation == "SMU Pulsed IV (debug)":
+        if excitation == "SMU Pulsed IV >1.5v":
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV - debug)...")
+                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV >1.5v)...")
                 self.master.update()
 
-                # Parameters
                 start_v = float(self.ex_piv_start.get())
                 stop_v = float(self.ex_piv_stop.get())
                 step_v = float(self.ex_piv_step.get()) if self.ex_piv_step.get() != 0 else None
@@ -3182,48 +3189,42 @@ class MeasurementGUI:
                 icc_val = float(self.icc.get())
                 smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
 
-                v_out, i_out, t_out, dbg = self.measurement_service.run_pulsed_iv_sweep_debug(
-                    keithley=self.keithley,
-                    start_v=start_v,
-                    stop_v=stop_v,
-                    step_v=step_v,
-                    num_steps=nsteps,
-                    pulse_width_ms=width_ms,
-                    vbase=vbase,
-                    inter_step_delay_s=inter_step,
-                    icc=icc_val,
-                    smu_type=smu_type,
-                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                    on_point=None,
-                    validate_timing=True,
+                # Prepare fixed 20 V range for >1.5 V
+                try:
+                    self.keithley.prepare_for_pulses(Icc=icc_val, v_range=20.0, ovp=22.0, use_remote_sense=False, autozero_off=True)
+                except Exception:
+                    pass
+                try:
+                    v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
+                        keithley=self.keithley,
+                        start_v=start_v,
+                        stop_v=stop_v,
+                        step_v=step_v,
+                        num_steps=nsteps,
+                        pulse_width_ms=width_ms,
+                        vbase=vbase,
+                        inter_step_delay_s=inter_step,
+                        icc=icc_val,
+                        smu_type=smu_type,
+                        should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                        on_point=None,
+                        validate_timing=True,
+                        manage_session=False,
                 )
+                finally:
+                    try:
+                        self.keithley.finish_pulses(Icc=icc_val, restore_autozero=True)
+                    except Exception:
+                        pass
 
                 try:
-                    self.graphs_show(v_out, i_out, "PULSED_IV_DBG", stop_v)
-                except Exception:
-                    pass
-
-                # Save arrays and debug JSON next to data
-                save_dir = _ensure_save_dir()
-                key = find_largest_number_in_folder(save_dir)
-                save_key = 0 if key is None else key + 1
-                name = f"{save_key}-PULSED_IV_DEBUG-{stop_v}v-{width_ms}ms-Py"
-                file_path = f"{save_dir}\\{name}.txt"
-                dbg_path = f"{save_dir}\\{name}_debug.json"
-                try:
-                    data = np.column_stack((v_out, i_out, t_out))
-                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Amplitude(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
-                try:
-                    import json as _json
-                    with open(dbg_path, 'w', encoding='utf-8') as f:
-                        _json.dump(dbg, f, indent=2)
+                    self.graphs_show(v_out, i_out, "PULSED_IV_GT1p5", stop_v)
                 except Exception:
                     pass
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
             if not self._bot_enabled():
@@ -3301,6 +3302,7 @@ class MeasurementGUI:
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
             if not self._bot_enabled():
@@ -3364,6 +3366,7 @@ class MeasurementGUI:
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
             show_popup = not self._bot_enabled()
@@ -3415,6 +3418,7 @@ class MeasurementGUI:
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False
             self.status_box.config(text="Measurement Complete")
             show_popup = not self._bot_enabled()
@@ -3466,6 +3470,7 @@ class MeasurementGUI:
                     pass
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False; self.status_box.config(text="Measurement Complete")
             if not self._bot_enabled(): messagebox.showinfo("Complete", "Measurements finished.")
             return
@@ -3512,6 +3517,7 @@ class MeasurementGUI:
                     pass
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
+            self._finalize_output()
             self.measuring = False; self.status_box.config(text="Measurement Complete")
             if not self._bot_enabled(): messagebox.showinfo("Complete", "Measurements finished.")
             return
@@ -3787,6 +3793,7 @@ class MeasurementGUI:
             # change device
             self.sample_gui.next_device()
 
+        self._finalize_output()
         self.measuring = False
         self.status_box.config(text="Measurement Complete")
         # Only show popup if bot is disabled; otherwise let bot drive the follow-up

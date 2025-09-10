@@ -114,6 +114,25 @@ class MeasurementService:
         self.smu_limits = SMULimits()
 
     # --------------------------
+    # Pulse session helpers
+    # --------------------------
+    def begin_pulse_session(self, keithley, icc: float, *, v_range: float = 20.0, ovp: float = 21.0,
+                            use_remote_sense: bool = False, autozero_off: bool = True) -> None:
+        """Prepare SMU once for a batch of pulses; caller should later call end_pulse_session."""
+        try:
+            keithley.prepare_for_pulses(Icc=float(icc), v_range=float(v_range), ovp=float(ovp),
+                                        use_remote_sense=bool(use_remote_sense), autozero_off=bool(autozero_off))
+        except Exception:
+            pass
+
+    def end_pulse_session(self, keithley, icc: float, *, restore_autozero: bool = True) -> None:
+        """Finish a pulse batch: return to 0 V, optionally restore autozero, disable output."""
+        try:
+            keithley.finish_pulses(Icc=float(icc), restore_autozero=bool(restore_autozero))
+        except Exception:
+            pass
+
+    # --------------------------
     # Voltage range helpers
     # --------------------------
     def _frange(self, start: float, stop: float, step: float) -> List[float]:
@@ -385,11 +404,7 @@ class MeasurementService:
 
         start_t = time.perf_counter()
 
-        try:
-            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
-                                        use_remote_sense=False, autozero_off=True)
-        except Exception:
-            pass
+        # Session assumed prepared by caller
 
         # Optional LED handling (basic): turn on if requested
         try:
@@ -642,9 +657,8 @@ class MeasurementService:
             except Exception:
                 pass
 
+        # Assumes caller/session manager already prepared; only set initial level if needed
         try:
-            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
-                                        use_remote_sense=False, autozero_off=True)
             if not start_at_zero:
                 keithley.set_voltage(read_voltage, icc)
         except Exception:
@@ -755,11 +769,7 @@ class MeasurementService:
         except Exception:
             pass
 
-        try:
-            if return_to_zero_at_end:
-                keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
-        except Exception:
-            pass
+        # Do not finish session here; caller/high-level manages session
 
         return v_arr, c_arr, t_arr
 
@@ -866,6 +876,7 @@ class MeasurementService:
         sweep_type: str = "FS",
         neg_stop_v: Optional[float] = None,
         reset_should_stop: Optional[Callable[[], None]] = None,
+        manage_session: bool = True,
     ) -> Tuple[List[float], List[float], List[float]]:
         """Amplitude-sweep pulsed IV using a standard SMU.
 
@@ -931,46 +942,46 @@ class MeasurementService:
         t_out: List[float] = []
         t0 = time.perf_counter()
 
-        for amp in amps:
-            if should_stop and should_stop():
-                break
-            # One pulse at 'amp', then go to vbase and read
-            _v, _i, _t = self.run_pulse_measurement(
-                keithley=keithley,
-                pulse_voltage=float(amp),
-                pulse_width_ms=float(pulse_width_ms),
-                num_pulses=1,
-                read_voltage=float(vbase),
-                inter_pulse_delay_s=0.0,
-                icc=float(icc),
-                smu_type=smu_type,
-                psu=None,
-                led=False,
-                power=1.0,
-                sequence=None,
-                should_stop=should_stop,
-                on_point=None,
-                validate_timing=validate_timing,
-            )
-            # The readback current is in _i[-1] at read_voltage
-            try:
-                i_val = float(_i[-1]) if _i else float('nan')
-            except Exception:
-                i_val = float('nan')
-            v_out.append(float(amp))
-            i_out.append(i_val)
-            t_out.append(time.time() - t0)
-            # Live callback per amplitude (optional)
-            if on_point:
+        if manage_session:
+            self.begin_pulse_session(keithley, icc, v_range=20.0, ovp=21.0, use_remote_sense=False, autozero_off=True)
+        try:
+            for amp in amps:
+                if should_stop and should_stop():
+                    break
+                _v, _i, _t = self.run_pulse_measurement(
+                    keithley=keithley,
+                    pulse_voltage=float(amp),
+                    pulse_width_ms=float(pulse_width_ms),
+                    num_pulses=1,
+                    read_voltage=float(vbase),
+                    inter_pulse_delay_s=0.0,
+                    icc=float(icc),
+                    smu_type=smu_type,
+                    psu=None,
+                    led=False,
+                    power=1.0,
+                    sequence=None,
+                    should_stop=should_stop,
+                    on_point=None,
+                    validate_timing=validate_timing,
+                )
                 try:
-                    on_point(float(amp), i_val, t_out[-1])
+                    i_val = float(_i[-1]) if _i else float('nan')
                 except Exception:
-                    pass
-            # Inter-step dwell at base between amplitudes
-            if inter_step_delay_s and inter_step_delay_s > 0:
-                time.sleep(max(0.0, float(inter_step_delay_s)))
-
-        keithley.enable_output(False)
+                    i_val = float('nan')
+                v_out.append(float(amp))
+                i_out.append(i_val)
+                t_out.append(time.time() - t0)
+                if on_point:
+                    try:
+                        on_point(float(amp), i_val, t_out[-1])
+                    except Exception:
+                        pass
+                if inter_step_delay_s and inter_step_delay_s > 0:
+                    time.sleep(max(0.0, float(inter_step_delay_s)))
+        finally:
+            if manage_session:
+                self.end_pulse_session(keithley, icc, restore_autozero=True)
         return v_out, i_out, t_out
 
     def run_pulsed_iv_sweep_debug(
@@ -1411,9 +1422,8 @@ class MeasurementService:
             min_ms = 1.0
         w_ms = max(min_ms, float(pulse_width_ms))
 
-        # Fire the set pulse
+        # Fire the set pulse (session assumed prepared by caller)
         try:
-            keithley.enable_output(True)
             keithley.set_voltage(float(pulse_voltage), float(icc))
         except Exception:
             pass
@@ -1453,11 +1463,7 @@ class MeasurementService:
             if sample_dt_s and sample_dt_s > 0:
                 time.sleep(max(0.0, float(sample_dt_s)))
 
-        # Safe cleanup
-        try:
-            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
-        except Exception:
-            pass
+        # Leave session open for caller to finish
 
         return t_arr, i_arr, v_arr
 
@@ -1576,10 +1582,7 @@ class MeasurementService:
                     on_point(float(read_voltage), i2, float(dt_s))
                 except Exception:
                     pass
-        try:
-            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
-        except Exception:
-            pass
+        # Leave session open for caller to finish
         return out_dt, out_i1, out_i2, out_ppf
 
     def run_stdp(
@@ -1611,8 +1614,7 @@ class MeasurementService:
         w_ms = max(min_ms, float(pulse_width_ms))
         out_dt: List[float] = []; I0_list: List[float] = []; I_after_list: List[float] = []; dW: List[float] = []
         eps = 1e-15
-        try: keithley.enable_output(True)
-        except Exception: pass
+        # Session assumed prepared by caller
         t_ref = time.perf_counter()
         for dt in list(delta_t_list_s or []):
             if should_stop and should_stop(): break
@@ -1707,8 +1709,7 @@ class MeasurementService:
         w_s = max(min_ms, float(pulse_width_ms)) / 1000.0
         freqs: List[float] = []
         I_ss: List[float] = []
-        try: keithley.enable_output(True)
-        except Exception: pass
+        # Session assumed prepared by caller
         t_ref = time.perf_counter()
         for f in list(freq_list_hz or []):
             if should_stop and should_stop(): break
