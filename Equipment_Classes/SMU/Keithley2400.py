@@ -20,6 +20,10 @@ class Keithley2400Controller:
             self._configured = False
             self._cached_icc: Optional[float] = None
             self._cached_vrange: Optional[float] = None
+            # Optional range lock (when set, set_voltage will not change the source range)
+            self._range_lock: Optional[float] = None
+            # Track output state locally to avoid querying
+            self._output_enabled: bool = False
         except Exception as e:
             print("Error initializing Keithley 2400:", e)
             self.device = None
@@ -55,16 +59,30 @@ class Keithley2400Controller:
         """Set source level without reconfiguring range/compliance each time."""
         if self.device:
             # Select discrete range based on requested level
-            v_abs = abs(float(voltage))
-            if v_abs <= 0.2:
-                v_rng = 0.2
-            elif v_abs <= 2.0:
-                v_rng = 2.0
-            elif v_abs <= 20.0:
-                v_rng = 20.0
+            if self._range_lock is not None:
+                v_rng = float(self._range_lock)
             else:
-                v_rng = 200.0
+                v_abs = abs(float(voltage))
+                if v_abs <= 0.2:
+                    v_rng = 0.2
+                elif v_abs <= 2.0:
+                    v_rng = 2.0
+                elif v_abs <= 20.0:
+                    v_rng = 20.0
+                else:
+                    v_rng = 200.0
             self._configure_voltage_source(float(Icc), v_rng)
+            # Safe auto-enable: if output is OFF, bias 0 V, enable, then set target
+            if not self._output_enabled:
+                try:
+                    self.device.source_voltage = 0.0
+                except Exception:
+                    pass
+                try:
+                    self.device.enable_source()
+                    self._output_enabled = True
+                except Exception:
+                    pass
             self.device.source_voltage = voltage
 
     def prepare_for_pulses(self, Icc: float = 1e-3, v_range: float = 20.0, ovp: float = 21.0,
@@ -76,33 +94,54 @@ class Keithley2400Controller:
         """
         if not self.device:
             return
-        # Function voltage
+        # Always select voltage function
         try:
             self.device.write("SOUR:FUNC VOLT")
         except Exception:
             pass
-        # Fixed range and compliance
-        self._configure_voltage_source(float(Icc), float(v_range))
-        # OVP (voltage protection)
-        try:
-            self.device.write(f"SOUR:VOLT:PROT {float(ovp)}")
-        except Exception:
-            pass
-        # Local vs remote sense
-        try:
-            self.device.write("SYST:RSEN ON" if use_remote_sense else "SYST:RSEN OFF")
-        except Exception:
-            pass
-        # Autozero control
-        try:
-            if autozero_off:
-                self.device.write("SYST:AZER OFF")
-        except Exception:
-            pass
+        # For high-voltage session (>= 20 V range), apply strict config; otherwise, minimal prep
+        high_voltage_session = float(v_range) >= 20.0
+        if high_voltage_session:
+            # Lock range for session
+            try:
+                self._range_lock = float(v_range)
+            except Exception:
+                self._range_lock = v_range
+            # Fixed range and compliance
+            self._configure_voltage_source(float(Icc), float(v_range))
+            # OVP (voltage protection)
+            try:
+                self.device.write(f"SOUR:VOLT:PROT {float(ovp)}")
+                self.device.write("SOUR:VOLT:PROT:STAT ON")
+            except Exception:
+                pass
+            # Local vs remote sense
+            try:
+                self.device.write("SYST:RSEN ON" if use_remote_sense else "SYST:RSEN OFF")
+            except Exception:
+                pass
+            # Autozero control
+            try:
+                if autozero_off:
+                    self.device.write("SYST:AZER OFF")
+            except Exception:
+                pass
+        else:
+            # Minimal prep for low-voltage sessions: configure compliance but do not force range/OVP
+            self._range_lock = None
+            try:
+                # Configure compliance with autorange (let the SMU choose range)
+                self.device.apply_voltage(compliance_current=float(Icc))
+            except Exception:
+                pass
         # Bias at 0 V and enable output
         try:
             self.device.source_voltage = 0.0
+        except Exception:
+            pass
+        try:
             self.device.enable_source()
+            self._output_enabled = True
         except Exception:
             pass
 
@@ -121,13 +160,27 @@ class Keithley2400Controller:
             pass
         try:
             self.device.disable_source()
+            self._output_enabled = False
         except Exception:
             pass
+        # Clear range lock at end of session
+        self._range_lock = None
 
     def set_current(self, current, Vcc=10):
         """Set output current and enable source mode."""
         if self.device:
             self.device.apply_current(current_range=10e-3, compliance_voltage=Vcc)  # Set compliance voltage
+            # Safe auto-enable for current mode
+            if not self._output_enabled:
+                try:
+                    self.device.source_current = 0.0
+                except Exception:
+                    pass
+                try:
+                    self.device.enable_source()
+                    self._output_enabled = True
+                except Exception:
+                    pass
             self.device.source_current = current
 
     def measure_voltage(self):
@@ -141,7 +194,12 @@ class Keithley2400Controller:
     def enable_output(self, enable=True):
         """Enable or disable output."""
         if self.device:
-            self.device.enable_source() if enable else self.device.disable_source()
+            if enable:
+                self.device.enable_source()
+                self._output_enabled = True
+            else:
+                self.device.disable_source()
+                self._output_enabled = False
 
     def beep(self, frequency=1000, duration=0.5):
         """Make the instrument beep."""
