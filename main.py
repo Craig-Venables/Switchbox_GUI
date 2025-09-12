@@ -19,7 +19,12 @@ from Sample_GUI import SampleGUI
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = SampleGUI(root)
-
-    root.mainloop()
+    import sys
+    if "--pmu" in sys.argv:
+        from PMU_Minimal_GUI import PMUMinimalGUI
+        app = PMUMinimalGUI()
+        app.mainloop()
+    else:
+        root = tk.Tk()
+        app = SampleGUI(root)
+        root.mainloop()

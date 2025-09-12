@@ -71,3 +71,5 @@ print(pr["raw_ch2"].head())
 - Keep ranges fixed during the shot to prevent re‑ranging artifacts.
 - Use CH2 as a quiet return at 0 V unless you are actively pulsing with it.
 
+
+

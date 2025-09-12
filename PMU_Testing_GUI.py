@@ -10,6 +10,7 @@ from tkinter import ttk, messagebox
 import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.figure import Figure
+import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from measurement_service import MeasurementService
@@ -146,7 +147,7 @@ class PMUTestingGUI(tk.Toplevel):
         self.status_var = tk.StringVar(value="PMU: Disconnected")
         tk.Label(conn_frame, textvariable=self.status_var).grid(row=0, column=3, sticky="w", padx=(5,0))
 
-        # Mode section
+        # Mode section (legacy, hidden for simplicity)
         mode_frame = tk.Frame(ctrl)
         mode_frame.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0,5))
         mode_frame.columnconfigure(1, weight=1)
@@ -164,7 +165,7 @@ class PMUTestingGUI(tk.Toplevel):
         self.mode_help = tk.Label(mode_frame, textvariable=self.mode_help_var, wraplength=360, justify="left", fg="#555")
         self.mode_help.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4,0))
 
-        # Basic parameters section
+        # Basic parameters section (legacy, hidden for simplicity)
         basic_frame = tk.Frame(ctrl)
         basic_frame.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0,5))
         basic_frame.columnconfigure([1,3], weight=1)
@@ -190,7 +191,7 @@ class PMUTestingGUI(tk.Toplevel):
         self.num_pulses = mk_spin(2, 0, "Num Pulses:", 10)
         self.pattern = mk_spin(2, 1, "Pattern:", "1011")
 
-        # Sweep parameters section
+        # Sweep parameters section (legacy, hidden for simplicity)
         sweep_frame = tk.Frame(ctrl)
         sweep_frame.grid(row=4, column=0, columnspan=4, sticky="ew", pady=(0,5))
         sweep_frame.columnconfigure([1,3], weight=1)
@@ -199,7 +200,7 @@ class PMUTestingGUI(tk.Toplevel):
         self.step_v = mk_spin(0, 0, "Step V:", 0.1, sweep_frame)
         self.stop_v = mk_spin(0, 1, "Stop V:", 1.0, sweep_frame)
 
-        # Timing parameters section
+        # Timing parameters section (legacy, hidden for simplicity)
         timing_frame = tk.Frame(ctrl)
         timing_frame.grid(row=5, column=0, columnspan=4, sticky="ew", pady=(0,5))
         timing_frame.columnconfigure([1,3], weight=1)
@@ -215,7 +216,7 @@ class PMUTestingGUI(tk.Toplevel):
         self.start_pct = mk_spin(1, 0, "Meas Start %:", 10, timing_frame)
         self.stop_pct = mk_spin(1, 1, "Meas Stop %:", 90, timing_frame)
 
-        # Limits section (toggle visibility)
+        # Limits section (legacy, hidden for simplicity)
         limits_frame = tk.Frame(ctrl)
         limits_frame.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(0,5))
         limits_frame.columnconfigure([1,3], weight=1)
@@ -229,7 +230,7 @@ class PMUTestingGUI(tk.Toplevel):
         self.show_limits = tk.BooleanVar(value=False)
         tk.Checkbutton(lim_toggle_row, text="Show limits", variable=self.show_limits, command=lambda: self._toggle_limits(limits_frame)).grid(row=0, column=0, sticky="e")
 
-        # Buttons section
+        # Buttons section (legacy, hidden for simplicity)
         btn_frame = tk.Frame(ctrl)
         btn_frame.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(5,0))
         btn_frame.columnconfigure([0,1,2], weight=1)
@@ -245,7 +246,66 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Button(btn_frame, text="Load Mode Defaults", command=self._load_and_apply_mode_defaults).grid(row=2, column=1, padx=5, pady=(6,2))
         tk.Button(btn_frame, text="Send Trigger (CH2)", command=self._send_trigger_ch2).grid(row=2, column=2, padx=5, pady=(6,2))
 
-        # ---------------- Controls: Laser Generator ----------------
+        # Hide legacy PMU controls to simplify UI for now
+        try:
+            mode_frame.grid_remove(); basic_frame.grid_remove(); sweep_frame.grid_remove()
+            timing_frame.grid_remove(); limits_frame.grid_remove(); btn_frame.grid_remove()
+        except Exception:
+            pass
+
+        # ---------------- Simple PMU Tests ----------------
+        # Place inside the PMU Controls frame so the Connect UI stays visible above
+        simple = tk.LabelFrame(ctrl, text="Simple PMU Tests", padx=5, pady=3)
+        simple.grid(row=2, column=0, columnspan=4, sticky="nsew", padx=5, pady=3)
+        simple.columnconfigure(3, weight=1)
+
+        tk.Label(simple, text="Test:").grid(row=0, column=0, sticky="w")
+        self.simple_test = tk.StringVar(value="Read (memr_read)")
+        ttk.Combobox(simple, textvariable=self.simple_test, values=[
+            "Read (memr_read)", "Pulse IV Sweep", "Pulse Width Sweep", "Fast Read", "Perturb/Relax"
+        ], state="readonly", width=22).grid(row=0, column=1, sticky="w")
+
+        # Common fields
+        tk.Label(simple, text="read_v/bias_v:").grid(row=1, column=0, sticky="w")
+        self.s_read_v = tk.StringVar(value="0.2")
+        tk.Entry(simple, textvariable=self.s_read_v, width=10).grid(row=1, column=1, sticky="w", padx=(5,10))
+
+        tk.Label(simple, text="pulse_v:").grid(row=1, column=2, sticky="w")
+        self.s_pulse_v = tk.StringVar(value="5.0")
+        tk.Entry(simple, textvariable=self.s_pulse_v, width=10).grid(row=1, column=3, sticky="w")
+
+        tk.Label(simple, text="width_s:").grid(row=2, column=0, sticky="w")
+        self.s_width = tk.StringVar(value="1e-5")
+        tk.Entry(simple, textvariable=self.s_width, width=10).grid(row=2, column=1, sticky="w", padx=(5,10))
+
+        tk.Label(simple, text="period_s:").grid(row=2, column=2, sticky="w")
+        self.s_period = tk.StringVar(value="2e-5")
+        tk.Entry(simple, textvariable=self.s_period, width=10).grid(row=2, column=3, sticky="w")
+
+        tk.Label(simple, text="delay_s:").grid(row=3, column=0, sticky="w")
+        self.s_delay = tk.StringVar(value="5e-6")
+        tk.Entry(simple, textvariable=self.s_delay, width=10).grid(row=3, column=1, sticky="w", padx=(5,10))
+
+        tk.Label(simple, text="#pulses:").grid(row=3, column=2, sticky="w")
+        self.s_npulses = tk.StringVar(value="3")
+        tk.Entry(simple, textvariable=self.s_npulses, width=10).grid(row=3, column=3, sticky="w")
+
+        # Lists
+        tk.Label(simple, text="levels (CSV):").grid(row=4, column=0, sticky="w")
+        self.s_levels = tk.StringVar(value="0.0,0.1,0.2,0.5,1.0")
+        tk.Entry(simple, textvariable=self.s_levels, width=28).grid(row=4, column=1, columnspan=3, sticky="ew")
+
+        tk.Label(simple, text="widths (CSV):").grid(row=5, column=0, sticky="w")
+        self.s_widths = tk.StringVar(value="5e-5,1e-4,2e-4,5e-4")
+        tk.Entry(simple, textvariable=self.s_widths, width=28).grid(row=5, column=1, columnspan=3, sticky="ew")
+
+        tk.Label(simple, text="shots:").grid(row=6, column=0, sticky="w")
+        self.s_shots = tk.StringVar(value="5")
+        tk.Entry(simple, textvariable=self.s_shots, width=10).grid(row=6, column=1, sticky="w", padx=(5,10))
+
+        tk.Button(simple, text="Run Simple Test", command=self._run_simple_pmu_test).grid(row=7, column=0, columnspan=4, sticky="ew", pady=(6,0))
+
+        # Keep legacy generator sections; they will appear below
         genf = tk.LabelFrame(self, text="Laser Pulse Generator", padx=5, pady=3)
         genf.grid(row=1, column=0, sticky="nsew", padx=5, pady=3)
         self.gen_frame = genf
@@ -626,7 +686,10 @@ class PMUTestingGUI(tk.Toplevel):
 
         # PMU dynamic UI/init
         self._init_pmu_mode_defaults()
-        self._on_mode_changed()
+        try:
+            self._on_mode_changed()
+        except Exception:
+            pass
         self._toggle_limits(limits_frame)  # start hidden
         # Init state for generator panel
         self._update_enabled_controls()
@@ -987,6 +1050,54 @@ class PMUTestingGUI(tk.Toplevel):
                 self.counter_var.set(f"Pulses applied: {self.pulses_applied}")
                 self.update_plot_dual(t, i, v, t2, i2, v2)
                 self._save_pmu_trace(t, v, i, mode)
+            except Exception as exc:
+                messagebox.showerror("PMU", str(exc))
+
+        threading.Thread(target=do_run, daemon=True).start()
+
+    def _run_simple_pmu_test(self):
+        if self.pmu_dc is None or self.wrap is None:
+            messagebox.showwarning("PMU", "Connect to PMU first.")
+            return
+        test = self.simple_test.get().strip()
+        try:
+            read_v = float(self.s_read_v.get()); pulse_v = float(self.s_pulse_v.get())
+            width = float(self.s_width.get()); period = float(self.s_period.get())
+            delay = float(self.s_delay.get()); npulses = int(float(self.s_npulses.get()))
+            shots = int(float(self.s_shots.get()))
+            levels = [float(x) for x in re.split(r"[,\s]+", self.s_levels.get().strip()) if x]
+            widths = [float(x) for x in re.split(r"[,\s]+", self.s_widths.get().strip()) if x]
+        except Exception:
+            messagebox.showerror("PMU", "Invalid simple test parameters.")
+            return
+
+        def do_run():
+            try:
+                if test.startswith("Read"):
+                    res = self.wrap.memr_read(read_v=read_v, expected_res_ohm=100_000.0, shots=shots,
+                                              width_s=width, period_s=period)
+                    df = res.get("raw_ch1", pd.DataFrame())
+                    self.update_plot(list(df.get("t (s)", [])), list(df.get("I (A)", [])), list(df.get("V (V)", [])))
+                elif test == "Pulse IV Sweep":
+                    res = self.wrap.pulse_iv_sweep(levels=levels, width_s=width, period_s=period,
+                                                   v_meas_range=2.0, i_meas_range=20e-6)
+                    df = res.get("raw_ch1", pd.DataFrame())
+                    self.update_plot(list(df.get("t (s)", [])), list(df.get("I (A)", [])), list(df.get("V (V)", [])))
+                elif test == "Pulse Width Sweep":
+                    res = self.wrap.pulse_width_sweep(voltage_v=read_v, widths_s=widths,
+                                                       v_meas_range=2.0, i_meas_range=20e-6)
+                    df = res.get("raw_ch1", pd.DataFrame())
+                    self.update_plot(list(df.get("t (s)", [])), list(df.get("I (A)", [])), list(df.get("V (V)", [])))
+                elif test == "Fast Read":
+                    res = self.wrap.fast_read(read_v=read_v, duration_pulses=npulses, width_s=width, period_s=period)
+                    df = res.get("raw_ch1", pd.DataFrame())
+                    self.update_plot(list(df.get("t (s)", [])), list(df.get("I (A)", [])), list(df.get("V (V)", [])))
+                elif test == "Perturb/Relax":
+                    res = self.wrap.perturb_measure(bias_v=read_v, pulse_v=pulse_v, width_s=width, period_s=period,
+                                                    delay_s=delay, num_pulses=npulses, fetch_both=True)
+                    ch1 = res.get("raw_ch1", pd.DataFrame()); ch2 = res.get("raw_ch2", pd.DataFrame())
+                    self.update_plot_dual(list(ch1.get("t (s)", [])), list(ch1.get("I (A)", [])), list(ch1.get("V (V)", [])),
+                                          list(ch2.get("t (s)", [])), list(ch2.get("I (A)", [])), list(ch2.get("V (V)", [])))
             except Exception as exc:
                 messagebox.showerror("PMU", str(exc))
 
