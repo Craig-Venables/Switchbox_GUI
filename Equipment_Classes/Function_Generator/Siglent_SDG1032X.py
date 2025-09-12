@@ -130,6 +130,22 @@ class SiglentSDG1032X:
         pref = self._ch_prefix(channel)
         self.write(f"{pref}OUTP {'ON' if on else 'OFF'}")
 
+    def get_output_status(self, channel: int) -> bool:
+        """Return True if channel output is ON, False if OFF.
+
+        Parses responses like: "C1:OUTP ON,LOAD,50,PLRT,NOR".
+        """
+        pref = self._ch_prefix(channel)
+        resp = self.query(f"{pref}OUTP?")
+        txt = (resp or "").strip().upper()
+        # Heuristic: prefer explicit OFF if present; otherwise ON if present
+        if "OFF" in txt:
+            return False
+        if "ON" in txt:
+            return True
+        # Fallback: unknown -> False
+        return False
+
     def set_output_load(self, channel: int, load: Union[str, float] = "50OHM"):
         """
         load: '50OHM', 'HIGHZ', or numeric impedance in ohms (e.g., 50, 75, 600)

@@ -4,8 +4,18 @@ from typing import Optional, Dict, Any
 
 # Import your controller classes
 
-from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
-from Equipment_Classes.TempControllers.Lakeshore355 import Lakeshore335Controller
+try:
+    from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
+    from Equipment_Classes.TempControllers.Lakeshore355 import Lakeshore335Controller
+except ModuleNotFoundError:
+    # Allow running this file directly by adding project root to sys.path
+    import os
+    import sys
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
+    from Equipment_Classes.TempControllers.Lakeshore355 import Lakeshore335Controller
 
 
 class TemperatureControllerManager:
