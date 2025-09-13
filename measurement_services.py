@@ -97,7 +97,7 @@ class SMULimits:
 
 class MeasurementService:
     """
-    Centralized measurement engine for IV, retention, pulse, and endurance flows.
+    Centralized measurement engine for IV, retention, pulse, and endurance flows.For SMU use only not PMU.
 
     Responsibilities
     - Compute voltage ranges for different sweep types
@@ -460,7 +460,7 @@ class MeasurementService:
         return v_arr, c_arr, t_arr
 
     # --------------------------
-    # Endurance (basic pulse-based)
+    # Endurance (basic pulse-based for an SMU)
     # --------------------------
     def run_endurance(
         self,
@@ -2429,214 +2429,214 @@ class MeasurementService:
                         pass
         return v_all, i_all, t_all
 
-    # --------------------------
-    # Combined PMU + Generator routines
-    # --------------------------
-    def run_laser_decay(
-        self,
-        *,
-        keithley,
-        gen,
-        bias_v: float = 0.2,
-        capture_time_s: float = 0.02,
-        sample_dt_s: float = 0.001,
-        prep_delay_s: float = 0.01,
-        trig_mode: str = "BUS",
-    ) -> Tuple[List[float], List[float]]:
-        """Apply a generator pulse and measure fast decay current at a DC bias using the SMU/PMU.
+    # # --------------------------
+    # # Combined PMU + Generator routines
+    # # --------------------------
+    # def run_laser_decay(
+    #     self,
+    #     *,
+    #     keithley,
+    #     gen,
+    #     bias_v: float = 0.2,
+    #     capture_time_s: float = 0.02,
+    #     sample_dt_s: float = 0.001,
+    #     prep_delay_s: float = 0.01,
+    #     trig_mode: str = "BUS",
+    # ) -> Tuple[List[float], List[float]]:
+    #     """Apply a generator pulse and measure fast decay current at a DC bias using the SMU/PMU.
 
-        - keithley: device with set_voltage/enable_output/measure_current
-        - gen: Siglent generator instance (already configured); will be triggered via software when trig_mode='BUS'
-        - bias_v: DC bias voltage to hold during measurement
-        - capture_time_s: total time to sample after trigger
-        - sample_dt_s: sampling interval for SMU current reads
-        - prep_delay_s: delay after bias set before triggering
-        - trig_mode: 'BUS' (software trigger) or 'EXT' (external cabling required; no software trigger)
-        """
-        v_target = float(bias_v)
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(v_target, 1e-3)
-        except Exception:
-            pass
+    #     - keithley: device with set_voltage/enable_output/measure_current
+    #     - gen: Siglent generator instance (already configured); will be triggered via software when trig_mode='BUS'
+    #     - bias_v: DC bias voltage to hold during measurement
+    #     - capture_time_s: total time to sample after trigger
+    #     - sample_dt_s: sampling interval for SMU current reads
+    #     - prep_delay_s: delay after bias set before triggering
+    #     - trig_mode: 'BUS' (software trigger) or 'EXT' (external cabling required; no software trigger)
+    #     """
+    #     v_target = float(bias_v)
+    #     try:
+    #         keithley.enable_output(True)
+    #         keithley.set_voltage(v_target, 1e-3)
+    #     except Exception:
+    #         pass
 
-        if prep_delay_s and prep_delay_s > 0:
-            time.sleep(prep_delay_s)
+    #     if prep_delay_s and prep_delay_s > 0:
+    #         time.sleep(prep_delay_s)
 
-        try:
-            if gen is not None and hasattr(gen, 'is_connected') and gen.is_connected():
-                if str(trig_mode).upper() == 'BUS':
-                    gen.trigger_now(1)
-        except Exception:
-            pass
+    #     try:
+    #         if gen is not None and hasattr(gen, 'is_connected') and gen.is_connected():
+    #             if str(trig_mode).upper() == 'BUS':
+    #                 gen.trigger_now(1)
+    #     except Exception:
+    #         pass
 
-        t0 = time.time()
-        t_arr: List[float] = []
-        i_arr: List[float] = []
-        while (time.time() - t0) < float(capture_time_s):
-            try:
-                i_val = keithley.measure_current()
-                i_val = i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
-            except Exception:
-                i_val = float('nan')
-            t_arr.append(time.time() - t0)
-            i_arr.append(i_val)
-            if sample_dt_s and sample_dt_s > 0:
-                time.sleep(max(0.0, float(sample_dt_s)))
+    #     t0 = time.time()
+    #     t_arr: List[float] = []
+    #     i_arr: List[float] = []
+    #     while (time.time() - t0) < float(capture_time_s):
+    #         try:
+    #             i_val = keithley.measure_current()
+    #             i_val = i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
+    #         except Exception:
+    #             i_val = float('nan')
+    #         t_arr.append(time.time() - t0)
+    #         i_arr.append(i_val)
+    #         if sample_dt_s and sample_dt_s > 0:
+    #             time.sleep(max(0.0, float(sample_dt_s)))
 
-        try:
-            keithley.set_voltage(0.0, 1e-3)
-            keithley.enable_output(False)
-        except Exception:
-            pass
+    #     try:
+    #         keithley.set_voltage(0.0, 1e-3)
+    #         keithley.enable_output(False)
+    #     except Exception:
+    #         pass
 
-        return t_arr, i_arr
+    #     return t_arr, i_arr
 
-    def run_moku_decay(
-        self,
-        *,
-        keithley,
-        laser,  # LaserFunctionGenerator
-        bias_v: float = 0.2,
-        capture_time_s: float = 0.02,
-        sample_dt_s: float = 0.001,
-        prep_delay_s: float = 0.01,
-        high_v: float = 1.0,
-        width_s: float = 100e-9,
-        period_s: float = 200e-9,
-        edge_s: float = 16e-9,
-        pulses: int = 1,
-        continuous_duration_s: float = 0.0,
-    ) -> Tuple[List[float], List[float]]:
-        """
-        Apply a Moku laser pulse (single/burst/continuous) while sampling current at a DC bias.
-        Returns (t_arr, i_arr).
-        """
-        t_arr: List[float] = []
-        i_arr: List[float] = []
+    # def run_moku_decay(
+    #     self,
+    #     *,
+    #     keithley,
+    #     laser,  # LaserFunctionGenerator
+    #     bias_v: float = 0.2,
+    #     capture_time_s: float = 0.02,
+    #     sample_dt_s: float = 0.001,
+    #     prep_delay_s: float = 0.01,
+    #     high_v: float = 1.0,
+    #     width_s: float = 100e-9,
+    #     period_s: float = 200e-9,
+    #     edge_s: float = 16e-9,
+    #     pulses: int = 1,
+    #     continuous_duration_s: float = 0.0,
+    # ) -> Tuple[List[float], List[float]]:
+    #     """
+    #     Apply a Moku laser pulse (single/burst/continuous) while sampling current at a DC bias.
+    #     Returns (t_arr, i_arr).
+    #     """
+    #     t_arr: List[float] = []
+    #     i_arr: List[float] = []
 
-        # Bias and settle
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(float(bias_v), 1e-3)
-        except Exception:
-            pass
+    #     # Bias and settle
+    #     try:
+    #         keithley.enable_output(True)
+    #         keithley.set_voltage(float(bias_v), 1e-3)
+    #     except Exception:
+    #         pass
 
-        if prep_delay_s and prep_delay_s > 0:
-            time.sleep(prep_delay_s)
+    #     if prep_delay_s and prep_delay_s > 0:
+    #         time.sleep(prep_delay_s)
 
-        # Fire laser according to mode in background to avoid blocking sampling
-        import threading
-        def _fire():
-            try:
-                if pulses and pulses > 1:
-                    laser.run_burst(high_v, width_s, period_s, edge_s, count=int(pulses))
-                elif continuous_duration_s and continuous_duration_s > 0:
-                    laser.start_continuous(high_v, width_s, period_s, edge_s)
-                    time.sleep(float(continuous_duration_s))
-                    laser.stop_output()
-                else:
-                    laser.send_single_pulse(high_v, width_s, edge_s, period_s)
-            except Exception:
-                pass
+    #     # Fire laser according to mode in background to avoid blocking sampling
+    #     import threading
+    #     def _fire():
+    #         try:
+    #             if pulses and pulses > 1:
+    #                 laser.run_burst(high_v, width_s, period_s, edge_s, count=int(pulses))
+    #             elif continuous_duration_s and continuous_duration_s > 0:
+    #                 laser.start_continuous(high_v, width_s, period_s, edge_s)
+    #                 time.sleep(float(continuous_duration_s))
+    #                 laser.stop_output()
+    #             else:
+    #                 laser.send_single_pulse(high_v, width_s, edge_s, period_s)
+    #         except Exception:
+    #             pass
 
-        th = threading.Thread(target=_fire, daemon=True)
-        th.start()
+    #     th = threading.Thread(target=_fire, daemon=True)
+    #     th.start()
 
-        t0 = time.time()
-        while (time.time() - t0) < float(capture_time_s):
-            try:
-                i_val = keithley.measure_current()
-                i_val = i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
-            except Exception:
-                i_val = float('nan')
-            t_arr.append(time.time() - t0)
-            i_arr.append(i_val)
-            if sample_dt_s and sample_dt_s > 0:
-                time.sleep(max(0.0, float(sample_dt_s)))
+    #     t0 = time.time()
+    #     while (time.time() - t0) < float(capture_time_s):
+    #         try:
+    #             i_val = keithley.measure_current()
+    #             i_val = i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
+    #         except Exception:
+    #             i_val = float('nan')
+    #         t_arr.append(time.time() - t0)
+    #         i_arr.append(i_val)
+    #         if sample_dt_s and sample_dt_s > 0:
+    #             time.sleep(max(0.0, float(sample_dt_s)))
 
-        try:
-            keithley.set_voltage(0.0, 1e-3)
-            keithley.enable_output(False)
-        except Exception:
-            pass
+    #     try:
+    #         keithley.set_voltage(0.0, 1e-3)
+    #         keithley.enable_output(False)
+    #     except Exception:
+    #         pass
 
-        return t_arr, i_arr
+    #     return t_arr, i_arr
 
-    def run_laser_4bit_sequences(
-        self,
-        *,
-        keithley,
-        gen,
-        bit_period_s: float,
-        relax_between_bits_s: float,
-        relax_between_patterns_s: float,
-        repeats: int = 1,
-        trig_mode: str = "BUS",
-        bias_v: float = 0.2,
-        sample_dt_s: float = 0.001,
-    ) -> Tuple[List[float], List[float], List[str]]:
-        """Run through all 4-bit combinations (0000..1111) with relax times, capture current continuously.
+    # def run_laser_4bit_sequences(
+    #     self,
+    #     *,
+    #     keithley,
+    #     gen,
+    #     bit_period_s: float,
+    #     relax_between_bits_s: float,
+    #     relax_between_patterns_s: float,
+    #     repeats: int = 1,
+    #     trig_mode: str = "BUS",
+    #     bias_v: float = 0.2,
+    #     sample_dt_s: float = 0.001,
+    # ) -> Tuple[List[float], List[float], List[str]]:
+    #     """Run through all 4-bit combinations (0000..1111) with relax times, capture current continuously.
 
-        - For each pattern: for each bit, we either trigger (bit '1') or wait (bit '0') for one bit period.
-        - relax_between_bits_s: extra delay after each bit window
-        - relax_between_patterns_s: extra delay between patterns
-        - returns (t_arr, i_arr, pattern_log) where pattern_log records the active pattern segments
-        """
-        patterns = [f"{n:04b}" for n in range(16)]
-        t_arr: List[float] = []
-        i_arr: List[float] = []
-        log: List[str] = []
+    #     - For each pattern: for each bit, we either trigger (bit '1') or wait (bit '0') for one bit period.
+    #     - relax_between_bits_s: extra delay after each bit window
+    #     - relax_between_patterns_s: extra delay between patterns
+    #     - returns (t_arr, i_arr, pattern_log) where pattern_log records the active pattern segments
+    #     """
+    #     patterns = [f"{n:04b}" for n in range(16)]
+    #     t_arr: List[float] = []
+    #     i_arr: List[float] = []
+    #     log: List[str] = []
 
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(float(bias_v), 1e-3)
-        except Exception:
-            pass
+    #     try:
+    #         keithley.enable_output(True)
+    #         keithley.set_voltage(float(bias_v), 1e-3)
+    #     except Exception:
+    #         pass
 
-        t0 = time.time()
-        def sample_once():
-            try:
-                i_val = keithley.measure_current()
-                return i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
-            except Exception:
-                return float('nan')
+    #     t0 = time.time()
+    #     def sample_once():
+    #         try:
+    #             i_val = keithley.measure_current()
+    #             return i_val[1] if isinstance(i_val, (list, tuple)) and len(i_val) > 1 else float(i_val)
+    #         except Exception:
+    #             return float('nan')
 
-        for _ in range(max(1, int(repeats))):
-            for pat in patterns:
-                for b in pat:
-                    if b == '1' and gen is not None and hasattr(gen, 'is_connected') and gen.is_connected():
-                        if str(trig_mode).upper() == 'BUS':
-                            try: gen.trigger_now(1)
-                            except Exception: pass
-                    t_bit_start = time.time()
-                    while (time.time() - t_bit_start) < float(bit_period_s):
-                        t_arr.append(time.time() - t0)
-                        i_arr.append(sample_once())
-                        if sample_dt_s and sample_dt_s > 0:
-                            time.sleep(max(0.0, float(sample_dt_s)))
-                    if relax_between_bits_s and relax_between_bits_s > 0:
-                        t_relax_start = time.time()
-                        while (time.time() - t_relax_start) < float(relax_between_bits_s):
-                            t_arr.append(time.time() - t0)
-                            i_arr.append(sample_once())
-                            if sample_dt_s and sample_dt_s > 0:
-                                time.sleep(max(0.0, float(sample_dt_s)))
-                log.append(pat)
-                if relax_between_patterns_s and relax_between_patterns_s > 0:
-                    t_relax2 = time.time()
-                    while (time.time() - t_relax2) < float(relax_between_patterns_s):
-                        t_arr.append(time.time() - t0)
-                        i_arr.append(sample_once())
-                        if sample_dt_s and sample_dt_s > 0:
-                            time.sleep(max(0.0, float(sample_dt_s)))
+    #     for _ in range(max(1, int(repeats))):
+    #         for pat in patterns:
+    #             for b in pat:
+    #                 if b == '1' and gen is not None and hasattr(gen, 'is_connected') and gen.is_connected():
+    #                     if str(trig_mode).upper() == 'BUS':
+    #                         try: gen.trigger_now(1)
+    #                         except Exception: pass
+    #                 t_bit_start = time.time()
+    #                 while (time.time() - t_bit_start) < float(bit_period_s):
+    #                     t_arr.append(time.time() - t0)
+    #                     i_arr.append(sample_once())
+    #                     if sample_dt_s and sample_dt_s > 0:
+    #                         time.sleep(max(0.0, float(sample_dt_s)))
+    #                 if relax_between_bits_s and relax_between_bits_s > 0:
+    #                     t_relax_start = time.time()
+    #                     while (time.time() - t_relax_start) < float(relax_between_bits_s):
+    #                         t_arr.append(time.time() - t0)
+    #                         i_arr.append(sample_once())
+    #                         if sample_dt_s and sample_dt_s > 0:
+    #                             time.sleep(max(0.0, float(sample_dt_s)))
+    #             log.append(pat)
+    #             if relax_between_patterns_s and relax_between_patterns_s > 0:
+    #                 t_relax2 = time.time()
+    #                 while (time.time() - t_relax2) < float(relax_between_patterns_s):
+    #                     t_arr.append(time.time() - t0)
+    #                     i_arr.append(sample_once())
+    #                     if sample_dt_s and sample_dt_s > 0:
+    #                         time.sleep(max(0.0, float(sample_dt_s)))
 
-        try:
-            keithley.set_voltage(0.0, 1e-3)
-            keithley.enable_output(False)
-        except Exception:
-            pass
+    #     try:
+    #         keithley.set_voltage(0.0, 1e-3)
+    #         keithley.enable_output(False)
+    #     except Exception:
+    #         pass
 
-        return t_arr, i_arr, log
+    #     return t_arr, i_arr, log
 
 
