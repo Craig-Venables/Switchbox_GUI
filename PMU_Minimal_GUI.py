@@ -8,7 +8,7 @@ import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-from Equipment_Classes.SMU.Keithley4200A import Keithley4200A_PMUDualChannel
+from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
 
 
 class PMUMinimalGUI(tk.Tk):

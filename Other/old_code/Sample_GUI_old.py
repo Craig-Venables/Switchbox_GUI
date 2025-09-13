@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
 import json
 from Measurement_GUI import MeasurementGUI
-from Equipment_Classes.Multiplexer.Multiplexer_Class import MultiplexerController
+from Equipment.Multiplexers.Multiplexer.Multiplexer_Class import MultiplexerController
 # import pySwitchbox
 
 # Load sample configuration from JSON file

@@ -7,7 +7,7 @@ import numpy as np
 
 
 class AdvancedTestsGUI:
-    """Popup window for advanced/volatile memristor tests (SMU-first, PMU-later).
+    """Popup window for advanced/volatile memristor tests (SMU_AND_PMU-first, PMU-later).
 
     Expects a provider with:
       - measurement_service (MeasurementService)

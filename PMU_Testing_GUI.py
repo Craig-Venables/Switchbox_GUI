@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox
+import numpy as np
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -13,87 +14,20 @@ from matplotlib.figure import Figure
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from measurement_services import MeasurementService
-from Equipment_Classes.SMU.Keithley4200A import (
-    Keithley4200A_PMUDualChannel,
-    MemristorMeasurements,
-)
+from Measurments.measurement_services_smu import MeasurementService
+from Equipment.SMU_AND_PMU.Keithley4200A import (
+    Keithley4200A_PMUDualChannel)
+from Equipment.function_generator_manager import FunctionGeneratorManager
+from Measurments.measurement_services_pmu import MeasurementServicesPMU
 
 
-from Equipment_Classes.Moku.laser_controller import MonkuGoController, LaserFunctionGenerator
+from Equipment.Moku.laser_controller import MonkuGoController, LaserFunctionGenerator
 
 
 class Tooltip:
-    """Simple hover tooltip for Tk widgets."""
-    def __init__(self, widget, text: str, delay_ms: int = 400):
-        self.widget = widget
-        self.text = text
-        self.delay_ms = max(0, int(delay_ms))
-        self.tipwindow = None
-        self._after_id = None
-        try:
-            self.widget.bind("<Enter>", self._on_enter, add="+")
-            self.widget.bind("<Leave>", self._on_leave, add="+")
-            self.widget.bind("<Motion>", self._on_motion, add="+")
-        except Exception:
-            pass
-
-    def _on_enter(self, _event=None):
-        self._schedule()
-
-    def _on_leave(self, _event=None):
-        self._unschedule()
-        self._hide()
-
-    def _on_motion(self, _event=None):
-        # restart delay on motion to reduce flicker
-        self._unschedule()
-        self._schedule()
-
-    def _schedule(self):
-        try:
-            self._after_id = self.widget.after(self.delay_ms, self._show)
-        except Exception:
-            pass
-
-    def _unschedule(self):
-        try:
-            if self._after_id is not None:
-                self.widget.after_cancel(self._after_id)
-                self._after_id = None
-        except Exception:
-            pass
-
-    def _show(self):
-        if self.tipwindow or not self.text:
-            return
-        try:
-            x, y, cx, cy = self.widget.bbox("insert") if hasattr(self.widget, "bbox") else (0, 0, 0, 0)
-        except Exception:
-            x, y, cx, cy = 0, 0, 0, 0
-        try:
-            x = x + self.widget.winfo_rootx() + 20
-            y = y + self.widget.winfo_rooty() + cy + 20
-        except Exception:
-            return
-        try:
-            self.tipwindow = tw = tk.Toplevel(self.widget)
-            tw.wm_overrideredirect(True)
-            tw.wm_geometry(f"+{x}+{y}")
-            label = tk.Label(tw, text=self.text, justify=tk.LEFT,
-                             background="#ffffe0", relief=tk.SOLID, borderwidth=1,
-                             font=("TkDefaultFont", 8))
-            label.pack(ipadx=4, ipy=2)
-        except Exception:
-            self.tipwindow = None
-
-    def _hide(self):
-        try:
-            if self.tipwindow is not None:
-                self.tipwindow.destroy()
-                self.tipwindow = None
-        except Exception:
-            pass
+    """Disabled tooltip placeholder (removed)."""
+    def __init__(self, *args, **kwargs):
+        return
 
 class PMUTestingGUI(tk.Toplevel):
     """PMU and Laser generator testing window with granular controls and live previews."""
@@ -258,6 +192,8 @@ class PMUTestingGUI(tk.Toplevel):
         simple = tk.LabelFrame(ctrl, text="Simple PMU Tests", padx=5, pady=3)
         simple.grid(row=2, column=0, columnspan=4, sticky="nsew", padx=5, pady=3)
         simple.columnconfigure(3, weight=1)
+        # Keep a handle to hide later
+        self.simple_frame = simple
 
         tk.Label(simple, text="Test:").grid(row=0, column=0, sticky="w")
         self.simple_test = tk.StringVar(value="Read (memr_read)")
@@ -510,11 +446,7 @@ class PMUTestingGUI(tk.Toplevel):
         except Exception:
             pass
         # Initial state update
-        try:
-            self._update_gen_controls()
-            # Hide advanced by default
-            self._toggle_advanced(show=False)
-        except Exception: pass
+        # Skip generator state updates; Moku UI removed
 
         # ---------------- Plots ----------------
         # PMU figure (top-right area)
@@ -531,6 +463,8 @@ class PMUTestingGUI(tk.Toplevel):
         self.ax_pmu_gen.set_xlabel("t (s)"); self.ax_pmu_gen.set_ylabel("GEN V (V)")
         self.canvas_pmu = FigureCanvasTkAgg(self.fig_pmu, master=plotf_pmu)
         self.canvas_pmu.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        # Keep handle
+        self.plotf_pmu = plotf_pmu
         # Counter + sync toggle
         row2 = tk.Frame(plotf_pmu)
         row2.grid(row=1, column=0, sticky="ew", pady=(2,0))
@@ -549,10 +483,12 @@ class PMUTestingGUI(tk.Toplevel):
         self.ax_data_v.set_xlabel("t (s)"); self.ax_data_v.set_ylabel("V (V)")
         self.canvas_data = FigureCanvasTkAgg(self.fig_data, master=plotf_data)
         self.canvas_data.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.plotf_data = plotf_data
 
         # Combined tests controls (bottom row, spans both columns)
         combo = tk.LabelFrame(self, text="Experiments (PMU + Moku)", padx=5, pady=3)
-        combo.grid(row=2, column=0, columnspan=2, sticky="ew", padx=5, pady=3)
+        combo.grid_forget()
+        self.combo_frame = combo
         # Experiment selection
         row0 = tk.Frame(combo)
         row0.grid(row=0, column=0, columnspan=10, sticky="ew", pady=(0,5))
@@ -684,6 +620,23 @@ class PMUTestingGUI(tk.Toplevel):
         plotf_data.grid_columnconfigure(0, weight=1)
         plotf_data.grid_rowconfigure(0, weight=1)
 
+        # Hide legacy layouts per request
+        try:
+            self.simple_frame.grid_remove()
+        except Exception:
+            pass
+        try:
+            self.gen_frame.grid_remove()
+        except Exception:
+            pass
+        try:
+            self.combo_frame.grid_remove()
+        except Exception:
+            pass
+
+        # New minimal measurement/FG controls and preview plots
+        self._install_minimal_measurement_ui()
+
         # PMU dynamic UI/init
         self._init_pmu_mode_defaults()
         try:
@@ -695,6 +648,208 @@ class PMUTestingGUI(tk.Toplevel):
         self._update_enabled_controls()
         self.after(500, self._poll_context)
 
+    def _install_minimal_measurement_ui(self):
+        # FG connection
+        fg_conn = tk.LabelFrame(self, text="Function Generator Connection", padx=5, pady=3)
+        fg_conn.grid(row=1, column=0, sticky="ew", padx=5, pady=3)
+        fg_conn.columnconfigure(1, weight=1)
+        tk.Label(fg_conn, text="VISA Addr:").grid(row=0, column=0, sticky="w")
+        self.fg_addr_var = tk.StringVar(value="")
+        tk.Entry(fg_conn, textvariable=self.fg_addr_var, width=40).grid(row=0, column=1, sticky="ew", padx=(5,0))
+        tk.Button(fg_conn, text="Connect FG", command=self._connect_fg).grid(row=0, column=2, padx=5)
+        self.fg_status = tk.StringVar(value="FG: Disconnected")
+        tk.Label(fg_conn, textvariable=self.fg_status).grid(row=0, column=3, sticky="w")
+
+        # Measurements section
+        measf = tk.LabelFrame(self, text="Measurements", padx=6, pady=6)
+        measf.grid(row=2, column=0, sticky="nsew", padx=5, pady=3)
+        measf.columnconfigure(0, weight=1)
+        measf.columnconfigure(1, weight=1)
+
+        # PMU inputs
+        pmu_inputs = tk.LabelFrame(measf, text="PMU", padx=5, pady=5)
+        pmu_inputs.grid(row=0, column=0, sticky="nsew", padx=(0,6))
+        pmu_inputs.columnconfigure(1, weight=1)
+        tk.Label(pmu_inputs, text="Voltage (V):").grid(row=0, column=0, sticky="w")
+        self.in_pmu_voltage = tk.StringVar(value="0.25")
+        tk.Entry(pmu_inputs, textvariable=self.in_pmu_voltage, width=10).grid(row=0, column=1, sticky="ew")
+        tk.Label(pmu_inputs, text="Pulse width (s):").grid(row=1, column=0, sticky="w")
+        self.in_pmu_width = tk.StringVar(value="5e-05")
+        tk.Entry(pmu_inputs, textvariable=self.in_pmu_width, width=10).grid(row=1, column=1, sticky="ew")
+        tk.Label(pmu_inputs, text="# pulses:").grid(row=2, column=0, sticky="w")
+        self.in_pmu_npulses = tk.StringVar(value="100")
+        tk.Entry(pmu_inputs, textvariable=self.in_pmu_npulses, width=10).grid(row=2, column=1, sticky="ew")
+
+        # FG inputs
+        fg_inputs = tk.LabelFrame(measf, text="Function Generator", padx=5, pady=5)
+        fg_inputs.grid(row=0, column=1, sticky="nsew")
+        fg_inputs.columnconfigure(1, weight=1)
+        tk.Label(fg_inputs, text="Period (s):").grid(row=0, column=0, sticky="w")
+        self.in_fg_period = tk.StringVar(value="1.0")
+        tk.Entry(fg_inputs, textvariable=self.in_fg_period, width=12).grid(row=0, column=1, sticky="ew")
+        tk.Label(fg_inputs, text="Voltage (V):").grid(row=1, column=0, sticky="w")
+        self.in_fg_voltage = tk.StringVar(value="1.5")
+        tk.Entry(fg_inputs, textvariable=self.in_fg_voltage, width=12).grid(row=1, column=1, sticky="ew")
+        tk.Label(fg_inputs, text="Cycles:").grid(row=2, column=0, sticky="w")
+        self.in_fg_cycles = tk.StringVar(value="1")
+        tk.Entry(fg_inputs, textvariable=self.in_fg_cycles, width=12).grid(row=2, column=1, sticky="ew")
+
+        # Run/Preview
+        actions = tk.Frame(measf)
+        actions.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(8,0))
+        actions.columnconfigure([0,1,2], weight=1)
+        tk.Button(actions, text="Preview", command=self._preview_expected_waveforms).grid(row=0, column=0, padx=5)
+        tk.Button(actions, text="Run Single Laser Pulse", command=self._run_single_pulse).grid(row=0, column=1, padx=5)
+        tk.Button(actions, text="Close", command=self.destroy).grid(row=0, column=2, padx=5)
+
+        # Latest data preview: two figures (CH1, CH2)
+        plots = tk.LabelFrame(self, text="Latest Data Preview", padx=5, pady=5)
+        plots.grid(row=3, column=0, sticky="nsew", padx=5, pady=3)
+        plots.columnconfigure([0,1], weight=1)
+        self.fig_ch1 = Figure(figsize=(6, 3))
+        self.ax1_ch1 = self.fig_ch1.add_subplot(111)
+        self.ax2_ch1 = self.ax1_ch1.twinx()
+        self.canvas_ch1 = FigureCanvasTkAgg(self.fig_ch1, master=plots)
+        self.canvas_ch1.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.fig_ch2 = Figure(figsize=(6, 3))
+        self.ax1_ch2 = self.fig_ch2.add_subplot(111)
+        self.ax2_ch2 = self.ax1_ch2.twinx()
+        self.canvas_ch2 = FigureCanvasTkAgg(self.fig_ch2, master=plots)
+        self.canvas_ch2.get_tk_widget().grid(row=0, column=1, sticky="nsew")
+
+        # Runtime state
+        self.fg = None
+        self.ms_pmu = None
+
+    def _connect_fg(self):
+        try:
+            addr = self.fg_addr_var.get().strip()
+            if not addr:
+                messagebox.showwarning("FG", "Enter VISA address (e.g., USB0::...::INSTR)")
+                return
+            self.fg = FunctionGeneratorManager(fg_type="Siglent SDG1032X", address=addr, auto_connect=True)
+            self.fg_status.set("FG: Connected")
+        except Exception as exc:
+            self.fg_status.set("FG: Failed")
+            messagebox.showerror("FG", f"Connect failed: {exc}")
+
+    def _preview_expected_waveforms(self):
+        try:
+            v = float(self.in_pmu_voltage.get())
+            w = float(self.in_pmu_width.get())
+            n = int(self.in_pmu_npulses.get())
+            per_fg = float(self.in_fg_period.get())
+            v_fg = float(self.in_fg_voltage.get())
+            cycles = int(self.in_fg_cycles.get())
+        except Exception:
+            messagebox.showwarning("Preview", "Invalid inputs")
+            return
+
+        # Compute PMU period and active duration
+        per_pmu = max(4.0 * w, w)
+        active_s = n * per_pmu
+
+        # FG preview: rectangular pulse width = active_s, period = per_fg
+        t_fg = np.linspace(0, per_fg, 500)
+        y_fg = np.where(t_fg < min(active_s, per_fg), v_fg, 0.0)
+
+        # PMU preview: pulse train amplitude v, width w, period per_pmu
+        t_pmu = np.linspace(0, active_s, 1000)
+        y_pmu = np.zeros_like(t_pmu)
+        for k in range(n):
+            start = k * per_pmu
+            y_pmu = np.where((t_pmu >= start) & (t_pmu < start + w), v, y_pmu)
+
+        # Draw preview into existing PMU preview figure (top: PMU, bottom: FG)
+        try:
+            self.ax_pmu_v.clear(); self.ax_pmu_gen.clear()
+        except Exception:
+            pass
+        self.ax_pmu_v.plot(t_pmu, y_pmu, color='C0')
+        self.ax_pmu_v.set_xlabel('t (s)'); self.ax_pmu_v.set_ylabel('PMU V (V)')
+        self.ax_pmu_gen.plot(t_fg, y_fg, color='C1')
+        self.ax_pmu_gen.set_xlabel('t (s)'); self.ax_pmu_gen.set_ylabel('GEN V (V)')
+        self.canvas_pmu.draw()
+        try:
+            self._sync_time_axes()
+        except Exception:
+            pass
+
+    def _run_single_pulse(self):
+        if self.pmu_dc is None:
+            messagebox.showwarning("PMU", "Connect PMU first")
+            return
+        if self.fg is None:
+            messagebox.showwarning("FG", "Connect function generator first")
+            return
+        try:
+            v = float(self.in_pmu_voltage.get())
+            w = float(self.in_pmu_width.get())
+            n = int(self.in_pmu_npulses.get())
+            per_fg = float(self.in_fg_period.get())
+            v_fg = float(self.in_fg_voltage.get())
+            cycles = int(self.in_fg_cycles.get())
+        except Exception:
+            messagebox.showwarning("Run", "Invalid inputs")
+            return
+
+        per_pmu = max(4.0 * w, w)
+        pmu_params = {
+            "amplitude_v": v,
+            "base_v": 0.0,
+            "width_s": w,
+            "period_s": per_pmu,
+            "meas_start_pct": 0.1,
+            "meas_stop_pct": 0.9,
+            "source_channel": 1,
+            "hold_other_at_zero": True,
+            "force_fixed_ranges": True,
+            "v_meas_range": 2.0,
+            "i_meas_range": 200e-6,
+            "num_pulses": n,
+            "delay_s": None,
+        }
+        active_s = n * per_pmu
+        fg_params = {
+            "channel": 1,
+            "high_level_v": v_fg,
+            "low_level_v": 0.0,
+            "period_s": per_fg,
+            "pulse_width_s": active_s,
+            "duty_pct": min(0.99, active_s / per_fg) if per_fg > 0 else 0.5,
+            "rise_s": 16e-9,
+            "fall_s": 16e-9,
+            "mode": "NCYC",
+            "cycles": cycles,
+            "trigger_source": "EXT",
+        }
+
+        def worker():
+            try:
+                self.ms_pmu = MeasurementServicesPMU(pmu=self.pmu_dc, function_generator=self.fg)
+                df = self.ms_pmu.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
+            except Exception as exc:
+                self.after(0, lambda: messagebox.showerror("Run", str(exc)))
+                return
+            self.after(0, lambda: self._plot_result(df))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _plot_result(self, df: pd.DataFrame):
+        try:
+            t = df["t (s)"].to_numpy()
+            v = df["V (V)"].to_numpy()
+            i = df["I (A)"].to_numpy()
+        except Exception:
+            messagebox.showwarning("Plot", "Unexpected data format")
+            return
+        self.ax1_ch1.clear(); self.ax2_ch1.clear()
+        self.ax1_ch1.plot(t, v, color='C0', label='V')
+        self.ax2_ch1.plot(t, i, color='C3', label='I')
+        self.ax1_ch1.set_xlabel('Time (s)'); self.ax1_ch1.set_ylabel('V (V)'); self.ax2_ch1.set_ylabel('I (A)')
+        self.canvas_ch1.draw()
+
+
     # ---------------- PMU methods ----------------
 
     def connect_pmu(self):
@@ -704,7 +859,6 @@ class PMUTestingGUI(tk.Toplevel):
             if "|" not in addr:
                 addr = f"{addr}|PMU1"
             self.pmu_dc = Keithley4200A_PMUDualChannel(addr)
-            self.wrap = MemristorMeasurements(self.pmu_dc)
             self.status_var.set("PMU: Connected")
         except Exception as exc:
             messagebox.showerror("PMU", f"Connection failed: {exc}")
@@ -1587,7 +1741,7 @@ class PMUTestingGUI(tk.Toplevel):
     # ------- helpers: context/saving/UI -------
     def _run_decay(self):
         if self.pmu is None:
-            messagebox.showwarning("PMU", "Connect PMU/SMU first.")
+            messagebox.showwarning("PMU", "Connect PMU/SMU_AND_PMU first.")
             return
         try:
             bias = float(self.combo_bias.get())
@@ -1617,7 +1771,7 @@ class PMUTestingGUI(tk.Toplevel):
 
     def _run_4bit(self):
         if self.pmu is None:
-            messagebox.showwarning("PMU", "Connect PMU/SMU first.")
+            messagebox.showwarning("PMU", "Connect PMU/SMU_AND_PMU first.")
             return
         try:
             bitp = float(self.combo_bit.get())
@@ -1655,7 +1809,7 @@ class PMUTestingGUI(tk.Toplevel):
     def _run_experiment(self):
         try:
             if self.pmu is None:
-                messagebox.showwarning("PMU", "Connect PMU/SMU first.")
+                messagebox.showwarning("PMU", "Connect PMU/SMU_AND_PMU first.")
                 return
             if not self.laser:
                 messagebox.showwarning("Moku", "Connect Moku first.")
@@ -1781,7 +1935,7 @@ class PMUTestingGUI(tk.Toplevel):
         try:
             import json
             from tkinter.filedialog import askopenfilename
-            path = askopenfilename(filetypes=[["JSON","*.json"]], initialdir="Equipment_Classes/Moku")
+            path = askopenfilename(filetypes=[["JSON","*.json"]], initialdir="Equipment/Moku")
             if not path:
                 return
             with open(path, 'r', encoding='utf-8') as f:

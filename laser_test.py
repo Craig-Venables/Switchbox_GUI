@@ -1,6 +1,6 @@
-from Equipment_Classes.SMU.Keithley4200A import Keithley4200A_PMUDualChannel
-from Equipment_Classes.function_generator_manager import FunctionGeneratorManager
-from measurement_services_pmu import MeasurementServicesPMU
+from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
+from Equipment.function_generator_manager import FunctionGeneratorManager
+from Measurments.measurement_services_pmu import MeasurementServicesPMU
 VISA_RESOURCE = "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR"
 
 pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
@@ -47,12 +47,12 @@ fg_params = {
     we may be able to set a minus delay on the system instead? not sure!
 """
 
-df = ms_pmu.Measure_at_voltage_with_laser_Using_trigger_out_pmu(
+df = ms_pmu.Single_Laser_Pulse_with_read(
     pmu_peramiter=pmu_params,
     fg_peramiter=fg_params,
     timeout_s=15.0,
 )
 # maybe add in a way to check range on that first pulse, pulse once, find current and range and set the range based on that.
-#df = coord.Measure_at_voltage_with_laser_Using_trigger_out_pmu(timeout_s=15.0)
+#df = coord.Single_Laser_Pulse_with_read(timeout_s=15.0)
 
 print(df.head())
