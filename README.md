@@ -137,8 +137,77 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
 ## Signal Messaging
 - Optional Telegram bot integration to drive interactive flows (start/continue tests, send plots/images).
 
-## PMU Testing
-- In the works. See `Equipment_Classes/SMU/Keithley4200A.py` (PMU helpers) and `PMU_Testing_GUI.py`.
+## PMU System (current capabilities)
+
+- Controller: `Equipment/SMU_AND_PMU/Keithley4200A.py` (`Keithley4200A_PMUDualChannel` low-level helper)
+- Service: `Measurments/measurement_services_pmu.py` (`MeasurementServicesPMU` high-level API)
+- GUI: `PMU_Testing_GUI.py` (connect PMU + function generator, preview waveforms, run measurement, view results)
+
+- Reference: see `Equipment/SMU_AND_PMU/PMU_Step_Sweep_Reference.md` for PMU step vs sweep and sweep types.
+
+### Available measurement
+- Single Laser Pulse with read
+  - PMU sources a pulse train; TRIG OUT drives the function generator (FG) which emits a laser pulse.
+  - Enforced checks: FG pulse_width_s ≥ PMU active time; safety dialogs require laser OFF (before arming) and ON (before run).
+  - Parameters:
+    - PMU: amplitude_v, width_s, period_s (or auto via width_s), num_pulses, ranges, measurement window.
+    - FG: period_s, high_level_v, cycles, trigger_source=EXT; pulse_width_s auto set to match PMU active time.
+  - API entrypoint: `MeasurementServicesPMU.Single_Laser_Pulse_with_read(pmu_params, fg_params)`
+
+#### Parameter summary
+
+PMU parameters
+
+| Name | Description |
+|------|-------------|
+| amplitude_v | Pulse amplitude (V) on source channel |
+| width_s | Pulse width (s) |
+| period_s | Pulse-to-pulse period (s) |
+| num_pulses | Number of pulses in the burst |
+| v_meas_range | Voltage measurement range (V) |
+| i_meas_range | Current measurement range (A) |
+| meas_start_pct | Start of capture window (fraction of width) |
+| meas_stop_pct | End of capture window (fraction of width) |
+
+FG parameters
+
+| Name | Description |
+|------|-------------|
+| channel | Output channel index (e.g., 1) |
+| period_s | Generator period (s) |
+| pulse_width_s | Generator pulse width (s); auto-set to PMU active time |
+| high_level_v | Generator high level (V) |
+| cycles | Burst cycles (e.g., 1 for single) |
+| trigger_source | Should be `EXT` to use PMU TRIG OUT |
+
+### Preview and results
+- PMU preview figure (in GUI):
+  - Top: expected PMU voltage vs time
+  - Bottom: expected FG output vs time
+- Latest Data Preview (GUI):
+  - Plots acquired data (time vs V and I) separate from the preview.
+  - CH1 displayed today; CH2 plotting is planned.
+
+### Utilities and helpers
+- Runtime estimator: `estimate_runtime_from_params(pmu_params, fg_params)` returns a breakdown including `pmu_active_s` and `total_estimate_s`.
+- Low-level PMU methods (via `Keithley4200A_PMUDualChannel`):
+  - `prepare_measure_at_voltage(...)`, `start()`, `wait(...)`, `fetch(...)`
+  - Trigger helpers: `set_trigger_output(...)`, `set_trigger_polarity(...)`
+
+### Minimal example (script)
+```python
+from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
+from Equipment.function_generator_manager import FunctionGeneratorManager
+from Measurments.measurement_services_pmu import MeasurementServicesPMU
+
+pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
+fg = FunctionGeneratorManager(fg_type="Siglent SDG1032X", address="USB0::...::INSTR", auto_connect=True)
+ms = MeasurementServicesPMU(pmu=pmu, function_generator=fg)
+
+pmu_params = {"amplitude_v": 0.25, "width_s": 50e-6, "period_s": 200e-6, "num_pulses": 100}
+fg_params  = {"channel": 1, "period_s": 1.0, "high_level_v": 1.5, "cycles": 1, "trigger_source": "EXT"}
+df = ms.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
+```
 
 ## Code Map (where to look)
 

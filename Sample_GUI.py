@@ -1,3 +1,10 @@
+"""Sample GUI
+
+Tkinter-based interface to browse/select devices on an image map, manage
+device selections, control multiplexer routing, and launch the
+`MeasurementGUI` for measurements on the selected subset.
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import Image, ImageTk
@@ -6,18 +13,36 @@ import threading
 import queue
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+
 from Measurement_GUI import MeasurementGUI
-from Equipment_Classes.Multiplexer.Multiplexer_Class import MultiplexerController
-from tests.config import Thresholds
-from tests.driver import MeasurementDriver
-from tests.runner import TestRunner
-from tests.preferences import load_thresholds, save_thresholds
+from Equipment.Multiplexers.Multiplexer_10_OUT.Multiplexer_Class import MultiplexerController
+
 try:
-    from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller
+    from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
 except Exception:
     Keithley2400Controller = None
 
-BASE_DIR = Path(__file__).resolve().parent
+if TYPE_CHECKING:
+    # Placeholders for optional typing-only dependencies
+    from typing import Protocol
+    class Thresholds(Protocol):
+        probe_voltage_v: float
+        probe_duration_s: float
+        probe_sample_hz: float
+        working_current_a: float
+        forming_voltages_v: List[float]
+        forming_compliance_a: float
+        forming_cooldown_s: float
+        hyst_budget: float
+        hyst_profiles: List[Any]
+        endurance_cycles: int
+        pulse_width_s: float
+        retention_times_s: List[float]
+        max_voltage_v: float
+        max_compliance_a: float
+
+BASE_DIR: Path = Path(__file__).resolve().parent
 
 # Load sample configuration from JSON file
 sample_config = {
@@ -25,7 +50,7 @@ sample_config = {
         "sections": {"A": True, "B": True, "C": False, "D": True, "E": True, "F": False, "G": True, "H": True,
                      "I": True, "J": True, "K": True, "L": True},
         "devices": [str(i) for i in range(1, 11)]},
-    "Multiplexer": {
+    "Multiplexer_10_OUT": {
         "sections": {"A": True},
         "devices": [str(i) for i in range(1, 11)]}}
 
@@ -33,7 +58,7 @@ multiplexer_types = {'Pyswitchbox': {}, 'Electronic_Mpx': {}}
 
 
 # Function to load device mapping from JSON file
-def load_device_mapping(filename=None):
+def load_device_mapping(filename: Optional[str] = None) -> Dict[str, Any]:
     try:
         mapping_path = (BASE_DIR / "Json_Files" / "pin_mapping.json") if filename is None else Path(filename)
         with mapping_path.open("r", encoding="utf-8") as file:
@@ -46,36 +71,37 @@ def load_device_mapping(filename=None):
         return {}
 
 
-pin_mapping = load_device_mapping()
+pin_mapping: Dict[str, Any] = load_device_mapping()
 
 # Load device mapping
 with (BASE_DIR / "Json_Files" / "mapping.json").open("r", encoding="utf-8") as f:
-    device_maps = json.load(f)
+    device_maps: Dict[str, Any] = json.load(f)
 
 
 class SampleGUI:
-    def __init__(self, root):
+    """Device selection and routing GUI."""
+    def __init__(self, root: tk.Misc) -> None:
         self.root = root
         self.root.title("Device Viewer")
         self.root.geometry("1000x650")
 
         # Defaults
-        self.multiplexer_type = "Pyswitchbox"
-        self.current_device_map = "Cross_bar"
-        self.pyswitchbox = True
-        self.Electronic_Mpx = False
+        self.multiplexer_type: str = "Pyswitchbox"
+        self.current_device_map: str = "Cross_bar"
+        self.pyswitchbox: bool = True
+        self.Electronic_Mpx: bool = False
         self.update_device_type(self.current_device_map)
-        self.current_index = 0  # Index of currently selected device
+        self.current_index: int = 0  # Index of currently selected device
 
         # Selected devices tracking
-        self.selected_devices = set()  # Store selected device names
-        self.selected_indices = []  # Store indices of selected devices
-        self.current_selected_index = 0  # Index within selected devices
+        self.selected_devices: Set[str] = set()  # Store selected device names
+        self.selected_indices: List[int] = []  # Store indices of selected devices
+        self.current_selected_index: int = 0  # Index within selected devices
 
         # Flags
         self.pyswitchbox = True
         self.Electronic_Mpx = False
-        self.measurement_window = False
+        self.measurement_window: bool = False
 
         # print(self.device_maps_list)
         # print(self.device_list)
@@ -174,8 +200,8 @@ class SampleGUI:
         # Placeholder for clicked points
         # self.electrode_points = []
 
-    def create_device_selection_frame(self):
-        """Create a frame with checkboxes for device selection"""
+    def create_device_selection_frame(self) -> None:
+        """Create a frame with checkboxes for device selection."""
         # Main frame for device selection
         selection_frame = tk.LabelFrame(self.root, text="Device Selection", padx=5, pady=5)
         selection_frame.grid(row=0, column=3, rowspan=6, padx=10, sticky='nsew')
@@ -204,8 +230,8 @@ class SampleGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        self.device_checkboxes = {}
-        self.checkbox_vars = {}
+        self.device_checkboxes: Dict[str, tk.Checkbutton] = {}
+        self.checkbox_vars: Dict[str, tk.BooleanVar] = {}
 
         # Status label
         self.selection_status = tk.Label(selection_frame, text="Selected: 0/0")
@@ -213,8 +239,8 @@ class SampleGUI:
 
         self.scrollable_frame = scrollable_frame
 
-    def update_device_checkboxes(self):
-        """Update the device checkboxes based on current device list"""
+    def update_device_checkboxes(self) -> None:
+        """Update the device checkboxes based on current device list."""
         # Clear existing checkboxes
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
@@ -235,25 +261,25 @@ class SampleGUI:
 
         self.update_selected_devices()
 
-    def select_all_devices(self):
+    def select_all_devices(self) -> None:
         """Select all devices"""
         for var in self.checkbox_vars.values():
             var.set(True)
         self.update_selected_devices()
 
-    def deselect_all_devices(self):
+    def deselect_all_devices(self) -> None:
         """Deselect all devices"""
         for var in self.checkbox_vars.values():
             var.set(False)
         self.update_selected_devices()
 
-    def invert_selection(self):
+    def invert_selection(self) -> None:
         """Invert device selection"""
         for var in self.checkbox_vars.values():
             var.set(not var.get())
         self.update_selected_devices()
 
-    def update_selected_devices(self):
+    def update_selected_devices(self) -> None:
         """Update the list of selected devices"""
         self.selected_devices.clear()
         self.selected_indices.clear()
@@ -279,7 +305,7 @@ class SampleGUI:
         # Log selection
         self.log_terminal(f"Selected devices: {', '.join(sorted(self.selected_devices))}")
 
-    def update_canvas_selection_highlights(self):
+    def update_canvas_selection_highlights(self) -> None:
         """Update visual indicators on canvas for selected devices"""
         # Remove existing selection highlights
         self.canvas.delete("selection")
@@ -302,7 +328,7 @@ class SampleGUI:
                         outline="green", width=1, tags="selection"
                     )
 
-    def canvas_ctrl_click(self, event):
+    def canvas_ctrl_click(self, event: Any) -> None:
         """Handle Ctrl+Click for device selection toggle"""
         if hasattr(self, 'original_image'):
             orig_width, orig_height = self.original_image.size
@@ -323,7 +349,7 @@ class SampleGUI:
                         self.update_selected_devices()
                     break
 
-    def update_multiplexer(self, event):
+    def update_multiplexer(self, event: Optional[Any]) -> None:
         self.multiplexer_type = self.Multiplexer_type_var.get()
         print("Multiplexer set to:", self.multiplexer_type)
         if self.multiplexer_type == "Pyswitchbox":
@@ -336,17 +362,17 @@ class SampleGUI:
         else:
             print("please check input")
 
-    def load_image(self, sample):
+    def load_image(self, sample: str) -> None:
         """ Load image into canvas set up to add others later simply """
         if sample == 'Cross_bar':
-            sample = BASE_DIR / "Sample_Infomation" / "memristor.png"
+            sample = BASE_DIR /"Helpers" /"Sample_Infomation" / "memristor.png"
             self.original_image = Image.open(sample)
             img = self.original_image.resize((400, 400))
             self.tk_img = ImageTk.PhotoImage(img)
             self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
 
-        if sample == 'Multiplexer':
-            sample = BASE_DIR / "Sample_Infomation" / "Multiplexer.jpg"
+        if sample == 'Multiplexer_10_OUT':
+            sample = BASE_DIR / "Sample_Infomation" / "Multiplexer_10_OUT.jpg"
             self.original_image = Image.open(sample)
             img = self.original_image.resize((400, 400))
             self.tk_img = ImageTk.PhotoImage(img)
@@ -355,7 +381,7 @@ class SampleGUI:
         # Redraw selection highlights
         self.update_canvas_selection_highlights()
 
-    def update_device_type(self, current_device_map):
+    def update_device_type(self, current_device_map: str) -> None:
         # all maps from dict
         self.current_map_name = current_device_map
         self.device_mapping = device_maps[current_device_map]
@@ -366,7 +392,7 @@ class SampleGUI:
         if hasattr(self, 'device_checkboxes'):
             self.update_device_checkboxes()
 
-    def update_dropdowns(self, event):
+    def update_dropdowns(self, event: Optional[Any]) -> None:
         sample = self.sample_type_var.get()
         print("Sample chosen:", sample)
         self.update_device_type(sample)
@@ -387,7 +413,7 @@ class SampleGUI:
             self.load_image(sample)
             self.device = self.device_var.get()
 
-    def prev_device(self):
+    def prev_device(self) -> None:
         """Move to the previous device in the selected devices list"""
         if not self.selected_indices:
             self.log_terminal("No devices selected")
@@ -414,7 +440,7 @@ class SampleGUI:
         # Update the highlight
         self.update_highlight(new_device)
 
-    def next_device(self):
+    def next_device(self) -> None:
         """Move to the next device in the selected devices list"""
         if not self.selected_indices:
             self.log_terminal("No devices selected")
@@ -441,7 +467,7 @@ class SampleGUI:
         # Update the highlight
         self.update_highlight(new_device)
 
-    def canvas_click(self, event):
+    def canvas_click(self, event: Any) -> None:
         mapname = self.current_map_name
         #print(mapname)
         #print(self.current_map_map)
@@ -477,7 +503,7 @@ class SampleGUI:
                     outline="red", width=2, tags="highlight"
                 )
 
-    def update_highlight(self, device):
+    def update_highlight(self, device: str) -> None:
         # Clear any existing highlights
         self.canvas.delete("highlight")
 
@@ -498,7 +524,7 @@ class SampleGUI:
             # Draw a new rectangle
             self.canvas.create_rectangle(x_min, y_min, x_max, y_max, outline="red", width=2, tags="highlight")
 
-    def open_measurement_window(self):
+    def open_measurement_window(self) -> None:
         if not self.measurement_window:
             sample_type = self.sample_type_var.get()
             section = self.section_var.get()
@@ -520,14 +546,14 @@ class SampleGUI:
         else:
             self.measuremnt_gui.bring_to_top()
 
-    def update_info_box(self, event=None):
+    def update_info_box(self, event: Optional[Any] = None) -> None:
         selected_sample = self.sample_type_var.get()
         selected_section = self.section_var.get()
         selected_device = self.device_var.get()
         device_text = f"Current Device: {selected_sample} - {selected_section} - {selected_device}"
         self.info_box.config(text=device_text)
 
-    def change_relays(self):
+    def change_relays(self) -> None:
         """Change relays for the current device"""
         current_device = self.device_list[self.current_index]
 
@@ -565,10 +591,10 @@ class SampleGUI:
             self.mpx.select_channel(device_number)
 
             print("Electronic_Mpx")
-        elif self.multiplexer_type == "Multiplexer":
-            print("Multiplexer")
+        elif self.multiplexer_type == "Multiplexer_10_OUT":
+            print("Multiplexer_10_OUT")
 
-    def clear_canvas(self):
+    def clear_canvas(self) -> None:
         self.canvas.delete("all")
         self.log_terminal("Canvas cleared")
         # Reload the image and selection highlights
@@ -577,7 +603,7 @@ class SampleGUI:
             if sample:
                 self.load_image(sample)
 
-    def log_terminal(self, message):
+    def log_terminal(self, message: str) -> None:
         self.terminal_output.config(state=tk.NORMAL)
         self.terminal_output.insert(tk.END, message + "\n")
         self.terminal_output.config(state=tk.DISABLED)

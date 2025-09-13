@@ -1,3 +1,30 @@
+"""Measurement GUI
+
+Module summary:
+This module implements a Tkinter-based GUI used to control IV/PMU/SMU
+measurements for arrays of devices. It provides:
+- Connection helpers for instrument managers (SMU, PSU, temperature controllers)
+- A centralized `MeasurementService` integration for performing IV sweeps,
+  pulsed measurements, endurance/retention tests, and transient captures
+- Real-time plotting using matplotlib embedded in Tkinter windows
+- Utilities for saving measurement data, creating summary plots and
+  sending results via Telegram.
+
+Key components:
+- `SMUAdapter`: small adapter layer that exposes a common minimal interface
+  (set_voltage, measure_current, enable_output, ...) wrapping an IV controller
+  manager instance. Used by the automated tester and other consumers that
+  expect a simple instrument API.
+- `MeasurementGUI`: the main window/class that constructs the Tkinter layout,
+  handles user inputs, routes measurements to `MeasurementService`, updates
+  live plots, and saves results.
+
+Notes:
+- The file intentionally routes most measurement work to `MeasurementService`
+  to keep GUI logic separate from instrument/measurement details.
+- Docstrings and inline comments focus on clarifying the intent of complex
+  functions and public APIs rather than literal line-by-line explanation.
+"""
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import numpy as np
@@ -19,22 +46,42 @@ from PMU_Testing_GUI import PMUTestingGUI
 
 from telegram import PassportData
 
-from Equipment_Classes.SMU.Keithley2400 import Keithley2400Controller  # Import the Keithley class
-from Equipment_Classes.iv_controller_manager import IVControllerManager
-from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
-from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
+from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller  # Import the Keithley class
+from Equipment.iv_controller_manager import IVControllerManager
+from Equipment.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
+from Equipment.temperature_controller_manager import TemperatureControllerManager
 #from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
-from measurement_services import MeasurementService, VoltageRangeMode
-from typing import Optional
-from tests.config import Thresholds
-from tests.runner import TestRunner
-from tests.driver import MeasurementDriver
-from tests.preferences import load_thresholds, save_thresholds
+from Measurments.measurement_services_smu import MeasurementService, VoltageRangeMode
+from typing import Optional, Any, Callable, Dict, List, Tuple, Union
 
-from Check_Connection import CheckConnection
+from Check_Connection_GUI import CheckConnection
 from TelegramBot import TelegramBot
-from Equipment_Classes.TempControllers.OxfordITC4 import OxfordITC4
-from automated_memristor_tester import AutomatedTesterGUI
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Optional-only imports for typing; avoids runtime deps if unavailable
+    from Advanced_tests_GUI import AdvancedTestsGUI  # noqa: F401
+    from PMU_Testing_GUI import PMUTestingGUI as _PMUTestingGUIType  # noqa: F401
+    from Automated_tester_GUI import AutomatedTesterGUI as _AutomatedTesterGUIType  # noqa: F401
+    # Test framework types
+    from typing import Protocol
+    class _Thresholds(Protocol):
+        probe_voltage_v: float
+        probe_duration_s: float
+        probe_sample_hz: float
+        working_current_a: float
+        forming_voltages_v: List[float]
+        forming_compliance_a: float
+        forming_cooldown_s: float
+        hyst_budget: float
+        hyst_profiles: List[Any]
+        endurance_cycles: int
+        pulse_width_s: float
+        retention_times_s: List[float]
+        max_voltage_v: float
+        max_compliance_a: float
+from Equipment.TempControllers.OxfordITC4 import OxfordITC4
+from Automated_tester_GUI import AutomatedTesterGUI
 
 # Set logging level to WARNING (hides INFO messages)
 logging.getLogger("pymeasure").setLevel(logging.WARNING)
@@ -42,10 +89,24 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 class SMUAdapter:
-	"""Adapter to expose the IVControllerManager with the interface expected by
-	AutomatedTesterGUI/AutoTester (set_voltage, measure_current, enable_output, etc.)."""
+	"""Light adapter wrapping an IV controller manager to a minimal SMU-like API.
 
-	def __init__(self, iv_manager):
+	This adapter provides a small, stable surface for consumers that expect a
+	simple instrument object with methods such as `set_voltage`, `set_current`,
+	`measure_current`, `measure_voltage`, `enable_output` and `close`.
+
+	Attributes:
+		_iv: underlying IV controller/manager instance (typed object)
+		device: optional device identifier exposed by some instrument drivers
+
+	Notes:
+		The adapter performs small normalization steps (e.g. tuple -> float)
+		so callers can assume simple return types. A NotImplementedError is raised
+		when a fast-path API (like `run_tsp_sweep`) is not implemented by the
+		underlying instrument.
+	"""
+
+	def __init__(self, iv_manager: Any) -> None:
 		self._iv = iv_manager
 		# For ad-hoc TSP fallback, expose an attribute named 'device' if available
 		self.device = None
@@ -59,13 +120,13 @@ class SMUAdapter:
 	def safe_init(self) -> None:
 		return None
 
-	def set_voltage(self, voltage: float, Icc: float = None) -> None:
+	def set_voltage(self, voltage: float, Icc: Optional[float] = None) -> None:
 		if Icc is None:
 			# Use a reasonable default if not specified
 			Icc = 1e-3
 		return self._iv.set_voltage(voltage, Icc)
 
-	def set_current(self, current: float, Vcc: float = None) -> None:
+	def set_current(self, current: float, Vcc: Optional[float] = None) -> None:
 		if Vcc is None:
 			Vcc = 10.0
 		return self._iv.set_current(current, Vcc)
@@ -102,8 +163,8 @@ class SMUAdapter:
 	# Optional fast-path: if underlying controller implements run_tsp_sweep, expose it
 	def run_tsp_sweep(self, start_v: float, stop_v: float, step_v: float,
 					 icc_start: float, icc_factor: float = 10.0,
-					 icc_max: float = None, delay_s: float = 0.005,
-					 burn_abort_A: float = None):
+					 icc_max: Optional[float] = None, delay_s: float = 0.005,
+					 burn_abort_A: Optional[float] = None) -> Any:
 		inst = getattr(self._iv, 'instrument', None)
 		if inst is not None and hasattr(inst, 'run_tsp_sweep'):
 			return inst.run_tsp_sweep(start_v=start_v, stop_v=stop_v, step_v=step_v,
@@ -114,7 +175,41 @@ class SMUAdapter:
 
 
 class MeasurementGUI:
-    def __init__(self, master, sample_type, section, device_list, sample_gui):
+    """Graphical control panel for running and monitoring measurements.
+
+    This class builds a Tkinter window that allows the user to configure and
+    run a broad range of measurements (IV sweeps, pulsed IV, endurance,
+    retention, transient captures, etc.) using an underlying
+    `MeasurementService` and instrument managers (SMU/PSU/Temp).
+
+    Main responsibilities:
+    - Construct the GUI layout (connection, sweep parameters, plots, logs)
+    - Translate GUI parameters into calls to `MeasurementService`
+    - Manage instrument connections via `IVControllerManager`, PSU and
+      temperature controller managers
+    - Provide lightweight helpers for saving, plotting and messaging
+
+    Attributes (selected):
+        master (tk.Toplevel): The GUI top-level window container.
+        sample_gui: reference to the sample-selection GUI (provides device list/index).
+        device_list (list[str]): list of device ids managed by the GUI.
+        measurement_service (MeasurementService): central engine performing measurements.
+        keithley: underlying SMU/IV controller manager instance (or None).
+        psu, temp_controller: optional external device managers.
+
+    Note: many instance attributes are created at runtime and are documented
+    inline where they are defined to avoid a huge upfront attribute block.
+    """
+    def __init__(self, master: tk.Misc, sample_type: str, section: str,
+                 device_list: List[str], sample_gui: Any) -> None:
+        # Commonly accessed attributes with explicit types for clarity
+        self.keithley: Optional[Any] = None
+        self.psu: Optional[Any] = None
+        self.temp_controller: Optional[Any] = None
+        self.itc: Optional[Any] = None
+        self.lakeshore: Optional[Any] = None
+        self.device_list: List[str] = device_list
+        self.sample_gui: Any = sample_gui
         self.measurment_number = None
         self.sweep_num = None
         self.master = tk.Toplevel(master)
@@ -254,23 +349,60 @@ class MeasurementGUI:
 
 
 
-    def cleanup(self):
-        self.keithley.shutdown()
-        # todo send comand to temp if connected to cool down to 0
-        if self.itc_connected:
-            self.itc.set_temperature(0) # set temp controller tp 0 deg
-        if self.psu_connected:
-            self.psu.disable_channel(1)
-            self.psu.disable_channel(2)
-            self.psu.close()
+    def cleanup(self) -> None:
+        """Attempt to gracefully shutdown connected instruments and clear flags.
+
+        This method is registered with `atexit` to ensure the SMU/PSU/temp
+        controllers are left in a safe state when the GUI exits. It performs
+        best-effort cleanup and swallows exceptions so shutdown proceeds.
+        """
+
+        #  self.keithley.shutdown()
+        # # todo send comand to temp if connected to cool down to 0
+        # if self.itc_connected:
+        #     self.itc.set_temperature(0) # set temp controller tp 0 deg
+        # if self.psu_connected:
+        #     self.psu.disable_channel(1)
+        #     self.psu.disable_channel(2)
+        #     self.psu.close()
+        try:
+            if getattr(self, 'keithley', None):
+                self.keithley.shutdown()
+        except Exception:
+            # Don't raise during process exit; just log to stdout where possible
+            print("Warning: keithley.shutdown() failed during cleanup")
+
+        # If a temperature controller is connected, try to set it to 0°C
+        try:
+            if getattr(self, 'itc_connected', False) and getattr(self, 'itc', None):
+                self.itc.set_temperature(0)
+        except Exception:
+            print("Warning: could not reset temperature controller during cleanup")
+
+        # Disable and close PSU channels if a PSU was connected
+        try:
+            if getattr(self, 'psu_connected', False) and getattr(self, 'psu', None):
+                self.psu.disable_channel(1)
+                self.psu.disable_channel(2)
+                self.psu.close()
+        except Exception:
+            print("Warning: PSU cleanup failed")
+
         print("safely turned everything off")
+        # Reset runtime test flags
         self.tests_running = False
         self.abort_tests_flag = False
 
     ###################################################################
     # Frames
     ###################################################################
-    def top_banner(self, parent):
+    def top_banner(self, parent: tk.Misc) -> None:
+        """Build the top banner: title and live status labels.
+
+        Displays the app title and periodically-updated labels showing the
+        currently selected device, most recent voltage sample, and loop/sweep
+        number. Also includes quick-access buttons.
+        """
         top_frame = tk.LabelFrame(parent, text="", padx=10, pady=10)
         top_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(10, 5))
         top_frame.columnconfigure(0, weight=1)
@@ -314,7 +446,8 @@ class MeasurementGUI:
         self._status_updates_active = True
         self.master.after(250, self._status_update_tick)
 
-    def log_test(self, msg: str):
+    def log_test(self, msg: str) -> None:
+        """Append a line to the tests log widget or stdout if unavailable."""
         try:
             if hasattr(self, 'tests_log') and self.tests_log:
                 self.tests_log.config(state=tk.NORMAL)
@@ -326,18 +459,30 @@ class MeasurementGUI:
         except Exception:
             print(msg)
     
-    def open_autotest(self):
+    def open_autotest(self) -> None:
+        """Open the Automated Tester window bound to this GUI.
+
+        This prepares a simple `SMUAdapter` for the automated tester and
+        provides a callback that advances the currently-selected device in the
+        parent GUI. Any connection errors are reported to the user.
+        """
         try:
             if not self.keithley:
                 self.connect_keithley()
             if not self.keithley:
                 messagebox.showerror("Instrument", "Keithley not connected.")
                 return
+
             adapter = SMUAdapter(self.keithley)
+
             # Provide section and device helpers to the automated tester
-            current_section_name = self.section  # already set in this GUI
-            # next-device callback: advance the GUI's device index and return the next device id string
+            current_section_name = self.section
+
             def get_next_device():
+                """Advance to the next device and update display labels.
+
+                Returns the new device id string or None on error.
+                """
                 try:
                     # Advance internal index, wrap safely
                     self.current_index = (self.current_index + 1) % max(1, len(self.device_list))
@@ -358,27 +503,44 @@ class MeasurementGUI:
                 except Exception:
                     return None
 
-            AutomatedTesterGUI(self.master,
-                                instrument=adapter,
-                                current_section=current_section_name,
-                                device_list=self.device_list,
-                                get_next_device_cb=get_next_device,
-                                current_device_id=self.current_device,
-                                host_gui=self)
+            AutomatedTesterGUI(
+                self.master,
+                instrument=adapter,
+                current_section=current_section_name,
+                device_list=self.device_list,
+                get_next_device_cb=get_next_device,
+                current_device_id=self.current_device,
+                host_gui=self,
+            )
         except Exception as e:
             messagebox.showerror("AutoTester", str(e))
 
 
     # ---------------- Telegram helpers -----------------
     def _bot_enabled(self) -> bool:
+        """Return True if Telegram messaging is configured and enabled.
+
+        Checks that the GUI toggle is set and that token/chat-id strings are
+        present.
+        """
         try:
-            return bool(getattr(self, 'get_messaged_var', None) and self.get_messaged_var.get() == 1 \
-                        and getattr(self, 'token_var', None) and getattr(self, 'chatid_var', None) \
-                        and self.token_var.get().strip() and self.chatid_var.get().strip())
+            return bool(
+                getattr(self, 'get_messaged_var', None)
+                and self.get_messaged_var.get() == 1
+                and getattr(self, 'token_var', None)
+                and getattr(self, 'chatid_var', None)
+                and self.token_var.get().strip()
+                and self.chatid_var.get().strip()
+            )
         except Exception:
             return False
 
-    def _get_bot(self):
+    def _get_bot(self) -> Optional[Any]:
+        """Return a cached `TelegramBot` instance or None.
+
+        The bot is created lazily on first use. Errors creating the bot result
+        in None being returned so callers can continue without messaging.
+        """
         if not self._bot_enabled():
             return None
         if self._telegram_bot is None:
@@ -388,7 +550,12 @@ class MeasurementGUI:
                 self._telegram_bot = None
         return self._telegram_bot
 
-    def _send_bot_message(self, text: str):
+    def _send_bot_message(self, text: str) -> None:
+        """Send a simple text message via the configured Telegram bot.
+
+        This is a safe wrapper that ignores messaging errors to avoid
+        disrupting the GUI flow.
+        """
         bot = self._get_bot()
         if bot:
             try:
@@ -396,7 +563,11 @@ class MeasurementGUI:
             except Exception:
                 pass
 
-    def _send_bot_image(self, image_path: str, caption: str = ""):
+    def _send_bot_image(self, image_path: str, caption: str = "") -> None:
+        """Send an image (path) with optional caption via Telegram.
+
+        Errors are swallowed so missing/invalid image paths do not crash the GUI.
+        """
         bot = self._get_bot()
         if bot:
             try:
@@ -404,7 +575,12 @@ class MeasurementGUI:
             except Exception:
                 pass
 
-    def _pump_test_logs(self):
+    def _pump_test_logs(self) -> None:
+        """Drain the in-memory test log queue and update the tests log widget.
+
+        This method schedules itself via `after` while tests are running so the
+        GUI receives incremental updates from background test threads.
+        """
         drained = False
         try:
             while True:
@@ -413,12 +589,20 @@ class MeasurementGUI:
                 self.log_test(m)
         except queue.Empty:
             pass
+
+        # Continue polling while tests are running. If we drained logs just now
+        # keep polling a little longer to avoid UI starvation.
         if self.tests_running:
             self.master.after(100, self._pump_test_logs)
         elif drained:
             self.master.after(100, self._pump_test_logs)
 
-    def show_test_preferences(self):
+    def show_test_preferences(self) -> None:
+        """Display current test preference thresholds in a read-only popup.
+
+        The helper `load_thresholds` (from the test framework) provides a
+        named structure containing probe settings, thresholds and safety limits.
+        """
         t = load_thresholds()
         info = (
             f"Probe: {t.probe_voltage_v} V for {t.probe_duration_s}s @ {t.probe_sample_hz} Hz\n"
@@ -431,7 +615,8 @@ class MeasurementGUI:
         )
         messagebox.showinfo("Test Preferences (read-only)", info)
 
-    def create_automated_tests_section(self, parent):
+    def create_automated_tests_section(self, parent: tk.Misc) -> None:
+        """Create the section with buttons for automated and PMU tests."""
         frame = tk.LabelFrame(parent, text="More Tests", padx=5, pady=5)
         frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
@@ -475,8 +660,8 @@ class MeasurementGUI:
     ###################################################################
     # Graph empty shells setting up for plotting
     ###################################################################
-    def graphs_main_iv(self, parent):
-        """Single Iv Plot"""
+    def graphs_main_iv(self, parent: tk.Misc) -> None:
+        """Create live IV and log-IV plots (single-sweep real-time)."""
         frame = tk.LabelFrame(parent, text="Current Measurement", padx=5, pady=5)
         frame.grid(row=0, column=1, rowspan=2, padx=10, pady=5, sticky="nsew")
 
@@ -509,8 +694,8 @@ class MeasurementGUI:
         self.measurement_iv_thread.daemon = True
         self.measurement_iv_thread.start()
 
-    def graphs_all(self, parent):
-        """Matplotlib figure for plotting"""
+    def graphs_all(self, parent: tk.Misc) -> None:
+        """Create the two 'All sweeps' axes: linear and log(|I|)."""
         frame = tk.LabelFrame(parent, text="Last Measurement Plot", padx=5, pady=5)
         frame.grid(row=0, column=2, rowspan=2, padx=10, pady=5, sticky="nsew")
 
@@ -546,8 +731,8 @@ class MeasurementGUI:
         self.show_results_button = tk.Button(frame, text="Ax2 Clear", command=lambda: self.clear_axis(3))
         self.show_results_button.grid(row=1, column=1, columnspan=1, pady=5)
 
-    def graphs_vi_logiv(self, parent):
-        """Single Iv Plot"""
+    def graphs_vi_logiv(self, parent: tk.Misc) -> None:
+        """Create V/I and log-log plots updated during measurements."""
         frame = tk.LabelFrame(parent, text="Current Measurement", padx=5, pady=5)
         frame.grid(row=2, column=1, rowspan=3, padx=10, pady=5, sticky="nsew")
 
@@ -584,7 +769,8 @@ class MeasurementGUI:
         self.measurement_vi_logilogv_thread.daemon = True
         self.measurement_vi_logilogv_thread.start()
 
-    def graphs_endurance_retention(self, parent):
+    def graphs_endurance_retention(self, parent: tk.Misc) -> None:
+        """Create small plots for Endurance (ON/OFF) and Retention (I vs t)."""
         frame = tk.LabelFrame(parent, text="Endurance & Retention", padx=5, pady=5)
         frame.grid(row=3, column=2, padx=10, pady=5, columnspan=1, rowspan=1, sticky="nsew")
 
@@ -615,7 +801,8 @@ class MeasurementGUI:
         self.retention_times = []
         self.retention_currents = []
 
-    def create_manual_endurance_retention(self, parent):
+    def create_manual_endurance_retention(self, parent: tk.Misc) -> None:
+        """Build control panel for manual Endurance and Retention tasks."""
         frame = tk.LabelFrame(parent, text="Manual Endurance / Retention", padx=5, pady=5)
         frame.grid(row=6, column=0, padx=10, pady=5, sticky="ew")
 
@@ -689,7 +876,8 @@ class MeasurementGUI:
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
 
-    def toggle_manual_led(self):
+    def toggle_manual_led(self) -> None:
+        """Toggle the external LED via PSU at the requested power setting."""
         try:
             if not self.psu_connected:
                 self.connect_keithley_psu()
@@ -704,13 +892,15 @@ class MeasurementGUI:
         except Exception:
             pass
 
-    def start_manual_endurance(self):
+    def start_manual_endurance(self) -> None:
+        """Kick off manual endurance in a background worker thread."""
         if not self.connected:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
         threading.Thread(target=self._manual_endurance_worker, daemon=True).start()
 
-    def _manual_endurance_worker(self):
+    def _manual_endurance_worker(self) -> None:
+        """Worker: alternates SET/RESET pulses and plots ON/OFF ratio."""
         try:
             set_v = self.end_set_v.get()
             reset_v = self.end_reset_v.get()
@@ -751,7 +941,8 @@ class MeasurementGUI:
         except Exception as e:
             print("Manual endurance error:", e)
 
-    def start_manual_retention(self):
+    def start_manual_retention(self) -> None:
+        """Kick off manual retention capture in a background worker thread."""
         if not self.connected:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
@@ -763,7 +954,8 @@ class MeasurementGUI:
             pass
         threading.Thread(target=self._manual_retention_worker, daemon=True).start()
 
-    def _manual_retention_worker(self):
+    def _manual_retention_worker(self) -> None:
+        """Worker: applies SET then samples current at READ V over time (log-log plot)."""
         try:
             set_v = self.ret_set_v.get()
             set_ms = max(0.001, self.ret_set_ms.get() / 1000.0)
@@ -806,7 +998,8 @@ class MeasurementGUI:
         except Exception as e:
             print("Manual retention error:", e)
 
-    def graphs_current_time_rt(self, parent):
+    def graphs_current_time_rt(self, parent: tk.Misc) -> None:
+        """Create Current vs Time live plot and start its update thread."""
         frame = tk.LabelFrame(parent, text="Current time", padx=5, pady=5)
         frame.grid(row=5, column=1, padx=10, pady=5, columnspan=1, rowspan=1, sticky="ew")
 
@@ -829,7 +1022,8 @@ class MeasurementGUI:
         self.measurement_ct_thread.daemon = True
         self.measurement_ct_thread.start()
 
-    def graphs_resistance_time_rt(self, parent):
+    def graphs_resistance_time_rt(self, parent: tk.Misc) -> None:
+        """Create Resistance vs Time live plot and start its update thread."""
         frame = tk.LabelFrame(parent, text="Resistance time", padx=5, pady=5)
         frame.grid(row=5, column=2, padx=10, pady=5, columnspan=2, rowspan=1, sticky="ew")
 
@@ -851,7 +1045,8 @@ class MeasurementGUI:
         self.measurement_rt_thread.daemon = True
         self.measurement_rt_thread.start()
 
-    def graphs_temp_time_rt(self, parent):
+    def graphs_temp_time_rt(self, parent: tk.Misc) -> None:
+        """Create Temperature vs Time plot if a temp controller is connected."""
 
         frame = tk.LabelFrame(parent, text="temperature time", padx=0, pady=0)
         frame.grid(row=4, column=2, padx=10, pady=5, columnspan=1, rowspan=1, sticky="ew")
@@ -915,7 +1110,13 @@ class MeasurementGUI:
             if self._status_updates_active and self.master.winfo_exists():
                 self.master.after(250, self._status_update_tick)
 
-    def plot_current_time(self):
+    def plot_current_time(self) -> None:
+        """Background plotter thread: update Current vs Time plot.
+
+        This method runs in a dedicated thread and periodically checks the
+        `self.measuring` flag. When measurements are active it copies the
+        plotting buffers and updates the matplotlib line objects safely.
+        """
         while True:
             if self.measuring:
                 try:
@@ -931,7 +1132,11 @@ class MeasurementGUI:
                     pass
             time.sleep(0.1)
 
-    def plot_vi_logilogv(self):
+    def plot_vi_logilogv(self) -> None:
+        """Background plotter thread: update V/I and log-log axes.
+
+        Keeps the V/I and log-log plots in sync with the shared buffers.
+        """
         while True:
             if self.measuring:
                 try:
@@ -960,7 +1165,12 @@ class MeasurementGUI:
 
             time.sleep(0.1)
 
-    def plot_voltage_current(self):
+    def plot_voltage_current(self) -> None:
+        """Background plotter thread: update IV and |I| (log) plots.
+
+        Regularly copies shared buffers into the live line objects so the GUI
+        displays the most recent measurement points.
+        """
         while True:
             if self.measuring:
                 try:
@@ -989,7 +1199,8 @@ class MeasurementGUI:
 
             time.sleep(0.1)
 
-    def plot_resistance_time(self):
+    def plot_resistance_time(self) -> None:
+        """Background plotter thread: update Resistance vs Time plot."""
         while True:
             if self.measuring:
                 try:
@@ -1005,7 +1216,8 @@ class MeasurementGUI:
                     pass
             time.sleep(0.1)
 
-    def plot_Temp_time(self):
+    def plot_Temp_time(self) -> None:
+        """Background plotter thread: update temperature-time plot (if enabled)."""
         while True:
             if self.measuring:
                 try:
@@ -1026,7 +1238,7 @@ class MeasurementGUI:
     ###################################################################
 
     # Add to your GUI initialization
-    def create_plot_menu(self):
+    def create_plot_menu(self) -> None:
         """Create menu options for plotting."""
         # Add to your menu bar
         plot_menu = tk.Menu(self.menubar, tearoff=0)
@@ -1037,7 +1249,7 @@ class MeasurementGUI:
         plot_menu.add_command(label="Export All Plots", command=self.export_all_plots)
         plot_menu.add_command(label="Save Current Plot", command=self.save_current_plot)
 
-    def open_live_plotter(self):
+    def open_live_plotter(self) -> None:
         """Open a standalone live plotter window."""
         if not hasattr(self, 'standalone_plotter') or not self.standalone_plotter.window.winfo_exists():
             measurement_type = self.Sequential_measurement_var.get()
@@ -1050,14 +1262,14 @@ class MeasurementGUI:
 
             self.standalone_plotter = MeasurementPlotter(self.root, measurement_type=plot_type)
 
-    def export_all_plots(self):
+    def export_all_plots(self) -> None:
         """Export plots from the current plotter."""
         if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
             self.plotter.export_data()
         else:
             tk.messagebox.showinfo("No Active Plotter", "No active measurement plotter found.")
 
-    def save_current_plot(self):
+    def save_current_plot(self) -> None:
         """Save the current plot as an image."""
         if hasattr(self, 'plotter') and self.plotter and self.plotter.window.winfo_exists():
             self.plotter.save_current_plot()
@@ -1069,7 +1281,7 @@ class MeasurementGUI:
     ###################################################################
 
 
-    def create_connection_section(self, parent):
+    def create_connection_section(self, parent: tk.Misc) -> None:
         """Keithley connection section"""
         frame = tk.LabelFrame(parent, text="Keithley Connection", padx=5, pady=5)
         frame.grid(row=0, column=0, padx=10, pady=5, sticky="ew")
@@ -1110,7 +1322,7 @@ class MeasurementGUI:
         #self.temp_connect_button = tk.Button(frame, text="Connect", command=self.connect_temp_controller)
         self.temp_connect_button.grid(row=3, column=2)
 
-    def set_default_system(self):
+    def set_default_system(self) -> None:
         systems = self.systems
         default = "Lab Small"
         if default in systems:
@@ -1120,7 +1332,7 @@ class MeasurementGUI:
             self.system_var.set(systems[0])
             self.on_system_change(systems[0])
 
-    def load_systems(self):
+    def load_systems(self) -> List[str]:
         """Load system configurations from JSON file"""
         config_file = "Json_Files/system_configs.json"
 
@@ -1131,7 +1343,7 @@ class MeasurementGUI:
         except (FileNotFoundError, json.JSONDecodeError):
             return ["No systems available"]
 
-    def on_system_change(self, selected_system):
+    def on_system_change(self, selected_system: str) -> None:
         """Update addresses when system selection changes"""
         if selected_system in self.system_configs:
             config = self.system_configs[selected_system]
@@ -1160,10 +1372,10 @@ class MeasurementGUI:
             self.controller_address_var.set(temp_address)
 
             # smu type
-            self.SMU_type = config.get("SMU Type", "")
+            self.SMU_type = config.get("SMU_AND_PMU Type", "")
 
 
-    def update_component_state(self, component_type, address):
+    def update_component_state(self, component_type: str, address: str) -> None:
         """Enable/disable and style components based on address availability"""
         has_address = bool(address and address.strip())
 
@@ -1191,7 +1403,7 @@ class MeasurementGUI:
             components[1].configure(state="disabled", bg="lightgrey", fg="grey")  # entry
             components[2].configure(state="disabled")  # button
 
-    def create_mode_selection(self,parent):
+    def create_mode_selection(self,parent: tk.Misc) -> None:
         """Mode selection section"""
         # Create a frame for mode selection
         mode_frame = tk.LabelFrame(parent, text="Mode Selection", padx=5, pady=5)
@@ -1235,20 +1447,20 @@ class MeasurementGUI:
 
 
 
-    def create_sweep_parameters(self, parent):
+    def create_sweep_parameters(self, parent: tk.Misc) -> None:
         """Sweep parameter section"""
         frame = tk.LabelFrame(parent, text="Sweep Parameters", padx=5, pady=5)
         frame.grid(row=2, column=0,columnspan = 2 ,padx=10, pady=5, sticky="ew")
 
-        # Measurement Type selector (DC Triangle IV, SMU pulse modes, etc.)
+        # Measurement Type selector (DC Triangle IV, SMU_AND_PMU pulse modes, etc.)
         tk.Label(frame, text="Measurement Type:").grid(row=0, column=0, sticky="w")
         self.excitation_var = tk.StringVar(value="DC Triangle IV")
         self.excitation_menu = ttk.Combobox(frame, textvariable=self.excitation_var,
                                             values=["DC Triangle IV",
-                                                    "SMU Pulsed IV <1.5v",
-                                                    "SMU Pulsed IV >1.5v",
-                                                    "SMU Fast Pulses",
-                                                    "SMU Fast Hold",
+                                                    "SMU_AND_PMU Pulsed IV <1.5v",
+                                                    "SMU_AND_PMU Pulsed IV >1.5v",
+                                                    "SMU_AND_PMU Fast Pulses",
+                                                    "SMU_AND_PMU Fast Hold",
                                                     "ISPP",
                                                     "Pulse Width Sweep",
                                                     "Threshold Search",
@@ -1388,8 +1600,8 @@ class MeasurementGUI:
                 except Exception:
                     pass
                 return
-            if sel == "SMU Pulsed IV <1.5v":
-                # Defaults tied to SMU min pulse width and base 0.2 V
+            if sel == "SMU_AND_PMU Pulsed IV <1.5v":
+                # Defaults tied to SMU_AND_PMU min pulse width and base 0.2 V
                 try:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
@@ -1414,7 +1626,7 @@ class MeasurementGUI:
                 tk.Label(self._excitation_params_frame, text="Note: Output is typically limited ~1.5 V depending on pulse width.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Tip: Verify pulse width on an oscilloscope; effective width is often slower than the set value.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 return
-            if sel == "SMU Pulsed IV >1.5v":
+            if sel == "SMU_AND_PMU Pulsed IV >1.5v":
                 try:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
@@ -1437,7 +1649,7 @@ class MeasurementGUI:
                 tk.Label(self._excitation_params_frame, text="Note: 20 V range is slower; use ≥100 ms pulse width for reliable amplitude.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Tip: Verify pulses on an oscilloscope; rise/fall can reduce effective width.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 return
-            if sel == "SMU Fast Pulses":
+            if sel == "SMU_AND_PMU Fast Pulses":
                 try:
                     self.ex_fp_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
@@ -1457,7 +1669,7 @@ class MeasurementGUI:
                 except Exception:
                     pass
                 return
-            if sel == "SMU Fast Hold":
+            if sel == "SMU_AND_PMU Fast Hold":
                 tk.Label(self._excitation_params_frame, text="Hold DC and sample I(t).", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 # For pulse modes, hide DC sweep-mode/type
                 tk.Label(self._excitation_params_frame, text="Hold V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fh_voltage, width=10).grid(row=r, column=1, sticky="w"); r+=1
@@ -1663,7 +1875,7 @@ class MeasurementGUI:
 
         # Note: Detailed sweep controls moved to popup editor; only Pause remains in main panel
 
-    def start_automated_tests(self):
+    def start_automated_tests(self) -> None:
         if self.tests_running:
             messagebox.showinfo("Tests", "Automated tests already running.")
             return
@@ -1678,19 +1890,19 @@ class MeasurementGUI:
         self._pump_test_logs()
         threading.Thread(target=self._tests_worker, daemon=True).start()
 
-    def stop_automated_tests(self):
+    def stop_automated_tests(self) -> None:
         if self.tests_running:
             self.abort_tests_flag = True
             self.test_log_queue.put("Abort requested.")
 
-    def _route_current_device(self):
+    def _route_current_device(self) -> None:
         # use Sample GUI to route relays if available
         try:
             self.sample_gui.change_relays()
         except Exception:
             pass
 
-    def _tests_worker(self):
+    def _tests_worker(self) -> None:
         try:
             inst = self.keithley
             driver = MeasurementDriver(inst, abort_flag=lambda: self.abort_tests_flag)
@@ -1806,10 +2018,10 @@ class MeasurementGUI:
             self.tests_running = False
             self._send_bot_message("Automated tests finished")
 
-    def set_measurment_flag_true(self):
+    def set_measurment_flag_true(self) -> None:
         self.stop_measurement_flag = True
     
-    def create_custom_measurement_section(self,parent):
+    def create_custom_measurement_section(self,parent: tk.Misc) -> None:
         """Custom measurements section"""
         frame = tk.LabelFrame(parent, text="Custom Measurements", padx=5, pady=5)
         frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
@@ -1840,7 +2052,7 @@ class MeasurementGUI:
         # Open sweep editor popup (under Run Custom)
         tk.Button(frame, text="Edit Sweeps", command=self.open_sweep_editor_popup).grid(row=2, column=1, padx=5, pady=2, sticky="w")
 
-    def open_sweep_editor_popup(self):
+    def open_sweep_editor_popup(self) -> None:
         try:
             selected = self.custom_measurement_var.get()
             plan = self.custom_sweeps.get(selected, {}).get('sweeps', {})
@@ -1920,7 +2132,8 @@ class MeasurementGUI:
 
         ttk.Button(footer, text="Apply", command=apply_changes).grid(row=0, column=1, sticky="e")
 
-    def signal_messaging(self,parent):
+    def signal_messaging(self,parent: tk.Misc) -> None:
+        """Build Telegram messaging controls (toggle, user dropdown, tokens)."""
         # Keep a handle to the frame so we can manage stacking/visibility
         self.signal_frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
         frame = self.signal_frame
@@ -1959,8 +2172,8 @@ class MeasurementGUI:
         except Exception:
             pass
 
-    def create_status_box(self,parent):
-        """Status box section"""
+    def create_status_box(self,parent: tk.Misc) -> None:
+        """Create a single-line status label for connection/measurements."""
         frame = tk.LabelFrame(parent, text="Status", padx=5, pady=5)
         frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
 
@@ -1968,7 +2181,8 @@ class MeasurementGUI:
         self.status_box.pack(fill=tk.X)
 
 
-    def temp_measurments_itc4(self, parent):
+    def temp_measurments_itc4(self, parent: tk.Misc) -> None:
+        """Create a simple panel to send a setpoint to the ITC4 controller."""
         # Temperature section
         frame = tk.LabelFrame(parent, text="Itc4 Temp Set", padx=5, pady=5)
         frame.grid(row=5, column=0, padx=10, pady=5, sticky="ew")
@@ -1985,7 +2199,7 @@ class MeasurementGUI:
         self.temp_go_button = tk.Button(frame, text="Apply", command=self.send_temp)
         self.temp_go_button.grid(row=1, column=2)
 
-    def create_controller_selection(self,parent):
+    def create_controller_selection(self,parent: tk.Misc) -> None:
         """Create manual controller selection widgets."""
         control_frame = tk.LabelFrame(parent, text="Temperature Controller", padx=5, pady=5)
         control_frame.grid(row=4, column=0, columnspan=2, sticky='ew', padx=5)
@@ -2027,7 +2241,7 @@ class MeasurementGUI:
         )
         self.controller_status_label.grid(row=2, column=1, padx=5)
 
-    def reconnect_temperature_controller(self):
+    def reconnect_temperature_controller(self) -> None:
         """Reconnect temperature controller based on GUI selection."""
         controller_type = self.controller_type_var.get()
         address = self.controller_address_var.get()
@@ -2063,7 +2277,7 @@ class MeasurementGUI:
         # Update status
         self.update_controller_status()
 
-    def reconnect_Kieithley_controller(self):
+    def reconnect_Kieithley_controller(self) -> None:
         """Reconnect temperature controller based on GUI selection."""
         controller_type = self.controller_type_var.get()
         address = self.controller_address_var.get()
@@ -2095,7 +2309,7 @@ class MeasurementGUI:
 
         # Update status
         self.update_controller_status()
-    def update_controller_status(self):
+    def update_controller_status(self) -> None:
         """Update controller status indicator."""
         if self.temp_controller.is_connected():
             info = self.temp_controller.get_controller_info()
@@ -2110,7 +2324,8 @@ class MeasurementGUI:
                 fg="red"
             )
 
-    def sequential_measurments(self,parent):
+    def sequential_measurments(self,parent: tk.Misc) -> None:
+        """Build the UI for sequential measurement routines (Iv/Avg measure)."""
 
         frame = tk.LabelFrame(parent, text="Sequential_measurement", padx=5, pady=5)
         frame.grid(row=10, column=0, padx=10, pady=5, sticky="ew")
@@ -2164,15 +2379,29 @@ class MeasurementGUI:
     # All Measurement acquisition code
     ###################################################################
 
-    def sequential_measure(self):
+    def sequential_measure(self) -> None:
+        """Run a sequence of measurements across devices.
 
+        This method supports two sequence modes selectable from the GUI:
+        - "Iv Sweep": runs repeated IV sweeps for each device
+        - "Single Avg Measure": measures an averaged current at a fixed voltage
+
+        The method runs in a background thread (started by the UI) and updates
+        GUI widgets and plots via thread-safe callbacks. It honors
+        `self.stop_measurement_flag` for cooperative cancellation and
+        `self.single_device_flag` to limit operation to the selected device.
+        """
+
+        # Enter measurement mode and ensure GUI focus
+        self._reset_plots_for_new_run()
         self.measuring = True
         self.stop_measurement_flag = False
-        self.bring_to_top() # make sure it is on the top
-        self.check_for_sample_name() # checks for sample name if not prompts user
+        self.bring_to_top()  # make sure the window is visible
+        self.check_for_sample_name()  # ensure sample name is set (or prompt)
 
-        print(f"Running sequential measurement:")
+        print("Running sequential measurement:")
 
+        # Branch by sequence type selected in the GUI
         if self.Sequential_measurement_var.get() == "Iv Sweep":
             count_pass = 1
 
@@ -2472,7 +2701,7 @@ class MeasurementGUI:
         #     self.keithley.enable_output(False)  # Disable output when done
 
 
-    def measure_average_current(self, voltage, duration):
+    def measure_average_current(self, voltage: float, duration: float) -> Tuple[float, float, float]:
         """
         Apply voltage and measure current for specified duration, then return average.
 
@@ -2539,7 +2768,7 @@ class MeasurementGUI:
 
         return avg_current, std_error, temperature
 
-    def record_temperature(self):
+    def record_temperature(self) -> float:
         """
         Placeholder function for temperature recording.
         To be implemented when temperature measurement hardware is available.
@@ -2556,7 +2785,7 @@ class MeasurementGUI:
         # For now, return a placeholder value
         return 25.0  # Room temperature placeholder
 
-    def log_terminal(self, message):
+    def log_terminal(self, message: str) -> None:
         """Log message to terminal output (if you don't already have this)"""
         if hasattr(self, 'terminal_output'):
             self.terminal_output.config(state=tk.NORMAL)
@@ -2566,8 +2795,8 @@ class MeasurementGUI:
         else:
             print(message)
 
-    def _finalize_output(self):
-        """Set SMU to 0 V and disable output (best-effort)."""
+    def _finalize_output(self) -> None:
+        """Set SMU_AND_PMU to 0 V and disable output (best-effort)."""
         try:
             self.keithley.set_voltage(0, self.icc.get())
         except Exception:
@@ -2579,13 +2808,27 @@ class MeasurementGUI:
 
     # Old measure method removed; logic centralized in MeasurementService
 
-    def run_custom_measurement(self):
-        """ when custom measurements has been ran"""
+    def run_custom_measurement(self) -> None:
+        """Execute a custom measurement plan from the loaded JSON file.
+
+        The JSON (loaded into `self.custom_sweeps`) contains an ordered set of
+        named sweeps. For each sweep the method configures instrument options
+        (LED, PSU, pulse parameters, etc.) and delegates the actual work to
+        `MeasurementService`. Per-sweep overrides made at runtime via the
+        sweep editor popup are applied on-the-fly.
+
+        The GUI's `stop_measurement_flag` is checked frequently to allow
+        cooperative abort. Results are saved per-sweep in `Data_save_loc` and
+        basic summary plots are produced.
+        """
 
 
         if not self.connected:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
+
+        # Reset graphs/buffers between runs
+        self._reset_plots_for_new_run()
 
         if self.single_device_flag:
             response = messagebox.askquestion(
@@ -2764,7 +3007,7 @@ class MeasurementGUI:
                     except Exception:
                         excitation_mode = "DC Triangle IV"
 
-                    # Helpers for SMU timing defaults
+                    # Helpers for SMU_AND_PMU timing defaults
                     def _min_pw_ms() -> float:
                         try:
                             smu_type_loc = getattr(self, 'SMU_type', 'Keithley 2401')
@@ -2772,7 +3015,7 @@ class MeasurementGUI:
                         except Exception:
                             return 1.0
 
-                    if excitation_mode == "SMU Pulsed IV":
+                    if excitation_mode == "SMU_AND_PMU Pulsed IV":
                         # Parameters
                         start_amp = float(params.get("start_v", 0.0))
                         stop_amp = float(params.get("stop_v", 0.2))
@@ -2798,7 +3041,7 @@ class MeasurementGUI:
                             on_point=None,
                             validate_timing=True,
                         )
-                    elif excitation_mode == "SMU Fast Pulses":
+                    elif excitation_mode == "SMU_AND_PMU Fast Pulses":
                         pulse_v = float(params.get("pulse_v", 0.2))
                         pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
                         num_pulses = int(params.get("num", 10))
@@ -2822,7 +3065,7 @@ class MeasurementGUI:
                             on_point=None,
                             validate_timing=True,
                         )
-                    elif excitation_mode == "SMU Fast Hold":
+                    elif excitation_mode == "SMU_AND_PMU Fast Hold":
                         hold_v = float(params.get("hold_v", 0.2))
                         duration = float(params.get("duration_s", 5.0))
                         sample_dt = float(params.get("sample_dt_s", 0.01))
@@ -3038,13 +3281,13 @@ class MeasurementGUI:
         else:
             print("Selected measurement not found in JSON file.")
 
-    def _show_message_async(self, kind: str, *args, **kwargs):
+    def _show_message_async(self, kind: str, *args: Any, **kwargs: Any) -> None:
         try:
             self.master.after(0, lambda: getattr(messagebox, kind)(*args, **kwargs))
         except Exception:
             pass
 
-    def _safe_get_float(self, var, name: str, default=None):
+    def _safe_get_float(self, var: Any, name: str, default: Optional[float] = None) -> Optional[float]:
         try:
             return float(var.get())
         except Exception:
@@ -3056,12 +3299,14 @@ class MeasurementGUI:
             self._show_message_async("showerror", "Invalid input", f"{name} is empty or invalid.")
             return None
 
-    def start_measurement(self):
+    def start_measurement(self) -> None:
         """Start single measurementt on the device! """
 
         if not self.connected:
             self._show_message_async("showwarning", "Warning", "Not connected to Keithley!")
             return
+        # Reset graphs/buffers between runs
+        self._reset_plots_for_new_run()
         self.measuring = True
 
         # Branch by excitation mode if available
@@ -3077,7 +3322,7 @@ class MeasurementGUI:
                 os.makedirs(save_dir)
             return save_dir
 
-        # Helper: SMU timing defaults
+        # Helper: SMU_AND_PMU timing defaults
         def _min_pulse_width_ms() -> float:
             try:
                 smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
@@ -3094,13 +3339,13 @@ class MeasurementGUI:
             start_index = 0
         device_count = 1 if self.single_device_flag else len(self.device_list)
 
-        if excitation == "SMU Pulsed IV <1.5v":
+        if excitation == "SMU_AND_PMU Pulsed IV <1.5v":
             # One device (or iterate) amplitude-sweep pulsed IV
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV <1.5v)...")
+                self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Pulsed IV <1.5v)...")
                 self.master.update()
 
                 # Pull parameters
@@ -3171,12 +3416,12 @@ class MeasurementGUI:
                 messagebox.showinfo("Complete", "Measurements finished.")
             return
 
-        if excitation == "SMU Pulsed IV >1.5v":
+        if excitation == "SMU_AND_PMU Pulsed IV >1.5v":
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV >1.5v)...")
+                self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Pulsed IV >1.5v)...")
                 self.master.update()
 
                 start_v = float(self.ex_piv_start.get())
@@ -3231,12 +3476,12 @@ class MeasurementGUI:
                 messagebox.showinfo("Complete", "Measurements finished.")
             return
 
-        if excitation == "SMU Pulsed IV (fixed 20V)":
+        if excitation == "SMU_AND_PMU Pulsed IV (fixed 20V)":
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Pulsed IV - fixed 20V)...")
+                self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Pulsed IV - fixed 20V)...")
                 self.master.update()
 
                 start_v = float(self.ex_piv_start.get())
@@ -3309,12 +3554,12 @@ class MeasurementGUI:
                 messagebox.showinfo("Complete", "Measurements finished.")
             return
 
-        if excitation == "SMU Fast Pulses":
+        if excitation == "SMU_AND_PMU Fast Pulses":
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Fast Pulses)...")
+                self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Fast Pulses)...")
                 self.master.update()
 
                 pulse_v = float(self.ex_fp_voltage.get())
@@ -3374,12 +3619,12 @@ class MeasurementGUI:
                 messagebox.showinfo("Complete", "Measurements finished.")
             return
 
-        if excitation == "SMU Fast Hold":
+        if excitation == "SMU_AND_PMU Fast Hold":
             for i in range(device_count):
                 device = self.device_list[(start_index + i) % device_count]
                 if self.stop_measurement_flag:
                     break
-                self.status_box.config(text=f"Measuring {device} (SMU Fast Hold)...")
+                self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Fast Hold)...")
                 self.master.update()
 
                 hold_v = float(self.ex_fh_voltage.get())
@@ -3820,11 +4065,20 @@ class MeasurementGUI:
         except Exception:
             pass
 
-    def retention_measure(self,set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time, pause=None):
+    def retention_measure(self,
+                          set_voltage: float,
+                          set_time: float,
+                          read_voltage: float,
+                          repeat_delay: float,
+                          number: int,
+                          sequence: Optional[Union[str,int]] ,
+                          led: bool,
+                          led_time: Union[str, float],
+                          pause: Optional[float] = None) -> Tuple[List[float], List[float], List[float]]:
         """Run retention via MeasurementService and return (v_arr, c_arr, timestamps)."""
         icc = 0.0001
 
-        def _on_point(v, i, t_s):
+        def _on_point(v: float, i: float, t_s: float) -> None:
             # Update plotting arrays minimally so existing plots keep working
             try:
                 self.v_arr_disp.append(v)
@@ -3855,8 +4109,8 @@ class MeasurementGUI:
     ###################################################################
     # Connect
     ###################################################################
-    def connect_keithley(self):
-        """Connect to the selected IV controller via GPIB using system config SMU Type"""
+    def connect_keithley(self) -> None:
+        """Connect to the selected IV controller via GPIB using system config SMU_AND_PMU Type"""
         address = self.keithley_address_var.get()
         smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
         try:
@@ -3874,10 +4128,10 @@ class MeasurementGUI:
                 self.keithley.beep(5000, 0.5)
         except Exception as e:
             self.connected = False
-            print("unable to connect to SMU please check")
+            print("unable to connect to SMU_AND_PMU please check")
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
 
-    def connect_keithley_psu(self):
+    def connect_keithley_psu(self) -> None:
         try:
             self.psu = Keithley2220_Powersupply(self.psu_visa_address)
             self.psu_connected = True
@@ -3890,8 +4144,8 @@ class MeasurementGUI:
             print("unable to connect to psu please check")
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
 
-    def connect_temp_controller(self):
-        """Connect to the Keithley SMU via GPIB"""
+    def connect_temp_controller(self) -> None:
+        """Connect to the Keithley SMU_AND_PMU via GPIB"""
         #address = self.address_var.get()
         address = self.temp_controller_address
         try:
@@ -3909,7 +4163,7 @@ class MeasurementGUI:
             print("unable to connect to Temp please check")
             messagebox.showerror("Error", f"Could not connect to temp device: {str(e)}")
 
-    def init_temperature_controller(self):
+    def init_temperature_controller(self) -> None:
         """Initialize temperature controller with auto-detection."""
         self.temp_controller = TemperatureControllerManager(auto_detect=True)
 
@@ -3925,18 +4179,18 @@ class MeasurementGUI:
     # Temp logging
     ###################################################################
 
-    def create_temperature_log(self):
+    def create_temperature_log(self) -> None:
         """Create a temperature log that records during measurements."""
         self.temperature_log = []
         self.is_logging_temperature = False
 
-    def start_temperature_logging(self):
+    def start_temperature_logging(self) -> None:
         """Start logging temperature data."""
         self.temperature_log = []
         self.is_logging_temperature = True
         self.log_temperature_data()
 
-    def log_temperature_data(self):
+    def log_temperature_data(self) -> None:
         """Log temperature data periodically during measurements."""
         if self.is_logging_temperature and self.measuring:
             timestamp = time.time()
@@ -3946,7 +4200,7 @@ class MeasurementGUI:
             # Continue logging every second
             self.root.after(1000, self.log_temperature_data)
 
-    def stop_temperature_logging(self):
+    def stop_temperature_logging(self) -> None:
         """Stop temperature logging and save data."""
         self.is_logging_temperature = False
 
@@ -4103,12 +4357,12 @@ class MeasurementGUI:
 
             self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
 
-    def send_temp(self):
+    def send_temp(self) -> None:
         self.itc.set_temperature(int(self.temp_var.get()))
         self.graphs_temp_time_rt(self.Graph_frame)
         print("temperature set too", self.temp_var.get())
 
-    def update_variables(self):
+    def update_variables(self) -> None:
         # update current device
         self.current_device = self.device_list[self.current_index]
         # Update number (ie device_11)
@@ -4118,7 +4372,7 @@ class MeasurementGUI:
         self.device_var.config(text=self.display_index_section_number)
         # print(self.convert_to_name(self.current_index))
 
-    def measure_one_device(self):
+    def measure_one_device(self) -> None:
         if self.adaptive_var.get():
             print("Measuring only one device")
             self.single_device_flag = True
@@ -4126,7 +4380,7 @@ class MeasurementGUI:
             print("Measuring all devices")
             self.single_device_flag = False
 
-    def update_last_sweeps(self):
+    def update_last_sweeps(self) -> None:
         """Automatically updates the plot every 1000ms"""
         # Re-draw the latest data on the axes
         for i, (device, measurements) in enumerate(self.measurement_data.items()):
@@ -4159,7 +4413,7 @@ class MeasurementGUI:
 
         # Set the next update ( or 10 seconds)
         self.master.after(10000, self.update_last_sweeps)
-    def check_for_sample_name(self):
+    def check_for_sample_name(self) -> None:
 
         sample_name = self.sample_name_var.get().strip()
 
@@ -4173,16 +4427,16 @@ class MeasurementGUI:
             else:
                 self.sample_name_var.set("undefined")
 
-    def check_connection(self):
+    def check_connection(self) -> None:
         self.connect_keithley()
         time.sleep(0.1)
         self.Check_connection_gui = CheckConnection(self.master, self.keithley)
 
-    def open_adaptive_settings(self):
+    def open_adaptive_settings(self) -> None:
         if self.adaptive_measurement is None or not self.adaptive_measurement.master.winfo_exists():
             self.adaptive_measurement = AdaptiveMeasurement(self.master)
 
-    def show_last_sweeps(self):
+    def show_last_sweeps(self) -> None:
         """Creates a new window showing the last measurement for each device"""
         results_window = tk.Toplevel(self.master)
         results_window.title("Last Measurement for Each Device")
@@ -4231,22 +4485,46 @@ class MeasurementGUI:
         # Start automatic update
         self.update_last_sweeps()
 
-    def clear_axis(self, axis):
-        # todo make the clear work correctly
+    def clear_axis(self, axis: int) -> None:
+        """Clear one of the 'All sweeps' axes by index.
+
+        axis=2 clears the linear IV panel; axis=3 clears the log(|I|) panel.
+        """
         if axis == 2:
             self.ax_all_iv.clear()
-            self.canvas.draw()  # Redraw the canvas
+            try:
+                self.canvas_all_iv.draw()
+            except Exception:
+                pass
             self.master.update_idletasks()
             self.master.update()
         if axis == 3:
             self.ax_all_logiv.clear()
             self.ax_all_logiv.set_yscale('log')
-            self.canvas.draw()  # Redraw the canvas
+            try:
+                self.canvas_all_logiv.draw()
+            except Exception:
+                pass
             self.master.update_idletasks()
             self.master.update()
 
-    def save_all_measurements_file(self, device_data, sample_name, start_index):
-        """Save all measurements with each device in its own columns using pandas and create graphs"""
+    def save_all_measurements_file(self, device_data: Dict[str, Dict[str, List[float]]],
+                                   sample_name: str,
+                                   start_index: int) -> str:
+        """Create a consolidated CSV and graphs for every device in `device_data`.
+
+        The CSV organizes each device as a group of columns (time, temperature,
+        voltage, current, std error, resistance, conductance, normalized).
+        Individual and comparison graphs are saved to a `graphs` subdirectory.
+
+        Args:
+            device_data (dict): mapping device_id -> dict of arrays (timestamps, voltages, currents, ...)
+            sample_name (str): sample folder/name used for saving
+            start_index (int): index of the first device (used for filenames/labels)
+
+        Returns:
+            filename (str): CSV filename created under `Data_save_loc`.
+        """
 
         import pandas as pd
         import matplotlib.pyplot as plt
@@ -4333,7 +4611,10 @@ class MeasurementGUI:
 
         return filename
 
-    def _create_individual_device_graphs(self, graph_data, graphs_dir, sample_name, timestamp):
+    def _create_individual_device_graphs(self, graph_data: Dict[str, Dict[str, Any]],
+                                         graphs_dir: str,
+                                         sample_name: str,
+                                         timestamp: str) -> None:
         """Create individual graphs for each device"""
         # stops error message by using back end
         import matplotlib
@@ -4409,7 +4690,10 @@ class MeasurementGUI:
             plt.savefig(graph_filepath, dpi=300, bbox_inches='tight')
             plt.close()
 
-    def _create_comparison_graph(self, graph_data, graphs_dir, sample_name, timestamp):
+    def _create_comparison_graph(self, graph_data: Dict[str, Dict[str, Any]],
+                                 graphs_dir: str,
+                                 sample_name: str,
+                                 timestamp: str) -> None:
         """Create comparison graph with all devices"""
         import matplotlib
         matplotlib.use('Agg')  # Use non-interactive backend
@@ -4445,10 +4729,10 @@ class MeasurementGUI:
         plt.savefig(comparison_filepath, dpi=300, bbox_inches='tight')
         plt.close()
 
-    def spare_button(self):
+    def spare_button(self) -> None:
         print("spare")
 
-    def convert_to_name(self, device_number):
+    def convert_to_name(self, device_number: int) -> str:
         if not (0 <= device_number <= 99):  # Adjusted range to start from 0
             print(device_number)
             raise ValueError("Device number must be between 0 and 99")
@@ -4465,7 +4749,7 @@ class MeasurementGUI:
 
         return f"{valid_letters[index]}{sub_number}"
 
-    def create_log_file(self, save_dir, start_time, measurement_type):
+    def create_log_file(self, save_dir: str, start_time: str, measurement_type: str) -> None:
         # Get the current date and time
         end_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         measurement_type = measurement_type
@@ -4481,7 +4765,7 @@ class MeasurementGUI:
             # log_file.write(f"Additional Info: {additional_info}\n")
             log_file.write("-" * 40 + "\n")  # Separator for readability
 
-    def graphs_show(self, v_arr, c_arr, key, stop_v):
+    def graphs_show(self, v_arr: List[float], c_arr: List[float], key: Union[str,int], stop_v: float) -> None:
 
         # # plot on main screen! on #1
         # self.ax_rt_iv.clear()
@@ -4504,7 +4788,72 @@ class MeasurementGUI:
         self.master.update_idletasks()
         self.master.update()
 
-    def _save_final_sweep_plot(self, save_dir: str) -> tuple[str | None, str | None]:
+    def _reset_plots_for_new_run(self) -> None:
+        """Clear live buffers and 'All sweeps' axes so a new run starts clean."""
+        try:
+            # Reset in-memory buffers used by background plotters
+            self.v_arr_disp = []
+            self.v_arr_disp_abs = []
+            self.v_arr_disp_abs_log = []
+            self.c_arr_disp = []
+            self.c_arr_disp_log = []
+            self.t_arr_disp = []
+            self.c_arr_disp_abs = []
+            self.c_arr_disp_abs_log = []
+            self.r_arr_disp = []
+            self.temp_time_disp = []
+        except Exception:
+            pass
+
+        # Clear the summary axes that accumulate lines across runs
+        try:
+            self.ax_all_iv.clear()
+            self.ax_all_logiv.clear()
+            self.ax_all_logiv.set_yscale('log')
+            self.canvas_all_iv.draw()
+            self.canvas_all_logiv.draw()
+        except Exception:
+            pass
+
+        # Clear the real-time line objects if available
+        try:
+            if hasattr(self, 'line_rt_iv'):
+                self.line_rt_iv.set_data([], [])
+                self.canvas_rt_iv.draw()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'line_rt_logiv'):
+                self.line_rt_logiv.set_data([], [])
+                self.canvas_rt_logiv.draw()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'line_rt_vi'):
+                self.line_rt_vi.set_data([], [])
+                self.canvas_rt_vi.draw()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'line_rt_logilogv'):
+                self.line_rt_logilogv.set_data([], [])
+                self.canvas_rt_logilogv.draw()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'line_ct_rt'):
+                self.line_ct_rt.set_data([], [])
+                self.canvas_ct_rt.draw()
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'line_rt_rt'):
+                self.line_rt_rt.set_data([], [])
+                self.canvas_rt_rt.draw()
+        except Exception:
+            pass
+
+    def _save_final_sweep_plot(self, save_dir: str) -> Tuple[Optional[str], Optional[str]]:
         """Save final sweep plots (linear and log) using Agg backend. Returns (iv_path, log_path)."""
         try:
             from matplotlib.figure import Figure
@@ -4540,7 +4889,7 @@ class MeasurementGUI:
         except Exception:
             return (None, None)
 
-    def _save_combined_summary_plot(self, save_dir: str) -> str | None:
+    def _save_combined_summary_plot(self, save_dir: str) -> Optional[str]:
         """Create a 2x2 summary figure using Agg: (All IV, All log, Final IV, Final log). Returns image path or None."""
         try:
             from matplotlib.figure import Figure
@@ -4598,7 +4947,7 @@ class MeasurementGUI:
         except Exception:
             return None
 
-    def _post_measurement_options_worker(self, save_dir: str, combined_path: str | None = None):
+    def _post_measurement_options_worker(self, save_dir: str, combined_path: Optional[str] = None) -> None:
         """Runs in background: sends summary and asks what to do next via Telegram."""
         try:
             bot = self._get_bot()
@@ -4946,7 +5295,11 @@ class MeasurementGUI:
 
 
 
-def get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v: Optional[float] = None):
+def get_voltage_range(start_v: float,
+                      stop_v: float,
+                      step_v: float,
+                      sweep_type: str,
+                      neg_stop_v: Optional[float] = None) -> List[float]:
     """Compatibility wrapper routing to MeasurementService to compute voltage ranges.
 
     Existing code calls this function from several places; keep the signature and
@@ -4958,6 +5311,10 @@ def get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v: Optional[
     except Exception:
         # Fallback to legacy behavior if service import/usage fails for any reason
         def frange(start, stop, step):
+            """Simple floating-range generator used when MeasurementService is unavailable.
+
+            Rounds to 3 decimals to avoid long floating point tails.
+            """
             while start <= stop if step > 0 else start >= stop:
                 yield round(start, 3)
                 start += step
@@ -4974,31 +5331,47 @@ def get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v: Optional[
         )
 
 
-def extract_number_from_filename(filename):
-    # Use regex to find the number at the start of the filename before the first '-'
+def extract_number_from_filename(filename: str) -> Optional[int]:
+    """Extract a leading integer prefix from a filename of the form '<N>-rest...'.
+
+    Returns the integer or None if no leading numeric prefix is present.
+    """
     match = re.match(r'^(\d+)-', filename)
     if match:
         return int(match.group(1))
     return None
 
 
-def find_largest_number_in_folder(folder_path):
+def find_largest_number_in_folder(folder_path: str) -> Optional[int]:
+    """Return the largest leading numeric prefix for files in `folder_path`.
+
+    Used to choose a monotonically-increasing save key when writing new
+    measurement files of the form '<N>-...'. Returns None if none found.
+    """
     largest_number = None
 
     # Iterate over all files in the folder
-    for filename in os.listdir(folder_path):
-        number = extract_number_from_filename(filename)
-        if number is not None:
-            if largest_number is None or number > largest_number:
-                largest_number = number
-    print(largest_number)
+    try:
+        for filename in os.listdir(folder_path):
+            number = extract_number_from_filename(filename)
+            if number is not None:
+                if largest_number is None or number > largest_number:
+                    largest_number = number
+    except FileNotFoundError:
+        return None
+
     return largest_number
 
 
-def zero_devision_check(x, y):
+def zero_devision_check(x: float, y: float) -> float:
+    """Safe division helper returning 0 on any error (e.g., division by zero).
+
+    Prefer explicit error handling where possible; this function is a small
+    convenience in places where 0 is an acceptable fallback.
+    """
     try:
         return x / y
-    except:
+    except Exception:
         return 0
 
 if __name__ == "__main__":
