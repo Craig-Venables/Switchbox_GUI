@@ -1,21 +1,3 @@
-
-
-
-"""-------------------------------------------------------------------------
-Unified 4200A controller classes for IVControllerManager
-
-These classes wrap the minimal API expected by `IVControllerManager` so the
-GUI can control a 4200A-SCS over the LPT server:
-  - set_voltage(voltage: float, Icc: float = ...)
-  - set_current(current: float, Vcc: float = ...)
-  - measure_voltage() -> float
-  - measure_current() -> float
-  - enable_output(enable: bool)
-  - close()
-
-Additionally, convenience sweep and PMU helpers are provided.
--------------------------------------------------------------------------"""
-
 import sys
 from pathlib import Path
 import time
@@ -24,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 import atexit, signal, sys
-
+from typing import Any, Literal
 
 
 # Ensure project root on sys.path for absolute imports when run as script
@@ -33,215 +15,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from Equipment_Classes.SMU.ProxyClass import Proxy
-
-
-class Keithley4200AController:
-    """Unified controller for 4200A SMU (DC) and basic PMU access using LPT.
-
-    Address formats supported (examples):
-      - "192.168.0.10:8888"            -> SMU1 by default
-      - "192.168.0.10"                 -> SMU1 by default, port 8888
-      - "192.168.0.10:8888|SMU2"       -> select SMU2
-      - "192.168.0.10:8888|PMU1-CH2"   -> select PMU1 channel 2 (PMU mode)
-
-    If running on the 4200A device (pylptlib available), pass address "LPTlib"
-    to use the local DLL instead of TCP/IP.
-    """
-
-    def __init__(self, address: str) -> None:
-        self._ip: str = ""
-        self._port: int = 8888
-        self._card_name: str = "SMU1"
-        self._pmu_channel: int | None = None
-        self._is_pmu: bool = False
-
-        self.lpt = None
-        self.param = None
-        self._instr_id: int | None = None
-        self._last_source_mode: str = "voltage"  # or "current"
-        self._output_enabled: bool = False
-
-        self._parse_address(address)
-        self._connect()
-
-    def _parse_address(self, address: str) -> None:
-        addr = (address or "").strip()
-        if addr.lower() == "lptlib":
-            # Local DLL mode disabled in this build
-            raise ValueError("Local LPTlib mode not supported. Use 'IP[:port]|SMUx' or '|PMU1-CHy'.")
-
-        # Optional instrument selector after '|'
-        instr_sel = None
-        if "|" in addr:
-            addr, instr_sel = addr.split("|", 1)
-            instr_sel = instr_sel.strip()
-
-        # IP[:port]
-        if ":" in addr:
-            ip_str, port_str = addr.split(":", 1)
-            self._ip = ip_str.strip()
-            try:
-                self._port = int(port_str)
-            except Exception:
-                self._port = 8888
-        else:
-            self._ip = addr
-            self._port = 8888
-
-        # Instrument selection
-        if instr_sel:
-            token = instr_sel.replace(" ", "").upper()
-            if token.startswith("SMU"):
-                self._card_name = token  # e.g. SMU2
-                self._pmu_channel = None
-                self._is_pmu = False
-            elif token.startswith("PMU"):
-                # Accept PMU1-CH2 or PMU1:2
-                self._card_name = token.split("-")[0].split(":")[0]
-                ch = None
-                if "CH" in token:
-                    try:
-                        ch = int(token.split("CH")[-1])
-                    except Exception:
-                        ch = 1
-                elif ":" in token:
-                    try:
-                        ch = int(token.split(":")[-1])
-                    except Exception:
-                        ch = 1
-                self._pmu_channel = (ch - 1) if ch else 0
-                self._is_pmu = True
-        else:
-            self._card_name = "SMU1"
-            self._pmu_channel = None
-            self._is_pmu = False
-
-    def _connect(self) -> None:
-        try:
-            # Remote TCP proxy
-            self.lpt = Proxy(self._ip, self._port, "lpt")
-            self.param = Proxy(self._ip, self._port, "param")
-
-            # Initialize session
-            self.lpt.initialize()
-            # For safety, reset and select test station
-            self.lpt.tstsel(1)
-            self.lpt.devint()
-
-            self._instr_id = self.lpt.getinstid(self._card_name)
-
-            # Reasonable defaults
-            # Return real measured values in compliance
-            self.lpt.setmode(self._instr_id, self.param.KI_LIM_MODE, self.param.KI_VALUE)
-            # Fast integration default
-            self.lpt.setmode(self._instr_id, self.param.KI_INTGPLC, 0.01)
-            if not self._is_pmu:
-                # Auto-range current measure by default
-                self.lpt.rangei(self._instr_id, 0)
-
-        except Exception as exc:
-            raise RuntimeError(f"Failed to connect 4200A at {self._ip}:{self._port} ({self._card_name}): {exc}")
-
-    # --------------- Unified API ---------------
-    def set_voltage(self, voltage: float, Icc: float = 1e-3):
-        self._last_source_mode = "voltage"
-        if self._instr_id is None:
-            return
-        # Compliance on current for voltage source
-        self.lpt.limiti(self._instr_id, float(Icc))
-        self.lpt.forcev(self._instr_id, float(voltage))
-        self._output_enabled = True
-
-    def set_current(self, current: float, Vcc: float = 10.0):
-        self._last_source_mode = "current"
-        if self._instr_id is None:
-            return
-        # Compliance on voltage for current source
-        self.lpt.limitv(self._instr_id, float(Vcc))
-        self.lpt.forcei(self._instr_id, float(current))
-        self._output_enabled = True
-
-    def measure_voltage(self) -> float:
-        if self._instr_id is None:
-            return float("nan")
-        return float(self.lpt.intgv(self._instr_id))
-
-    def measure_current(self) -> float:
-        if self._instr_id is None:
-            return float("nan")
-        return float(self.lpt.intgi(self._instr_id))
-
-    def enable_output(self, enable: bool = True):
-        # SMU has no explicit output enable in LPT; emulate via sourcing 0 when disabling
-        if self._instr_id is None:
-            return
-        if not enable:
-            if self._last_source_mode == "voltage":
-                self.lpt.forcev(self._instr_id, 0.0)
-            else:
-                self.lpt.forcei(self._instr_id, 0.0)
-        self._output_enabled = enable
-
-    def get_idn(self) -> str:
-        ip = self._ip or "local"
-        return f"Keithley 4200A-SCS via LPT ({ip}:{self._port}) {self._card_name}"
-
-    def close(self):
-        try:
-            if self._instr_id is not None:
-                # Put outputs to a safe state and deselect station
-                try:
-                    self.lpt.forcev(self._instr_id, 0.0)
-                except Exception:
-                    pass
-            self.lpt.devint()
-            try:
-                self.lpt.tstdsl()
-            except Exception:
-                pass
-        except Exception:
-            pass
-
-    # --------------- Convenience helpers ---------------
-    def voltage_sweep(self, start_v: float, stop_v: float, step_v: float, delay_s: float = 0.05,
-                       v_limit: float = 10.0, i_limit: float = 1e-3) -> list[tuple[float, float]]:
-        points = []
-        voltages = np.concatenate([
-            np.arange(start_v, stop_v + step_v, step_v),
-            np.arange(stop_v - step_v, start_v - step_v, -step_v),
-        ])
-        self.set_limits(v_limit=v_limit, i_limit=i_limit)
-        for v in voltages:
-            self.set_voltage(float(v), Icc=i_limit)
-            time.sleep(delay_s)
-            i = self.measure_current()
-            points.append((float(v), float(i)))
-        self.enable_output(False)
-        return points
-
-    def current_sweep(self, start_i: float, stop_i: float, step_i: float, delay_s: float = 0.05,
-                       v_limit: float = 10.0) -> list[tuple[float, float]]:
-        points = []
-        currents = np.concatenate([
-            np.arange(start_i, stop_i + step_i, step_i),
-            np.arange(stop_i - step_i, start_i - step_i, -step_i),
-        ])
-        for i in currents:
-            self.set_current(float(i), Vcc=v_limit)
-            time.sleep(delay_s)
-            v = self.measure_voltage()
-            points.append((float(i), float(v)))
-        self.enable_output(False)
-        return points
-
-    def set_limits(self, v_limit: float | None = None, i_limit: float | None = None):
-        if self._instr_id is None:
-            return
-        if v_limit is not None:
-            self.lpt.limitv(self._instr_id, float(v_limit))
-        if i_limit is not None:
-            self.lpt.limiti(self._instr_id, float(i_limit))
-
 
 
 # -------------------------------------------
@@ -284,6 +57,13 @@ class Keithley4200A_PMUDualChannel:
         # Proxies
         self.lpt = Proxy(self._ip, self._port, "lpt")
         self.param = Proxy(self._ip, self._port, "param")
+        
+        # try:
+        #     self.lpt.dev_abort()
+        # except Exception:
+        #     pass
+
+        #self.reset_lpt_server(self.lpt)
 
         # Initialize tester
         self.lpt.initialize()
@@ -316,14 +96,11 @@ class Keithley4200A_PMUDualChannel:
             print("if this keeps happening try restarting the 4200a")
             pass
 
-        # at close down, cleans up and hopfully shuts down any operation still running 
-        # Stops a lot of errors from occuring if something goes wrong. Ie less restarts. 
         atexit.register(self.cleanup)
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda s, f: (self.cleanup(), sys.exit(0)))
 
     def cleanup(self):
-        """"Cleans up and shuts down any operation still running"""
         try: self.output(False)
         except Exception: pass
         try: self.lpt.dev_abort()
@@ -356,6 +133,7 @@ class Keithley4200A_PMUDualChannel:
         """"configures both channels"with the ranges limits and timing!"""
         # Configure pathway, measurement, ranges, limits, timing, and load for both channels
         for ch in self.channels:
+            print("a")
             self.lpt.rpm_config(self.card_id, ch, self.param.KI_RPM_PATHWAY, self.param.KI_RPM_PULSE)
             self.lpt.pulse_meas_sm(self.card_id, ch,
                                    acquire_type=0,
@@ -373,6 +151,7 @@ class Keithley4200A_PMUDualChannel:
             self.lpt.pulse_meas_timing(self.card_id, ch, start_pct, stop_pct, int(num_pulses))
             self.lpt.pulse_source_timing(self.card_id, ch, period, delay, width, rise, fall)
             self.lpt.pulse_load(self.card_id, ch, load_ohm)
+            print("b")
 
         # Software trigger by default
         # try:
@@ -381,7 +160,7 @@ class Keithley4200A_PMUDualChannel:
         #     pass
 
         self._configured = True
-        print("PMU default configured")
+        print("PMU configured")
 
     def _ensure_config(self) -> None:
         
@@ -413,13 +192,8 @@ class Keithley4200A_PMUDualChannel:
           the typical wiring (manual figure 11 with both channels connected).
         - Returns a pandas DataFrame with columns: t (s), V (V), I (A), R (Ohm).
         """
-        # checks if PMU is configured if not configures it
-        try:
-            self._ensure_config()
-        except Exception:
-            print("Failed to configure PMU")
-            print("if this keeps happening try restarting the 4200a")
-            sys.exit() # force close 
+        # checks if PMU is configured
+        self._ensure_config()
 
         # Optionally force fixed ranges (helps avoid bogus overflow values on some setups)
         # Sometimes this may be necessary to avoid errors! Not sure why yet. 
@@ -444,7 +218,7 @@ class Keithley4200A_PMUDualChannel:
                 # doubleVrange, int Irange_type, double Irange);
                 self.lpt.pulse_ranges(self.card_id, ch,v_src_range=v_src_range,i_range_type=0,v_range_type=0)
 
-        print("Set Ranges successfully")
+        print("passed_ranges")
 
         # Apply trigger settings if provided
         # for now this is not beenm checked
@@ -464,14 +238,14 @@ class Keithley4200A_PMUDualChannel:
             except Exception:
                 pass
 
-        print("Passed trigger set up correctly")
+        print("passed_trigger_settings")
 
         # Update timing on both channels
         for ch in self.channels:
             self.lpt.pulse_source_timing(self.card_id, ch, period_s, 1e-7, width_s, 1e-7, 1e-7)
             self.lpt.pulse_meas_timing(self.card_id, ch, float(meas_start_pct), float(meas_stop_pct), int(num_pulses))
 
-        print("Passed timing settings correctly")
+        print("passed_timing_settings")
 
         # Program setpoints: source channel to requested amplitude, other at 0 V if requested
         other_channel = 2 if int(source_channel) == 1 else 1
@@ -496,8 +270,7 @@ class Keithley4200A_PMUDualChannel:
             self.lpt.pulse_delay(self.card_id, ch, Trig_delay)
             self.lpt.pulse_output(self.card_id, ch, 1)
 
-        print("Passed outputs correctly")
-        print("Measuring under way")
+        print("passed_outputs")
         #trigger for 5 pulses
 
         # Execute and wait
@@ -512,7 +285,7 @@ class Keithley4200A_PMUDualChannel:
                 raise TimeoutError("PMU pulse execution timed out")
             time.sleep(0.02)
 
-        print("Passed execution, now waiting on Data")
+        print("passed_exec")
 
         # Fetch both channels for diagnostics
         ch_data: dict[int, dict[str, np.ndarray]] = {}
@@ -534,7 +307,7 @@ class Keithley4200A_PMUDualChannel:
                     "s": np.array([], dtype=int),
                 }
 
-        print("Fetched Data successfully")
+        print("passed_fetch")
 
         # Decode and summarize statuses (helps diagnose overflow/invalid samples)
         try:
@@ -549,7 +322,7 @@ class Keithley4200A_PMUDualChannel:
         except Exception:
             pass
 
-        print("Decoded statuses successfully")
+        print("passed_statuses")
 
         # Select the source channel arrays
         src = int(source_channel)
@@ -579,7 +352,7 @@ class Keithley4200A_PMUDualChannel:
         if s_arr.size:
             df["Status"] = s_arr
 
-        print("Finished returning Df successfully")
+        print("Finished returning Df")
 
         return df
 
@@ -1044,9 +817,28 @@ class Keithley4200A_PMUDualChannel:
 
 
 
- 
 
-if __name__ == "__main__":
-    print("nothing set up here yet ")
+#pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
+# # #df = pmu.test_pulse_with_pretrigger(amplitude_v=0.5, width_s=50e-6, period_s=200e-6, num_pulses=5, source_channel=1,pretrigger_width_s=50e-6)
+# # #print(df.head())
+# # #pmu.close()
 
-    
+# # # this works as long as you use fixed ranges 
+# df = pmu.measure_at_voltage(amplitude_v=0.5, width_s=50e-6, period_s=200e-6, num_pulses=100, source_channel=1,force_fixed_ranges=True)
+# print(df.head())
+# pmu.close()
+
+# # pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
+
+# # df = pmu.measure_at_voltage_wait_for_trigger(
+#     amplitude_v=0.5,
+#     width_s=50e-6,
+#     period_s=200e-6,
+#     num_pulses=10,
+#     source_channel=1,
+#     trig_edge="rising",   # or "falling"
+#     timeout_s=15
+# )
+
+# print(df.head())
+# pmu.close()

@@ -1,25 +1,3 @@
-import sys
-from pathlib import Path
-import time
-from types import NoneType
-import numpy as np
-import pandas as pd
-
-import atexit, signal, sys
-from typing import Any, Literal
-
-
-# Ensure project root on sys.path for absolute imports when run as script
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-from Equipment_Classes.SMU.ProxyClass import Proxy
-
-
-# -------------------------------------------
-# Minimal dual-channel PMU helper (both CHs)
-# -------------------------------------------
 class Keithley4200A_PMUDualChannel:
     """Minimal dual-channel PMU helper using the LPT server.
 
@@ -67,17 +45,7 @@ class Keithley4200A_PMUDualChannel:
 
         # Initialize tester
         self.lpt.initialize()
-
-        try:
-            self.lpt.tstsel(1)
-        except Exception as e:
-            print(e)
-            print
-            print("If you see this error close the terminal and rerun the script on both the 4200 and python terminal")
-            print("the 4200 may need restarting is persists")
-            print("Im not sure why this is occuring")
-            sys.exit() # force close 
-
+        self.lpt.tstsel(1)
         self.lpt.devint()
         self.lpt.dev_abort()
 
@@ -93,6 +61,7 @@ class Keithley4200A_PMUDualChannel:
         except Exception:
             self._configured = False
             print("Failed to configure PMU")
+            print("if this keeps happening try restarting the 4200a")
             pass
 
         atexit.register(self.cleanup)
@@ -100,7 +69,7 @@ class Keithley4200A_PMUDualChannel:
             signal.signal(sig, lambda s, f: (self.cleanup(), sys.exit(0)))
 
     def cleanup(self):
-        try: self.output(False)
+        try: pmu.output(False)
         except Exception: pass
         try: self.lpt.dev_abort()
         except Exception: pass
@@ -179,13 +148,12 @@ class Keithley4200A_PMUDualChannel:
                            v_meas_range: float = 10.0,
                            i_meas_range: float = 100e-6,
                            num_pulses: int = 1,
-                           timeout_s: float = 10,
+                           timeout_s: float = 10.0,
                            acquire_time_stamp: int = 1,
-                           Trig_delay = int(500e-4),
                            trig_source: int | None = None,
                            trig_output: bool | None = None,
                            trig_polarity: int | None = None) -> pd.DataFrame:
-        """Apply x num pulse and return V, I, t, and R (ohm) for the source channel.
+        """Apply a single pulse and return V, I, t, and R (ohm) for the source channel.
 
         - Uses both channels: the non-source channel can be held at 0 V to match
           the typical wiring (manual figure 11 with both channels connected).
@@ -215,7 +183,7 @@ class Keithley4200A_PMUDualChannel:
                 # Auto Range (i_range_type=0)
                 # pulse_ranges(int instr_id, int chan, double VSrcRange, int Vrange_type, 
                 # doubleVrange, int Irange_type, double Irange);
-                self.lpt.pulse_ranges(self.card_id, ch,v_src_range=v_src_range,i_range_type=0,v_range_type=0)
+                self.lpt.pulse_ranges(self.card_id, ch,v_src_range=v_src_range,i_range_type=0)
 
         print("passed_ranges")
 
@@ -255,24 +223,32 @@ class Keithley4200A_PMUDualChannel:
             self.lpt.pulse_sweep_linear(self.card_id, other_channel,
                                         self.param.PULSE_AMPLITUDE_SP,
                                         0.0, 0.0, 0.0)
-        # for ch in self.channels:
-        #     print("passed_setpoints")
-        #     self.lpt.pulse_burst_count(self.card_id, ch, int(1))  #define num of pulses 
-        #     self.lpt.pulse_output(self.card_id, ch, 1)   
-        #     self.lpt.pulse_trig(self.card_id,0 ) # 2 burst trigger
-        #     print("passed_trig")
+
+        print("passed_setpoints")
+        #self.lpt.pulse_burst_count(self.card_id, ch, int(1))  #define num of pulses 
+        #self.lpt.pulse_output(self.card_id, ch, 1)   
+        #self.lpt.pulse_trig(self.card_id,0 ) # 2 burst trigger
+        print("passed_trig")
         
 
         # Enable outputs on both channels
         for ch in self.channels:
-            # delays trigger output by the trigger delay
-            self.lpt.pulse_delay(self.card_id, ch, Trig_delay)
+            # delays trigger output by 50us
+            self.lpt.pulse_delay(self.card_id, ch, 50e-6)
             self.lpt.pulse_output(self.card_id, ch, 1)
 
         print("passed_outputs")
         #trigger for 5 pulses
+        
+        #maybe add if stastment to check fior trigger or no trigger?
+        
+        
 
+        # fails onthe pulse_trig, due too a fucntion not valid in the present pulse mode! 
+        
+        
         # Execute and wait
+        #PULSE_MODE_ADVANCED
         self.lpt.pulse_exec(self.param.PULSE_MODE_SIMPLE)
         t0 = time.time()
         while True:
@@ -355,6 +331,336 @@ class Keithley4200A_PMUDualChannel:
 
         return df
 
+    def create_and_upload_arb(self,
+                              chan: int,
+                              levels: list[float],
+                              time_per_point: float,
+                              fname: str | None = None) -> str:
+        """Upload an arbitrary waveform to the pulse card.
+
+        - chan: channel to associate the arb with (1 or 2)
+        - levels: list of voltage levels (floats)
+        - time_per_point: sample interval in seconds for each level
+        - fname: optional name for the uploaded waveform; autogenerated if None
+
+        Returns the waveform name used on the server.
+        """
+        if not isinstance(levels, (list, tuple)) or len(levels) == 0:
+            raise ValueError("levels must be a non-empty list of floats")
+        if float(time_per_point) <= 0:
+            raise ValueError("time_per_point must be > 0")
+
+            
+
+        fname = fname or f"py_arb_{int(time.time()*1e6)}"
+        try:
+            # ensure card is in ARB/PG2 mode before uploading arb array
+            try:
+                self.lpt.pg2_init(self.card_id, 2)
+            except Exception:
+                pass
+            # arb_array(instr_id, chan, time_per_pt, length, level_arr, fname)
+            self.lpt.arb_array(self.card_id, int(chan), float(time_per_point), int(len(levels)), list(levels), fname)
+        except Exception:
+            # try to re-init the card once then rethrow the exception
+            try:
+                self.lpt.pulse_init(self.card_id)
+                self.lpt.arb_array(self.card_id, int(chan), float(time_per_point), int(len(levels)), list(levels), fname)
+            except Exception as exc:
+                raise
+        return fname
+
+    def run_arb_waveform(self,
+                         chan: int,
+                         fname: str,
+                         mode: str = "full",
+                         trig_source: int = 0,
+                         trig_output: bool = True,
+                         burst_count: int = 1,
+                         v_meas_range: float = 2.0,
+                         i_meas_range: float = 1e-3,
+                         timeout_s: float = 10.0) -> pd.DataFrame:
+        """Run a previously uploaded arb waveform and return measured V/I/t.
+
+        mode: 'full' -> full arb (mode_id=2), 'segment' -> segment arb (mode_id=1)
+        """
+        if not fname:
+            raise ValueError("fname is required to run an arb waveform")
+
+        mode_id = 2 if mode == "full" else 1
+
+        # Put card into requested PG/ARB mode
+        try:
+            self.lpt.pg2_init(self.card_id, int(mode_id))
+        except Exception:
+            pass
+
+        # Load the named arb into the card (if present)
+        try:
+            # arb_file(instr_id, chan, fname)
+            self.lpt.arb_file(self.card_id, int(chan), fname)
+        except Exception:
+            # ignore if server already has it or doesn't support loading by name
+            pass
+
+        # For full ARB the server often expects the channel to be associated with the uploaded arb
+        # Try an explicit full-ARB registration step if available
+        try:
+            # Some servers accept pulse_sweep_linear with a special sweep type to bind the arb; try using PULSE_AMPLITUDE_SP with start==stop==0
+            self.lpt.pulse_sweep_linear(self.card_id, int(chan), self.param.PULSE_AMPLITUDE_SP, 0.0, 0.0, 0.0)
+        except Exception:
+            pass
+
+        # Configure measurement for waveform
+        try:
+            self.lpt.pulse_meas_wfm(self.card_id, int(chan), acquire_type=1, acquire_meas_v=1, acquire_meas_i=1, acquire_time_stamp=1, llecomp=0)
+        except Exception:
+            try:
+                # fallback to spot-mean config
+                self.lpt.pulse_meas_sm(self.card_id, int(chan), acquire_type=0, acquire_meas_v_ampl=1, acquire_meas_v_base=0, acquire_meas_i_ampl=1, acquire_meas_i_base=0, acquire_time_stamp=1, llecomp=0)
+            except Exception:
+                pass
+
+        # Set ranges and limits
+        try:
+            self.lpt.pulse_ranges(self.card_id, int(chan), v_src_range=max(abs(v_meas_range), 2.0), v_range_type=1, v_range=float(v_meas_range), i_range_type=1, i_range=float(i_meas_range))
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_limits(self.card_id, int(chan), v_limit=float(max(v_meas_range, 10.0)), i_limit=float(i_meas_range), power_limit=1.0)
+        except Exception:
+            pass
+
+        # Set burst count and trigger I/O
+        try:
+            self.lpt.pulse_burst_count(self.card_id, int(chan), int(burst_count))
+        except Exception:
+            pass
+        # Ensure the channel is added to the test by defining a sweep on it
+        try:
+            self.lpt.pulse_sweep_linear(self.card_id, int(chan), self.param.PULSE_AMPLITUDE_SP, 0.0, 0.0, 0.0)
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_trig_source(self.card_id, int(trig_source))
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_trig_output(self.card_id, 1 if trig_output else 0)
+        except Exception:
+            pass
+
+        # Enable outputs
+        try:
+            self.lpt.pulse_output(self.card_id, int(chan), 1)
+        except Exception:
+            pass
+
+        # Execute in advanced/arb-capable mode (fallback to simple if not available)
+        exec_mode = getattr(self.param, "PULSE_MODE_ADVANCED", getattr(self.param, "PULSE_MODE_SIMPLE", 1))
+        try:
+            self.lpt.pulse_exec(exec_mode)
+        except Exception:
+            try:
+                self.lpt.pulse_init(self.card_id)
+                self.lpt.pulse_exec(exec_mode)
+            except Exception as exc:
+                raise
+
+        # Wait for completion
+        t0 = time.time()
+        while True:
+            status, _ = self.lpt.pulse_exec_status()
+            if status != self.param.PMU_TEST_STATUS_RUNNING:
+                break
+            if time.time() - t0 > float(timeout_s):
+                try:
+                    self.lpt.dev_abort()
+                except Exception:
+                    pass
+                raise TimeoutError("ARB execution timed out")
+            time.sleep(0.02)
+
+        # Fetch data
+        buf_size = 0
+        try:
+            buf_size = self.lpt.pulse_chan_status(self.card_id, int(chan))
+        except Exception:
+            pass
+        try:
+            v, i, ts, st = self.lpt.pulse_fetch(self.card_id, int(chan), 0, max(0, buf_size - 1))
+        except Exception:
+            v, i, ts, st = [], [], [], []
+
+        df = pd.DataFrame({"t (s)": ts, "V (V)": v, "I (A)": i})
+        if st:
+            df["Status"] = st
+        return df
+
+    # ---- Segment ARB helpers (PG2 segment mode) ----
+    def build_segments_from_volts_times(self,
+                                        volts: list[float],
+                                        times: list[float]) -> tuple[list[float], list[float], list[float], list[int], list[int]]:
+        """Convert sample/hold-style volts,times arrays into segment parameters.
+
+        Returns (startvals, stopvals, timevals, triggervals, output_relays)
+        suitable for seg_arb_define. Uses simple 0 trigger and 0 relay values.
+        """
+        if not volts or not times or len(times) != len(volts):
+            raise ValueError("volts and times must be non-empty and same length")
+        n = len(volts)
+        startvals = []
+        stopvals = []
+        timevals = []
+        triggervals = []
+        output_relays = []
+        # each entry is a flat segment at volts[i] for times[i]
+        for i in range(n):
+            v = float(volts[i])
+            t = float(times[i])
+            if t <= 0:
+                continue
+            startvals.append(v)
+            stopvals.append(v)
+            timevals.append(t)
+            triggervals.append(0)
+            output_relays.append(0)
+        return startvals, stopvals, timevals, triggervals, output_relays
+
+    def run_segment_arb(self,
+                        chan: int,
+                        startvals: list[float],
+                        stopvals: list[float],
+                        timevals: list[float],
+                        triggervals: list[int] | None = None,
+                        output_relays: list[int] | None = None,
+                        trig_source: int = 0,
+                        trig_output: bool = True,
+                        v_meas_range: float = 2.0,
+                        i_meas_range: float = 1e-3,
+                        timeout_s: float = 10.0) -> pd.DataFrame:
+        """Define a segment-ARB sequence on chan and execute it (PG2 segment mode).
+
+        Expects per-segment arrays of equal length.
+        """
+        chan = int(chan)
+        nsegments = len(startvals)
+        if not (nsegments and len(stopvals) == nsegments and len(timevals) == nsegments):
+            raise ValueError("startvals, stopvals, timevals must have same non-zero length")
+        trigs = [int(x) for x in (triggervals if triggervals else [0] * nsegments)]
+        relays = [int(x) for x in (output_relays if output_relays else [0] * nsegments)]
+
+        # Segment ARB mode
+        try:
+            self.lpt.pg2_init(self.card_id, 1)  # 1: segment arb
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_init(self.card_id)
+        except Exception:
+            pass
+
+        # Define segments and waveform
+        define_ok = False
+        try:
+            # Preferred path (if server impl is correct)
+            self.lpt.seg_arb_define(self.card_id, chan, int(nsegments), list(startvals), list(stopvals), list(timevals), trigs, relays)
+            define_ok = True
+        except Exception:
+            # Fallback: use seg_arb_sequence API to register segments under a single sequence
+            try:
+                seq_num = 1
+                meas_type = [1.0] * nsegments      # 1 = Spot measurement per segment
+                meas_start = [0.2] * nsegments     # 20% window
+                meas_stop = [0.8] * nsegments      # 80% window
+                self.lpt.seg_arb_sequence(
+                    self.card_id,
+                    chan,
+                    int(seq_num),
+                    int(nsegments),
+                    list(startvals),
+                    list(stopvals),
+                    list(timevals),
+                    trigs,
+                    relays,
+                    meas_type,
+                    meas_start,
+                    meas_stop,
+                )
+                # Build waveform from that single sequence
+                self.lpt.seg_arb_waveform(self.card_id, chan, 1, [seq_num], [1.0])
+                define_ok = True
+            except Exception:
+                define_ok = False
+        if define_ok:
+            try:
+                # If we used seg_arb_define we may still want a simple waveform; attempt but ignore failures
+                seq_ids = list(range(nsegments))
+                loop_counts = [1.0] * nsegments
+                self.lpt.seg_arb_waveform(self.card_id, chan, int(len(seq_ids)), seq_ids, loop_counts)
+            except Exception:
+                pass
+
+        # Configure measurement
+        try:
+            self.lpt.pulse_meas_wfm(self.card_id, chan, acquire_type=1, acquire_meas_v=1, acquire_meas_i=1, acquire_time_stamp=1, llecomp=0)
+        except Exception:
+            pass
+        # Ranges/limits
+        try:
+            self.lpt.pulse_ranges(self.card_id, chan, v_src_range=max(abs(v_meas_range), 2.0), v_range_type=1, v_range=float(v_meas_range), i_range_type=1, i_range=float(i_meas_range))
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_limits(self.card_id, chan, v_limit=float(max(v_meas_range, 10.0)), i_limit=float(i_meas_range), power_limit=1.0)
+        except Exception:
+            pass
+
+        # Trigger and outputs
+        try:
+            self.lpt.pulse_trig_source(self.card_id, int(trig_source))
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_trig_output(self.card_id, 1 if trig_output else 0)
+        except Exception:
+            pass
+        try:
+            self.lpt.pulse_output(self.card_id, chan, 1)
+        except Exception:
+            pass
+
+        # Execute advanced mode
+        exec_mode = getattr(self.param, "PULSE_MODE_ADVANCED", getattr(self.param, "PULSE_MODE_SIMPLE", 1))
+        try:
+            self.lpt.pulse_exec(exec_mode)
+        except Exception:
+            try:
+                self.lpt.pulse_init(self.card_id)
+                self.lpt.pulse_exec(exec_mode)
+            except Exception as exc:
+                raise
+
+        # Wait and fetch
+        t0 = time.time()
+        while True:
+            status, _ = self.lpt.pulse_exec_status()
+            if status != self.param.PMU_TEST_STATUS_RUNNING:
+                break
+            if time.time() - t0 > float(timeout_s):
+                try:
+                    self.lpt.dev_abort()
+                except Exception:
+                    pass
+                raise TimeoutError("Segment ARB execution timed out")
+            time.sleep(0.02)
+
+        buf = self.lpt.pulse_chan_status(self.card_id, chan)
+        v, i, ts, st = self.lpt.pulse_fetch(self.card_id, chan, 0, max(0, buf - 1))
+        df = pd.DataFrame({"t (s)": ts, "V (V)": v, "I (A)": i})
+        if st:
+            df["Status"] = st
+        return df
 
     def output(self, enable: bool) -> None:
         for ch in self.channels:
@@ -362,142 +668,6 @@ class Keithley4200A_PMUDualChannel:
                 self.lpt.pulse_output(self.card_id, ch, 1 if enable else 0)
             except Exception:
                 pass
-
-    # ---- High-level prep/start/wait/fetch helpers (no triggers) ----
-    def prepare_measure_at_voltage(self,
-                                   amplitude_v: float,
-                                   base_v: float = 0.0,
-                                   width_s: float = 10e-6,
-                                   period_s: float = 20e-6,
-                                   meas_start_pct: float = 0.1,
-                                   meas_stop_pct: float = 0.9,
-                                   source_channel: int = 1,
-                                   hold_other_at_zero: bool = True,
-                                   force_fixed_ranges: bool = False,
-                                   v_meas_range: float = 10.0,
-                                   i_meas_range: float = 100e-6,
-                                   num_pulses: int = 1,
-                                   delay_s: float | None = None,
-                                   outputs_on: bool = True) -> None:
-        """Prepare a measure-at-voltage style test without starting execution.
-
-        - Configures ranges/limits/timing and setpoints.
-        - Optionally enables outputs so a follow-up start() executes immediately.
-        - No trigger configuration is performed here.
-        """
-        self._ensure_config()
-
-        v_src_range = max(abs(amplitude_v), v_meas_range)
-        if force_fixed_ranges:
-            for ch in self.channels:
-                self.lpt.pulse_ranges(self.card_id, ch,
-                                      v_src_range=v_src_range,
-                                      v_range_type=1, v_range=float(v_meas_range),
-                                      i_range_type=1, i_range=float(i_meas_range))
-        else:
-            for ch in self.channels:
-                self.lpt.pulse_ranges(self.card_id, ch,
-                                      v_src_range=v_src_range,
-                                      v_range_type=0, v_range=None,
-                                      i_range_type=0, i_range=None)
-
-        for ch in self.channels:
-            self.lpt.pulse_source_timing(self.card_id, ch,
-                                         float(period_s), 1e-7, float(width_s), 1e-7, 1e-7)
-            self.lpt.pulse_meas_timing(self.card_id, ch,
-                                       float(meas_start_pct), float(meas_stop_pct), int(num_pulses))
-            if delay_s is not None:
-                self.lpt.pulse_delay(self.card_id, ch, float(delay_s))
-
-        src = int(source_channel)
-        other = 2 if src == 1 else 1
-        self.lpt.pulse_sweep_linear(self.card_id, src, self.param.PULSE_AMPLITUDE_SP,
-                                    float(amplitude_v), float(amplitude_v), float(base_v))
-        if hold_other_at_zero:
-            self.lpt.pulse_sweep_linear(self.card_id, other, self.param.PULSE_AMPLITUDE_SP,
-                                        0.0, 0.0, 0.0)
-
-        if outputs_on:
-            for ch in self.channels:
-                self.lpt.pulse_output(self.card_id, ch, 1)
-
-    def start(self) -> None:
-        """Start an already-prepared PMU test in simple mode.
-
-        Falls back to pulse_init if exec fails once.
-        """
-        try:
-            self.lpt.pulse_exec(self.param.PULSE_MODE_SIMPLE)
-        except Exception:
-            try:
-                self.lpt.pulse_init(self.card_id)
-                self.lpt.pulse_exec(self.param.PULSE_MODE_SIMPLE)
-            except Exception:
-                raise
-
-    def status(self) -> tuple[int, float]:
-        """Return (status_code, elapsed_time_s)."""
-        return self.lpt.pulse_exec_status()
-
-    def wait(self, timeout_s: float = 10.0, poll_s: float = 0.02) -> None:
-        """Block until PMU completes or timeout; raises TimeoutError on timeout."""
-        t0 = time.time()
-        while True:
-            status, _elapsed = self.lpt.pulse_exec_status()
-            if status != self.param.PMU_TEST_STATUS_RUNNING:
-                return
-            if time.time() - t0 > float(timeout_s):
-                self.lpt.dev_abort()
-                raise TimeoutError("PMU pulse execution timed out")
-            time.sleep(float(poll_s))
-
-    def fetch(self, channel: int = 1) -> pd.DataFrame:
-        """Fetch V/I/t (and Status if present) for a single channel."""
-        ch = int(channel)
-        try:
-            buf_size = self.lpt.pulse_chan_status(self.card_id, ch)
-            v, i, ts, st = self.lpt.pulse_fetch(self.card_id, ch, 0, max(0, buf_size - 1))
-        except Exception:
-            v, i, ts, st = [], [], [], []
-
-        v_arr = np.array(v, dtype=float)
-        i_arr = np.array(i, dtype=float)
-        ts_arr = np.array(ts, dtype=float)
-        s_arr = np.array(st, dtype=int) if st else np.array([], dtype=int)
-
-        if i_arr.size:
-            invalid = ~np.isfinite(i_arr) | (np.abs(i_arr) > 1e10)
-            i_arr = np.where(invalid, np.nan, i_arr)
-
-        eps = 1e-15
-        with np.errstate(divide="ignore", invalid="ignore"):
-            r_arr = np.where(np.abs(i_arr) > eps, v_arr / i_arr, np.nan)
-
-        df = pd.DataFrame({
-            "t (s)": ts_arr,
-            "V (V)": v_arr,
-            "I (A)": i_arr,
-            "R (Ohm)": r_arr,
-        })
-        if s_arr.size:
-            df["Status"] = s_arr
-        return df
-
-    def abort(self) -> None:
-        """Abort current PMU activity."""
-        try:
-            self.lpt.dev_abort()
-        except Exception:
-            pass
-
-    def set_pulse_delay(self, delay_s: float, channel: int | None = None) -> None:
-        """Set trigger-to-output delay for one channel or both if channel is None."""
-        if channel is None:
-            targets = self.channels
-        else:
-            targets = [int(channel)]
-        for ch in targets:
-            self.lpt.pulse_delay(self.card_id, ch, float(delay_s))
 
     # ---- Trigger helpers (dual-channel scope) ----
     def set_trigger_source(self, source: int) -> None:
@@ -690,8 +860,7 @@ class Keithley4200A_PMUDualChannel:
                                    period_s: float = 200e-6,
                                    num_pulses: int = 5,
                                    source_channel: int = 1,
-                                   hold_other_at_zero: bool = True,
-                                   pretrigger_width_s: float = 50e-6) -> pd.DataFrame:
+                                   hold_other_at_zero: bool = True) -> pd.DataFrame:
         """Simple helper: toggle TRIG OUT once (pre-trigger), then emit a short burst and fetch results.
 
         Uses Simple pulse mode and conservative defaults. Returns the DataFrame of the source channel.
@@ -716,33 +885,6 @@ class Keithley4200A_PMUDualChannel:
                                        llecomp=0)
             except Exception:
                 pass
-
-        # Send a TTL-only pre-trigger on TRIG OUT, with DUT outputs explicitly OFF
-        # to avoid any activity on the DUT. Then proceed to set ranges/limits etc.
-        try:
-            # Ensure software trigger source so TRIG OUT toggling does not arm external flow
-            self.lpt.pulse_trig_source(self.card_id, 0)
-        except Exception:
-            pass
-        # Force outputs OFF before toggling TRIG OUT (belt and suspenders)
-        for ch in self.channels:
-            try:
-                self.lpt.pulse_output(self.card_id, ch, 0)
-            except Exception:
-                pass
-        try:
-            self.lpt.pulse_trig_polarity(self.card_id, 1)
-        except Exception:
-            pass
-        try:
-            # Generate a clean TTL pulse on the rear TRIG OUT SMA
-            self.lpt.pulse_trig_output(self.card_id, 0)
-            time.sleep(1e-4)
-            self.lpt.pulse_trig_output(self.card_id, 1)
-            time.sleep(float(pretrigger_width_s))
-            self.lpt.pulse_trig_output(self.card_id, 0)
-        except Exception:
-            pass
 
         # Ranges/limits
         try:
@@ -775,12 +917,24 @@ class Keithley4200A_PMUDualChannel:
             except Exception:
                 pass
 
-        # TRIG OUT already pulsed above while outputs were OFF.
+        # Enable TRIG OUT and send a quick manual pre-trigger pulse (toggle)
+        try:
+            self.lpt.pulse_trig_polarity(self.card_id, 1)
+            print("trig_polarity out")
+        except Exception:
+            pass
+        try:
+            # Enable TRIG OUT
+            self.lpt.pulse_trig_output(self.card_id, 1)
+            print("trig_out out")
+        except Exception:
+            pass
+        # Do not manually toggle TRIG OUT here; rely on PMU arm/start marker
 
         # Enable outputs
         for ch in self.channels:
             try:
-                self.lpt.pulse_delay(self.card_id, ch, 0)
+                self.lpt.pulse_delay(self.card_id, ch, 50e-6)
             except Exception:
                 pass
             try:
@@ -815,29 +969,76 @@ class Keithley4200A_PMUDualChannel:
         return df
 
 
+    # ---- Memristor-oriented convenience APIs ----
+    def memr_read(self,
+                  read_v: float = 0.2,
+                  expected_res_ohm: float = 100_000.0,
+                  shots: int = 5,
+                  width_s: float = 200e-6,
+                  period_s: float = 500e-6,
+                  source_channel: int = 1) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Low-stress read of device resistance at a small bias voltage.
+
+        Returns (summary_df, raw_df).
+        """
+        return self.measure_resistance(
+            amplitude_v=float(read_v),
+            expected_res_ohm=float(expected_res_ohm),
+            shots=int(shots),
+            width_s=float(width_s),
+            period_s=float(period_s),
+            source_channel=int(source_channel),
+        )
+
+    def memr_iv(self,
+                voltages: list[float],
+                expected_res_ohm: float,
+                shots: int = 3,
+                width_s: float = 200e-6,
+                period_s: float = 500e-6,
+                source_channel: int = 1) -> pd.DataFrame:
+        """Quasi-static IV: sweep small set of voltages with late-window sampling and shots.
+
+        Returns a summary DataFrame with Vset and robust R per step.
+        """
+        return self.measure_resistance_sweep(
+            voltages=list(voltages or []),
+            expected_res_ohm=float(expected_res_ohm),
+            shots=int(shots),
+            width_s=float(width_s),
+            period_s=float(period_s),
+            source_channel=int(source_channel),
+        )
+
+    def memr_perturb_relax(self,
+                            bias_v: float,
+                            pulse_v: float,
+                            width_s: float,
+                            period_s: float,
+                            delay_s: float = 1e-7,
+                            num_pulses: int = 1,
+                            bias_channel: int = 1,
+                            aux_channel: int = 2,
+                            v_meas_range: float = 2.0,
+                            i_meas_range: float = 200e-6,
+                            capture_start_pct: float = 0.0,
+                            capture_stop_pct: float = 1.0,
+                            fetch_both: bool = False) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]:
+        """Bias + auxiliary pulse: observe bias channel waveform (V/I/t) including relaxation."""
+        return self.measure_bias_with_aux_pulse(
+            bias_v=float(bias_v),
+            aux_pulse_v=float(pulse_v),
+            width_s=float(width_s),
+            period_s=float(period_s),
+            delay_s=float(delay_s),
+            num_pulses=int(num_pulses),
+            bias_channel=int(bias_channel),
+            aux_channel=int(aux_channel),
+            v_meas_range=float(v_meas_range),
+            i_meas_range=float(i_meas_range),
+            start_pct=float(capture_start_pct),
+            stop_pct=float(capture_stop_pct),
+            fetch_both=bool(fetch_both),
+        )
 
 
-#pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
-# # #df = pmu.test_pulse_with_pretrigger(amplitude_v=0.5, width_s=50e-6, period_s=200e-6, num_pulses=5, source_channel=1,pretrigger_width_s=50e-6)
-# # #print(df.head())
-# # #pmu.close()
-
-# # # this works as long as you use fixed ranges 
-# df = pmu.measure_at_voltage(amplitude_v=0.5, width_s=50e-6, period_s=200e-6, num_pulses=100, source_channel=1,force_fixed_ranges=True)
-# print(df.head())
-# pmu.close()
-
-# # pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
-
-# # df = pmu.measure_at_voltage_wait_for_trigger(
-#     amplitude_v=0.5,
-#     width_s=50e-6,
-#     period_s=200e-6,
-#     num_pulses=10,
-#     source_channel=1,
-#     trig_edge="rising",   # or "falling"
-#     timeout_s=15
-# )
-
-# print(df.head())
-# pmu.close()

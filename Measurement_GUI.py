@@ -24,7 +24,7 @@ from Equipment_Classes.iv_controller_manager import IVControllerManager
 from Equipment_Classes.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # import power supply controll
 from Equipment_Classes.temperature_controller_manager import TemperatureControllerManager
 #from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
-from measurement_service import MeasurementService, VoltageRangeMode
+from measurement_services import MeasurementService, VoltageRangeMode
 from typing import Optional
 from tests.config import Thresholds
 from tests.runner import TestRunner
@@ -442,7 +442,7 @@ class MeasurementGUI:
         # Volatile/Non-volatile popup
         def open_advanced():
             try:
-                from advanced_tests_gui import AdvancedTestsGUI
+                from Advanced_tests_GUI import AdvancedTestsGUI
                 AdvancedTestsGUI(self.master, provider=self)
             except Exception as e:
                 try:

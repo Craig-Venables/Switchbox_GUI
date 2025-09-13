@@ -1,43 +1,16 @@
-from Equipment_Classes.SMU.keitheley4200a3_workingpulse import Keithley4200A_PMUDualChannel
+from Equipment_Classes.SMU.Keithley4200A import Keithley4200A_PMUDualChannel
 from Equipment_Classes.function_generator_manager import FunctionGeneratorManager
-from Equipment_Classes.SMU.pmu_fg_orchestrator import PMUFGSoftwareOrchestrator
+from measurement_services_pmu import MeasurementServicesPMU
 VISA_RESOURCE = "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR"
 
 pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
-gen = FunctionGeneratorManager(fg_type="Siglent SDG1032X",address=VISA_RESOURCE ,auto_connect=True)
-
-coord = PMUFGSoftwareOrchestrator(pmu, gen)
-
+gen = FunctionGeneratorManager(fg_type="Siglent SDG1032X", address=VISA_RESOURCE, auto_connect=True)
+ms_pmu = MeasurementServicesPMU(pmu=pmu, function_generator=gen)
 
 
 
-def run_no_trigger_softwear_only_test():
-    pmu_params = {
-        "amplitude_v": 0.5,
-        "width_s": 50e-6,
-        "period_s": 200e-6,
-        "num_pulses": 1000,        # PMU pulses
-        "source_channel": 1,
-        "force_fixed_ranges": True,
-        "v_meas_range": 2.0,
-        "i_meas_range": 200e-6,
-    }
 
-    fg_params = {
-        "channel": 1,
-        "high_level_v": 3.0,
-        "low_level_v": 0.0,
-        "frequency_hz": 1e3,
-    }
-
-    df = coord.measure_at_voltage_with_laser_NO_TRIGGER_SOFTWEAR_ONLY(
-        pmu_peramiter=pmu_params,
-        fg_peramiter=fg_params,
-        start_order="fg_first",
-        skew_s=0.0,
-        timeout_s=15.0,
-    )
-    print(df.head())
+## Deprecated: software-only sequencing helper removed with orchestrator
 
 
 pmu_params = {
@@ -74,8 +47,12 @@ fg_params = {
     we may be able to set a minus delay on the system instead? not sure!
 """
 
-df = coord.Measure_at_voltage_with_laser_Using_trigger_out_pmu(pmu_peramiter=pmu_params,fg_peramiter=fg_params,timeout_s=15.0)
-
+df = ms_pmu.Measure_at_voltage_with_laser_Using_trigger_out_pmu(
+    pmu_peramiter=pmu_params,
+    fg_peramiter=fg_params,
+    timeout_s=15.0,
+)
+# maybe add in a way to check range on that first pulse, pulse once, find current and range and set the range based on that.
 #df = coord.Measure_at_voltage_with_laser_Using_trigger_out_pmu(timeout_s=15.0)
 
 print(df.head())

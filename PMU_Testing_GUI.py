@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from measurement_service import MeasurementService
+from measurement_services import MeasurementService
 from Equipment_Classes.SMU.Keithley4200A import (
     Keithley4200A_PMUDualChannel,
     MemristorMeasurements,
