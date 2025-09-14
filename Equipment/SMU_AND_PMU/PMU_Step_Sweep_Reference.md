@@ -51,3 +51,4 @@ Use a SweepType for `pulse_sweep_linear` (inner loop) and a StepType for `pulse_
 - Dual‑sweep (`PULSE_DUAL_*`) emits up and then down in one test; useful for capturing hysteresis.
 - Only a sweep defines time‑varying setpoints during the acquisition; steps change between sweeps.
 - See `Equipment/SMU_AND_PMU/Keithley4200A.py` for usage examples where `pulse_sweep_linear` and `pulse_step_linear` are called.
+

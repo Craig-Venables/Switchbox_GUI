@@ -256,6 +256,7 @@ class MeasurementService:
         psu=None,
         led: bool = False,
         power: float = 1.0,
+        optical=None,
         sequence: Optional[Iterable[str]] = None,
         pause_s: float = 0.0,
         should_stop: Optional[Callable[[], bool]] = None,
@@ -311,13 +312,19 @@ class MeasurementService:
                 except Exception:
                     pass
 
-            # Apply LED per-sweep
+            # Apply optical per-sweep
             try:
-                if psu is not None:
+                if optical is not None:
+                    if led_state == '1':
+                        # Use configured defaults
+                        optical.set_level(float(power), getattr(optical, 'capabilities', {}).get('units', 'mW'))
+                        optical.set_enabled(True)
+                    else:
+                        optical.set_enabled(False)
+                elif psu is not None:
                     if led_state == '1':
                         psu.led_on_380(power)
                     else:
-                        # only turn off if LED feature is in use
                         if led:
                             psu.led_off_380()
             except Exception:
@@ -365,9 +372,11 @@ class MeasurementService:
             if should_stop and should_stop():
                 break
 
-        # Always attempt to turn LED off at the end
+        # Always attempt to turn optical off at the end
         try:
-            if psu is not None:
+            if optical is not None:
+                optical.set_enabled(False)
+            elif psu is not None:
                 psu.led_off_380()
         except Exception:
             pass
@@ -393,6 +402,7 @@ class MeasurementService:
         smu_type: str = "Keithley 2400",
         psu=None,
         led: bool = False,
+        optical=None,
         led_time_s: Optional[float] = None,
         sequence: Optional[Iterable[str]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
@@ -407,9 +417,11 @@ class MeasurementService:
 
         # Session assumed prepared by caller
 
-        # Optional LED handling (basic): turn on if requested
+        # Optional optical handling (basic): turn on if requested
         try:
-            if psu is not None and led:
+            if optical is not None and led:
+                optical.set_enabled(True)
+            elif psu is not None and led:
                 psu.led_on_380(1.0)
         except Exception:
             pass
@@ -446,9 +458,11 @@ class MeasurementService:
                     pass
             time.sleep(max(0.0, float(repeat_delay_s)))
 
-        # Optional LED off
+        # Optional optical off
         try:
-            if psu is not None and led:
+            if optical is not None and led:
+                optical.set_enabled(False)
+            elif psu is not None and led:
                 psu.led_off_380()
         except Exception:
             pass
@@ -478,6 +492,7 @@ class MeasurementService:
         psu=None,
         led: bool = False,
         power: float = 1.0,
+        optical=None,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
@@ -493,9 +508,15 @@ class MeasurementService:
         except Exception:
             pass
 
-        # LED handling (optional)
+        # Optical handling (optional)
         try:
-            if psu is not None and led:
+            if optical is not None and led:
+                try:
+                    optical.set_level(float(power), getattr(optical, 'capabilities', {}).get('units', 'mW'))
+                except Exception:
+                    pass
+                optical.set_enabled(True)
+            elif psu is not None and led:
                 psu.led_on_380(power)
         except Exception:
             pass
@@ -574,7 +595,9 @@ class MeasurementService:
 
         # Cleanup
         try:
-            if psu is not None and led:
+            if optical is not None and led:
+                optical.set_enabled(False)
+            elif psu is not None and led:
                 psu.led_off_380()
         except Exception:
             pass
@@ -600,6 +623,7 @@ class MeasurementService:
         psu=None,
         led: bool = False,
         power: float = 1.0,
+        optical=None,
         sequence: Optional[Iterable[str]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
@@ -641,9 +665,12 @@ class MeasurementService:
         except Exception:
             pass
 
-        # LED setup if requested
+        # Optical setup if requested
         try:
-            if psu is not None and led:
+            if optical is not None and led:
+                optical.set_level(float(power), getattr(optical, 'capabilities', {}).get('units', 'mW'))
+                optical.set_enabled(True)
+            elif psu is not None and led:
                 psu.led_on_380(power)
         except Exception:
             pass
@@ -662,10 +689,15 @@ class MeasurementService:
                 except Exception:
                     pass
 
-            # Apply LED state if using sequence
+            # Apply optical state if using sequence
             if sequence is not None:
                 try:
-                    if psu is not None:
+                    if optical is not None:
+                        if led_state == '1':
+                            optical.set_enabled(True)
+                        elif led:
+                            optical.set_enabled(False)
+                    elif psu is not None:
                         if led_state == '1':
                             psu.led_on_380(power)
                         elif led:
@@ -741,7 +773,9 @@ class MeasurementService:
 
         # Cleanup
         try:
-            if psu is not None and led:
+            if optical is not None and led:
+                optical.set_enabled(False)
+            elif psu is not None and led:
                 psu.led_off_380()
         except Exception:
             pass

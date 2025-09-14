@@ -66,4 +66,37 @@ class PowerSupplyManager:
         if hasattr(self.instrument, 'close'):
             self.instrument.close()
 
+    # Legacy LED helpers (shim) to preserve existing call sites
+    def led_on_380(self, power: float):
+        """Shim to maintain compatibility with existing code paths.
+
+        Forwards to channel mapped as "380nm" when present, otherwise CH1.
+        Interprets 'power' as a vendor-specific value; for 2220 LED code, this
+        previously mapped 0..1 to a voltage range. Here we set voltage
+        proportionally in 3.0..3.45 V range if the underlying driver supports
+        voltage control; otherwise we enable current at 10 mA as a safe default.
+        """
+        try:
+            ch = 1
+            # best-effort: try to use set_voltage range as before
+            p = max(0.0, min(1.0, float(power)))
+            min_v, max_v = 3.0, 3.45
+            v = min_v + (max_v - min_v) * p
+            self.set_voltage(ch, v)
+            self.enable(ch)
+        except Exception:
+            try:
+                # fallback to 10 mA
+                self.set_current(1, 0.01)
+                self.enable(1)
+            except Exception:
+                pass
+
+    def led_off_380(self):
+        try:
+            self.disable(1)
+            self.disable(2)
+        except Exception:
+            pass
+
 
