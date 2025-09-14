@@ -2,13 +2,32 @@
     "Lab Small-2401": {
         "SMU_address": "GPIB0::24::INSTR",
         "SMU Type": "Keithley 2401",
+        "psu_type": "Keithley 2220",
         "psu_address": "USB0::0x05E6::0x2220::9210734::INSTR",
         "temp_address": "ASRL12::INSTR",
-        "temp_controller": "Oxford ITC4"
+        "temp_controller": "Oxford ITC4",
+        "optical": {
+            "type": "LED",
+            "driver": "PowerSupply",
+            "units": "mA",
+            "limits": { "min": 0.0, "max": 30.0, "ramp_mA_per_s": 50 },
+            "channels": { "380nm": 1, "420nm": 2 },
+            "defaults": { "channel": "380nm", "level": 10.0 }
+        }
     },
     "Lab_Laser-4200A ": {
         "SMU_address": "192.168.0.10:8888",
-        "SMU Type": "Keithley 4200A"
+        "SMU Type": "Keithley 4200A",
+        "optical": {
+            "type": "Laser",
+            "driver": "Oxxius",
+            "address": "COM3",
+            "baud": 38400,
+            "units": "mW",
+            "limits": { "min": 0.0, "max": 10.0, "ramp_mW_per_s": 20 },
+            "wavelength_nm": 405,
+            "defaults": { "level": 2.5 }
+        }
     },
     "Olegs_lab-2401": {
         "SMU_address": "GPIB0::9::INSTR",
