@@ -21,8 +21,8 @@
         "optical": {
             "type": "Laser",
             "driver": "Oxxius",
-            "address": "COM3",
-            "baud": 38400,
+            "address": "COM4",
+            "baud": 19200,
             "units": "mW",
             "limits": { "min": 0.0, "max": 10.0, "ramp_mW_per_s": 20 },
             "wavelength_nm": 405,

@@ -45,7 +45,7 @@ class OxxiusLaser:
         Usually 'P <mW>' (e.g. 'P 100').
         Some firmwares use 'PW <percent>'.
         """
-        return self.send_command(f"P {value}")
+        return self.send_command(f"PM {value}")
 
     def get_power(self):
         """Query power setpoint/reading (?P)."""
@@ -112,26 +112,48 @@ class OxxiusLaser:
 # Example usage
 # =======================
 if __name__ == "__main__":
-    laser = OxxiusLaser(port="COM3", baud=38400)
+    laser = OxxiusLaser(port="COM4", baud=19200)
 
     try:
         print("ID:", laser.idn())
 
         print("Status:", laser.get_status())
         print("Errors:", laser.get_error())
+        print("set laser to power control")
+        print(laser.send_command("APC 1"))
 
         print("Turning emission ON...")
         print(laser.emission_on())
         time.sleep(6)  # safety delay
 
+        
+
+        print("changing powers")
+        print(laser.send_command("AM 0"))
+        print(laser.send_command("DM 0"))
+
+        print("########################")
+
+        print("Setting power to 10 mW...")
+        print(laser.set_power(10))
+        print("Power:", laser.get_power())
+
+        time.sleep(2)
+        
         print("Setting power to 100 mW...")
         print(laser.set_power(100))
+        print("Power:", laser.get_power())
+        time.sleep(2)
 
         print("Power:", laser.get_power())
         print("Temperature:", laser.get_temperature())
 
+        print(laser.set_power(1))
+
         print("Turning emission OFF...")
         print(laser.emission_off())
+
+        laser.send_command("RST")
 
     finally:
         laser.close()
