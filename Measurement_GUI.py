@@ -4168,7 +4168,7 @@ class MeasurementGUI:
                 self.keithley.beep(5000, 0.5)
         except Exception as e:
             self.connected = False
-            print("unable to connect to SMU_AND_PMU please check")
+            print("unable to connect to SMU please check")
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
 
     def connect_keithley_psu(self) -> None:
