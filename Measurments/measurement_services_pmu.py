@@ -73,7 +73,7 @@ class MeasurementServicesPMU:
     def start(self) -> None:
         self.pmu.start()
 
-    def wait(self, *, timeout_s: float = 10.0, poll_s: float = 0.02) -> None:
+    def wait(self, *, timeout_s: float = 30.0, poll_s: float = 0.02) -> None:
         self.pmu.wait(timeout_s=timeout_s, poll_s=poll_s)
 
     def fetch(self, *, channel: int = 1) -> pd.DataFrame:
@@ -176,7 +176,7 @@ class MeasurementServicesPMU:
                 v_meas_range=float(v_meas_range),
                 i_meas_range=float(i_meas_range),
                 num_pulses=1,
-                timeout_s=10.0,
+                timeout_s=30.0,
             )
             df["Level (V)"] = float(vset)
             raw_all.append(df)
@@ -217,7 +217,7 @@ class MeasurementServicesPMU:
                 v_meas_range=float(v_meas_range),
                 i_meas_range=float(i_meas_range),
                 num_pulses=1,
-                timeout_s=10.0,
+                timeout_s=30.0,
             )
             df["Width (s)"] = float(w)
             raw_all.append(df)
@@ -409,7 +409,7 @@ class MeasurementServicesPMU:
         self,
         pmu_peramiter: dict | None,
         fg_peramiter: dict | None,
-        timeout_s: float = 10.0,
+        timeout_s: float = 30.0,
     ):
         if self.function_generator is None:
             raise RuntimeError("Function generator not connected: MeasurementServicesPMU(function_generator=None)")
@@ -429,7 +429,7 @@ class MeasurementServicesPMU:
             "amplitude_v": 0.25,
             "base_v": 0.0,
             "width_s": 50e-6,
-            "period_s": 200e-6,
+            "period_s": 100e-6,
             "meas_start_pct": 0.1,
             "meas_stop_pct": 0.9,
             "source_channel": 1,
@@ -446,7 +446,7 @@ class MeasurementServicesPMU:
             "low_level_v": 0.0,
             "period_s": 1.0,
             "pulse_width_s": 0.0002,
-            "duty_pct": 0.02,
+            #"duty_pct": 0.02,
             "rise_s": 1.68e-08,
             "fall_s": 1.68e-08,
             #"delay_s": 0.01,
@@ -463,13 +463,13 @@ class MeasurementServicesPMU:
         fg_cfg = {**fg_defaults, **(fg_peramiter or {})}
 
         # Sanity check: ensure FG pulse width covers total PMU measurement time
-        est_effective = self.estimate_runtime_from_params(pmu_cfg, fg_cfg, include_pre_sleep=False)
-        fg_pulse_width_s_effective = float(fg_cfg["pulse_width_s"])
-        if fg_pulse_width_s_effective < est_effective["pmu_active_s"]:
-            raise ValueError(
-                f"FG pulse_width_s ({fg_pulse_width_s_effective}s) shorter than PMU active time "
-                f"({est_effective['pmu_active_s']}s). Increase pulse_width_s or reduce num_pulses/period_s."
-            )
+        # est_effective = self.estimate_runtime_from_params(pmu_cfg, fg_cfg, include_pre_sleep=False)
+        # fg_pulse_width_s_effective = float(fg_cfg["pulse_width_s"])
+        # if fg_pulse_width_s_effective < est_effective["pmu_active_s"]:
+        #     raise ValueError(
+        #         f"FG pulse_width_s ({fg_pulse_width_s_effective}s) shorter than PMU active time "
+        #         f"({est_effective['pmu_active_s']}s). Increase pulse_width_s or reduce num_pulses/period_s."
+        #     )
 
         amplitude_v = float(pmu_cfg["amplitude_v"]) 
         base_v = float(pmu_cfg["base_v"]) 
@@ -493,14 +493,15 @@ class MeasurementServicesPMU:
         period_s_val = float(fg_cfg["period_s"]) if fg_cfg.get("period_s") is not None else 1.0
         fg_frequency_hz = (1.0 / period_s_val) if period_s_val else 1.0
         fg_pulse_width_s = fg_cfg["pulse_width_s"]
-        fg_duty_pct = fg_cfg["duty_pct"]
+        #fg_duty_pct = fg_cfg["duty_pct"]
         fg_rise_s = fg_cfg["rise_s"]
         fg_fall_s = fg_cfg["fall_s"]
         #fg_delay_s = fg_cfg["delay_s"]
         fg_mode = str(fg_cfg["mode"]).upper()
         fg_cycles = int(fg_cfg["cycles"])
         fg_trigger_source = str(fg_cfg["trigger_source"]).upper()
-        
+
+        print(fg_pulse_width_s)        
         
         # Prepare PMU
         self.pmu.prepare_measure_at_voltage(
@@ -526,10 +527,10 @@ class MeasurementServicesPMU:
             frequency_hz=fg_frequency_hz,
             high_level_v=fg_high_level_v,
             low_level_v=fg_low_level_v,
-            pulse_width_s=fg_pulse_width_s,
-            duty_pct=fg_duty_pct,
-            rise_s=fg_rise_s,
-            fall_s=fg_fall_s,
+            #pulse_width_s=fg_pulse_width_s,
+            #duty_pct=fg_duty_pct,
+            #rise_s=fg_rise_s,
+            #fall_s=fg_fall_s,
             #delay_s=fg_delay_s,
         )
         self.gen.enable_burst(

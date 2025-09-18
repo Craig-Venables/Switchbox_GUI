@@ -132,26 +132,29 @@ if __name__ == "__main__":
         print(laser.send_command("AM 0"))
         print(laser.send_command("DM 0"))
 
-        print("########################")
+        # print("########################")
 
-        print("Setting power to 10 mW...")
-        print(laser.set_power(10))
-        print("Power:", laser.get_power())
+        # print("Setting power to 10 mW...")
+        # print(laser.set_power(10))
+        # print("Power:", laser.get_power())
 
-        time.sleep(2)
+        # time.sleep(2)
         
-        print("Setting power to 100 mW...")
-        print(laser.set_power(100))
-        print("Power:", laser.get_power())
-        time.sleep(2)
+        # print("Setting power to 100 mW...")
+        # print(laser.set_power(100))
+        # print("Power:", laser.get_power())
+        # time.sleep(2)
 
-        print("Power:", laser.get_power())
-        print("Temperature:", laser.get_temperature())
+        # print("Power:", laser.get_power())
+        # print("Temperature:", laser.get_temperature())
 
-        print(laser.set_power(1))
+        # print(laser.set_power(1))
 
-        print("Turning emission OFF...")
-        print(laser.emission_off())
+        # print("Turning emission OFF...")
+        # print(laser.emission_off())
+
+
+        print(laser.send_command("APC 0"))
 
         laser.send_command("RST")
 

@@ -27,4 +27,3 @@ if __name__ == "__main__":
         root = tk.Tk()
         app = SampleGUI(root)
         root.mainloop()
-0
