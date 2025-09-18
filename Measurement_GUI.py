@@ -1366,6 +1366,7 @@ class MeasurementGUI:
 
             # Update IV section
             iv_address = config.get("SMU_address", "")
+            self.iv_address = iv_address
             self.keithley_address_var.set(iv_address)
             self.keithley_address = iv_address
             self.update_component_state("iv", iv_address)
@@ -1388,7 +1389,8 @@ class MeasurementGUI:
             self.controller_address_var.set(temp_address)
 
             # smu type
-            self.SMU_type = config.get("SMU_AND_PMU Type", "")
+            self.SMU_type = config.get("SMU Type", "")
+            print(self.SMU_type)
 
             # Optical excitation (LED/Laser) selection based on config
             try:
@@ -4152,10 +4154,15 @@ class MeasurementGUI:
     def connect_keithley(self) -> None:
         """Connect to the selected IV controller via GPIB using system config SMU_AND_PMU Type"""
         address = self.keithley_address_var.get()
-        smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+        smu_type = getattr(self, 'SMU type', 'Keithley 2401')
+        print("3")
         try:
-            self.keithley = IVControllerManager(smu_type, address)
+            print("a")
+            print(smu_type)
+            print(address)
+            self.keithley = IVControllerManager(self.SMU_type, address)
             # Verify the connection using controller's handle
+            print("b")
             try:
                 self.connected = bool(self.keithley.is_connected())
             except Exception:

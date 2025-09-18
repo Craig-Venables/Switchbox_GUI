@@ -1043,13 +1043,6 @@ class Keithley4200A_PMUDualChannel:
         return df
 
 
-
- 
-
-if __name__ == "__main__":
-    print("nothing set up here yet ")
-
-
 def simple_health_check(address: str = "192.168.0.10:8888") -> bool:
     """Minimal check: connect to a 4200A LPT server, query id and perform a read.
 
@@ -1097,5 +1090,11 @@ def simple_health_check(address: str = "192.168.0.10:8888") -> bool:
         except Exception:
             pass
 
-simple_health_check()
-    
+
+ 
+
+if __name__ == "__main__":
+    print("nothing set up here yet ")
+    simple_health_check()
+        
+

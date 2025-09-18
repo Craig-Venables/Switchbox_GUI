@@ -14,6 +14,9 @@ from matplotlib.figure import Figure
 import pandas as pd
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+import subprocess
+import sys
+
 from Measurments.measurement_services_smu import MeasurementService
 from Equipment.SMU_AND_PMU.Keithley4200A import (
     Keithley4200A_PMUDualChannel)
@@ -654,11 +657,13 @@ class PMUTestingGUI(tk.Toplevel):
         fg_conn.grid(row=1, column=0, sticky="ew", padx=5, pady=3)
         fg_conn.columnconfigure(1, weight=1)
         tk.Label(fg_conn, text="VISA Addr:").grid(row=0, column=0, sticky="w")
-        self.fg_addr_var = tk.StringVar(value="")
+        self.fg_addr_var = tk.StringVar(value="USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR")
         tk.Entry(fg_conn, textvariable=self.fg_addr_var, width=40).grid(row=0, column=1, sticky="ew", padx=(5,0))
         tk.Button(fg_conn, text="Connect FG", command=self._connect_fg).grid(row=0, column=2, padx=5)
         self.fg_status = tk.StringVar(value="FG: Disconnected")
         tk.Label(fg_conn, textvariable=self.fg_status).grid(row=0, column=3, sticky="w")
+        # Launch external Motor Control GUI
+        tk.Button(fg_conn, text="Open Motor GUI", command=self._launch_motor_gui).grid(row=1, column=0, columnspan=4, sticky="w", pady=(4,0))
 
         # Measurements section
         measf = tk.LabelFrame(self, text="Measurements", padx=6, pady=6)
@@ -680,19 +685,40 @@ class PMUTestingGUI(tk.Toplevel):
         self.in_pmu_npulses = tk.StringVar(value="100")
         tk.Entry(pmu_inputs, textvariable=self.in_pmu_npulses, width=10).grid(row=2, column=1, sticky="ew")
 
+        # Ranges
+        tk.Label(pmu_inputs, text="V range:").grid(row=3, column=0, sticky="w")
+        self.v_range = tk.StringVar(value="10V")
+        self.v_range_combo = ttk.Combobox(pmu_inputs, values=["10V","40V"], textvariable=self.v_range, width=8, state="readonly")
+        self.v_range_combo.grid(row=3, column=1, sticky="ew")
+        tk.Label(pmu_inputs, text="I range:").grid(row=4, column=0, sticky="w")
+        self.i_range = tk.StringVar(value="100uA")
+        self.i_range_combo = ttk.Combobox(pmu_inputs, values=["100nA","1uA","10uA","100uA","1mA","10mA","200mA"], textvariable=self.i_range, width=10, state="readonly")
+        self.i_range_combo.grid(row=4, column=1, sticky="ew")
+        try:
+            self.v_range_combo.bind("<<ComboboxSelected>>", lambda _e: self._update_current_range_options())
+        except Exception:
+            pass
+
         # FG inputs
         fg_inputs = tk.LabelFrame(measf, text="Function Generator", padx=5, pady=5)
         fg_inputs.grid(row=0, column=1, sticky="nsew")
         fg_inputs.columnconfigure(1, weight=1)
+
         tk.Label(fg_inputs, text="Period (s):").grid(row=0, column=0, sticky="w")
         self.in_fg_period = tk.StringVar(value="1.0")
         tk.Entry(fg_inputs, textvariable=self.in_fg_period, width=12).grid(row=0, column=1, sticky="ew")
-        tk.Label(fg_inputs, text="Voltage (V):").grid(row=1, column=0, sticky="w")
+        tk.Label(fg_inputs, text="Pulse width (s):").grid(row=1, column=0, sticky="w")
+        self.in_fg_pulse_width = tk.StringVar(value="1.0")
+        tk.Entry(fg_inputs, textvariable=self.in_fg_pulse_width, width=12).grid(row=1, column=1, sticky="ew")
+        
+        
+        
+        tk.Label(fg_inputs, text="Voltage (V):").grid(row=2, column=0, sticky="w")
         self.in_fg_voltage = tk.StringVar(value="1.5")
-        tk.Entry(fg_inputs, textvariable=self.in_fg_voltage, width=12).grid(row=1, column=1, sticky="ew")
-        tk.Label(fg_inputs, text="Cycles:").grid(row=2, column=0, sticky="w")
+        tk.Entry(fg_inputs, textvariable=self.in_fg_voltage, width=12).grid(row=2, column=1, sticky="ew")
+        tk.Label(fg_inputs, text="Cycles:").grid(row=3, column=0, sticky="w")
         self.in_fg_cycles = tk.StringVar(value="1")
-        tk.Entry(fg_inputs, textvariable=self.in_fg_cycles, width=12).grid(row=2, column=1, sticky="ew")
+        tk.Entry(fg_inputs, textvariable=self.in_fg_cycles, width=12).grid(row=3, column=1, sticky="ew")
 
         # Run/Preview
         actions = tk.Frame(measf)
@@ -701,6 +727,17 @@ class PMUTestingGUI(tk.Toplevel):
         tk.Button(actions, text="Preview", command=self._preview_expected_waveforms).grid(row=0, column=0, padx=5)
         tk.Button(actions, text="Run Single Laser Pulse", command=self._run_single_pulse).grid(row=0, column=1, padx=5)
         tk.Button(actions, text="Close", command=self.destroy).grid(row=0, column=2, padx=5)
+
+        # Quick current check (5 pulses)
+        checkf = tk.LabelFrame(measf, text="Current range check (5 pulses)", padx=5, pady=5)
+        checkf.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8,0))
+        tk.Button(checkf, text="Check Current Range", command=self._check_current_range).grid(row=0, column=0, sticky="w")
+        self.check_table = ttk.Treeview(checkf, columns=("pulse","current"), show="headings", height=5)
+        self.check_table.heading("pulse", text="Pulse #")
+        self.check_table.heading("current", text="I (A)")
+        self.check_table.column("pulse", width=60, anchor="center")
+        self.check_table.column("current", width=120, anchor="center")
+        self.check_table.grid(row=1, column=0, sticky="ew", pady=(4,0))
 
         # Latest data preview: two figures (CH1, CH2)
         plots = tk.LabelFrame(self, text="Latest Data Preview", padx=5, pady=5)
@@ -733,6 +770,16 @@ class PMUTestingGUI(tk.Toplevel):
             self.fg_status.set("FG: Failed")
             messagebox.showerror("FG", f"Connect failed: {exc}")
 
+    def _launch_motor_gui(self):
+        try:
+            script = Path(__file__).resolve().parent / "Motor_Controll_GUI.py"
+            if not script.exists():
+                messagebox.showerror("Motor GUI", f"Not found: {script}")
+                return
+            subprocess.Popen([sys.executable, str(script)], cwd=str(script.parent))
+        except Exception as exc:
+            messagebox.showerror("Motor GUI", f"Launch failed: {exc}")
+
     def _preview_expected_waveforms(self):
         try:
             v = float(self.in_pmu_voltage.get())
@@ -741,6 +788,7 @@ class PMUTestingGUI(tk.Toplevel):
             per_fg = float(self.in_fg_period.get())
             v_fg = float(self.in_fg_voltage.get())
             cycles = int(self.in_fg_cycles.get())
+            w_func = float(self.in_fg_pulse_width.get())
         except Exception:
             messagebox.showwarning("Preview", "Invalid inputs")
             return
@@ -789,11 +837,18 @@ class PMUTestingGUI(tk.Toplevel):
             per_fg = float(self.in_fg_period.get())
             v_fg = float(self.in_fg_voltage.get())
             cycles = int(self.in_fg_cycles.get())
+            w_func = float(self.in_fg_pulse_width.get())
         except Exception:
             messagebox.showwarning("Run", "Invalid inputs")
             return
 
         per_pmu = max(4.0 * w, w)
+        # Map selected ranges
+        try:
+            v_rng = self._map_v_range(self.v_range.get())
+            i_rng = self._map_i_range(self.i_range.get())
+        except Exception:
+            v_rng, i_rng = 10.0, 200e-6
         pmu_params = {
             "amplitude_v": v,
             "base_v": 0.0,
@@ -804,8 +859,8 @@ class PMUTestingGUI(tk.Toplevel):
             "source_channel": 1,
             "hold_other_at_zero": True,
             "force_fixed_ranges": True,
-            "v_meas_range": 2.0,
-            "i_meas_range": 200e-6,
+            "v_meas_range": v_rng,
+            "i_meas_range": i_rng,
             "num_pulses": n,
             "delay_s": None,
         }
@@ -815,7 +870,7 @@ class PMUTestingGUI(tk.Toplevel):
             "high_level_v": v_fg,
             "low_level_v": 0.0,
             "period_s": per_fg,
-            "pulse_width_s": active_s,
+            "pulse_width_s": w_func,
             "duty_pct": min(0.99, active_s / per_fg) if per_fg > 0 else 0.5,
             "rise_s": 16e-9,
             "fall_s": 16e-9,
@@ -827,13 +882,114 @@ class PMUTestingGUI(tk.Toplevel):
         def worker():
             try:
                 self.ms_pmu = MeasurementServicesPMU(pmu=self.pmu_dc, function_generator=self.fg)
-                df = self.ms_pmu.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
+                df = self.ms_pmu.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=30.0)
             except Exception as exc:
                 self.after(0, lambda: messagebox.showerror("Run", str(exc)))
                 return
             self.after(0, lambda: self._plot_result(df))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _check_current_range(self):
+        if self.pmu_dc is None:
+            messagebox.showwarning("PMU", "Connect PMU first")
+            return
+        try:
+            v = float(self.in_pmu_voltage.get())
+            w = float(self.in_pmu_width.get())
+            per = max(4.0 * w, w)
+            v_rng = self._map_v_range(self.v_range.get())
+            i_rng = self._map_i_range(self.i_range.get())
+        except Exception:
+            messagebox.showwarning("Check", "Invalid inputs")
+            return
+
+        def worker():
+            try:
+                df = self.pmu_dc.measure_at_voltage(
+                    amplitude_v=v, base_v=0.0, width_s=w, period_s=per,
+                    meas_start_pct=0.1, meas_stop_pct=0.9, source_channel=1,
+                    hold_other_at_zero=True, force_fixed_ranges=True,
+                    v_meas_range=v_rng, i_meas_range=i_rng, num_pulses=5, timeout_s=30.0,
+                )
+            except Exception as exc:
+                self.after(0, lambda: messagebox.showerror("Check", str(exc)))
+                return
+
+            # Compute per-pulse median current within each width window
+            try:
+                t = df.get("t (s)") if isinstance(df, pd.DataFrame) else None
+                i = df.get("I (A)") if isinstance(df, pd.DataFrame) else None
+            except Exception:
+                t = None; i = None
+            currents = []
+            if t is not None and i is not None and len(t) == len(i):
+                import numpy as _np
+                t_arr = _np.asarray(t, dtype=float)
+                i_arr = _np.asarray(i, dtype=float)
+                for k in range(5):
+                    t0 = k * per
+                    t1 = t0 + w
+                    mask = (t_arr >= t0) & (t_arr < t1)
+                    vals = i_arr[mask]
+                    if vals.size:
+                        currents.append(float(_np.median(vals)))
+                    else:
+                        currents.append(float("nan"))
+            self.after(0, lambda: self._populate_check_table(currents))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _populate_check_table(self, currents):
+        try:
+            for row in self.check_table.get_children():
+                self.check_table.delete(row)
+            for idx, val in enumerate(list(currents or [])[:5], start=1):
+                try:
+                    self.check_table.insert("", "end", values=(idx, f"{val:.6e}"))
+                except Exception:
+                    self.check_table.insert("", "end", values=(idx, str(val)))
+        except Exception:
+            pass
+
+    def _update_current_range_options(self):
+        try:
+            vsel = (self.v_range.get() or "10V").upper()
+            if vsel.startswith("40"):
+                opts = ["100uA","10mA","800mA"]
+            else:
+                opts = ["100nA","1uA","10uA","100uA","1mA","10mA","200mA"]
+            self.i_range_combo.configure(values=opts)
+            if self.i_range.get() not in opts:
+                self.i_range.set(opts[0])
+        except Exception:
+            pass
+
+    def _map_v_range(self, sel: str) -> float:
+        s = (sel or "10V").strip().upper()
+        return 40.0 if s.startswith("40") else 10.0
+
+    def _map_i_range(self, sel: str) -> float:
+        s = (sel or "100uA").strip().lower()
+        if s.endswith("ma"):
+            try:
+                return float(s[:-2]) * 1e-3
+            except Exception:
+                return 1e-3
+        if s.endswith("ua"):
+            try:
+                return float(s[:-2]) * 1e-6
+            except Exception:
+                return 1e-6
+        if s.endswith("na"):
+            try:
+                return float(s[:-2]) * 1e-9
+            except Exception:
+                return 1e-9
+        try:
+            return float(s)
+        except Exception:
+            return 200e-6
 
     def _plot_result(self, df: pd.DataFrame):
         try:
@@ -848,6 +1004,11 @@ class PMUTestingGUI(tk.Toplevel):
         self.ax2_ch1.plot(t, i, color='C3', label='I')
         self.ax1_ch1.set_xlabel('Time (s)'); self.ax1_ch1.set_ylabel('V (V)'); self.ax2_ch1.set_ylabel('I (A)')
         self.canvas_ch1.draw()
+        # Save using the same folder structure and format as other PMU saves
+        try:
+            self._save_pmu_trace(list(t), list(v), list(i), mode="Single_Laser_Pulse")
+        except Exception:
+            pass
 
 
     # ---------------- PMU methods ----------------
@@ -1879,7 +2040,7 @@ class PMUTestingGUI(tk.Toplevel):
 
                             # Wait for PMU result
                             try:
-                                res = q.get(timeout=5 + cap)
+                                res = q.get(timeout=15 + cap)
                                 if isinstance(res, Exception):
                                     raise res
                                 v_arr, i_arr, t_arr = list(res[0]), list(res[1]), list(res[2])
@@ -2114,7 +2275,6 @@ class PMUTestingGUI(tk.Toplevel):
                 "gen_amp_vpp": float(self.gen_amp.get()),
                 "gen_offset_v": float(self.gen_offset.get()),
                 "gen_freq_hz": float(self.gen_freq.get()),
-                "gen_duty_pct": float(self.gen_duty.get()),
                 "gen_cycles": float(self.gen_cycles.get()),
                 "gen_trig_src": self.gen_trig_src.get(),
             })
