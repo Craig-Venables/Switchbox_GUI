@@ -3039,7 +3039,7 @@ class MeasurementGUI:
                         except Exception:
                             return 1.0
 
-                    if excitation_mode == "SMU_AND_PMU Pulsed IV":
+                    if excitation_mode == "SMU Pulsed IV":
                         # Parameters
                         start_amp = float(params.get("start_v", 0.0))
                         stop_amp = float(params.get("stop_v", 0.2))
@@ -3065,7 +3065,7 @@ class MeasurementGUI:
                             on_point=None,
                             validate_timing=True,
                         )
-                    elif excitation_mode == "SMU_AND_PMU Fast Pulses":
+                    elif excitation_mode == "SMU Fast Pulses":
                         pulse_v = float(params.get("pulse_v", 0.2))
                         pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
                         num_pulses = int(params.get("num", 10))
@@ -3090,7 +3090,7 @@ class MeasurementGUI:
                             on_point=None,
                             validate_timing=True,
                         )
-                    elif excitation_mode == "SMU_AND_PMU Fast Hold":
+                    elif excitation_mode == "SMU Fast Hold":
                         hold_v = float(params.get("hold_v", 0.2))
                         duration = float(params.get("duration_s", 5.0))
                         sample_dt = float(params.get("sample_dt_s", 0.01))
@@ -3389,9 +3389,9 @@ class MeasurementGUI:
                 icc_val = float(self.icc.get())
                 smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
 
-                # Prepare fixed 2 V range for faster edges below ~1.5 V
+                # Prepare fixed 20 V range for higher voltage measurements
                 try:
-                    self.keithley.prepare_for_pulses(Icc=icc_val, v_range=2.0, ovp=2.2, use_remote_sense=False, autozero_off=True)
+                    self.keithley.prepare_for_pulses(Icc=icc_val, v_range=20.0, ovp=22.0, use_remote_sense=False, autozero_off=True)
                 except Exception:
                     pass
                 try:
