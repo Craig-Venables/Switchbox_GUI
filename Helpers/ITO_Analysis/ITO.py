@@ -1,17 +1,42 @@
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+print("ITO Analysis Running...")
 
 # Root directory on OneDrive that contains the ITO sample folders (e.g., "5-ITO")
-ONEDRIVE_ROOT = r"C:\Users\Craig-Desktop\OneDrive - The University of Nottingham\Documents\Phd\2) Data\1) Devices\1) Memristors\Quantum Dots\ITO"
+ONEDRIVE_ROOT = r"C:\Users\Craig-Desktop\OneDrive - The University of Nottingham\Documents\Phd\2) Data\1) Devices\1) Memristors\ITO"
 
 # The specific sample folder to analyze
-SAMPLE_FOLDER_NAME = "5-ITO"
+SAMPLE_FOLDER_NAME = "7_ITO"
+
+# Geometry and material constants
+# Thickness: 50 nm; Length uncertainty: 6700–6950 µm (use for error bounds)
+THICKNESS_M: float = 50e-9
+LENGTH_M_MIN: float = 6700e-6
+LENGTH_M_MAX: float = 6950e-6
+
+# Section widths (µm). A,D,G,H = 200 µm; B,E,L,I = 100 µm. Case-insensitive.
+SECTION_WIDTH_UM: Dict[str, float] = {
+    "A": 200.0, "D": 200.0, "G": 200.0, "H": 200.0,
+    "B": 100.0, "E": 100.0, "L": 100.0, "I": 100.0,
+}
+
+
+# Conductivity thresholds (S/m) for guideline lines on plots
+CONDUCTIVITY_THRESHOLDS: Dict[str, float] = {
+    "low": 1e3,
+    "medium": 1e4,
+    "high": 1e5,
+}
+
+# Batch analysis options
+PROCESS_ALL_SAMPLES: bool = True  # If True, analyze all subfolders in ONEDRIVE_ROOT except exclusions
+EXCLUDE_SAMPLES: Set[str] = {"1","2","summary"}  # e.g., {"test", "archive"}
 
 # File name prefixes for the first three sweeps (ignore any trailing suffixes in actual files)
 FIRST_THREE_SWEEP_PREFIXES = [
@@ -19,6 +44,29 @@ FIRST_THREE_SWEEP_PREFIXES = [
     "2-FS-3v-0.1sv-0.05sd-Py",
     "3-FS-5v-0.2sv-0.05sd-Py",
 ]
+
+
+def get_section_width_m(section_name: str) -> Optional[float]:
+    key = (section_name or "").strip().upper()
+    if key in SECTION_WIDTH_UM:
+        return SECTION_WIDTH_UM[key] * 1e-6
+    return None
+
+def format_engineering_S(value: float) -> str:
+    """Engineering string for conductance (S)."""
+    if value is None or not np.isfinite(value):
+        return "n/a"
+    abs_val = abs(value)
+    if abs_val >= 1:
+        return f"{value:.3g} S"
+    if abs_val >= 1e-3:
+        return f"{value*1e3:.3g} mS"
+    if abs_val >= 1e-6:
+        return f"{value*1e6:.3g} µS"
+    if abs_val >= 1e-9:
+        return f"{value*1e9:.3g} nS"
+    return f"{value:.3g} S"
+
 
 
 def list_section_directories(sample_directory: str) -> List[str]:
@@ -170,6 +218,62 @@ def format_engineering(value: float) -> str:
     return f"{value:.3g} Ω"
 
 
+def compute_geometry_metrics(section: str, resistance_ohm: Optional[float]) -> Dict[str, Optional[float]]:
+    """Compute geometry-derived metrics given a section and resistance.
+
+    Returns dict with keys:
+    width_m, length_m_min, length_m_max, area_m2,
+    sigma_nominal_Spm, sigma_lo_Spm, sigma_hi_Spm,
+    rho_nominal_ohm_m, rho_lo_ohm_m, rho_hi_ohm_m,
+    Rsheet_nominal_ohm_sq, Rsheet_lo_ohm_sq, Rsheet_hi_ohm_sq
+    """
+    width_m = get_section_width_m(section)
+    if resistance_ohm is None or not np.isfinite(resistance_ohm) or resistance_ohm <= 0 or width_m is None:
+        return {
+            "width_m": width_m,
+            "length_m_min": LENGTH_M_MIN,
+            "length_m_max": LENGTH_M_MAX,
+            "area_m2": None,
+            "sigma_nominal_Spm": None,
+            "sigma_lo_Spm": None,
+            "sigma_hi_Spm": None,
+            "rho_nominal_ohm_m": None,
+            "rho_lo_ohm_m": None,
+            "rho_hi_ohm_m": None,
+            "Rsheet_nominal_ohm_sq": None,
+            "Rsheet_lo_ohm_sq": None,
+            "Rsheet_hi_ohm_sq": None,
+        }
+    area_m2 = width_m * THICKNESS_M
+    L_mean = 0.5 * (LENGTH_M_MIN + LENGTH_M_MAX)
+    # Conductivity sigma = L / (R * A)
+    sigma_lo = LENGTH_M_MIN / (resistance_ohm * area_m2)
+    sigma_hi = LENGTH_M_MAX / (resistance_ohm * area_m2)
+    sigma_nom = L_mean / (resistance_ohm * area_m2)
+    # Resistivity rho = 1/sigma
+    rho_lo = 1.0 / sigma_hi if sigma_hi > 0 else None
+    rho_hi = 1.0 / sigma_lo if sigma_lo > 0 else None
+    rho_nom = 1.0 / sigma_nom if sigma_nom > 0 else None
+    # Sheet resistance R_s = R * (w / L)
+    Rs_lo = resistance_ohm * (width_m / LENGTH_M_MAX)
+    Rs_hi = resistance_ohm * (width_m / LENGTH_M_MIN)
+    Rs_nom = resistance_ohm * (width_m / L_mean)
+    return {
+        "width_m": width_m,
+        "length_m_min": LENGTH_M_MIN,
+        "length_m_max": LENGTH_M_MAX,
+        "area_m2": area_m2,
+        "sigma_nominal_Spm": sigma_nom,
+        "sigma_lo_Spm": sigma_lo,
+        "sigma_hi_Spm": sigma_hi,
+        "rho_nominal_ohm_m": rho_nom,
+        "rho_lo_ohm_m": rho_lo,
+        "rho_hi_ohm_m": rho_hi,
+        "Rsheet_nominal_ohm_sq": Rs_nom,
+        "Rsheet_lo_ohm_sq": Rs_lo,
+        "Rsheet_hi_ohm_sq": Rs_hi,
+    }
+
 def write_origin_wide_csv(out_path: str, blocks: List[Tuple[str, int, pd.DataFrame, str, Optional[float], Optional[float]]], sample: str) -> None:
     """Write a single CSV with left-to-right [Voltage,Current,Time] triplets for each (Section,Sweep).
 
@@ -190,7 +294,12 @@ def write_origin_wide_csv(out_path: str, blocks: List[Tuple[str, int, pd.DataFra
         name_row.extend(["Voltage", "Current", "Time"])
         rpos_str = f"Rpos={r_pos:.6g}" if (r_pos is not None and np.isfinite(r_pos)) else "Rpos=n/a"
         rneg_str = f"Rneg={r_neg:.6g}" if (r_neg is not None and np.isfinite(r_neg)) else "Rneg=n/a"
-        meta_row.extend([rpos_str, rneg_str, f"file={file_name}"])
+        # Add conductance labels for quick view
+        gpos = (1.0 / r_pos) if (r_pos is not None and np.isfinite(r_pos) and r_pos != 0) else None
+        gneg = (1.0 / r_neg) if (r_neg is not None and np.isfinite(r_neg) and r_neg != 0) else None
+        gpos_str = f"Gpos={gpos:.6g} S" if (gpos is not None and np.isfinite(gpos)) else "Gpos=n/a"
+        gneg_str = f"Gneg={gneg:.6g} S" if (gneg is not None and np.isfinite(gneg)) else "Gneg=n/a"
+        meta_row.extend([rpos_str, rneg_str, gpos_str + ";" + gneg_str])
     # Write file
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(f"# sample: {sample}\n")
@@ -215,22 +324,30 @@ def write_origin_wide_csv(out_path: str, blocks: List[Tuple[str, int, pd.DataFra
             fh.write(",".join(row_values) + "\n")
 
 
-def main() -> None:
+def analyze_sample(sample_folder_name: str) -> None:
     # Filesystem locations
     repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    analysis_dir = os.path.join(repo_dir, "ITO_Analysis")
-    sample_dir = os.path.join(ONEDRIVE_ROOT, SAMPLE_FOLDER_NAME)
-    output_dir = os.path.join(analysis_dir, SAMPLE_FOLDER_NAME)
+    sample_dir = os.path.join(ONEDRIVE_ROOT, sample_folder_name)
+    # Save all outputs inside the data folder: <ONEDRIVE_ROOT>/<sample>/analysis
+    output_dir = os.path.join(sample_dir, "analysis")
     os.makedirs(output_dir, exist_ok=True)
+    # Folder for per-sweep individual semilog plots
+    individual_semilog_dir = os.path.join(output_dir, "log_iv_individual")
+    os.makedirs(individual_semilog_dir, exist_ok=True)
 
     # Collect data across sections
     section_dirs = list_section_directories(sample_dir)
     per_sweep_summary: List[Dict[str, object]] = []
     combined_rows: List[Dict[str, object]] = []
+    combined_df: Optional[pd.DataFrame] = None
+    summary_df: Optional[pd.DataFrame] = None
+    stats_df: Optional[pd.DataFrame] = None
 
     # For overlay plot of first sweeps and for wide CSV blocks
     overlay_traces: List[Tuple[str, np.ndarray, np.ndarray]] = []  # (label, V, I)
     wide_blocks: List[Tuple[str, int, pd.DataFrame, str, Optional[float], Optional[float]]] = []
+    # Collect data for combined semilog plots per sweep index
+    combined_semilog: Dict[int, List[Tuple[str, np.ndarray, np.ndarray]]] = {1: [], 2: [], 3: []}
 
     for section_path in section_dirs:
         section_name = os.path.basename(section_path).upper()
@@ -259,11 +376,42 @@ def main() -> None:
             switch_v = detect_switching_voltages(df)
             ohmic_flag = "X" if len(switch_v) > 0 else ""
 
+            # Conductance (simple reciprocal, where defined)
+            g_pos = (1.0 / r_pos) if (r_pos is not None and np.isfinite(r_pos) and r_pos != 0) else None
+            g_neg = (1.0 / r_neg) if (r_neg is not None and np.isfinite(r_neg) and r_neg != 0) else None
+
+            # Geometry-based metrics using R_pos for sweeps 1..3 and R_neg likewise (store both when available)
+            geom_pos = compute_geometry_metrics(section_name, r_pos) if r_pos is not None else {}
+            geom_neg = compute_geometry_metrics(section_name, r_neg) if r_neg is not None else {}
+
             wide_blocks.append((section_name, idx, df, os.path.basename(sweep_path), r_pos, r_neg))
+
+            # Save individual semilog I-V plot (Voltage vs log(abs(Current)))
+            try:
+                v_vals = df["Voltage"].values
+                i_abs_vals = np.abs(df["Current"].values) + 1e-20
+                plt.figure(figsize=(8, 6))
+                plt.semilogy(v_vals, i_abs_vals, linewidth=1.6, label=f"{section_name}")
+                plt.xlabel("Voltage (V)")
+                plt.ylabel("abs(Current) (A)")
+                plt.title(f"{sample_folder_name}: Sweep {idx} - Section {section_name}")
+                plt.grid(True, which="both", linestyle=":", linewidth=0.6)
+                out_individual = os.path.join(individual_semilog_dir, f"{idx}-{section_name}.png")
+                plt.tight_layout()
+                plt.savefig(out_individual, dpi=200)
+                plt.close()
+            except Exception:
+                plt.close()
+
+            # Accumulate for combined plots per sweep
+            try:
+                combined_semilog[idx].append((section_name, v_vals, i_abs_vals))
+            except Exception:
+                pass
 
             per_sweep_summary.append(
                 {
-                    "sample": SAMPLE_FOLDER_NAME,
+                    "sample": sample_folder_name,
                     "section": section_name,
                     "sweep_index": idx,
                     "file_name": os.path.basename(sweep_path),
@@ -271,6 +419,23 @@ def main() -> None:
                     "R_neg_m0p5_to_0_ohm": r_neg,
                     "R_pos_label": format_engineering(r_pos) if r_pos is not None else "n/a",
                     "R_neg_label": format_engineering(r_neg) if r_neg is not None else "n/a",
+                    "G_pos_S": g_pos,
+                    "G_neg_S": g_neg,
+                    # Geometry
+                    "width_m": geom_pos.get("width_m") or geom_neg.get("width_m"),
+                    "thickness_m": THICKNESS_M,
+                    "length_m_min": LENGTH_M_MIN,
+                    "length_m_max": LENGTH_M_MAX,
+                    # Conductivity/resistivity (using whichever side had a valid R)
+                    "sigma_nominal_Spm": geom_pos.get("sigma_nominal_Spm") if geom_pos else geom_neg.get("sigma_nominal_Spm"),
+                    "sigma_lo_Spm": geom_pos.get("sigma_lo_Spm") if geom_pos else geom_neg.get("sigma_lo_Spm"),
+                    "sigma_hi_Spm": geom_pos.get("sigma_hi_Spm") if geom_pos else geom_neg.get("sigma_hi_Spm"),
+                    "rho_nominal_ohm_m": geom_pos.get("rho_nominal_ohm_m") if geom_pos else geom_neg.get("rho_nominal_ohm_m"),
+                    "rho_lo_ohm_m": geom_pos.get("rho_lo_ohm_m") if geom_pos else geom_neg.get("rho_lo_ohm_m"),
+                    "rho_hi_ohm_m": geom_pos.get("rho_hi_ohm_m") if geom_pos else geom_neg.get("rho_hi_ohm_m"),
+                    "Rsheet_nominal_ohm_sq": geom_pos.get("Rsheet_nominal_ohm_sq") if geom_pos else geom_neg.get("Rsheet_nominal_ohm_sq"),
+                    "Rsheet_lo_ohm_sq": geom_pos.get("Rsheet_lo_ohm_sq") if geom_pos else geom_neg.get("Rsheet_lo_ohm_sq"),
+                    "Rsheet_hi_ohm_sq": geom_pos.get("Rsheet_hi_ohm_sq") if geom_pos else geom_neg.get("Rsheet_hi_ohm_sq"),
                     "ohmic": "" if ohmic_flag == "" else "X",
                     "switching_voltages_V": ";".join(f"{v:.3g}" for v in switch_v) if switch_v else "",
                 }
@@ -279,7 +444,7 @@ def main() -> None:
             # Combined long CSV (all rows for all sweeps)
             combined_rows.extend(
                 {
-                    "sample": SAMPLE_FOLDER_NAME,
+                    "sample": sample_folder_name,
                     "section": section_name,
                     "sweep_index": idx,
                     "sweep_prefix": prefix,
@@ -294,19 +459,58 @@ def main() -> None:
     # Save combined long CSV (tidy format)
     if combined_rows:
         combined_df = pd.DataFrame(combined_rows)
-        combined_csv_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_first_three_sweeps.csv")
+        combined_csv_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_first_three_sweeps.csv")
         combined_df.to_csv(combined_csv_path, index=False)
 
     # Save summary CSV (per sweep per section)
     if per_sweep_summary:
         summary_df = pd.DataFrame(per_sweep_summary)
-        summary_csv_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_summary.csv")
+        summary_csv_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_summary.csv")
         summary_df.to_csv(summary_csv_path, index=False)
 
     # Save single wide Origin-friendly CSV (left-to-right V,C,T for each Section/Sweep) including resistances per block
     if wide_blocks:
-        wide_out = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_wide.csv")
-        write_origin_wide_csv(wide_out, wide_blocks, sample=SAMPLE_FOLDER_NAME)
+        wide_out = os.path.join(output_dir, f"ITO_{sample_folder_name}_wide.csv")
+        write_origin_wide_csv(wide_out, wide_blocks, sample=sample_folder_name)
+
+    # Combined semilog plots per sweep: 1-all, 2-all, 3-all
+    for sweep_idx in (1, 2, 3):
+        traces = combined_semilog.get(sweep_idx, [])
+        if traces:
+            try:
+                plt.figure(figsize=(8, 6))
+                for sec_label, v_vals, i_abs_vals in traces:
+                    plt.semilogy(v_vals, i_abs_vals, label=sec_label, linewidth=1.5)
+                plt.xlabel("Voltage (V)")
+                plt.ylabel("abs(Current) (A)")
+                plt.title(f"{sample_folder_name}: Sweep {sweep_idx} - all sections (semilog)")
+                plt.grid(True, which="both", linestyle=":", linewidth=0.6)
+                plt.legend(loc="best", fontsize=8)
+                out_all = os.path.join(output_dir, f"{sweep_idx}-all.png")
+                plt.tight_layout()
+                plt.savefig(out_all, dpi=200)
+                plt.close()
+            except Exception:
+                plt.close()
+
+    # Optional: Excel workbook export with multiple sheets
+    try:
+        xlsx_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_summary.xlsx")
+        with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
+            if summary_df is not None:
+                summary_df.to_excel(writer, sheet_name="summary", index=False)
+            if combined_df is not None:
+                combined_df.to_excel(writer, sheet_name="long", index=False)
+            if stats_df is not None:
+                stats_df.to_excel(writer, sheet_name="start_end_stats", index=False)
+            # Embed table image if exists
+            table_img = os.path.join(output_dir, f"ITO_{sample_folder_name}_summary_table.png")
+            if os.path.isfile(table_img):
+                # Create an empty sheet and insert image
+                ws = writer.book.add_worksheet("summary_table")
+                ws.insert_image("B2", table_img)
+    except Exception:
+        pass
 
     # Plot 1: Overlay of first-sweep I-V curves labeled by section and R(0->0.5V)
     if overlay_traces:
@@ -315,10 +519,10 @@ def main() -> None:
             plt.plot(v, i, label=label, linewidth=1.5)
         plt.xlabel("Voltage (V)")
         plt.ylabel("Current (A)")
-        plt.title(f"{SAMPLE_FOLDER_NAME}: First-sweep I-V by Section (label shows R 0->0.5 V)")
+        plt.title(f"{sample_folder_name}: First-sweep I-V by Section (label shows R 0->0.5 V)")
         plt.grid(True, which="both", linestyle=":", linewidth=0.6)
         plt.legend(loc="best", fontsize=8)
-        overlay_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_first_sweep_overlay.png")
+        overlay_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_first_sweep_overlay.png")
         plt.tight_layout()
         plt.savefig(overlay_path, dpi=200)
         plt.close()
@@ -334,14 +538,41 @@ def main() -> None:
                 values = [(r / 1e3) if np.isfinite(r) else np.nan for r in resistances]
                 plt.bar(labels, values, color="#4e79a7")
                 plt.ylabel("Resistance (kΩ)")
-                plt.title(f"{SAMPLE_FOLDER_NAME}: First-sweep R(0->0.5 V) by Section")
+                plt.title(f"{sample_folder_name}: First-sweep R(0->0.5 V) by Section")
                 plt.grid(axis="y", linestyle=":", linewidth=0.6)
                 for x, r in zip(labels, resistances):
                     if np.isfinite(r):
                         plt.text(x, (r / 1e3) * 1.02, format_engineering(r), ha="center", va="bottom", fontsize=8, rotation=90)
-                bar_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_resistance_bar.png")
+                bar_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_resistance_bar.png")
                 plt.tight_layout()
                 plt.savefig(bar_path, dpi=200)
+                plt.close()
+
+            # Additional plot: Conductance for first vs final (G_pos vs G_neg background)
+            g_pos_vals = [row.get("G_pos_S") if row.get("G_pos_S") is not None else np.nan for row in first_sweep_rows]
+            # Match final conductance by section (from sweep 3 -> G_neg)
+            final_rows = [row for row in per_sweep_summary if row.get("sweep_index") == 3]
+            g_neg_map = {row["section"]: (row.get("G_neg_S") if row.get("G_neg_S") is not None else np.nan) for row in final_rows}
+            g_neg_vals = [g_neg_map.get(sec, np.nan) for sec in labels]
+            if any(np.isfinite(g) for g in g_pos_vals) or any(np.isfinite(g) for g in g_neg_vals):
+                plt.figure(figsize=(9, 5))
+                # background bars for final in lighter color
+                g_neg_ms = [(g * 1e3) if np.isfinite(g) else np.nan for g in g_neg_vals]
+                g_pos_ms = [(g * 1e3) if np.isfinite(g) else np.nan for g in g_pos_vals]
+                x = np.arange(len(labels))
+                bar_bg = plt.bar(x, g_neg_ms, color="#c7e9c0", label="Final G (mS)")
+                bar_fg = plt.bar(x, g_pos_ms, color="#59a14f", alpha=0.9, width=0.55, label="First G (mS)")
+                plt.xticks(x, labels)
+                plt.ylabel("Conductance (mS)")
+                plt.title(f"{sample_folder_name}: Conductance first vs final")
+                plt.grid(axis="y", linestyle=":", linewidth=0.6)
+                for xi, g in zip(x, g_pos_vals):
+                    if np.isfinite(g):
+                        plt.text(xi, (g * 1e3) * 1.02, format_engineering_S(g), ha="center", va="bottom", fontsize=8, rotation=90)
+                out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_conductance_bar.png")
+                plt.tight_layout()
+                plt.legend()
+                plt.savefig(out_path, dpi=200)
                 plt.close()
 
     # Plot 3: Overlay of last sweep IV within -0.5 to 0 V (final resistance region)
@@ -355,10 +586,10 @@ def main() -> None:
                     plt.plot(region["Voltage"].values, region["Current"].values, label=f"{sec}", linewidth=1.5)
             plt.xlabel("Voltage (V)")
             plt.ylabel("Current (A)")
-            plt.title(f"{SAMPLE_FOLDER_NAME}: Last sweep IV in -0.5..0 V")
+            plt.title(f"{sample_folder_name}: Last sweep IV in -0.5..0 V")
             plt.grid(True, which="both", linestyle=":", linewidth=0.6)
             plt.legend(loc="best", fontsize=8)
-            out_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_last_neg_overlay.png")
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_last_neg_overlay.png")
             plt.tight_layout()
             plt.savefig(out_path, dpi=200)
             plt.close()
@@ -384,10 +615,10 @@ def main() -> None:
                 plt.bar(x + width/2, [(v/1e3) if np.isfinite(v) else np.nan for v in last_vals], width, label="Last (-0.5->0 V)")
                 plt.xticks(x, sections)
                 plt.ylabel("Resistance (kΩ)")
-                plt.title(f"{SAMPLE_FOLDER_NAME}: First vs Last Resistances")
+                plt.title(f"{sample_folder_name}: First vs Last Resistances")
                 plt.grid(axis="y", linestyle=":", linewidth=0.6)
                 plt.legend()
-                out_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_first_vs_last_resistance.png")
+                out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_first_vs_last_resistance.png")
                 plt.tight_layout()
                 plt.savefig(out_path, dpi=200)
                 plt.close()
@@ -403,25 +634,89 @@ def main() -> None:
                 plt.semilogy(v, i_abs, label=sec)
             plt.xlabel("Voltage (V)")
             plt.ylabel("abs(Current) (A)")
-            plt.title(f"{SAMPLE_FOLDER_NAME}: Last sweep semilog abs(I) vs V")
+            plt.title(f"{sample_folder_name}: Last sweep semilog abs(I) vs V")
             plt.grid(True, which="both", linestyle=":", linewidth=0.6)
             plt.legend(loc="best", fontsize=8)
-            out_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_last_semilogy.png")
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_last_semilogy.png")
             plt.tight_layout()
             plt.savefig(out_path, dpi=200)
             plt.close()
+
+    # Dashboard figure: a grid of subplots summarizing key plots
+    try:
+        import math
+        dashboard_paths = []
+        # List existing plot files to include (ensure table last)
+        candidate_plots = [
+            f"ITO_{sample_folder_name}_first_sweep_overlay.png",
+            f"ITO_{sample_folder_name}_resistance_bar.png",
+            f"ITO_{sample_folder_name}_conductance_bar.png",
+            f"ITO_{sample_folder_name}_last_neg_overlay.png",
+            f"ITO_{sample_folder_name}_first_vs_last_resistance.png",
+            f"ITO_{sample_folder_name}_start_end_dumbbell.png",
+            f"ITO_{sample_folder_name}_start_vs_end_scatter.png",
+            f"ITO_{sample_folder_name}_last_semilogy.png",
+            f"ITO_{sample_folder_name}_conductivity_start_end.png",
+            f"ITO_{sample_folder_name}_sheet_resistance_start_end.png",
+            f"ITO_{sample_folder_name}_resistivity_start_end.png",
+        ]
+        table_candidate = os.path.join(output_dir, f"ITO_{sample_folder_name}_summary_table.png")
+        for fn in candidate_plots:
+            p = os.path.join(output_dir, fn)
+            if os.path.isfile(p):
+                dashboard_paths.append(p)
+        # Append the table last if it exists
+        if os.path.isfile(table_candidate):
+            dashboard_paths.append(table_candidate)
+        if dashboard_paths:
+            cols = 3
+            rows = math.ceil(len(dashboard_paths) / cols)
+            fig, axes = plt.subplots(rows, cols, figsize=(cols*5.0, rows*4.0))
+            axes = np.atleast_2d(axes)
+            import matplotlib.image as mpimg
+            for idx, img_path in enumerate(dashboard_paths):
+                r = idx // cols
+                c = idx % cols
+                ax = axes[r, c]
+                img = mpimg.imread(img_path)
+                ax.imshow(img)
+                ax.set_title(os.path.basename(img_path).replace(f"ITO_{sample_folder_name}_", ""), fontsize=8)
+                ax.axis('off')
+            # Hide any leftover axes
+            for idx in range(len(dashboard_paths), rows*cols):
+                r = idx // cols
+                c = idx % cols
+                axes[r, c].axis('off')
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_dashboard.png")
+            plt.tight_layout()
+            plt.savefig(out_path, dpi=180)
+            plt.close(fig)
+    except Exception:
+        pass
 
     # Stats and plots: start vs end resistance
     if per_sweep_summary:
         # Build per-section start (sweep 1, Rpos) and end (sweep 3, Rneg)
         start_map: Dict[str, Optional[float]] = {}
         end_map: Dict[str, Optional[float]] = {}
+        start_sigma: Dict[str, Optional[float]] = {}
+        end_sigma: Dict[str, Optional[float]] = {}
+        start_sigma_lo: Dict[str, Optional[float]] = {}
+        start_sigma_hi: Dict[str, Optional[float]] = {}
+        end_sigma_lo: Dict[str, Optional[float]] = {}
+        end_sigma_hi: Dict[str, Optional[float]] = {}
         for row in per_sweep_summary:
             sec = row["section"]
             if row.get("sweep_index") == 1:
                 start_map[sec] = row.get("R_pos_0_to_0p5_ohm")
+                start_sigma[sec] = row.get("sigma_nominal_Spm")
+                start_sigma_lo[sec] = row.get("sigma_lo_Spm")
+                start_sigma_hi[sec] = row.get("sigma_hi_Spm")
             if row.get("sweep_index") == 3:
                 end_map[sec] = row.get("R_neg_m0p5_to_0_ohm")
+                end_sigma[sec] = row.get("sigma_nominal_Spm")
+                end_sigma_lo[sec] = row.get("sigma_lo_Spm")
+                end_sigma_hi[sec] = row.get("sigma_hi_Spm")
         sections_se = sorted(set(start_map.keys()).intersection(end_map.keys()))
         stats_rows: List[Dict[str, object]] = []
         xs = []
@@ -444,7 +739,7 @@ def main() -> None:
         # Save stats CSV
         if stats_rows:
             stats_df = pd.DataFrame(stats_rows)
-            stats_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_start_end_stats.csv")
+            stats_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_start_end_stats.csv")
             stats_df.to_csv(stats_path, index=False)
         # Scatter: start vs end
         if len(xs) >= 1:
@@ -462,10 +757,10 @@ def main() -> None:
                 plt.annotate(sec, (x, y), textcoords="offset points", xytext=(4, 2), fontsize=8)
             plt.xlabel("Start R (0->0.5 V) [Ohm]")
             plt.ylabel("End R (-0.5->0 V) [Ohm]")
-            plt.title(f"{SAMPLE_FOLDER_NAME}: Start vs End Resistance")
+            plt.title(f"{sample_folder_name}: Start vs End Resistance")
             plt.grid(True, which='both', linestyle=':', linewidth=0.6)
             plt.legend()
-            out_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_start_vs_end_scatter.png")
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_start_vs_end_scatter.png")
             plt.tight_layout()
             plt.savefig(out_path, dpi=200)
             plt.close()
@@ -485,47 +780,187 @@ def main() -> None:
             plt.yticks(y_positions, sections_se)
             plt.xscale('log')
             plt.xlabel('Resistance (Ohm, log scale)')
-            plt.title(f"{SAMPLE_FOLDER_NAME}: Start vs End Resistance (Dumbbell)")
+            plt.title(f"{sample_folder_name}: Start vs End Resistance (Dumbbell)")
             plt.grid(True, axis='x', which='both', linestyle=':', linewidth=0.6)
             plt.legend()
-            out_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_start_end_dumbbell.png")
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_start_end_dumbbell.png")
             plt.tight_layout()
             plt.savefig(out_path, dpi=200)
             plt.close()
-        # Violin plot: distribution of start vs end
-        start_series = [v for v in start_map.values() if v is not None and np.isfinite(v)]
-        end_series = [v for v in end_map.values() if v is not None and np.isfinite(v)]
-        if len(start_series) >= 2 or len(end_series) >= 2:
-            # Work in log10 for better distribution visualization
-            data = []
-            labels_violin = []
-            if len(start_series) >= 2:
-                data.append(np.log10(np.array(start_series)))
-                labels_violin.append('Start (0->0.5 V)')
-            if len(end_series) >= 2:
-                data.append(np.log10(np.array(end_series)))
-                labels_violin.append('End (-0.5->0 V)')
-            if data:
-                plt.figure(figsize=(7, 5))
-                parts = plt.violinplot(data, showmeans=True, showmedians=True)
-                plt.xticks(np.arange(1, len(labels_violin)+1), labels_violin)
-                plt.ylabel('log10(Resistance [Ohm])')
-                plt.title(f"{SAMPLE_FOLDER_NAME}: Distribution of Resistances")
+        # Replace distribution plot with a table of metrics per section
+        table_sections = sorted(set(list(start_map.keys()) + list(end_map.keys())))
+        if table_sections:
+            # Build rows: section, R_start, R_end, G_end, sigma_end
+            rows = []
+            end_g_map = {row['section']: row.get('G_neg_S') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            end_sigma_map = {row['section']: row.get('sigma_nominal_Spm') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            end_sigma_lo_map = {row['section']: row.get('sigma_lo_Spm') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            end_sigma_hi_map = {row['section']: row.get('sigma_hi_Spm') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            for sec in table_sections:
+                r_s = start_map.get(sec)
+                r_e = end_map.get(sec)
+                g_e = end_g_map.get(sec)
+                s_e = end_sigma_map.get(sec)
+                rows.append([
+                    sec,
+                    (f"{r_s:.3g}" if (r_s is not None and np.isfinite(r_s)) else "n/a"),
+                    (f"{r_e:.3g}" if (r_e is not None and np.isfinite(r_e)) else "n/a"),
+                    (format_engineering_S(g_e) if (g_e is not None and np.isfinite(g_e)) else "n/a"),
+                    (f"{s_e:.3g}" if (s_e is not None and np.isfinite(s_e)) else "n/a"),
+                ])
+            # Compute averages and bounds
+            r_s_vals = np.array([v for v in start_map.values() if v is not None and np.isfinite(v)])
+            g_e_vals = np.array([v for v in end_g_map.values() if v is not None and np.isfinite(v)])
+            s_e_vals = np.array([v for v in end_sigma_map.values() if v is not None and np.isfinite(v)])
+            s_e_lo_vals = np.array([v for v in end_sigma_lo_map.values() if v is not None and np.isfinite(v)])
+            s_e_hi_vals = np.array([v for v in end_sigma_hi_map.values() if v is not None and np.isfinite(v)])
+            avg_r_s = np.nanmean(r_s_vals) if r_s_vals.size else np.nan
+            avg_g_e = np.nanmean(g_e_vals) if g_e_vals.size else np.nan
+            avg_s_e = np.nanmean(s_e_vals) if s_e_vals.size else np.nan
+            lo_s_e = np.nanmean(s_e_lo_vals) if s_e_lo_vals.size else np.nan
+            hi_s_e = np.nanmean(s_e_hi_vals) if s_e_hi_vals.size else np.nan
+
+            fig, ax = plt.subplots(figsize=(9, max(3.5, 0.35*len(rows) + 1.6)))
+            ax.axis('off')
+            col_labels = ["Section", "R_start (Ω)", "R_end (Ω)", "G_end (S)", "σ_end (S/m)"]
+            table = ax.table(cellText=rows, colLabels=col_labels, loc='center')
+            table.auto_set_font_size(False)
+            table.set_fontsize(8)
+            table.scale(1, 1.2)
+            title_lines = [f"{sample_folder_name}: Summary Table"]
+            if np.isfinite(avg_r_s):
+                title_lines.append(f"Avg R_start: {format_engineering(avg_r_s)}")
+            if np.isfinite(avg_g_e):
+                title_lines.append(f"Avg G_end: {format_engineering_S(avg_g_e)}")
+            if np.isfinite(avg_s_e):
+                avg_band = ""
+                if np.isfinite(lo_s_e) and np.isfinite(hi_s_e):
+                    avg_band = f" (avg bounds: {lo_s_e:.3g}..{hi_s_e:.3g})"
+                title_lines.append(f"Avg σ_end: {avg_s_e:.3g} S/m{avg_band}")
+            ax.set_title("\n".join(title_lines))
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_summary_table.png")
+            plt.tight_layout()
+            plt.savefig(out_path, dpi=200)
+            plt.close()
+
+        # Conductivity plots: start vs end with error bars
+        sections_se = sorted(set([s for s, v in start_sigma.items() if v is not None]).intersection([s for s, v in end_sigma.items() if v is not None]))
+        if sections_se:
+            x = np.arange(len(sections_se))
+            w = 0.38
+            start_vals = [start_sigma[s] for s in sections_se]
+            end_vals = [end_sigma[s] for s in sections_se]
+            # Error bars from min/max around nominal
+            start_err_lo = [max(0.0, (sv - (start_sigma_lo[s] if start_sigma_lo[s] is not None else sv))) for s, sv in zip(sections_se, start_vals)]
+            start_err_hi = [max(0.0, ((start_sigma_hi[s] if start_sigma_hi[s] is not None else sv) - sv)) for s, sv in zip(sections_se, start_vals)]
+            end_err_lo = [max(0.0, (ev - (end_sigma_lo[s] if end_sigma_lo[s] is not None else ev))) for s, ev in zip(sections_se, end_vals)]
+            end_err_hi = [max(0.0, ((end_sigma_hi[s] if end_sigma_hi[s] is not None else ev) - ev)) for s, ev in zip(sections_se, end_vals)]
+            plt.figure(figsize=(10, 5))
+            plt.bar(x - w/2, start_vals, w, yerr=[start_err_lo, start_err_hi], label="Start σ", color="#76b7b2", capsize=3)
+            plt.bar(x + w/2, end_vals, w, yerr=[end_err_lo, end_err_hi], label="End σ", color="#e15759", capsize=3)
+            # Threshold lines
+            for name, val in CONDUCTIVITY_THRESHOLDS.items():
+                plt.axhline(val, linestyle='--', linewidth=1.0, color={'low':'#999', 'medium':'#666', 'high':'#333'}.get(name, '#888'), label=f"{name}={val:.0e} S/m")
+            plt.xticks(x, sections_se)
+            plt.ylabel("Conductivity σ (S/m)")
+            plt.title(f"{sample_folder_name}: Conductivity start vs end with error bars")
+            plt.grid(axis='y', linestyle=':', linewidth=0.6)
+            plt.legend()
+            out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_conductivity_start_end.png")
+            plt.tight_layout()
+            plt.savefig(out_path, dpi=200)
+            plt.close()
+
+        # Sheet resistance and resistivity plots (start vs end with error bars)
+        if sections_se:
+            # Build from per_sweep_summary again to ensure alignment of Rs and rho
+            rs_start = {row['section']: row.get('Rsheet_nominal_ohm_sq') for row in per_sweep_summary if row.get('sweep_index') == 1}
+            rs_end = {row['section']: row.get('Rsheet_nominal_ohm_sq') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            rs_lo_start = {row['section']: row.get('Rsheet_lo_ohm_sq') for row in per_sweep_summary if row.get('sweep_index') == 1}
+            rs_hi_start = {row['section']: row.get('Rsheet_hi_ohm_sq') for row in per_sweep_summary if row.get('sweep_index') == 1}
+            rs_lo_end = {row['section']: row.get('Rsheet_lo_ohm_sq') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            rs_hi_end = {row['section']: row.get('Rsheet_hi_ohm_sq') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            secs_rs = [s for s in sections_se if rs_start.get(s) is not None and rs_end.get(s) is not None]
+            if secs_rs:
+                x = np.arange(len(secs_rs))
+                w = 0.38
+                sv = [rs_start[s] for s in secs_rs]
+                ev = [rs_end[s] for s in secs_rs]
+                se_lo = [max(0.0, sv_i - (rs_lo_start[s] if rs_lo_start[s] is not None else sv_i)) for s, sv_i in zip(secs_rs, sv)]
+                se_hi = [max(0.0, (rs_hi_start[s] if rs_hi_start[s] is not None else sv_i) - sv_i) for s, sv_i in zip(secs_rs, sv)]
+                ee_lo = [max(0.0, ev_i - (rs_lo_end[s] if rs_lo_end[s] is not None else ev_i)) for s, ev_i in zip(secs_rs, ev)]
+                ee_hi = [max(0.0, (rs_hi_end[s] if rs_hi_end[s] is not None else ev_i) - ev_i) for s, ev_i in zip(secs_rs, ev)]
+                plt.figure(figsize=(10, 5))
+                plt.bar(x - w/2, sv, w, yerr=[se_lo, se_hi], label="Start Rs", color="#59a14f", capsize=3)
+                plt.bar(x + w/2, ev, w, yerr=[ee_lo, ee_hi], label="End Rs", color="#edc948", capsize=3)
+                plt.xticks(x, secs_rs)
+                plt.ylabel("Sheet resistance Rs (Ω/□)")
+                plt.title(f"{sample_folder_name}: Sheet resistance start vs end")
                 plt.grid(axis='y', linestyle=':', linewidth=0.6)
-                out_path = os.path.join(output_dir, f"ITO_{SAMPLE_FOLDER_NAME}_distribution.png")
+                plt.legend()
+                out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_sheet_resistance_start_end.png")
+                plt.tight_layout()
+                plt.savefig(out_path, dpi=200)
+                plt.close()
+
+        if sections_se:
+            rho_start = {row['section']: row.get('rho_nominal_ohm_m') for row in per_sweep_summary if row.get('sweep_index') == 1}
+            rho_end = {row['section']: row.get('rho_nominal_ohm_m') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            rho_lo_start = {row['section']: row.get('rho_lo_ohm_m') for row in per_sweep_summary if row.get('sweep_index') == 1}
+            rho_hi_start = {row['section']: row.get('rho_hi_ohm_m') for row in per_sweep_summary if row.get('sweep_index') == 1}
+            rho_lo_end = {row['section']: row.get('rho_lo_ohm_m') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            rho_hi_end = {row['section']: row.get('rho_hi_ohm_m') for row in per_sweep_summary if row.get('sweep_index') == 3}
+            secs_rho = [s for s in sections_se if rho_start.get(s) is not None and rho_end.get(s) is not None]
+            if secs_rho:
+                x = np.arange(len(secs_rho))
+                w = 0.38
+                sv = [rho_start[s] for s in secs_rho]
+                ev = [rho_end[s] for s in secs_rho]
+                se_lo = [max(0.0, sv_i - (rho_lo_start[s] if rho_lo_start[s] is not None else sv_i)) for s, sv_i in zip(secs_rho, sv)]
+                se_hi = [max(0.0, (rho_hi_start[s] if rho_hi_start[s] is not None else sv_i) - sv_i) for s, sv_i in zip(secs_rho, sv)]
+                ee_lo = [max(0.0, ev_i - (rho_lo_end[s] if rho_lo_end[s] is not None else ev_i)) for s, ev_i in zip(secs_rho, ev)]
+                ee_hi = [max(0.0, (rho_hi_end[s] if rho_hi_end[s] is not None else ev_i) - ev_i) for s, ev_i in zip(secs_rho, ev)]
+                plt.figure(figsize=(10, 5))
+                plt.bar(x - w/2, sv, w, yerr=[se_lo, se_hi], label="Start ρ", color="#af7aa1", capsize=3)
+                plt.bar(x + w/2, ev, w, yerr=[ee_lo, ee_hi], label="End ρ", color="#ff9da7", capsize=3)
+                plt.xticks(x, secs_rho)
+                plt.ylabel("Resistivity ρ (Ω·m)")
+                plt.title(f"{sample_folder_name}: Resistivity start vs end")
+                plt.grid(axis='y', linestyle=':', linewidth=0.6)
+                plt.legend()
+                out_path = os.path.join(output_dir, f"ITO_{sample_folder_name}_resistivity_start_end.png")
                 plt.tight_layout()
                 plt.savefig(out_path, dpi=200)
                 plt.close()
 
     # Simple console output for quick check (ASCII-safe)
-    print(f"Analyzed sample: {SAMPLE_FOLDER_NAME}")
+    print(f"Analyzed sample: {sample_folder_name}")
     print(f"Sections found: {[os.path.basename(p) for p in section_dirs]}")
     if per_sweep_summary:
         print("First-sweep resistances (0->0.5 V):")
         for row in [r for r in per_sweep_summary if r.get("sweep_index") == 1]:
             label_ascii = str(row['R_pos_label']).replace('Ω', 'Ohm')
-            print(f"  {row['section']}: {label_ascii}  ({'X' if row['ohmic']=='X' else 'ohmic'})")
+            g_label = format_engineering_S(row.get('G_pos_S')) if row.get('G_pos_S') is not None else 'n/a'
+            sigma_nom = row.get('sigma_nominal_Spm')
+            sigma_str = f"{sigma_nom:.3g} S/m" if sigma_nom is not None and np.isfinite(sigma_nom) else 'n/a'
+            print(f"  {row['section']}: R={label_ascii}, G={g_label}, sigma={sigma_str}  ({'X' if row['ohmic']=='X' else 'ohmic'})")
 
+
+def main() -> None:
+    if PROCESS_ALL_SAMPLES:
+        # find subfolders in ONEDRIVE_ROOT that look like sample folders
+        try:
+            for entry in sorted(os.listdir(ONEDRIVE_ROOT)):
+                full = os.path.join(ONEDRIVE_ROOT, entry)
+                if os.path.isdir(full) and entry not in EXCLUDE_SAMPLES:
+                    try:
+                        analyze_sample(entry)
+                    except Exception as e:
+                        print(f"Error analyzing sample '{entry}': {e}")
+        except Exception as e:
+            print(f"Error listing ONEDRIVE_ROOT: {e}")
+    else:
+        analyze_sample(SAMPLE_FOLDER_NAME)
 
 if __name__ == "__main__":
     main()
