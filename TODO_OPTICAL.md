@@ -31,6 +31,3 @@ Goal: finalize a safe, configurable optical layer (LED/Laser) that is robust in 
 - Capability detection: guard unsupported ops (e.g., wavelength changes on fixed lasers) with clear messages.
 
 
-
-
-
