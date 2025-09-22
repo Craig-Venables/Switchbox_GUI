@@ -1043,10 +1043,58 @@ class Keithley4200A_PMUDualChannel:
         return df
 
 
+def simple_health_check(address: str = "192.168.0.10:8888") -> bool:
+    """Minimal check: connect to a 4200A LPT server, query id and perform a read.
+
+    Returns True if connection and a harmless measurement succeed, False otherwise.
+    Keep imports local so calling this helper won't affect normal imports elsewhere.
+    """
+    try:
+        # Import locally to avoid side-effects during module import
+        from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
+    except Exception:
+        # We're already in this module, so fallback to class defined above
+        Keithley4200AController = globals().get("Keithley4200AController")
+
+    if Keithley4200AController is None:
+        print("Keithley4200AController class not available in module.")
+        return False
+
+    try:
+        inst = Keithley4200AController(address)
+    except Exception as e:
+        print(f"Failed to connect to Keithley 4200A at {address}: {e}")
+        return False
+
+    try:
+        try:
+            idn = inst.get_idn()
+            print(f"Connected: {idn}")
+        except Exception:
+            print("Connected but failed to read id string")
+
+        # harmless read
+        try:
+            val = inst.measure_current()
+            print(f"measure_current() -> {val}")
+        except Exception as e:
+            print(f"Failed to perform measure_current(): {e}")
+            inst.close()
+            return False
+
+        inst.close()
+        return True
+    finally:
+        try:
+            inst.close()
+        except Exception:
+            pass
+
 
  
 
 if __name__ == "__main__":
     print("nothing set up here yet ")
+    simple_health_check()
+        
 
-    

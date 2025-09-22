@@ -52,6 +52,7 @@ from Equipment.PowerSupplies.Keithley2220 import Keithley2220_Powersupply  # imp
 from Equipment.temperature_controller_manager import TemperatureControllerManager
 #from measurement_plotter import MeasurementPlotter, ThreadSafePlotter
 from Measurments.measurement_services_smu import MeasurementService, VoltageRangeMode
+from Equipment.optical_excitation import create_optical_from_system_config, OpticalExcitation
 from typing import Optional, Any, Callable, Dict, List, Tuple, Union
 
 from Check_Connection_GUI import CheckConnection
@@ -877,9 +878,24 @@ class MeasurementGUI:
         frame.columnconfigure(1, weight=1)
 
     def toggle_manual_led(self) -> None:
-        """Toggle the external LED via PSU at the requested power setting."""
+        """Toggle the optical source (LED/Laser) using configured abstraction."""
         try:
-            if not self.psu_connected:
+            # Prefer new optical abstraction if available
+            if hasattr(self, 'optical') and self.optical is not None:
+                if not self.manual_led_on:
+                    lvl = float(self.manual_led_power.get())
+                    unit = getattr(self.optical, 'capabilities', {}).get('units', 'mW')
+                    self.optical.set_level(lvl, unit)
+                    self.optical.set_enabled(True)
+                    self.manual_led_on = True
+                    self.manual_led_btn.config(text="LIGHT ON")
+                else:
+                    self.optical.set_enabled(False)
+                    self.manual_led_on = False
+                    self.manual_led_btn.config(text="LIGHT OFF")
+                return
+            # Legacy PSU path fallback
+            if not getattr(self, 'psu_connected', False):
                 self.connect_keithley_psu()
             if not self.manual_led_on:
                 self.psu.led_on_380(self.manual_led_power.get())
@@ -1350,6 +1366,7 @@ class MeasurementGUI:
 
             # Update IV section
             iv_address = config.get("SMU_address", "")
+            self.iv_address = iv_address
             self.keithley_address_var.set(iv_address)
             self.keithley_address = iv_address
             self.update_component_state("iv", iv_address)
@@ -1372,7 +1389,14 @@ class MeasurementGUI:
             self.controller_address_var.set(temp_address)
 
             # smu type
-            self.SMU_type = config.get("SMU_AND_PMU Type", "")
+            self.SMU_type = config.get("SMU Type", "")
+            print(self.SMU_type)
+
+            # Optical excitation (LED/Laser) selection based on config
+            try:
+                self.optical = create_optical_from_system_config(config)
+            except Exception:
+                self.optical = None
 
 
     def update_component_state(self, component_type: str, address: str) -> None:
@@ -3060,6 +3084,7 @@ class MeasurementGUI:
                             psu=getattr(self, 'psu', None),
                             led=False,
                             power=1.0,
+                            optical=getattr(self, 'optical', None),
                             sequence=None,
                             should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
                             on_point=None,
@@ -3107,6 +3132,7 @@ class MeasurementGUI:
                             psu=getattr(self, 'psu', None),
                             led=bool(led),
                             power=power,
+                            optical=getattr(self, 'optical', None),
                             sequence=sequence,
                             pause_s=pause,
                             smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
@@ -3131,6 +3157,7 @@ class MeasurementGUI:
                             psu=getattr(self, 'psu', None),
                             led=bool(led),
                             power=power,
+                            optical=getattr(self, 'optical', None),
                             smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
                             should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
                             on_point=_on_point,
@@ -3220,7 +3247,9 @@ class MeasurementGUI:
                     # give time to sleep between measurements!
                     time.sleep(2)
                 try:
-                    if getattr(self, 'psu_needed', False) and hasattr(self, 'psu'):
+                    if hasattr(self, 'optical') and self.optical is not None and bool(led):
+                        self.optical.set_enabled(False)
+                    elif getattr(self, 'psu_needed', False) and hasattr(self, 'psu'):
                         self.psu.led_off_380()
                 except Exception:
                     # Do not skip the rest of the per-device finalization
@@ -3968,6 +3997,7 @@ class MeasurementGUI:
                 psu=getattr(self, 'psu', None),
                 led=bool(led),
                 power=led_power,
+                optical=getattr(self, 'optical', None),
                 sequence=sequence,
                 pause_s=pause,
                 smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
@@ -4021,7 +4051,18 @@ class MeasurementGUI:
 
             key = find_largest_number_in_folder(save_dir)
             save_key = 0 if key is None else key + 1
-            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}{additional}{extra_info}"
+            # Optional optical suffix when using Laser
+            opt_suffix = ""
+            try:
+                if hasattr(self, 'optical') and self.optical is not None:
+                    caps = getattr(self.optical, 'capabilities', {})
+                    if str(caps.get('type', '')).lower() == 'laser' and bool(led):
+                        unit = str(caps.get('units', 'mW'))
+                        lvl = float(led_power)
+                        opt_suffix = f"-LASER{lvl}{unit}"
+            except Exception:
+                opt_suffix = ""
+            name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}{additional}{opt_suffix}{extra_info}"
             file_path = f"{save_dir}\\{name}.txt"
 
             np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
@@ -4097,6 +4138,7 @@ class MeasurementGUI:
             icc=icc,
             psu=getattr(self, 'psu', None),
             led=bool(led),
+            optical=getattr(self, 'optical', None),
             led_time_s=led_time,
             sequence=sequence,
             should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
@@ -4112,10 +4154,15 @@ class MeasurementGUI:
     def connect_keithley(self) -> None:
         """Connect to the selected IV controller via GPIB using system config SMU_AND_PMU Type"""
         address = self.keithley_address_var.get()
-        smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+        smu_type = getattr(self, 'SMU type', 'Keithley 2401')
+        print("3")
         try:
-            self.keithley = IVControllerManager(smu_type, address)
+            print("a")
+            print(smu_type)
+            print(address)
+            self.keithley = IVControllerManager(self.SMU_type, address)
             # Verify the connection using controller's handle
+            print("b")
             try:
                 self.connected = bool(self.keithley.is_connected())
             except Exception:
@@ -4128,7 +4175,7 @@ class MeasurementGUI:
                 self.keithley.beep(5000, 0.5)
         except Exception as e:
             self.connected = False
-            print("unable to connect to SMU_AND_PMU please check")
+            print("unable to connect to SMU please check")
             messagebox.showerror("Error", f"Could not connect to device: {str(e)}")
 
     def connect_keithley_psu(self) -> None:

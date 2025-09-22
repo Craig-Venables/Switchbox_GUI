@@ -46,14 +46,14 @@ class IVControllerManager:
 
     @classmethod
     def from_config(cls, config: Dict[str, Any]) -> 'IVControllerManager':
-        smu_type = config.get('SMU_AND_PMU Type', 'Keithley 2400')
+        smu_type = config.get('SMU Type', 'Keithley 2400')
         address = config.get('SMU_address')
         return cls(smu_type, address)
 
     def _init_instrument(self) -> None:
         meta = self.SUPPORTED.get(self.smu_type)
         if not meta:
-            raise ValueError(f"Unsupported SMU_AND_PMU Type: {self.smu_type}")
+            raise ValueError(f"Unsupported SMU Type: {self.smu_type}")
         controller_class = meta['class']
         # Both controllers accept a single address argument string
         self.instrument = controller_class(self.address)

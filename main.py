@@ -8,15 +8,9 @@ from Sample_GUI import SampleGUI
 
 
 #todo add non multiplexer device so that people can use it for just one device
-#todo clean up the code with the following 
-#more comments explaineng each functions with variables in and out
 
 
-
-# this function will be the wrapper for all the measurments that are available for the pmu, this can either call 4200adual...py or another wrapper then the class, 
-# probably another class
-
-
+# what am i doing about the laser? can we use it the same way as the led??
 
 # todo is there a way to find the optimal settings for each device, some kind of test?
 
@@ -33,4 +27,3 @@ if __name__ == "__main__":
         root = tk.Tk()
         app = SampleGUI(root)
         root.mainloop()
-0
