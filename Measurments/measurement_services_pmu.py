@@ -518,7 +518,7 @@ class MeasurementServicesPMU:
             i_meas_range=i_meas_range,
             num_pulses=num_pulses,
             delay_s=delay_s,
-            outputs_on=True,
+            
         )
 
         # Prepare FG with full shape + EXT burst
@@ -605,9 +605,9 @@ class MeasurementServicesPMU:
         print("sleeping for 2 seconds  ")
         time.sleep(2)
 
-        self.pmu.start()
-        self.pmu.wait(timeout_s=float(timeout_s))
-        df = self.pmu.fetch(channel=int(source_channel)) 
+        self.pmu.start() # starts the measurment 
+        self.pmu.wait(timeout_s=float(timeout_s)) # waits for the measurment to finish
+        df = self.pmu.fetch(channel=int(source_channel)) # fetches the data from the measurment
 
         print("##################")
         print("dont forget delay is disabled youn need to manualy input!")

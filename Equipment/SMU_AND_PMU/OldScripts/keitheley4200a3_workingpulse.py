@@ -9,12 +9,12 @@ import atexit, signal, sys
 from typing import Any, Literal
 
 
-# Ensure project root on sys.path for absolute imports when run as script
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# # Ensure project root on sys.path for absolute imports when run as script
+# PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# if str(PROJECT_ROOT) not in sys.path:
+#     sys.path.insert(0, str(PROJECT_ROOT))
 
-from Equipment.SMU_AND_PMU.ProxyClass import Proxy
+from ProxyClass import Proxy
 
 
 # -------------------------------------------
@@ -180,7 +180,7 @@ class Keithley4200A_PMUDualChannel:
                            v_meas_range: float = 10.0,
                            i_meas_range: float = 100e-6,
                            num_pulses: int = 1,
-                           timeout_s: float = 10,
+                           timeout_s: float = 30,
                            acquire_time_stamp: int = 1,
                            Trig_delay = int(500e-4),
                            trig_source: int | None = None,
@@ -445,6 +445,7 @@ class Keithley4200A_PMUDualChannel:
         t0 = time.time()
         while True:
             status, _elapsed = self.lpt.pulse_exec_status()
+            # detrmion wether a test is running
             if status != self.param.PMU_TEST_STATUS_RUNNING:
                 return
             if time.time() - t0 > float(timeout_s):
@@ -575,7 +576,7 @@ class Keithley4200A_PMUDualChannel:
                 v_meas_range=float(v_rng),
                 i_meas_range=float(i_rng),
                 num_pulses=1,
-                timeout_s=10.0,
+                timeout_s=30.0,
                 acquire_time_stamp=1,
             )
             raw_dfs.append(df)
@@ -818,15 +819,15 @@ class Keithley4200A_PMUDualChannel:
 
 
 
-#pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
+pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
 # # #df = pmu.test_pulse_with_pretrigger(amplitude_v=0.5, width_s=50e-6, period_s=200e-6, num_pulses=5, source_channel=1,pretrigger_width_s=50e-6)
 # # #print(df.head())
 # # #pmu.close()
 
-# # # this works as long as you use fixed ranges 
-# df = pmu.measure_at_voltage(amplitude_v=0.5, width_s=50e-6, period_s=200e-6, num_pulses=100, source_channel=1,force_fixed_ranges=True)
-# print(df.head())
-# pmu.close()
+# # this works as long as you use fixed ranges 
+df = pmu.measure_at_voltage(amplitude_v=0.5, width_s=0.1e-3, period_s=100e-3, num_pulses=200, source_channel=1,force_fixed_ranges=True,timeout_s=50)
+print(df.head())
+pmu.close()
 
 # # pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
 
