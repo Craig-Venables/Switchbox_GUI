@@ -111,7 +111,7 @@ class OxfordITC4:
 
         # Just add these methods at the end:
 
-    def get_temperature_celsius(self, channel='A'):
+    def get_temperature_celsius(self, channel='B'):
         """Wrapper to match the common interface"""
         # Channel mapping: A=1, B=2, C=3
         channel_map = {'A': 1, 'B': 2, 'C': 3}
@@ -136,4 +136,27 @@ class OxfordITC4:
         self.rm.close()
 
 
+if __name__ == "__main__":
+    # Create OxfordITC4 instance
+    temp_controller = None
+    try:
+        print("Initializing Oxford ITC4 temperature controller...")
+        temp_controller = OxfordITC4()
+        
+        print("Setting temperature to 50°C...")
+        result = temp_controller.set_temperature(50)
+        print(f"Temperature set result: {result}")
+        
+        # Read current temperature to verify
+        current_temp = temp_controller.get_temperature_celsius('B')
+        print(f"Current temperature: {current_temp}°C")
+        
+        print("Temperature controller setup complete!")
+        
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        if temp_controller:
+            temp_controller.close()
+            print("Connection closed.")
 

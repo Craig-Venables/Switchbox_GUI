@@ -678,6 +678,8 @@ class Keithley4200A_PMUDualChannel:
         t0 = time.time()
         while True:
             status, _elapsed = self.lpt.pulse_exec_status()
+            print("Status: ", status)
+            print("elapsed: ", _elapsed)
             if status != self.param.PMU_TEST_STATUS_RUNNING:
                 return
             if time.time() - t0 > float(timeout_s):

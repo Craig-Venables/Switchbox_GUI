@@ -16,7 +16,7 @@ class VoltageRangeMode:
 
 
 class SMULimits:
-    """Configuration for different SMU_AND_PMU types and their timing limits."""
+    """Configuration for different SMU types and their timing limits."""
 
     def __init__(self):
         self.limits = {
@@ -87,11 +87,11 @@ class SMULimits:
     
 
     def get_limits(self, smu_type: str) -> dict:
-        """Get timing limits for the specified SMU_AND_PMU type."""
+        """Get timing limits for the specified SMU type."""
         return self.limits.get(smu_type, self.limits["Keithley 2401"])
 
     def update_limits(self, smu_type: str, **kwargs):
-        """Update timing limits for a specific SMU_AND_PMU type."""
+        """Update timing limits for a specific SMU type."""
         if smu_type not in self.limits:
             self.limits[smu_type] = {}
         self.limits[smu_type].update(kwargs)
@@ -104,7 +104,7 @@ class SMULimits:
 
 class MeasurementService:
     """
-    Centralized measurement engine for IV, retention, pulse, and endurance flows.For SMU_AND_PMU use only not PMU.
+    Centralized measurement engine for IV, retention, pulse, and endurance flows.For SMU use only not PMU.
 
     Responsibilities
     - Compute voltage ranges for different sweep types
@@ -125,7 +125,7 @@ class MeasurementService:
     # --------------------------
     def begin_pulse_session(self, keithley, icc: float, *, v_range: float = 20.0, ovp: float = 21.0,
                             use_remote_sense: bool = False, autozero_off: bool = True) -> None:
-        """Prepare SMU_AND_PMU once for a batch of pulses; caller should later call end_pulse_session."""
+        """Prepare SMU once for a batch of pulses; caller should later call end_pulse_session."""
         try:
             keithley.prepare_for_pulses(Icc=float(icc), v_range=float(v_range), ovp=float(ovp),
                                         use_remote_sense=bool(use_remote_sense), autozero_off=bool(autozero_off))
