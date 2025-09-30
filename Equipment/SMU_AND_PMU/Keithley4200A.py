@@ -641,9 +641,15 @@ class Keithley4200A_PMUDualChannel:
         other = 2 if src == 1 else 1
         self.lpt.pulse_sweep_linear(self.card_id, src, self.param.PULSE_AMPLITUDE_SP,
                                     float(amplitude_v), float(amplitude_v), float(base_v))
+        self.lpt.pulse_burst_count(self.card_id, src, int(num_pulses))
+
         if hold_other_at_zero:
             self.lpt.pulse_sweep_linear(self.card_id, other, self.param.PULSE_AMPLITUDE_SP,
                                         0.0, 0.0, 0.0)
+            #self.lpt.pulse_burst_count(self.card_id, other, 0)
+
+
+        
 
         if outputs_on:
             for ch in self.channels:
