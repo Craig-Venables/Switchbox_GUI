@@ -16,9 +16,9 @@ ms_pmu = MeasurementServicesPMU(pmu=pmu, function_generator=gen)
 ## Deprecated: software-only sequencing helper removed with orchestrator
 
 pmu_params = {
-    "amplitude_v": 0.3,
-    "width_s": 0.25, #increasing this will significantly increase the time to complete the measurement
-    "period_s": 0.5, #increasing this will significantly increase the time to complete the measurement
+    "amplitude_v": 0.5,
+    "width_s": 50e-6, #increasing this will significantly increase the time to complete the measurement
+    "period_s": 200e-6, #increasing this will significantly increase the time to complete the measurement
     "num_pulses": 20,
     "source_channel": 1,
     "force_fixed_ranges": True,
@@ -66,8 +66,9 @@ print("Starting measurement: be patient on the readings it can take a while >60s
 df = ms_pmu.Single_Laser_Pulse_with_read(
     pmu_peramiter=pmu_params,
     fg_peramiter=fg_params,
-    timeout_s=2500,
+    timeout_s=15,
 )
+
 # maybe add in a way to check range on that first pulse, pulse once, find current and range and set the range based on that.
 #df = coord.Single_Laser_Pulse_with_read(timeout_s=15.0)
 b=time.time()
@@ -76,7 +77,7 @@ print(df.head())
 
 # Save DataFrame to a timestamped TXT with header including parameters
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-out_dir = os.path.join(os.path.dirname(__file__), "Data_save_loc", "D104PMU", "F", "2", "PMU measurments")
+out_dir = os.path.join(os.path.dirname(__file__), "Data_save_loc", "testing_again", "F", "2", "PMU measurments")
 os.makedirs(out_dir, exist_ok=True)
 
 # Build header with parameters and derived pulse information
