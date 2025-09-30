@@ -456,8 +456,9 @@ class MeasurementServicesPMU:
             "burst_delay_s": 3.41e-07,
         }
 
+        # estimate run time
         est = self.estimate_runtime_from_params(pmu_peramiter, fg_peramiter, include_pre_sleep=True)
-        print(est["total_estimate_s"], est)
+        
 
         pmu_cfg = {**pmu_defaults, **(pmu_peramiter or {})}
         fg_cfg = {**fg_defaults, **(fg_peramiter or {})}
@@ -501,9 +502,12 @@ class MeasurementServicesPMU:
         fg_cycles = int(fg_cfg["cycles"])
         fg_trigger_source = str(fg_cfg["trigger_source"]).upper()
 
-        print(fg_pulse_width_s)        
-        
+        print("Pulse width (fg): ", fg_pulse_width_s)  
+
+        ############
         # Prepare PMU
+        ############
+
         self.pmu.prepare_measure_at_voltage(
             amplitude_v=amplitude_v,
             base_v=base_v,
@@ -520,26 +524,7 @@ class MeasurementServicesPMU:
             delay_s=delay_s,
             
         )
-
-        # Prepare FG with full shape + EXT burst
-        self.gen.set_pulse_shape(
-            channel=fg_channel,
-            frequency_hz=fg_frequency_hz,
-            high_level_v=fg_high_level_v,
-            low_level_v=fg_low_level_v,
-            #pulse_width_s=fg_pulse_width_s,
-            #duty_pct=fg_duty_pct,
-            #rise_s=fg_rise_s,
-            #fall_s=fg_fall_s,
-            #delay_s=fg_delay_s,
-        )
-        self.gen.enable_burst(
-            channel=fg_channel,
-            mode=fg_mode,
-            cycles=fg_cycles,
-            trigger_source=fg_trigger_source,
-
-        )
+        # dont want this before or will trig when we dont want!
         #self.gen.output(fg_channel, True)
 
         # Enable PMU TRIG OUT so FG (TRSR=EXT) can be driven by PMU
@@ -551,6 +536,10 @@ class MeasurementServicesPMU:
             self.pmu.set_trigger_output(True)
         except Exception:
             pass
+        
+        #############
+        # Preparing the Fg
+        #############
 
         
         # Check if FG output is currently on
@@ -584,6 +573,26 @@ class MeasurementServicesPMU:
             if not proceed:
                 raise RuntimeError("Operation cancelled by user at laser OFF confirmation.")
 
+
+        # Prepare FG with full shape + EXT burst and arm
+        self.gen.set_pulse_shape(
+            channel=fg_channel,
+            frequency_hz=fg_frequency_hz,
+            high_level_v=fg_high_level_v,
+            low_level_v=fg_low_level_v,
+            #pulse_width_s=fg_pulse_width_s,
+            #duty_pct=fg_duty_pct,
+            #rise_s=fg_rise_s,
+            #fall_s=fg_fall_s,
+            #delay_s=fg_delay_s,
+        )
+        self.gen.enable_burst(
+            channel=fg_channel,
+            mode=fg_mode,
+            cycles=fg_cycles,
+            trigger_source=fg_trigger_source
+        )
+
         # Turn on FG output to prevent transients
         self.gen.output(fg_channel, True)
 
@@ -599,19 +608,22 @@ class MeasurementServicesPMU:
         if not proceed_on:
             raise RuntimeError("Operation cancelled by user at laser ON confirmation.")
         
-        
+        # total excpected run time. 
+        print(est["total_estimate_s"], est)
 
         # give function generator time to settle
-        print("sleeping for 2 seconds  ")
-        time.sleep(2)
+        print("sleeping for 0.5 seconds  ")
+        time.sleep(0.5)
 
-        self.pmu.start() # starts the measurment 
+        print("start the measurment")
+        self.pmu.start() # starts the measurment
+
+        print("started the measurment waiting too finish")
         self.pmu.wait(timeout_s=float(timeout_s)) # waits for the measurment to finish
+
+        print("about to fetch the data")
         df = self.pmu.fetch(channel=int(source_channel)) # fetches the data from the measurment
 
-        print("##################")
-        print("dont forget delay is disabled youn need to manualy input!")
-        print("##################")
         return df
 
 
