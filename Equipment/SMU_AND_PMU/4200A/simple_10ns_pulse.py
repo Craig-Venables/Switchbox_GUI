@@ -62,8 +62,8 @@ class PMU_10ns_Simple:
         setRange = 5.0
         setVLow = 0
         setVHigh = 1
-        setPeriod = 500e-9      # 1 ms = 1 kHz (MUCH slower, easy to see)
-        setWidth = 250e-9     # 500 µs pulse width
+        setPeriod = 5e-3      # 1 ms = 1 kHz (MUCH slower, easy to see)
+        setWidth = 2.5e-3     # 500 µs pulse width
         
         # Set RPM to pulse mode (does nothing if no RPM)
         try:
@@ -88,11 +88,14 @@ class PMU_10ns_Simple:
         self.lpt.pulse_vhigh(self.card_id, ch, setVHigh)
         self.lpt.pulse_period(self.card_id, setPeriod)
         self.lpt.pulse_width(self.card_id, ch, setWidth)
+       
         
+        self.lpt.pulse_burst_count(self.card_id, ch, 10)
         # Output the pulse
         self.lpt.pulse_output(self.card_id, ch, 1)  # Turn ON
-        self.lpt.pulse_trig(self.card_id, 1)        # Continuous trigger
+        self.lpt.pulse_trig(self.card_id, 0)        # Continuous trigger
         
+
         print(f"10ns pulses running on channel {ch}")
         print("Press Ctrl+C to stop")
     
