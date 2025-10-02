@@ -365,6 +365,17 @@ class Keithley4200A_PMUDualChannel:
                                    acquire_meas_i_base=0,
                                    acquire_time_stamp=int(acquire_time_stamp),
                                    llecomp=0)
+
+            # if runnig slow pulses 
+            # self.lpt.pulse_meas_wfm(self.card_id, ch,
+            #                         acquire_type=0,
+            #                         acquire_meas_v=1,   # capture voltage waveform
+            #                         acquire_meas_i=1,   # capture current waveform
+            #                         acquire_time_stamp=1,  # capture timestamps
+            #                         llecomp=0)
+            #self.lpt.pulse_meas_timing(self.card_id, ch, 1, 99, int(num_pulses))
+            
+
             self.lpt.pulse_ranges(self.card_id, ch,
                                   v_src_range,
                                   v_meas_range_type, v_meas_range,
@@ -373,7 +384,9 @@ class Keithley4200A_PMUDualChannel:
             self.lpt.pulse_meas_timing(self.card_id, ch, start_pct, stop_pct, int(num_pulses))
             self.lpt.pulse_source_timing(self.card_id, ch, period, delay, width, rise, fall)
             self.lpt.pulse_load(self.card_id, ch, load_ohm)
-
+        #print(self.card_id)
+        #self.lpt.pulse_sample_rate(self.card_id, 1e6)
+        #self.lpt.pulse_sample_rate(self.card_id, 1e6)  # 1 MSa/s, adjust to your needs
         # Software trigger by default
         # try:
         #     self.lpt.pulse_trig_source(self.card_id, 0)
@@ -613,27 +626,31 @@ class Keithley4200A_PMUDualChannel:
         - Optionally enables outputs so a follow-up start() executes immediately.
         - No trigger configuration is performed here.
         """
+        # arbituary incase earlier failed most will be set up different in here
         self._ensure_config()
 
+
+        
+        print("running_fast_pulses")
         v_src_range = max(abs(amplitude_v), v_meas_range)
         if force_fixed_ranges:
             for ch in self.channels:
                 self.lpt.pulse_ranges(self.card_id, ch,
-                                      v_src_range=v_src_range,
-                                      v_range_type=1, v_range=float(v_meas_range),
-                                      i_range_type=1, i_range=float(i_meas_range))
+                                    v_src_range=v_src_range,
+                                    v_range_type=1, v_range=float(v_meas_range),
+                                    i_range_type=1, i_range=float(i_meas_range))
         else:
             for ch in self.channels:
                 self.lpt.pulse_ranges(self.card_id, ch,
-                                      v_src_range=v_src_range,
-                                      v_range_type=0, v_range=None,
-                                      i_range_type=0, i_range=None)
+                                    v_src_range=v_src_range,
+                                    v_range_type=0, v_range=None,
+                                    i_range_type=0, i_range=None)
 
         for ch in self.channels:
             self.lpt.pulse_source_timing(self.card_id, ch,
-                                         float(period_s), 1e-7, float(width_s), 1e-7, 1e-7)
+                                        float(period_s), 1e-7, float(width_s), 1e-7, 1e-7)
             self.lpt.pulse_meas_timing(self.card_id, ch,
-                                       float(meas_start_pct), float(meas_stop_pct), int(num_pulses))
+                                    float(meas_start_pct), float(meas_stop_pct), int(num_pulses))
             if delay_s is not None:
                 self.lpt.pulse_delay(self.card_id, ch, float(delay_s))
 
@@ -647,13 +664,58 @@ class Keithley4200A_PMUDualChannel:
             self.lpt.pulse_sweep_linear(self.card_id, other, self.param.PULSE_AMPLITUDE_SP,
                                         0.0, 0.0, 0.0)
             #self.lpt.pulse_burst_count(self.card_id, other, 0)
-
-
-        
-
         if outputs_on:
             for ch in self.channels:
                 self.lpt.pulse_output(self.card_id, ch, 1)
+
+        # else:
+        # testing for slower pulses 
+        # print("running_slow_pulses")
+
+        # v_src_range = max(abs(amplitude_v), v_meas_range)
+        # if force_fixed_ranges:
+        #     for ch in self.channels:
+        #         self.lpt.pulse_ranges(self.card_id, ch,
+        #                             v_src_range=v_src_range,
+        #                             v_range_type=1, v_range=float(v_meas_range),
+        #                             i_range_type=1, i_range=float(i_meas_range))
+        # else:
+        #     for ch in self.channels:
+        #         self.lpt.pulse_ranges(self.card_id, ch,
+        #                             v_src_range=v_src_range,
+        #                             v_range_type=0, v_range=None,
+        #                             i_range_type=0, i_range=None)
+
+
+        # for ch in self.channels:
+            
+
+        #     self.lpt.pulse_meas_wfm(self.card_id, ch,
+        #                     acquire_type=0,
+        #                     acquire_meas_v=1,   # capture voltage waveform
+        #                     acquire_meas_i=1,   # capture current waveform
+        #                     acquire_time_stamp=1,  # capture timestamps
+        #                     llecomp=0)
+        #     self.lpt.pulse_source_timing(self.card_id, ch,float(period_s), 1e-7, float(width_s), 1e-7, 1e-7)
+        #     # self.lpt.pulse_meas_timing(self.card_id, ch,
+        #     #                         float(meas_start_pct), float(meas_stop_pct), int(num_pulses))
+        #     if delay_s is not None:
+        #         self.lpt.pulse_delay(self.card_id, ch, float(delay_s))
+
+        # src = int(source_channel)
+        # other = 2 if src == 1 else 1
+        # self.lpt.pulse_sweep_linear(self.card_id, src, self.param.PULSE_AMPLITUDE_SP,
+        #                             float(amplitude_v), float(amplitude_v), float(base_v))
+        # self.lpt.pulse_burst_count(self.card_id, src, int(num_pulses))
+
+        # if hold_other_at_zero:
+        #     self.lpt.pulse_sweep_linear(self.card_id, other, self.param.PULSE_AMPLITUDE_SP,
+        #                                 0.0, 0.0, 0.0)
+        #     #self.lpt.pulse_burst_count(self.card_id, other, 0)
+        # if outputs_on:
+        #     for ch in self.channels:
+        #         self.lpt.pulse_output(self.card_id, ch, 1)
+
 
     def start(self) -> None:
         """Start an already-prepared PMU test in simple mode.
