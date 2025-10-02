@@ -17,9 +17,9 @@ ms_pmu = MeasurementServicesPMU(pmu=pmu, function_generator=gen)
 
 pmu_params = {
     "amplitude_v": 0.5,
-    "width_s": 50e-6, #increasing this will significantly increase the time to complete the measurement
-    "period_s": 200e-6, #increasing this will significantly increase the time to complete the measurement
-    "num_pulses": 20,
+    "width_s": 5e-6, #increasing this will significantly increase the time to complete the measurement
+    "period_s": 2e-5, #increasing this will significantly increase the time to complete the measurement
+    "num_pulses": 100,
     "source_channel": 1,
     "force_fixed_ranges": True,
     "v_meas_range": 2.0,
@@ -66,7 +66,7 @@ print("Starting measurement: be patient on the readings it can take a while >60s
 df = ms_pmu.Single_Laser_Pulse_with_read(
     pmu_peramiter=pmu_params,
     fg_peramiter=fg_params,
-    timeout_s=15,
+    timeout_s=60,
 )
 
 # maybe add in a way to check range on that first pulse, pulse once, find current and range and set the range based on that.

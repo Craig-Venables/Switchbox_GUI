@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E remove -f CMakeFiles\PMU_examples_ulib.dir/objects.a
+C:\PROGRA~2\MinGW\bin\ar.exe cr CMakeFiles\PMU_examples_ulib.dir/objects.a @CMakeFiles\PMU_examples_ulib.dir\objects1.rsp
+C:\PROGRA~2\MinGW\bin\gcc.exe  -O3 -DNDEBUG -Wno-pointer-to-int-cast -std=c11 -m32 -mfpmath=sse -msse2 -D"_NO_OLDNAMES" -D"WIN32" -D"_WINDOWS" -D"I4200" -D"USE_IMPORT_GLOBALS" -Wl,--enable-stdcall-fixup ..\PMU_examples_ulib.def -shared -o bin\release\PMU_examples_ulib.dll -Wl,--out-implib,bin\release\PMU_examples_ulib.lib -Wl,--major-image-version,0,--minor-image-version,0 -Wl,--whole-archive CMakeFiles\PMU_examples_ulib.dir/objects.a -Wl,--no-whole-archive @CMakeFiles\PMU_examples_ulib.dir\linklibs.rsp

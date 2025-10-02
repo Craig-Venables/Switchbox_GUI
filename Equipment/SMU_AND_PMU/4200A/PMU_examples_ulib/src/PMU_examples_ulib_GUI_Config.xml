@@ -1,0 +1,1104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<PMU_examples_ulib_GUI_Config>
+  <GUI_Config Rev="1.0" Created="KISystem" />
+  <Module name="PMU_SegArb_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\3_terminal_NFET_SegArb_2Chan.bmp" sizeable="Yes" />
+    <Group name="Ch1 Segment ARB Definition" position="9">
+      <param name="SegArb Config" value="" units="" type="SegARBConfig">
+        <utmItem Name="Time" Val="SegTime" minValue="" maxValue="" defValue="2E-007,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,2E-007" />
+        <utmItem Name="StartV" Val="StartVCh1" minValue="" maxValue="" defValue="0,0,0.5,0.5,0,0,1,1,0,0,1.5,1.5,0,0,2,2,0,0,2.5,2.5,0" />
+        <utmItem Name="StopV" Val="StopVCh1" minValue="" maxValue="" defValue="0,0.5,0.5,0,0,1,1,0,0,1.5,1.5,0,0,2,2,0,0,2.5,2.5,0,0" />
+        <utmItem Name="SSR" Val="SSRCtrlCh1" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="Trig" Val="SegTrigOut" minValue="" maxValue="" defValue="0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0" />
+        <utmItem Name="Meas" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasType" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasStart" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasStop" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStartSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStopSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqLoops" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="NumSegments" Val="NumSegments" minValue="" maxValue="" defValue="21" />
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeCh1" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 1 Voltage Range: +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh1" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 1 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh1=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh1=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR VRangeCh1=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+        </listItems>
+      </param>
+      <param name="VRangeCh2" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 2 Range: +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh2" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 2 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh2=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh2=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR VRangeCh2=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ch2 Segment ARB Definition" position="12">
+      <param name="SegArb Config" value="" units="" type="SegARBConfig">
+        <utmItem Name="Time" Val="SegTime" minValue="" maxValue="" defValue="2E-007,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,5E-005,2E-007,1E-005,2E-007,2E-007" />
+        <utmItem Name="StartV" Val="StartVCh2" minValue="" maxValue="" defValue="0,0,2.5,2.5,0,0,2,2,0,0,1.5,1.5,0,0,1,1,0,0,0.5,0.5,0" />
+        <utmItem Name="StopV" Val="StopVCh2" minValue="" maxValue="" defValue="0,2.5,2.5,0,0,2,2,0,0,1.5,1.5,0,0,1,1,0,0,0.5,0.5,0,0" />
+        <utmItem Name="SSR" Val="SSRCtrlCh2" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="Trig" Val="SegTrigOut" minValue="" maxValue="" defValue="0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,0" />
+        <utmItem Name="Meas" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasType" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasStart" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasStop" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStartSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStopSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqLoops" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="NumSegments" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+      </param>
+    </Group>
+    <Group name="Test Settings" position="3">
+      <param name="MaxSheetPoints" value="" minValue="12" maxValue="30000" defValue="5000" units="Samples" type="EditBox" toolTips="Maximum number of samples for Segment ARB waveform measurement (used to calculate Sample Rate).  Not applicable for spot mean measurements." />
+      <param name="DUTResCh1" value="1.0e+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of DUT connected to PMU Channel 1." />
+      <param name="DUTResCh2" value="1.0e+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of DUT connected to PMU Channel 2." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="SMU_V" value="0.0" minValue="-210" maxValue="+210" defValue="0" units="V" type="EditBox" toolTips="" />
+      <param name="SMU_ID" value="" minValue="" maxValue="" defValue="NONE" units="" type="ListBox" toolTips="SMU to use for DC bias (V). Must not be connected to an RPM or a device terminal that responds to pulsing.">
+        <listItems selItem="NONE">
+          <item Name="NONE" Val="NONE" />
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="NumWaveforms" value="" minValue="1" maxValue="1" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="SMU_Irange" value="" minValue="10e-9" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value="" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="VMeasCh1_size" value="10000" minValue="100" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="IMeasCh1_size" value="10000" minValue="100" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="VMeasCh2_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="IMeasCh2_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="TimeOutput_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="StatusCh1_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="StatusCh2_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_SegArb_ExampleB">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\3_terminal_NFET_SegArb_2Chan.bmp" sizeable="Yes" />
+    <Group name="Ch1 Segment ARB Definition" position="9">
+      <param name="SegArb Config" value="" units="" type="SegARBConfig">
+        <utmItem Name="Time" Val="SegTime" minValue="" maxValue="" defValue="2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007" />
+        <utmItem Name="StartV" Val="StartVCh1" minValue="" maxValue="" defValue="0,0,0.1,0.1,0.2,0.2,0.3,0.3,0.4,0.4,0.5,0.5,0.6,0.6,0.7,0.7,0.8,0.8,0.9,0.9,1,1,1.1,1.1,1.2,1.2,1.3,1.3,1.4,1.4,1.5,1.5,1.6,1.6,1.7,1.7,1.8,1.8,1.9,1.9,2,2,1.9,1.9,1.8,1.8,1.7,1.7,1.6,1.6,1.5,1.5,1.4,1.4,1.3,1.3,1.2,1.2,1.1,1.1,1,1,0.9,0.9,0.8,0.8,0.7,0.7,0.6,0.6,0.5,0.5,0.4,0.4,0.3,0.3,0.2,0.2,0.1,0.1,0,0" />
+        <utmItem Name="StopV" Val="StopVCh1" minValue="" maxValue="" defValue="0,0.1,0.1,0.2,0.2,0.3,0.3,0.4,0.4,0.5,0.5,0.6,0.6,0.7,0.7,0.8,0.8,0.9,0.9,1,1,1.1,1.1,1.2,1.2,1.3,1.3,1.4,1.4,1.5,1.5,1.6,1.6,1.7,1.7,1.8,1.8,1.9,1.9,2,2,1.9,1.9,1.8,1.8,1.7,1.7,1.6,1.6,1.5,1.5,1.4,1.4,1.3,1.3,1.2,1.2,1.1,1.1,1,1,0.9,0.9,0.8,0.8,0.7,0.7,0.6,0.6,0.5,0.5,0.4,0.4,0.3,0.3,0.2,0.2,0.1,0.1,0,0,0" />
+        <utmItem Name="SSR" Val="SSRCtrlCh1" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="Trig" Val="SegTrigOut" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0" />
+        <utmItem Name="Meas" Val="MeasEnabled" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0" />
+        <utmItem Name="MeasType" Val="MeasType" minValue="" maxValue="" defValue="1" />
+        <utmItem Name="MeasStart" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasStop" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStartSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStopSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqLoops" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="NumSegments" Val="NumSegments" minValue="" maxValue="" defValue="82" />
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeCh1" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 1 Range: +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh1" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 1 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh1=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh1=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR VRangeCh1=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+        </listItems>
+      </param>
+      <param name="VRangeCh2" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 2 Range: +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh2" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 2 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh2=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh2=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR VRangeCh2=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Test Settings" position="3">
+      <param name="MeasSegStart" value="0" minValue="0" maxValue="1.0" defValue="0" units="% of Segment" type="EditBox" toolTips="Measurement Window Start %, for each segment with measurement enabled." />
+      <param name="MeasSegStop" value="1.0" minValue="0" maxValue="1.0" defValue="1.0" units="% of Segment" type="EditBox" toolTips="Measurement Window Stop %, for each segment with measurement enabled." />
+      <param name="MaxSheetPoints" value="" minValue="12" maxValue="30000" defValue="5000" units="Samples" type="EditBox" toolTips="Maximum number of samples for Segment ARB waveform measurement (used to calculate Sample Rate).  Not applicable for spot mean measurements." />
+      <param name="DUTResCh1" value="1E+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of DUT connected to PMU Channel 1." />
+      <param name="DUTResCh2" value="1E+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of DUT connected to PMU Channel 2." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="SMU_V" value="0" minValue="-210" maxValue="+210" defValue="0" units="V" type="EditBox" toolTips="" />
+      <param name="SMU_ID" value="" minValue="" maxValue="" defValue="NONE" units="" type="ListBox" toolTips="SMU to use for DC bias (V).  Must not be connected to an RPM or a device terminal that responds to pulsing.">
+        <listItems selItem="NONE">
+          <item Name="NONE" Val="NONE" />
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ch2 Segment ARB Definition" position="12">
+      <param name="SegArb Config" value="" units="" type="SegARBConfig">
+        <utmItem Name="Time" Val="SegTime" minValue="" maxValue="" defValue="2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007,2E-005,2E-007" />
+        <utmItem Name="StartV" Val="StartVCh2" minValue="" maxValue="" defValue="0,0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5" />
+        <utmItem Name="StopV" Val="StopVCh2" minValue="" maxValue="" defValue="0,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0" />
+        <utmItem Name="SSR" Val="SSRCtrlCh2" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="Trig" Val="SegTrigOut" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0" />
+        <utmItem Name="Meas" Val="MeasEnabled" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0" />
+        <utmItem Name="MeasType" Val="MeasType" minValue="" maxValue="" defValue="1" />
+        <utmItem Name="MeasStart" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="MeasStop" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStartSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SeqStopSeg" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqList" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="SelSeqLoops" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+        <utmItem Name="NumSegments" Val="NumSegments" minValue="" maxValue="" defValue="82" />
+      </param>
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="NumWaveforms" value="" minValue="1" maxValue="1" defValue="1" units="Periods" type="EditBox" toolTips="Number of Seg-Arb Waveforms to output and measure." />
+      <param name="AcqType" value="" minValue="0" maxValue="0" defValue="0" units="" type="EditBox" toolTips="" />
+      <param name="SMU_Irange" value="0.01" minValue="10e-9" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value="0.01" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="VMeasCh1_size" value="10000" minValue="100" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="IMeasCh1_size" value="10000" minValue="100" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="VMeasCh2_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="IMeasCh2_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="TimeOutput_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="StatusCh1_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="StatusCh2_size" value="10000" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_SegArb_ExampleFull">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\3_terminal_NFET_SegArb_2Chan.bmp" sizeable="Yes" />
+    <Group name="Ch1 Segment ARB Definition" position="9">
+      <param name="SegArb Config" value="" units="" type="SegARBConfig">
+        <utmItem Name="Time" Val="SegTime" minValue="" maxValue="" defValue="1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,1E-006,1E-005,1E-006,1E-006" />
+        <utmItem Name="StartV" Val="StartVCh1" minValue="" maxValue="" defValue="0,0,0.1,0.1,0.2,0.2,0.3,0.3,0.4,0.4,0.5,0.5,0.6,0.6,0.7,0.7,0.8,0.8,0.9,0.9,1,1,1.1,1.1,1.2,1.2,1.3,1.3,1.4,1.4,1.5,1.5,1.6,1.6,1.7,1.7,1.8,1.8,1.9,1.9,2,2,1.9,1.9,1.8,1.8,1.7,1.7,1.6,1.6,1.5,1.5,1.4,1.4,1.3,1.3,1.2,1.2,1.1,1.1,1,1,0.9,0.9,0.8,0.8,0.7,0.7,0.6,0.6,0.5,0.5,0.4,0.4,0.3,0.3,0.2,0.2,0.1,0.1,0,0,0,0,2.5,2.5,0" />
+        <utmItem Name="StopV" Val="StopVCh1" minValue="" maxValue="" defValue="0,0.1,0.1,0.2,0.2,0.3,0.3,0.4,0.4,0.5,0.5,0.6,0.6,0.7,0.7,0.8,0.8,0.9,0.9,1,1,1.1,1.1,1.2,1.2,1.3,1.3,1.4,1.4,1.5,1.5,1.6,1.6,1.7,1.7,1.8,1.8,1.9,1.9,2,2,1.9,1.9,1.8,1.8,1.7,1.7,1.6,1.6,1.5,1.5,1.4,1.4,1.3,1.3,1.2,1.2,1.1,1.1,1,1,0.9,0.9,0.8,0.8,0.7,0.7,0.6,0.6,0.5,0.5,0.4,0.4,0.3,0.3,0.2,0.2,0.1,0.1,0,0,0,0,2.5,2.5,0,0" />
+        <utmItem Name="SSR" Val="SSRCtrlCh1" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="Trig" Val="SegTrigOut" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1,1,1,1" />
+        <utmItem Name="Meas" Val="MeasEnabled" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0" />
+        <utmItem Name="MeasType" Val="SegMeasType" minValue="" maxValue="" defValue="2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2" />
+        <utmItem Name="MeasStart" Val="SegMeasStart" minValue="" maxValue="" defValue="0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0" />
+        <utmItem Name="MeasStop" Val="SegMeasStop" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="SeqList" Val="SeqList" minValue="" maxValue="" defValue="1,2" />
+        <utmItem Name="SeqStartSeg" Val="SeqStartSeg" minValue="" maxValue="" defValue="1,83" />
+        <utmItem Name="SeqStopSeg" Val="SeqStopSeg" minValue="" maxValue="" defValue="82,87" />
+        <utmItem Name="SelSeqList" Val="SeqListCh1" minValue="" maxValue="" defValue="1,2,1,2,1,2" />
+        <utmItem Name="SelSeqLoops" Val="SeqLoopsCh1" minValue="" maxValue="" defValue="1,1,1,2,1,3" />
+        <utmItem Name="NumSegments" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+      </param>
+    </Group>
+    <Group name="Ch2 Segment ARB Definition" position="12">
+      <param name="SegArb Config" value="" units="" type="SegARBConfig">
+        <utmItem Name="Time" Val="SegTime" minValue="" maxValue="" defValue="1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,2E-007,1E-005,1E-006,1E-005,1E-006,1E-006" />
+        <utmItem Name="StartV" Val="StartVCh2" minValue="" maxValue="" defValue="0,0,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0,0,0,0,0.1,0.1,0" />
+        <utmItem Name="StopV" Val="StopVCh2" minValue="" maxValue="" defValue="0,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0.1,0,0,0,0,0.1,0.1,0,0" />
+        <utmItem Name="SSR" Val="SSRCtrlCh2" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="Trig" Val="SegTrigOut" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,1,1,1,1" />
+        <utmItem Name="Meas" Val="MeasEnabled" minValue="" maxValue="" defValue="1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,1,0,0" />
+        <utmItem Name="MeasType" Val="SegMeasType" minValue="" maxValue="" defValue="2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2" />
+        <utmItem Name="MeasStart" Val="SegMeasStart" minValue="" maxValue="" defValue="0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0" />
+        <utmItem Name="MeasStop" Val="SegMeasStop" minValue="" maxValue="" defValue="1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1" />
+        <utmItem Name="SeqList" Val="SeqList" minValue="" maxValue="" defValue="1,2" />
+        <utmItem Name="SeqStartSeg" Val="SeqStartSeg" minValue="" maxValue="" defValue="1,83" />
+        <utmItem Name="SeqStopSeg" Val="SeqStopSeg" minValue="" maxValue="" defValue="82,87" />
+        <utmItem Name="SelSeqList" Val="SeqListCh2" minValue="" maxValue="" defValue="1,2,1,2,1,2" />
+        <utmItem Name="SelSeqLoops" Val="SeqLoopsCh2" minValue="" maxValue="" defValue="1,1,1,2,1,3" />
+        <utmItem Name="NumSegments" Val="Not Assigned" minValue="" maxValue="" defValue="" />
+      </param>
+    </Group>
+    <Group name="Test Settings" position="4">
+      <param name="MaxSheetPoints" value="" minValue="12" maxValue="30000" defValue="5000" units="Samples" type="EditBox" toolTips="Maximum number of samples for Segment ARB waveform measurement (used to calculate Sample Rate).  Not applicable for spot mean measurements." />
+      <param name="DUTResCh1" value="1E+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of DUT connected to PMU Channel 1." />
+      <param name="DUTResCh2" value="1E+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of DUT connected to PMU Channel 2." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="SMU_V" value="0" minValue="-210" maxValue="+210" defValue="0" units="V" type="EditBox" toolTips="SMU DC Bias. Must not be connected to an RPM or a device terminal that responds to pulsing." />
+      <param name="SMU_ID" value="" minValue="" maxValue="" defValue="NONE" units="" type="ListBox" toolTips="SMU to use for DC bias (V).  Must not be connected to an RPM or a device terminal that responds to pulsing.">
+        <listItems selItem="NONE">
+          <item Name="NONE" Val="NONE" />
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeCh1" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 1 Range, +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh1" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 1 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh1=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh1=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR VRangeCh1=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+        </listItems>
+      </param>
+      <param name="VRangeCh2" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 2 Range, +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh2" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 2 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh2=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh2=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR VRangeCh2=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="AcqType" value="" minValue="0" maxValue="0" defValue="0" units="" type="EditBox" toolTips="" />
+      <param name="SMU_Irange" value="" minValue="10e-9" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value="" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="VMeasCh1_size" value="" minValue="100" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="IMeasCh1_size" value="" minValue="100" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="VMeasCh2_size" value="" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="IMeasCh2_size" value="" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="TimeOutput_size" value="" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="StatusCh1_size" value="" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+      <param name="StatusCh2_size" value="" minValue="12" maxValue="30000" defValue="10000" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_IV_sweep_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\3_terminal_NFET_Pulse_2Chan.bmp" sizeable="Yes" />
+    <Group name="Pulse Timing" position="10">
+      <param name="Period" value="1.0e-5" minValue="80e-9" maxValue="1" defValue="5e-6" units="s" type="EditBox" toolTips="Pulse Period time. 10 V range: 140 ns to 1 s. 40 V range: 280 ns to 1 s.  Both Gate and Drain share the same period time." />
+      <param name="PulseWidthGate" value="2.0e-7" minValue="60e-9" maxValue=".999999" defValue="200e-9" units="s" type="EditBox" toolTips="Pulse Width for Gate (FWHM). 10 V range: 60 ns to 0.99999 s. 40 V range: 140 ns to 0.99999 s." />
+      <param name="RiseTimeGate" value="4.0e-8" minValue="20e-9" maxValue="0.033" defValue="40e-9" units="s" type="EditBox" toolTips="Rise time (0-100%) for the Gate. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeGate" value="40e-9" minValue="20e-9" maxValue="0.033" defValue="40e-9" units="s" type="EditBox" toolTips="Fall time (0-100%) for the Gate. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayGate" value="2.0e-7" minValue="0" maxValue=".999999" defValue="0" units="s" type="EditBox" toolTips="Delay time (time before pulse) for the Gate. 10 V &amp; 40 V: 20 ns to 0.99999 s." />
+      <param name="PulseWidthDrain" value="1.0e-6" minValue="60e-9" maxValue=".999999" defValue="300e-9" units="s" type="EditBox" toolTips="Pulse Width for Drain (FWHM). 10 V range: 60 ns to 0.99999s. 40 V range: 140 ns to 0.99999s." />
+      <param name="RiseTimeDrain" value="4.0e-8" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Rise time (0-100%) for the Drain. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeDrain" value="4.0e-8" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Fall time (0-100%) for the Drain. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayDrain" value="1.0e-7" minValue="0" maxValue=".999999" defValue="0" units="s" type="EditBox" toolTips="Delay time (time before pulse) for the Drain. 10 V &amp; 40 V: 20 ns to 0.99999 s." />
+    </Group>
+    <Group name="Gate Voltages" position="11">
+      <param name="AmplVGate" value="1.3" minValue="-40" maxValue="40" defValue="2" units="V" type="EditBox" toolTips="Pulse Amplitude of Gate (height from base voltage)." />
+      <param name="BaseVGate" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Base V (DC offset) for Gate." />
+    </Group>
+    <Group name="Test Settings" position="2">
+      <param name="PMUMode" value="" minValue="0" maxValue="1" defValue="0" units="" type="ListBox" toolTips="Use &quot;Simple&quot; for basic PMU test (no I-ranging, LLEC, or thresholds).  If you need these features, use &quot;Ranging, LLEC&quot;.">
+        <listItems selItem="Ranging, LLEC">
+          <item Name="Simple" Val="0" />
+          <item Name="Ranging, LLEC" Val="1" />
+        </listItems>
+      </param>
+      <param name="LoadLineGate" value="1" minValue="0" maxValue="1" defValue="1" units="" type="CheckBox" toolTips="Check to enable Load Line Effect Compensation (LLEC) on the Gate terminal of the test device." />
+      <param name="LoadLineDrain" value="1" minValue="0" maxValue="1" defValue="1" units="" type="CheckBox" toolTips="Check to enable Load Line Effect Compensation (LLEC) on the Drain terminal of the test device." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="SMU_V" value="0.0" minValue="-210" maxValue="210" defValue="0" units="V" type="EditBox" toolTips="SMU DC Bias. Must not be connected to an RPM or a device terminal that responds to pulsing." />
+      <param name="SMU_ID" value="" minValue="" maxValue="" defValue="NONE" units="" type="ListBox" toolTips="SMU to use for DC bias (V).  Must not be connected to an RPM or a device terminal that responds to pulsing.">
+        <listItems selItem="NONE">
+          <item Name="NONE" Val="NONE" />
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeGate" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="Gate Range, +/- 10V or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeGate" value="" minValue="1e-7" maxValue=".8" defValue="0.01" units="" type="ListBox" toolTips="Gate Measure (A) Range. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeGate=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeGate=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR VRangeGate=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+        </listItems>
+      </param>
+      <param name="VRangeDrain" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="Drain Range, +/- 10V or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeDrain" value="" minValue="1e-7" maxValue=".8" defValue="0.2" units="" type="ListBox" toolTips="Drain Measure Range (A). Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeDrain=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeDrain=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND VRangeDrain=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR VRangeDrain=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND VRangeDrain=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeDrain=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeDrain=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Drain Voltages" position="12">
+      <param name="StartVDrain" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Starting voltage for Drain amplitude sweep." />
+      <param name="StopVDrain" value="6.0" minValue="-40" maxValue="40" defValue="5" units="V" type="EditBox" toolTips="Final voltage for Drain amplitude sweep." />
+      <param name="StepVDrain" value="2.0e-1" minValue=".001" maxValue="40" defValue="1" units="V" type="EditBox" toolTips="Voltage step size for Drain amplitude sweep." />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="MeasStartGate" value="7.5e-1" minValue="0" maxValue="1" defValue="0.65" units="" type="EditBox" toolTips="Start of spot mean measure window, as a fraction of pulse top." />
+      <param name="MeasStopGate" value="9.0e-1" minValue="0" maxValue="1" defValue="0.80" units="" type="EditBox" toolTips="End of spot mean measure window, as a fraction of pulse top." />
+      <param name="PulseAverage" value="5" minValue="1" maxValue="10000" defValue="1" units="Pulses" type="EditBox" toolTips="Number of pulses to source and measure." />
+      <param name="ResGate" value="1e+006" minValue="1" maxValue="1e6" defValue="1e6" units="ohms" type="EditBox" toolTips="" />
+      <param name="ResDrain" value="1e+006" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="" />
+      <param name="BaseVDrain" value="" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Base (DC V offset) for Drain." />
+      <param name="LtdAutoCurrGate" value="" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check to enable Limited Auto Range for the Gate." />
+      <param name="LtdAutoCurrDrain" value="" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check to enable Limited Auto Range for the Drain." />
+      <param name="GateCh" value="1" minValue="1" maxValue="2" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="DrainCh" value="2" minValue="1" maxValue="2" defValue="2" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="ThresholdCurrGate" value="1" minValue="1e-12" maxValue="1" defValue="1" units="A" type="EditBox" toolTips="" />
+      <param name="ThresholdVoltGate" value="42" minValue="0" maxValue="42" defValue="40" units="V" type="EditBox" toolTips="" />
+      <param name="ThresholdPwrGate" value="8" minValue="1e-12" maxValue="10" defValue="8" units="W" type="EditBox" toolTips="" />
+      <param name="ThresholdCurrDrain" value="1" minValue="1e-12" maxValue="1" defValue="1" units="A" type="EditBox" toolTips="" />
+      <param name="ThresholdVoltDrain" value="42" minValue="0" maxValue="42" defValue="40" units="V" type="EditBox" toolTips="" />
+      <param name="ThresholdPwrDrain" value="8" minValue="0" maxValue="10" defValue="8" units="W" type="EditBox" toolTips="" />
+      <param name="SMU_Irange" value="" minValue="10e-9" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value="" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="Gate_V_Ampl_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Gate_I_Ampl_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="Gate_V_Base_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Gate_I_Base_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Drain_V_Ampl_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Drain_I_Ampl_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Drain_V_Base_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Drain_I_Base_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampAmpl_Gate_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampBase_Gate_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampAmpl_Drain_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampBase_Drain_Size" value="100" minValue="" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_PulseWaveform_FileSave_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\3_terminal_NFET_Pulse_2Chan.bmp" sizeable="Yes" />
+    <Group name="Pulse Timing" position="9">
+      <param name="PulseTop" value="5.0e-5" minValue="20e-9" maxValue="40" defValue="1e-6" units="s" type="EditBox" toolTips="Width of the top of the pulse." />
+      <param name="RiseTime" value="2.0e-6" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Rise time (0-100%). 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range: 100 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTime" value="5.0e-6" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Fall time (0-100%). 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range: 100 ns to 33 ms (slew-rate limited)." />
+      <param name="BaseTime" value="5.0e-6" minValue="20e-9" maxValue="40" defValue="1e-6" units="s" type="EditBox" toolTips="Time after the pulse (at the base voltage)." />
+      <param name="DelayTime" value="5.0e-6" minValue="20e-9" maxValue="40" defValue="100e-9" units="s" type="EditBox" toolTips="Time before the pulse (at the base voltage), 20 ns to 40 s." />
+    </Group>
+    <Group name="Gate Voltages" position="10">
+      <param name="Ch1_V_Ampl" value="4.0" minValue="-80" maxValue="+80" defValue="2" units="V" type="EditBox" toolTips="Gate (PMU Channel 1) Pulse Voltage Amplitude (height from base voltage)." />
+      <param name="Ch1_V_Base" value="0.0" minValue="-40" maxValue="+40" defValue="0" units="V" type="EditBox" toolTips="Gate (PMU Channel 1) base voltage (DC offset)." />
+    </Group>
+    <Group name="Test Settings" position="3">
+      <param name="SaveFile" value="1" minValue="0" maxValue="1" defValue="1" units="" type="CheckBox" toolTips="Check to save waveform to a CSV text file." />
+      <param name="Filename" value="wavefrm_capture.csv" minValue="" maxValue="" defValue="wavefrm_capture.csv" units="" type="EditBox" toolTips="Filename for results, which will be saved in the path = C:\s4200\kiuser\export\" />
+      <param name="MaxSheetPoints" value="200" minValue="100" maxValue="32767" defValue="1000" units="Samples" type="EditBox" toolTips="Number of waveform samples to graph." />
+      <param name="MaxFilePoints" value="30000" minValue="100" maxValue="1000000" defValue="30000" units="Samples" type="EditBox" toolTips="Number of waveform samples to store in the results file." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="SMU_V" value="0.0" minValue="-210" maxValue="+210" defValue="0" units="V" type="EditBox" toolTips="DC Bias. Must not be connected to an RPM or a device terminal that responds to pulsing." />
+      <param name="SMU_ID" value="" minValue="" maxValue="" defValue="NONE" units="" type="ListBox" toolTips="SMU to use for DC (V) bias.  Must not be connected to an RPM or a device terminal that responds to pulsing.">
+        <listItems selItem="NONE">
+          <item Name="NONE" Val="NONE" />
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="Ch1_VRange" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="Gate (PMU Channel 1) range:  +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="Ch1_IRange" value="" minValue="100e-9" maxValue=".8" defValue="0.200" units="" type="ListBox" toolTips="Gate Measure (A) Range (PMU Channel 1), fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="Ch1_VRange=40" />
+          <item Name="200 mA" Val="0.2" Condition="Ch1_VRange=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND Ch1_VRange=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR Ch1_VRange=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND Ch1_VRange=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND Ch1_VRange=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND Ch1_VRange=10" />
+        </listItems>
+      </param>
+      <param name="Ch2_VRange" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="Drain (PMU Channel 2) range:  +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="Ch2_IRange" value="" minValue="100e-9" maxValue=".8" defValue="0.200" units="" type="ListBox" toolTips="Drain (PMU Channel 2) Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="Ch2_VRange=40" />
+          <item Name="200 mA" Val="0.2" Condition="Ch2_VRange=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND Ch2_VRange=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR Ch2_VRange=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND Ch2_VRange=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=2 AND Ch2_VRange=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=2 AND Ch2_VRange=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Drain Voltages" position="12">
+      <param name="Ch2_StartV" value="4.0" minValue="-80" maxValue="80" defValue="1" units="V" type="EditBox" toolTips="Drain (PMU Channel 2) starting Pulse Voltage amplitude for sweep." />
+      <param name="Ch2_StopV" value="4.0" minValue="-80" maxValue="80" defValue="4" units="V" type="EditBox" toolTips="Drain (PMU Channel 2) Final Pulse Voltage amplitude for sweep." />
+      <param name="Ch2_StepV" value="1.0" minValue="-80" maxValue="80" defValue="1" units="V" type="EditBox" toolTips="Drain (PMU Channel 2)  Pulse Voltage amplitude step size for sweep." />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="Ch2_V_Base" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Drain (PMU Channel 2) base voltage (DC offset)." />
+      <param name="Ch1_Res" value="1e+006" minValue="1" maxValue="1e6" defValue="1e6" units="ohms" type="EditBox" toolTips="" />
+      <param name="Ch2_Res" value="1e+006" minValue="1" maxValue="1e6" defValue="1e6" units="ohms" type="EditBox" toolTips="" />
+      <param name="SMU_Irange" value="0.01" minValue="10e-9" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value="0.01" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="AppendTimeToFilename" value="" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check to append the date and time to to the end of the filename.  This is useful when performing many tests and all data should be saved." />
+      <param name="TimeStampSize" value="3000" minValue="1" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Ch1_VmeasSize" value="3000" minValue="1" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Ch1_ImeasSize" value="3000" minValue="1" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Ch2_VmeasSize" value="3000" minValue="1" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="Ch2_ImeasSize" value="3000" minValue="1" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_ScopeShot_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\3_terminal_NFET_Pulse_2Chan.bmp" sizeable="Yes" />
+    <Group name="Pulse Timing" position="10">
+      <param name="Period" value="5.0e-6" minValue="120e-9" maxValue="1" defValue="5e-6" units="s" type="EditBox" toolTips="Pulse period, shared by Gate and Drain, 120 ns to 1s." />
+      <param name="PW_Gate" value="4.0e-7" minValue="60e-9" maxValue=".999999" defValue="200e-9" units="s" type="EditBox" toolTips="Pulse Width for the Gate terminal, 60 ns to 0.99999 s." />
+      <param name="RiseTimeGate" value="1.0e-7" minValue="20e-9" maxValue="0.033" defValue="40e-9" units="s" type="EditBox" toolTips="Rise time for the Gate pulse, range 20 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeGate" value="1.0e-7" minValue="20e-9" maxValue="0.033" defValue="40e-9" units="s" type="EditBox" toolTips="Fall time for the Gate pulse, range 20 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayGate" value="5.0e-8" minValue="0" maxValue=".999999" defValue="100e-9" units="s" type="EditBox" toolTips="Delay time before the Gate pulse, 0s to 0.999999s." />
+      <param name="PW_Drain" value="3.0e-7" minValue="60e-9" maxValue=".999999" defValue="300e-9" units="s" type="EditBox" toolTips="Pulse Width for the Drain terminal, 60 ns to 0.99999 s." />
+      <param name="RiseTimeDrain" value="1.0e-7" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Rise time for the Drain pulse, range 20 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeDrain" value="1.0e-7" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Fall time for the Drain pulse, range 20 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayDrain" value="1.0e-7" minValue="0" maxValue=".999999" defValue="100e-9" units="s" type="EditBox" toolTips="Delay time before the Drain pulse, 0s to 0.99999s." />
+    </Group>
+    <Group name="Gate Voltages" position="11">
+      <param name="AmplVGate" value="1.8" minValue="-40" maxValue="40" defValue="1" units="V" type="EditBox" toolTips="Pulse Voltage Amplitude of Gate (height from base voltage)." />
+      <param name="BaseVGate" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Base voltage (DC offset) for Gate." />
+    </Group>
+    <Group name="Measure Settings" position="6">
+      <param name="MeasStartGate" value="5.5e-1" minValue="0" maxValue="1" defValue="0.55" units="" type="EditBox" toolTips="Measure window start point for pulse spot mean, taken on the top of the pulse, specified as a fraction of the Gate pulse top time. To measure entire pulse top, set Start = 0. Default = 0.55." />
+      <param name="MeasStopGate" value="7.0e-1" minValue="0" maxValue="1" defValue="0.70" units="" type="EditBox" toolTips="Measure window stop point for pulse spot mean, taken on the top of the pulse, specified as a fraction of the Gate pulse top time. To measure entire pulse top, set Start = 1. Default = 0.7." />
+    </Group>
+    <Group name="Test Settings" position="3">
+      <param name="PMUMode" value="" minValue="0" maxValue="1" defValue="0" units="" type="ListBox" toolTips="Use &quot;Simple&quot; for basic PMU test (no I-ranging, LLEC, or thresholds).  If you need these features, use &quot;Ranging, LLEC&quot;.">
+        <listItems selItem="Simple">
+          <item Name="Simple" Val="0" />
+          <item Name="Ranging, LLEC" Val="1" />
+        </listItems>
+      </param>
+      <param name="MaxSheetRows" value="3000" minValue="100" maxValue="32767" defValue="3000" units="Samples" type="EditBox" toolTips="Determines the maximum number of samples for the waveform, range: 100 to 32767." />
+      <param name="LoadLineGate" value="1" minValue="0" maxValue="1" defValue="1" units="" type="CheckBox" toolTips="Check box to enable Load Line Effect Compensation (LLEC) for the Gate terminal." />
+      <param name="LoadLineDrain" value="1" minValue="0" maxValue="1" defValue="1" units="" type="CheckBox" toolTips="Check box to enable Load Line Effect Compensation (LLEC) for the Drain terminal." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="SMU_V" value="0.0" minValue="-210" maxValue="+210" defValue="0" units="V" type="EditBox" toolTips="SMU DC Bias. Must not be connected to an RPM or a device terminal that responds to pulsing." />
+      <param name="SMU_ID" value="" minValue="" maxValue="" defValue="NONE" units="" type="ListBox" toolTips="SMU to use for DC bias (V).  Must not be connected to an RPM or a device terminal that responds to pulsing.">
+        <listItems selItem="NONE">
+          <item Name="NONE" Val="NONE" />
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeGate" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="Gate Range, +/-10 or +/-40.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeGate" value="" minValue="1e-7" maxValue=".8" defValue="0.01" units="" type="ListBox" toolTips="Gate (PMU Channel 1) Measure (A) Range. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeGate=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeGate=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR VRangeGate=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeGate=10" />
+        </listItems>
+      </param>
+      <param name="VRangeDrain" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="Drain Range, +/-10 or +/-40.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeDrain" value="" minValue="1e-7" maxValue=".8" defValue="0.2" units="" type="ListBox" toolTips="Drain (PMU Channel 2) Measure (A) Range. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeDrain=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeDrain=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND VRangeDrain=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR VRangeDrain=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND VRangeDrain=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=2 AND VRangeDrain=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=2 AND VRangeDrain=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Drain Voltages" position="12">
+      <param name="AmplVDrain" value="2.0" minValue="-40" maxValue="40" defValue="2" units="V" type="EditBox" toolTips="Pulse Voltage Amplitude of Drain (height from base voltage)." />
+      <param name="BaseVDrain" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Base voltage (DC offset) for Drain." />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="PulseAverage" value="1" minValue="1" maxValue="10000" defValue="1" units="Pulses" type="EditBox" toolTips="Number of pulses to output and measure." />
+      <param name="ResGate" value="1e+006" minValue="1" maxValue="1e6" defValue="1e6" units="ohms" type="EditBox" toolTips="" />
+      <param name="ResDrain" value="1e+006" minValue="1" maxValue="1e6" defValue="1e6" units="ohms" type="EditBox" toolTips="" />
+      <param name="LtdAuto_I_Gate" value="" minValue="0" maxValue="1" defValue="0" units="A" type="EditBox" toolTips="" />
+      <param name="LtdAuto_I_Drn" value="" minValue="0" maxValue="1" defValue="0" units="A" type="EditBox" toolTips="" />
+      <param name="GateCh" value="1" minValue="1" maxValue="2" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="DrainCh" value="" minValue="1" maxValue="2" defValue="2" units="" type="EditBox" toolTips="" />
+      <param name="Thrshld_I_Gate" value="1" minValue="1e-12" maxValue="1" defValue="1" units="A" type="EditBox" toolTips="" />
+      <param name="ThresholdVoltGate" value="42" minValue="0" maxValue="42" defValue="40" units="V" type="EditBox" toolTips="" />
+      <param name="ThresholdPwrGate" value="8" minValue="1e-12" maxValue="10" defValue="8" units="W" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="ThresholdCurrDrain" value="1" minValue="1e-12" maxValue="1" defValue="1" units="A" type="EditBox" toolTips="" />
+      <param name="ThresholdVoltDrain" value="42" minValue="0" maxValue="42" defValue="40" units="V" type="EditBox" toolTips="" />
+      <param name="ThresholdPwrDrain" value="8" minValue="0" maxValue="10" defValue="8" units="W" type="EditBox" toolTips="" />
+      <param name="PrePulse" value="0.2" minValue="0" maxValue="1" defValue=".2" units="% of PW" type="EditBox" toolTips="Amount of waveform to sample before the pulse, specified as a percentage of the pulse width." />
+      <param name="PostPulse" value="0.25" minValue="0" maxValue="1" defValue=".2" units="% of PW" type="EditBox" toolTips="Amount of waveform to sample after the pulse, specified as a percentage of the pulse width." />
+      <param name="SMU_Irange" value="0.01" minValue="10e-9" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value="0.01" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="" />
+      <param name="Gate_TimeStamp_Size" value="3000" minValue="" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Gate_V_Size" value="3000" minValue="" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Gate_I_Size" value="3000" minValue="" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="Drain_TimeStamp_Size" value="3000" minValue="" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Drain_V_Size" value="3000" minValue="" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="Drain_I_Size" value="3000" minValue="" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="SpotMean_StartWind_Size" value="1" minValue="" maxValue="" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="SpotMean_StopWind_Size" value="1" minValue="" maxValue="" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="Gate_V_Ampl_SM_Size" value="1" minValue="" maxValue="" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="Gate_I_Ampl_SM_Size" value="1" minValue="" maxValue="" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="Drain_V_Ampl_SM_Size" value="1" minValue="" maxValue="" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="Drain_I_Ampl_SM_Size" value="1" minValue="" maxValue="" defValue="1" units="" type="EditBox" toolTips="" />
+      <param name="Status_Gate_Size" value="3000" minValue="" maxValue="" defValue="3000" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="Status_Drain_Size" value="3000" minValue="" maxValue="" defValue="3000" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_1Chan_Sweep_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\2_wire_Generic_Pulse.bmp" sizeable="Yes" />
+    <Group name="Pulse Timing" position="10">
+      <param name="Period" value="1.0e-5" minValue="120e-9" maxValue="1" defValue="10e-6" units="s" type="EditBox" toolTips="Pulse Period time. 10 V range: 140 ns to 1 s. 40 V range: 280 ns to 1 s." />
+      <param name="PulseWidthCh1" value="5.0e-7" minValue="60e-9" maxValue=".999999" defValue="500e-9" units="s" type="EditBox" toolTips="Pulse Width for PMU channel (FWHM). 10 V range: 60 ns to 0.99999 s. 40 V range: 140 ns to 0.99999 s." />
+      <param name="RiseTimeCh1" value="2.0e-8" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Rise time (0-100%) for the PMU channel. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeCh1" value="2.0e-8" minValue="20e-9" maxValue="0.033" defValue="100e-9" units="s" type="EditBox" toolTips="Fall time (0-100%) for the PMU channel. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayCh1" value="0.0" minValue="0" maxValue=".999999" defValue="0" units="s" type="EditBox" toolTips="Delay time (time before pulse) for the PMU channel. 10 V &amp; 40 V: 20 ns to 0.99999 s." />
+    </Group>
+    <Group name="Test Settings" position="3">
+      <param name="MeasStartPerc" value="7.5e-1" minValue="0" maxValue="1" defValue=".75" units="" type="EditBox" toolTips="Measure window start point for pulse spot mean, taken on the top of the pulse, specified as a fraction of the Gate pulse top time." />
+      <param name="MeasStopPerc" value="9.0e-1" minValue="0" maxValue="1" defValue="0.90" units="" type="EditBox" toolTips="Measure window stop point for pulse spot mean, taken on the top of the pulse, specified as a fraction of the Gate pulse top time." />
+      <param name="DUTResCh1" value="1.0e+6" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="Resistance of Test Device.  If unknown, use 1E6. Range: 1 to 1E6 ohms." />
+      <param name="PMUMode" value="" minValue="0" maxValue="1" defValue="0" units="" type="ListBox" toolTips="Use &quot;Simple&quot; for basic PMU test (LLEC).  If you need this feature, use &quot;LLEC&quot;.">
+        <listItems selItem="Simple">
+          <item Name="Simple" Val="0" />
+          <item Name="LLEC" Val="1" />
+        </listItems>
+      </param>
+      <param name="SampleRate" value="2.0e+8" minValue="1000" maxValue="200E6" defValue="200E6" units="Sa/s" type="EditBox" toolTips="PMU A/D Sample Rate:1000 Sa/s to 200E6 Sa/s." />
+      <param name="PulseAverage" value="10" minValue="1" maxValue="10000" defValue="1" units="Number of Pulses" type="EditBox" toolTips="Number of pulses to output and measure: 1 to 10,000." />
+      <param name="LoadLineCh1" value="1" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check to enable Load Line Effect Compensation." />
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="Chan" value="" minValue="1" maxValue="2" defValue="1" units="" type="ListBox" toolTips="PMU Channel to use for the test.">
+        <listItems selItem="PMU Ch1">
+          <item Name="PMU Ch1" Val="1" />
+          <item Name="PMU Ch2" Val="2" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeCh1" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 1 Range, +/-10 or +/-40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh1" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="PMU Channel 1 Measure (A) Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh1=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh1=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=Chan AND VRangeCh1=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=Chan OR VRangeCh1=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=Chan AND VRangeCh1=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=Chan AND VRangeCh1=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=Chan AND VRangeCh1=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Voltages" position="11">
+      <param name="StartVCh1" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Starting voltage for voltage amplitude sweep." />
+      <param name="StopVCh1" value="5" minValue="-40" maxValue="40" defValue="5" units="V" type="EditBox" toolTips="Final voltage for amplitude sweep." />
+      <param name="StepVCh1" value="2.0e-1" minValue="-40" maxValue="40" defValue="1" units="V" type="EditBox" toolTips="Voltage step size for amplitude sweep." />
+      <param name="BaseVCh1" value="0.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Pulse Voltage Amplitude (height from base voltage)." />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="V_Ampl_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="I_Ampl_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="V_Base_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="I_Base_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStamp_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Status_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_1Chan_Waveform_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\2_wire_Generic_Pulse.bmp" sizeable="Yes" />
+    <Group name="Pulse Timing" position="11">
+      <param name="period" value="1.0e-5" minValue="120e-9" maxValue="1" defValue="1e-6" units="s" type="EditBox" toolTips="Pulse Period time. 10 V range: 140 ns to 1 s. 40 V range: 280 ns to 1 s. " />
+      <param name="width" value="3.0e-7" minValue="40e-9" maxValue=".999999" defValue="500e-9" units="s" type="EditBox" toolTips="Pulse Width (FWHM). 10 V range: 60 ns to 0.99999 s. 40 V range: 140 ns to 0.99999 s." />
+      <param name="rise" value="5.0e-8" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Rise time (0-100%). 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="fall" value="1.0e-7" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Fall time (0-100%). 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="delay" value="1.0e-7" minValue="0" maxValue=".999999" defValue="0.0" units="s" type="EditBox" toolTips="Delay time (time before pulse). 10 V &amp; 40 V: 20 ns to 0.99999 s." />
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="voltsSourceRng" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Source Range: +/- 10V or +/-40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="currentMeasureRng" value="" minValue="100e-9" maxValue=".8" defValue=".01" units="" type="ListBox" toolTips="Current Measure Range, fixed. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="voltsSourceRng=40" />
+          <item Name="200 mA" Val="0.2" Condition="voltsSourceRng=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=chan AND voltsSourceRng=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=chan OR voltsSourceRng=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=chan AND voltsSourceRng=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=chan AND voltsSourceRng=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=chan AND voltsSourceRng=10" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Voltages" position="9">
+      <param name="startV" value="2.0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Starting voltage for voltage amplitude sweep. For a single pulse, set startV = stopV and stepV = 0." />
+      <param name="stopV" value="2.0" minValue="-40" maxValue="40" defValue="5" units="V" type="EditBox" toolTips="Final voltage for amplitude sweep." />
+      <param name="stepV" value="0.0" minValue="-40" maxValue="40" defValue="1" units="V" type="EditBox" toolTips="Voltage step size for amplitude sweep." />
+      <param name="baseV" value="0.0" minValue="-40" maxValue="" defValue="0" units="V" type="EditBox" toolTips="Pulse Voltage Amplitude (height from base voltage)." />
+    </Group>
+    <Group name="Test Settings" position="2">
+      <param name="DUTRes" value="1.0e+6" minValue="1" maxValue="10e6" defValue="50" units="ohms" type="EditBox" toolTips="Resistance of test device.  If unknown, enable LLEC and choose PMUMode &quot;Ranging, LLEC&quot;." />
+      <param name="LLEComp" value="1" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check box to enable Load Line Effect Compensation." />
+      <param name="SampleRate" value="2.0e+8" minValue="1" maxValue="200e6" defValue="200e6" units="Samples/s" type="EditBox" toolTips="PMU A/D Sample rate: 200E6 Sa/s down to 1000 Sa/s." />
+      <param name="PMUMode" value="" minValue="0" maxValue="1" defValue="0" units="" type="ListBox" toolTips="Use &quot;Simple&quot; for basic PMU test (no LLEC).  If you need this feature, use &quot;LLEC&quot;. Must also have LLEC checkbox enabled.">
+        <listItems selItem="Simple">
+          <item Name="Simple" Val="0" />
+          <item Name="LLEC" Val="1" />
+        </listItems>
+      </param>
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use for the test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="chan" value="" minValue="1" maxValue="2" defValue="1" units="" type="ListBox" toolTips="PMU Channel to use for the test.">
+        <listItems selItem="PMU Ch1">
+          <item Name="PMU Ch1" Val="1" />
+          <item Name="PMU Ch2" Val="2" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Acquisition Type" position="3">
+      <param name="acqType" value="" minValue="0" maxValue="1" defValue="1" units="" type="OptionBtn" toolTips="When pulseAvgCnt = 1, determines if all pulses are averaged together to return a single pulse, or return each pulse individually.">
+        <listItems selItem="Average Pulses">
+          <item Name="Average Pulses" Val="1" />
+          <item Name="Discrete Pulses" Val="0" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="preDataPct" value="0.2" minValue="0" maxValue="1.0" defValue=".2" units="% of PW" type="EditBox" toolTips="Amount of waveform to capture before the pulse." />
+      <param name="postDataPct" value="0.3" minValue="0" maxValue="1.0" defValue=".2" units="% of PW" type="EditBox" toolTips="Amount of waveform to capture after the pulse." />
+      <param name="pulseAvgCnt" value="1" minValue="1" maxValue="10000" defValue="1" units="Pulses" type="EditBox" toolTips="Number of pulses to output and measure." />
+      <param name="size_V_Meas" value="3000" minValue="100" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="size_I_Meas" value="3000" minValue="100" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="size_T_Stamp" value="3000" minValue="100" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+      <param name="size_Status" value="3000" minValue="100" maxValue="32767" defValue="3000" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_SMU_Sweep_Example">
+    <image file="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\pmu-smu-iv-sweep-test.bmp" sizeable="Yes" />
+    <Group name="PMU Pulse Timing" position="10">
+      <param name="Period" value="10e-6" minValue="80e-9" maxValue="1" defValue="2e-6" units="s" type="EditBox" toolTips="Pulse Period time. 10 V range: 140 ns to 1 s. 40 V range: 280 ns to 1 s.  Both Channel 1 and Channel 2 share the same period time." />
+      <param name="PulseWidthCh1" value="4e-6" minValue="60e-9" maxValue=".999999" defValue="1e-6" units="s" type="EditBox" toolTips="Pulse Width for Channel 1 (FWHM). 10 V range: 60 ns to 0.99999 s. 40 V range: 140 ns to 0.99999 s." />
+      <param name="RiseTimeCh1" value="40e-9" minValue="20e-9" maxValue="0.033" defValue="40e-9" units="s" type="EditBox" toolTips="Rise time (0-100%) for the Channel 1. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeCh1" value="40e-9" minValue="20e-9" maxValue="0.033" defValue="40e-9" units="s" type="EditBox" toolTips="Fall time (0-100%) for the Channel 1. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayCh1" value="40e-9" minValue="0" maxValue=".999999" defValue="0" units="s" type="EditBox" toolTips="Delay time (time before pulse) for Channel 1. 10 V &amp; 40 V: 20 ns to 0.99999 s." />
+      <param name="PulseWidthCh2" value="4e-6" minValue="60e-9" maxValue=".999999" defValue="1e-6" units="s" type="EditBox" toolTips="Pulse Width for Channel 2 (FWHM). 10 V range: 60 ns to 0.99999 s. 40 V range: 140 ns to 0.99999 s." />
+      <param name="RiseTimeCh2" value="100e-9" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Rise time (0-100%) for the Channel 2. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="FallTimeCh2" value="100e-9" minValue="20e-9" maxValue=".033" defValue="100e-9" units="s" type="EditBox" toolTips="Fall time (0-100%) for the Channel 2. 10 V range: 20 ns to 33 ms (slew-rate limited). 40 V range:  100 ns to 33 ms (slew-rate limited)." />
+      <param name="DelayCh2" value="0" minValue="0" maxValue=".999999" defValue="0" units="s" type="EditBox" toolTips="Delay time (time before pulse) for Channel 2. 10 V &amp; 40 V: 20 ns to 0.99999 s." />
+    </Group>
+    <Group name="Voltages" position="11">
+      <param name="AmplVCh1" value="1.7" minValue="-40" maxValue="40" defValue="2" units="V" type="EditBox" toolTips="PMU Channel 1 Voltage amplitude (voltage height from Vbase) or SMU Channel 1 Voltage." />
+      <param name="BaseVCh1" value="0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Base voltage (DC offset) for PMU Channel 1." />
+    </Group>
+    <Group name="Ranges" position="1">
+      <param name="VRangeCh1" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 1 Range, +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh1" value="" minValue="1e-7" maxValue=".8" defValue="0.01" units="" type="ListBox" toolTips="PMU Channel 1 Measure (A) Range. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="10 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh1=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh1=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=1 OR VRangeCh1=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=1 AND VRangeCh1=10" />
+        </listItems>
+      </param>
+      <param name="VRangeCh2" value="" minValue="5" maxValue="40" defValue="10" units="V" type="ListBox" toolTips="PMU Channel 2 Range, +/-10 or +/- 40V.">
+        <listItems selItem="10">
+          <item Name="40" Val="40" />
+          <item Name="10" Val="10" />
+        </listItems>
+      </param>
+      <param name="IRangeCh2" value="" minValue="1e-7" maxValue=".8" defValue="0.2" units="" type="ListBox" toolTips="PMU Channel 2 Measure (A) Range. Note: Available ranges differ based on Voltage Range and if an RPM is connected.">
+        <listItems selItem="200 mA">
+          <item Name="800 mA" Val="0.8" Condition="VRangeCh2=40" />
+          <item Name="200 mA" Val="0.2" Condition="VRangeCh2=10" />
+          <item Name="10 mA" Val="0.01" />
+          <item Name="1 mA" Val="0.001" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 μA" Val="0.0001" Condition="HasRPM PMU_ID,Ch=2 OR VRangeCh2=40" />
+          <item Name="10 μA" Val="1E-005" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="1 μA" Val="1E-006" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+          <item Name="100 nA" Val="1E-007" Condition="HasRPM PMU_ID,Ch=2 AND VRangeCh2=10" />
+        </listItems>
+      </param>
+      <param name="SMU_Irange" value="" minValue="1e-9" maxValue="1" defValue=".01" units="" type="ListBox" toolTips="SMU Channel 2 Current range.">
+        <listItems selItem="10 mA">
+          <item Name="100 mA" Val="0.1" />
+          <item Name="10 mA" Val=".01" />
+          <item Name="1 mA" Val=".001" />
+          <item Name="100 μA" Val="100e-6" />
+          <item Name="10 μA" Val="10e-6" />
+          <item Name="1 μA" Val="1e-6" />
+          <item Name="100 nA" Val="100e-9" />
+          <item Name="10 nA" Val="10e-9" Condition="HasPA Ch2SMU_ID" />
+          <item Name="1 nA" Val="1e-9" Condition="HasPA Ch2SMU_ID" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Test Settings" position="1">
+      <param name="ExecMode" value="" minValue="0" maxValue="2" defValue="0" units="" type="ListBox" toolTips="Determines whether to execute a pulse I-V test, a DC SMU I-V test, or both.">
+        <listItems selItem="Pulse &amp; SMU test">
+          <item Name="Pulse &amp; SMU test" Val="0" />
+          <item Name="Pulse I-V Test only" Val="1" />
+          <item Name="DC SMU Test only" Val="2" />
+        </listItems>
+      </param>
+      <param name="PMUMode" value="" minValue="0" maxValue="2" defValue="0" units="" type="ListBox" toolTips="Use &quot;Simple&quot; for basic PMU test (no I-ranging, LLEC, or thresholds).  If you need these features, use &quot;Ranging, LLEC&quot;.">
+        <listItems selItem="Ranging, LLEC">
+          <item Name="Simple" Val="0" />
+          <item Name="Ranging, LLEC" Val="1" />
+        </listItems>
+      </param>
+      <param name="Ch1SMU_ID" value="" minValue="" maxValue="" defValue="SMU1" units="" type="ListBox" toolTips="SMU to use for Channel 1.">
+        <listItems selItem="SMU1">
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="Ch2SMU_ID" value="" minValue="" maxValue="" defValue="SMU2" units="" type="ListBox" toolTips="">
+        <listItems selItem="SMU2">
+          <item Name="SMU1" Val="SMU1" Condition="PresentInSystem" />
+          <item Name="SMU2" Val="SMU2" Condition="PresentInSystem" />
+          <item Name="SMU3" Val="SMU3" Condition="PresentInSystem" />
+          <item Name="SMU4" Val="SMU4" Condition="PresentInSystem" />
+          <item Name="SMU5" Val="SMU5" Condition="PresentInSystem" />
+          <item Name="SMU6" Val="SMU6" Condition="PresentInSystem" />
+          <item Name="SMU7" Val="SMU7" Condition="PresentInSystem" />
+          <item Name="SMU8" Val="SMU8" Condition="PresentInSystem" />
+          <item Name="SMU9" Val="SMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+      <param name="PMU_ID" value="" minValue="" maxValue="" defValue="PMU1" units="" type="ListBox" toolTips="PMU to use in Test.">
+        <listItems selItem="PMU1">
+          <item Name="PMU1" Val="PMU1" Condition="PresentInSystem" />
+          <item Name="PMU2" Val="PMU2" Condition="PresentInSystem" />
+          <item Name="PMU3" Val="PMU3" Condition="PresentInSystem" />
+          <item Name="PMU4" Val="PMU4" Condition="PresentInSystem" />
+          <item Name="PMU5" Val="PMU5" Condition="PresentInSystem" />
+          <item Name="PMU6" Val="PMU6" Condition="PresentInSystem" />
+          <item Name="PMU7" Val="PMU7" Condition="PresentInSystem" />
+          <item Name="PMU8" Val="PMU8" Condition="PresentInSystem" />
+          <item Name="PMU9" Val="PMU9" Condition="PresentInSystem" />
+        </listItems>
+      </param>
+    </Group>
+    <Group name="Sweep Voltages" position="12">
+      <param name="StartVCh2" value="0" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="PMU Channel 1 Voltage starting amplitude (voltage height from Vbase) or SMU Channel 1 starting voltage for sweep." />
+      <param name="StopVCh2" value="5" minValue="-40" maxValue="40" defValue="5" units="V" type="EditBox" toolTips="PMU Channel 1 Voltage final amplitude (voltage height from Vbase) or SMU Channel 1 final voltage for sweep." />
+      <param name="StepVCh2" value="0.1" minValue=".001" maxValue="40" defValue="0.1" units="V" type="EditBox" toolTips="PMU or SMU Channel 1 Voltage step size for sweep." />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="PulseAverage" value="1" minValue="1" maxValue="10000" defValue="1" units="Pulses" type="EditBox" toolTips="Number of pulses to output and measure: 1 to 10,000." />
+      <param name="LoadLineCh1" value="" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check to enable Load Line Effect Compensation on Channel 1." />
+      <param name="LoadLineCh2" value="" minValue="0" maxValue="1" defValue="0" units="" type="CheckBox" toolTips="Check to enable Load Line Effect Compensation on Channel 2." />
+      <param name="ResCh1" value="" minValue="1" maxValue="1e6" defValue="1e6" units="ohms" type="EditBox" toolTips="" />
+      <param name="ResCh2" value="" minValue="1" maxValue="1E6" defValue="1E6" units="ohms" type="EditBox" toolTips="" />
+      <param name="BaseVCh2" value="" minValue="-40" maxValue="40" defValue="0" units="V" type="EditBox" toolTips="Base voltage (DC offset) for PMU Channel 2." />
+      <param name="LtdAutoCurrCh1" value="0" minValue="0" maxValue="1" defValue="0" units="" type="EditBox" toolTips="" />
+      <param name="LtdAutoCurrCh2" value="0" minValue="0" maxValue="1" defValue="0" units="" type="EditBox" toolTips="" />
+      <param name="SMU_Icomp" value=".01" minValue="0" maxValue="1" defValue=".01" units="A" type="EditBox" toolTips="SMU Channel 2 current compliance." />
+      <param name="Ch1_V_Ampl_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="Ch1_I_Ampl_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch1_V_Base_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch1_I_Base_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch2_V_Ampl_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch2_I_Ampl_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch2_V_Base_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch2_I_Base_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampAmpl_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampBase_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="TimeStampAmpl_Ch2_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+    </Group>
+    <Group name="NotAssigned" position="0">
+      <param name="TimeStampBase_Ch2_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Status_Ch1_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Status_Ch2_Size" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch2SMUVoltageSize" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch2SMUCurrentSize" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch1SMUVoltageSize" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+      <param name="Ch1SMUCurrentSize" value="100" minValue="1" maxValue="10000" defValue="100" units="" type="EditBox" toolTips="" />
+    </Group>
+  </Module>
+  <Module name="PMU_10ns_Pulse_Example">
+      <Group name="Image" position="0" collapsible="0" fixedLocation="0" visibleFrame="0" groupType="1" width="2">
+        <param name="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\pulse1.bmp" value="C:\s4200\kiuser\usrlib\PMU_examples_ulib\src\pulse1.bmp" minValue="" maxValue="" defValue="" units="" type="Image" toolTips="" sizeable="Yes" />
+      </Group>
+      <Group name="Settings" position="9" collapsible="1" fixedLocation="0" visibleFrame="1" groupType="0" width="2">
+        <param name="pmu_id" value="" minValue="1" maxValue="2" defValue="1" units="" type="ListBox" toolTips="">
+          <listItems selItem="PMU1">
+            <item Name="PMU1" Val="1" Condition="PresentInSystem" />
+            <item Name="PMU2" Val="2" Condition="PresentInSystem" />
+          </listItems>
+        </param>
+        <param name="pmu_ch" value="" minValue="1" maxValue="2" defValue="1" units="" type="ListBox" toolTips="">
+          <listItems selItem="Channel 1">
+            <item Name="Channel 1" Val="1" />
+            <item Name="Channel 2" Val="2" />
+          </listItems>
+        </param>
+      </Group>
+  </Module>
+</PMU_examples_ulib_GUI_Config>

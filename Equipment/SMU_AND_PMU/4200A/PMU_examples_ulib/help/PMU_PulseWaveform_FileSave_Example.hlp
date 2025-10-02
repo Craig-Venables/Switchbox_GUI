@@ -1,0 +1,290 @@
+PMU_PulseWaveform_FileSave_Example
+<!--MarkdownExtra-->
+
+<link rel="stylesheet" type="text/css" href="file:///C:/s4200/sys/help/InfoPane/stylesheet.css">
+
+Module: PMU_PulseWaveform_FileSave_Example
+==========================================
+
+Description
+-----------
+
+This module allows for a long pulse or time capture (40 s pulse width maximum, 120 s total waveform capture) 
+of an entire pulse to a csv file using both channels of a single 4225-PMU and the Segment ARB mode. 
+In addition to optionally saving the waveform to a file, a time-averaged version is available in the Analyze sheet.  
+
+Since this module uses the Seg Arb mode, it does not allow range-changing or 
+Load Line Effect compensation.
+
+Both channels use the same timing values, but allow different voltages for 
+both the pulse amplitude and base. To output a DC waveform, set 
+V_Ampl = V_Base.
+
+Ch1_parameter is Channel 1 of the specified PMU. Ch2_parameter is Channel 2 
+of the specified PMU.
+
+Channel 2 may be swept.  To output a single (non-swept) drain pulse waveform, 
+set Ch2_StartV= Ch2_StopV (value for Ch2_StepV does not matter in this case).
+
+Optional SMU available for voltage biasing of a device terminal that does 
+not react to the pulse.  For example, do not connect SMU to DUT drain, gate, 
+or source of a transistor. Note that the SMU cannot be connected to an RPM, 
+or a -233 error ("forcev(): Cannot force when not connected.") will occur.
+
+This data return method in this routine is not compatible with KXCI (using 
+the UL mode).
+
+file path = C:\s4200\kiuser\export\wavefrm_capture.csv
+
+~~~~
+                 _____________ Ch1_V_Ampl  or Ch2_StartV, Ch2_StopV, Ch2_StepV
+                /  PulseTop   \
+               /               \ 
+              /                 \
+             /                   \
+  __________/                     \__________Ch1_V_Base or Ch2_V_Base
+   DelayTime   RiseT           FallT   BaseTime
+~~~~
+
+Inputs
+------
+
+PulseTop	
+: Pulse Top (see ASCII diagram above) in seconds: 20 ns to 40 s
+
+RiseTime
+: Rise time (0 to 100%) of the pulse. Note there is a maximum 
+		rise time of 33 ms, which is available only at the largest 
+		pulse amplitude:
+:		10V Range: -10 to +10 (into 1 M&Omega;)
+:		40V Range: -40 to +40 (into 1 M&Omega;)
+:		Available settings: 20 ns to 33 ms
+:		Note that the longer times are only
+		available at larger pulse amplitudes.
+
+FallTime	
+: See RiseTime for details.
+
+BaseTime	
+: Time at the base voltage after the pulse. Note that this 
+		time is not the period.
+: Period = DelayTime + BaseTime + 0.5 * RiseTime + 
+		0.5 * FallTime + PulseWidth
+: Available settings: 20 ns to 40 s
+
+DelayTime	
+: Time before pulse, at base voltage.
+: Available settings: 20 ns to 40 s
+
+MaxSheetPoints	
+: Maximum number of rows in the sheet. This value is for each 
+		measurement type, not the total of all measurements per test.
+		When the number of data points is greater than MaxSheetPoints, 
+		averaging is used to reduce the number of points put
+		in the sheet.
+: Range: 100 to 32,768
+
+MaxFilePoints
+: Maximum number of samples for each measurement to be saved to the file.
+: Range: 100 to 1,000,000
+
+Ch1_VRange	
+: Voltage Source range for Channel 1 of the PMU. Voltage is 
+		the maximum voltage possible into a high impedance DUT.
+: Valid: 10, 40
+
+Ch1_IRange
+: Fixed current measure range for Channel 1 of the PMU. Valid 
+		ranges are specific to each voltage source range and to the 
+		4225-RPM (if connected).
+: PMU 10V: 0.01, 0.2
+: PMU 40V: 100e-6, 0.01, 0.8
+: RPM 10V: 100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 0.01
+
+Ch1_V_Ampl
+: Voltage amplitude of the pulse for channel 1. Amplitude is relative
+   to Ch1_V_Base. Valid voltages are specific to 
+		the source range and incorporate the effects of Ch1_Res.  
+		(Ch1_V_Ampl + Ch1_V_Base) must be l< Ch1_VRange.
+: 10V range PMU(or RPM): -20 to +20
+: 40V range: -80 to +80
+
+Ch1_V_Base
+: Base voltage for Ch1 pulse. This is the voltage level 
+		in-between the pulses, also may be called the DC offset.
+: 10V range PMU(or RPM): -10 to +10
+: 40V range: -40 to +40
+
+Ch2_VRange	
+: Voltage Source range for Channel 1 of the PMU. Voltage 
+		is the maximum voltage possible into a high impedance DUT.
+: Valid: 10, 40
+
+Ch2_IRange
+: Fixed current measure range for Channel 2 of the PMU.  
+		Valid ranges are specific to each voltage source range 
+		and to the 4225-RPM (if connected).
+: PMU 10V: 0.01, 0.2
+: PMU 40V: 100e-6, 0.01, 0.8
+: RPM 10V: 100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 0.01
+
+Ch2_StartV	
+: Start voltage amplitude for the amplitude sweep on Channel 2.
+		(Ch2_StartV + Ch2_V_Base) must be less than Ch2_VRange.
+: 10V range PMU(or RPM): -20 to +20
+: 40V range: -80 to +80
+
+Ch2_StopV	
+: Stop voltage amplitude for the amplitude sweep on Channel 2.
+		(Ch2_StopV + Ch2_V_Base) must be less than Ch2_VRange.
+: 10V range PMU(or RPM): -20 to +20
+: 40V range: -80 to +80	
+
+Ch2_StepV	
+: Step voltage size for amplitude sweep on Channel 2.
+: 10V range PMU(or RPM): -20 to +20
+: 40V range: -80 to +80	
+
+Ch2_V_Base	
+: Base voltage for Ch2 pulse. This is the voltage level 
+		in-between the pulses, also may be called the DC offset.
+: 10V range PMU(or RPM): -10 to +10
+: 40V range: -40 to +40	
+
+Ch1_Res		
+: Resistance of the device terminal attached to channel 1
+		(&Omega;). Set this value to the DUT resistance, if known, 
+		to allow the PMU to calculate the correct voltage to output 
+		to match the desired voltages given in Ch1_V_Ampl and 
+		Ch1_V_Base. Note that resistances < 1e6 will not allow 
+		voltage values < VRange to be specified (an error -846 
+		will be reported).
+: Range: 1 to 1e6
+		
+Ch2_Res	
+: Resistance of the device terminal attached to channel 2, 
+		(&Omega;). Set this value to the DUT resistance, if known, 
+		to allow the PMU to calculate the correct voltage to output 
+		to match the desired voltages given in Ch2_V_Ampl and 
+		Ch2_V_Base. Note that resistances < 1e6 will not allow 
+		voltage values < VRange to be specified (an error -846 will 
+		be reported).
+: Range: 1 to 1e6
+
+SMU_V		
+: (double) SMU voltage for biasing non-pulsed DUT terminal. For
+		example, do not connect SMU to transistor source terminal when
+		pulsing gate and/or drain.
+: Range: -210 to +210 V
+
+SMU_Irange	
+: (double) SMU current range.
+: Ranges: 10e-9, 100e-9, 1e-6,
+			10e-6, 100e-6, 1e-3,
+			10e-3, 100e-3, 1
+: Note: 10e-9 requires preamplifier and 1 A range only 
+			available on high power SMU.
+
+SMU_Icomp	
+: (double) SMU current compliance. This value must > 10% of the 
+			above current range.
+
+SMU_ID		
+: SMU instrument name, such as "SMU1" (without quotes).  
+		For no SMU, use "NONE". Note that the SMU cannot be 
+		connected to an RPM, or a -233 error ("forcev(): Cannot 
+		force when not connected.") will occur.
+: Range:  NONE, SMU1, SMU2, up to maximum SMUs in system.
+
+PMU_ID	
+: PMU number. PMU in lowest numbered (right-most PMU when viewed 
+		from rear of 4200 chassis) is PMU1.
+
+SaveFile	
+: Sets whether the .csv file is saved to disk:
+: 0: File not saved
+: 1: File saved
+
+AppendTimeToFilename
+: Adds the file saved test time to the file. Useful when saving
+			many waveforms in succession:
+: 1: Enabled
+: 0: Disabled
+
+Filename
+: Name of the file.
+
+TimeStampSize	
+: Size for Output arrays.  Ensure that all arrays have the same
+size and it must be >= MaxSheetPoints.
+
+Ch2_VmeasSize	
+: Size for Output arrays.  Ensure that all arrays have the same
+size and it must be >= MaxSheetPoints.
+
+Ch2_ImeasSize	
+: Size for Output arrays.  Ensure that all arrays have the same
+size and it must be >= MaxSheetPoints.
+	
+Ch1_VmeasSize
+: Size for Output arrays.  Ensure that all arrays have the same
+size and it must be >= MaxSheetPoints.
+
+Ch1_ImeasSize
+: Size for Output arrays.  Ensure that all arrays have the same
+size and it must be >= MaxSheetPoints.
+
+Outputs
+-------
+
+TimeStamp	
+: (double) Time stamps for waveform measurements
+
+Ch2_Vmeas		
+: (double) Measured Voltage on Drain Channel
+
+Ch2_Imeas		
+: (double) Measured Currnt on Drain Channel
+
+Ch1_Vmeas		
+: (double) Measured Voltage on Gate Channel
+
+Ch1_Imeas		
+: (double) Measured Current on Gate Channel
+
+
+Return values
+-------------
+			 
+Value  | Description
+------ | -----------
+0      | OK.
+-122   | pulse_ranges(): Illegal value for parameter #7. Ensure that current
+       | measure range is appropriate for the chosen voltage range.
+-233   | Cannot force when not connected. Ensure that specified SMU is not
+       | connected through or associated with an RPM. If all SMUs are associated
+       | with RPM modules, choose NONE to permit the test to run.
+-804   | Usually caused by PMU V source and I measure range setting conflict.
+       | See above for valid combinations.
+-820   | seg_arb_sequence(): PMU segment start value xxV at index 1 does not match
+       | previous segment stop value of yyV. Problem with Segment ARB voltage definition.
+       | Review start or stop voltages. Check to see if StartV matches previous StopV.
+       | Check to see if any voltages > VRange.
+-835   | seg_arb_sequence(): Using the specified sample rate of xxxxx samples/s,
+       | the time (yyyy) for sequence 1 is too short for a measurement.
+       | This means that there is a segment with a time duration too short to
+       | permit any samples to be made with the chosen sample rate of xxxxx samples/s.
+       | There must be at least 1 sample per measured segment.
+       | Increase the permitted number of samples by increasing the value for MaxSheetPoints,
+       | or increase the time duration of all segments with time yyyy.
+-846   | seg_arb_sequence(): Maximum Source Voltage Reached: Requested voltage across
+       | DUT resistance exceeds maximum voltage available. Ensure that all voltages are
+       | < PMU Voltage Range (VRangeCh1 and VRangeCh2). When the DUT Resistance is
+       | set to a lower value (< 1 k&Omega;), also check that the voltage is still possible
+       | by calculating Imax and Vmax. Imax = V source range/(50 &Omega; + DUT Resistance)
+       | Vmax = Imax * DUT Resistance. If Vmax is < SegARB voltage requested Error -846 will occur.
+       | Reduce the requested voltage to allow test to run.
+-17001 | Wrong card Id. Check PMU and SMU names
+-17002 | Failure to assign card Id handle. Check PMU and/or SMU names
+
+.
