@@ -113,15 +113,15 @@
   "device_99": {"x_min": 280, "y_min": 1075,"x_max": 305, "y_max": 1100,"sample": "Cross_bar", "section": "L"},
   "device_100":{"x_min": 328, "y_min": 1075,"x_max": 353, "y_max": 1100,"sample": "Cross_bar", "section": "L"}
 },
-"Multiplexer": {
-    "device_1": {"x_min": 121,"y_min": 214, "x_max": 208,"y_max": 293,"sample": "Multiplexer", "section": "A"},
-    "device_2": {"x_min": 248,"y_min": 215, "x_max": 327,"y_max": 299,"sample": "Multiplexer", "section": "A"},
-    "device_3": {"x_min": 364,"y_min": 218, "x_max": 448,"y_max": 302,"sample": "Multiplexer", "section": "A"},
-    "device_4": {"x_min": 488,"y_min": 223, "x_max": 573,"y_max": 301,"sample": "Multiplexer", "section": "A"},
-    "device_5": {"x_min": 618,"y_min": 221, "x_max": 694,"y_max": 294,"sample": "Multiplexer", "section": "A"},
-    "device_6": {"x_min": 104,"y_min": 391, "x_max": 190,"y_max": 464,"sample": "Multiplexer", "section": "A"},
-    "device_7": {"x_min": 234,"y_min": 397, "x_max": 314,"y_max": 476,"sample": "Multiplexer", "section": "A"},
-    "device_8": {"x_min": 362,"y_min": 400, "x_max": 434,"y_max": 488,"sample": "Multiplexer", "section": "A"},
-    "device_9": {"x_min": 485,"y_min": 402, "x_max": 572,"y_max": 490,"sample": "Multiplexer", "section": "A"},
-    "device_10": {"x_min": 612,"y_min": 406,"x_max": 704,"y_max": 495,"sample": "Multiplexer", "section": "A"}}
+"Multiplexer_10_OUT": {
+    "device_1": {"x_min": 121,"y_min": 214, "x_max": 208,"y_max": 293,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_2": {"x_min": 248,"y_min": 215, "x_max": 327,"y_max": 299,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_3": {"x_min": 364,"y_min": 218, "x_max": 448,"y_max": 302,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_4": {"x_min": 488,"y_min": 223, "x_max": 573,"y_max": 301,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_5": {"x_min": 618,"y_min": 221, "x_max": 694,"y_max": 294,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_6": {"x_min": 104,"y_min": 391, "x_max": 190,"y_max": 464,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_7": {"x_min": 234,"y_min": 397, "x_max": 314,"y_max": 476,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_8": {"x_min": 362,"y_min": 400, "x_max": 434,"y_max": 488,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_9": {"x_min": 485,"y_min": 402, "x_max": 572,"y_max": 490,"sample": "Multiplexer_10_OUT", "section": "A"},
+    "device_10": {"x_min": 612,"y_min": 406,"x_max": 704,"y_max": 495,"sample": "Multiplexer_10_OUT", "section": "A"}}
 }

@@ -52,6 +52,7 @@ class FunctionGenerator(Protocol):
 
 # Use existing project motor control
 from Equipment.Motor_Controll.Kenisis_motor_control import MotorController as KinesisController
+from Equipment.function_generator_manager import FunctionGeneratorManager
 
 
 # ---------- GUI Window ----------
@@ -81,8 +82,9 @@ class MotorControlWindow:
     ) -> None:
         # Will be initialized on Connect
         self.motor: Optional[KinesisController] = None
-        # FG optional
+        # FG optional (legacy injection) and manager-based control
         self.fg: Optional[FunctionGenerator] = function_generator
+        self.fg_mgr: Optional[FunctionGeneratorManager] = None
 
         self.canvas_size = int(canvas_size_pixels)
         self.world_range = float(world_range_units)
@@ -97,11 +99,11 @@ class MotorControlWindow:
         self.var_step = tk.StringVar(value="1.0")  # jog step in user units
         self.var_status_x = tk.StringVar(value="")
         self.var_status_y = tk.StringVar(value="")
-        # FG state only if FG provided
-        self.var_fg_enabled = tk.BooleanVar(value=False) if self.fg is not None else None
-        self.var_fg_amplitude = (
-            tk.StringVar(value=f"{default_amplitude_volts:.3f}") if self.fg is not None else None
-        )
+        # FG state (manager-driven; legacy injection still supported)
+        self.var_fg_status = tk.StringVar(value="FG: Disconnected")
+        self.var_fg_addr = tk.StringVar(value="")
+        self.var_fg_enabled = tk.BooleanVar(value=False)
+        self.var_fg_amplitude = tk.StringVar(value=f"{default_amplitude_volts:.3f}")
 
         self._build_ui()
         self._update_canvas_grid()
@@ -183,21 +185,27 @@ class MotorControlWindow:
         ttk.Label(axis_group, text="Y:").grid(row=1, column=0, sticky="w")
         ttk.Label(axis_group, textvariable=self.var_status_y).grid(row=1, column=1, sticky="w")
 
-        # FG controls (optional)
-        if self.fg is not None:
-            fg_group = ttk.Labelframe(controls, text="Function Generator", padding=10)
-            fg_group.grid(row=2, column=0, sticky="new")
-            fg_group.columnconfigure(1, weight=1)
+        # FG controls (always visible, managed internally)
+        fg_group = ttk.Labelframe(controls, text="Function Generator", padding=10)
+        fg_group.grid(row=2, column=0, sticky="new")
+        for i in range(3):
+            fg_group.columnconfigure(i, weight=1)
 
-            fg_toggle = ttk.Checkbutton(
-                fg_group, text="Output Enabled", variable=self.var_fg_enabled, command=self._on_fg_toggle
-            )
-            fg_toggle.grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(fg_group, text="VISA Address").grid(row=0, column=0, sticky="w")
+        ttk.Entry(fg_group, textvariable=self.var_fg_addr, width=32).grid(row=0, column=1, columnspan=2, sticky="we")
 
-            ttk.Label(fg_group, text="Amplitude (V)").grid(row=1, column=0, sticky="w", pady=(6, 0))
-            fg_entry = ttk.Entry(fg_group, textvariable=self.var_fg_amplitude, width=10)
-            fg_entry.grid(row=2, column=0, sticky="we")
-            ttk.Button(fg_group, text="Apply", command=self._on_apply_amplitude).grid(row=2, column=1, sticky="we", padx=(6, 0))
+        ttk.Button(fg_group, text="Connect", command=self._on_fg_connect).grid(row=1, column=0, sticky="we", pady=(4, 6))
+        ttk.Button(fg_group, text="Disconnect", command=self._on_fg_disconnect).grid(row=1, column=1, sticky="we", pady=(4, 6))
+        ttk.Label(fg_group, textvariable=self.var_fg_status).grid(row=1, column=2, sticky="e")
+
+        fg_toggle = ttk.Checkbutton(
+            fg_group, text="Output Enabled", variable=self.var_fg_enabled, command=self._on_fg_toggle
+        )
+        fg_toggle.grid(row=2, column=0, columnspan=3, sticky="w")
+
+        ttk.Label(fg_group, text="DC Voltage (V)").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(fg_group, textvariable=self.var_fg_amplitude, width=10).grid(row=4, column=0, sticky="we")
+        ttk.Button(fg_group, text="Apply", command=self._on_apply_amplitude).grid(row=4, column=1, sticky="we", padx=(6, 0))
 
     # ---------- Canvas helpers ----------
     def _update_canvas_grid(self) -> None:
@@ -296,25 +304,72 @@ class MotorControlWindow:
             self.var_status.set(f"Error: {exc}")
 
     def _on_fg_toggle(self) -> None:
-        if self.fg is None or self.var_fg_enabled is None:
-            return
+        # Prefer manager if connected; fallback to legacy injected FG
         try:
-            self.fg.set_output(bool(self.var_fg_enabled.get()))
+            desired = bool(self.var_fg_enabled.get())
+            if self.fg_mgr is not None and self.fg_mgr.is_connected():
+                self.fg_mgr.output(1, desired)
+                self.var_fg_status.set("FG: Output ON" if desired else "FG: Output OFF")
+                return
+            if self.fg is not None:
+                self.fg.set_output(desired)
+                self.var_fg_status.set("FG: Output ON" if desired else "FG: Output OFF")
         except Exception as exc:  # pragma: no cover
             self.var_status.set(f"FG Error: {exc}")
 
     def _on_apply_amplitude(self) -> None:
-        if self.fg is None or self.var_fg_amplitude is None:
-            return
         try:
             volts = float(self.var_fg_amplitude.get())
         except ValueError:
             volts = 0.4
             self.var_fg_amplitude.set("0.400")
         try:
-            self.fg.set_amplitude(volts)
+            if self.fg_mgr is not None and self.fg_mgr.is_connected():
+                # Use DC mode and set level
+                self.fg_mgr.set_dc_level(1, volts)
+                self.var_fg_status.set(f"FG: DC {volts:.3f} V applied")
+                return
+            if self.fg is not None:
+                # Legacy injected FG API expects 'amplitude' wording
+                if hasattr(self.fg, "set_amplitude"):
+                    self.fg.set_amplitude(volts)
+                    self.var_fg_status.set(f"FG: {volts:.3f} V applied")
         except Exception as exc:  # pragma: no cover
             self.var_status.set(f"FG Error: {exc}")
+
+    def _on_fg_connect(self) -> None:
+        try:
+            addr = self.var_fg_addr.get().strip() or None
+            self.fg_mgr = FunctionGeneratorManager(
+                fg_type="Siglent SDG1032X", address=addr, auto_connect=True
+            )
+            if not self.fg_mgr.is_connected():
+                self.var_fg_status.set("FG: Failed to connect")
+                return
+            self.var_fg_status.set("FG: Connected")
+            # Initialize output state and DC level UI
+            try:
+                out_on = bool(self.fg_mgr.get_output_status(1))
+                self.var_fg_enabled.set(out_on)
+            except Exception:
+                pass
+            # Apply current UI DC voltage to ensure consistency
+            self._on_apply_amplitude()
+        except Exception as exc:  # pragma: no cover
+            self.var_fg_status.set(f"FG: Error {exc}")
+
+    def _on_fg_disconnect(self) -> None:
+        try:
+            if self.fg_mgr is not None:
+                try:
+                    self.fg_mgr.close()
+                except Exception:
+                    pass
+                self.fg_mgr = None
+            self.var_fg_enabled.set(False)
+            self.var_fg_status.set("FG: Disconnected")
+        except Exception as exc:  # pragma: no cover
+            self.var_fg_status.set(f"FG: Error {exc}")
 
     # ---------- Helpers ----------
     def _refresh_position(self) -> None:
