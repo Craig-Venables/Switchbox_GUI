@@ -372,7 +372,7 @@ class SampleGUI:
             self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
 
         if sample == 'Multiplexer_10_OUT':
-            sample = BASE_DIR / "Sample_Infomation" / "Multiplexer_10_OUT.jpg"
+            sample = BASE_DIR / "Helpers" / "Sample_Infomation" / "Multiplexer_10_OUT.jpg"
             self.original_image = Image.open(sample)
             img = self.original_image.resize((400, 400))
             self.tk_img = ImageTk.PhotoImage(img)
