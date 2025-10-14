@@ -3,6 +3,8 @@ from moku.instruments import ArbitraryWaveformGenerator
 import numpy as np
 import time
 
+print("Moku Go imported")
+
 class MokuGoPulse:
     def __init__(self, usb_identifier: str):
         """
