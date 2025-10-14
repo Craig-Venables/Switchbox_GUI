@@ -3977,36 +3977,87 @@ class MeasurementGUI:
 
             time.sleep(1)
 
-            # measure device using centralized service
-            def _on_point(v, i, t_s):
-                self.v_arr_disp.append(v)
-                self.c_arr_disp.append(i)
-                self.t_arr_disp.append(t_s)
+            # measure device using centralized service with hardware acceleration!
             icc_val = float(self.icc.get())
-            v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
-                keithley=self.keithley,
-                icc=icc_val,
-                sweeps=sweeps,
-                step_delay=step_delay,
-                start_v=start_v,
-                stop_v=stop_v,
-                neg_stop_v=neg_stop_v,
-                step_v=step_v,
-                sweep_type=sweep_type,
-                mode=mode,
-                sweep_rate_v_per_s=sweep_rate,
-                total_time_s=total_time,
-                num_steps=nsteps,
-                psu=getattr(self, 'psu', None),
-                led=bool(led),
-                power=led_power,
-                optical=getattr(self, 'optical', None),
-                sequence=sequence,
-                pause_s=pause,
-                smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                on_point=_on_point,
+            smu_type_str = getattr(self, 'SMU_type', 'Keithley 2401')
+            
+            # Check if hardware sweep will be used
+            num_points_estimate = int(abs(stop_v - start_v) / step_v) + 1 if step_v else 100
+            using_hardware_sweep = (
+                smu_type_str == 'Keithley 4200A' and 
+                num_points_estimate > 20 and 
+                step_delay < 0.05
             )
+            
+            if using_hardware_sweep:
+                # Status message for hardware sweep
+                self.status_box.config(text="Hardware sweep in progress (fast mode)...")
+                self.master.update()
+                
+                # Create sweep config
+                from Measurments.sweep_config import SweepConfig
+                config = SweepConfig(
+                    start_v=start_v,
+                    stop_v=stop_v,
+                    step_v=step_v,
+                    neg_stop_v=neg_stop_v,
+                    step_delay=step_delay,
+                    sweep_type=sweep_type,
+                    sweeps=sweeps,
+                    pause_s=pause,
+                    icc=icc_val,
+                    led=bool(led),
+                    power=led_power,
+                    sequence=sequence
+                )
+                
+                # Use new hardware-accelerated method
+                v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep_v2(
+                    keithley=self.keithley,
+                    config=config,
+                    smu_type=smu_type_str,
+                    psu=getattr(self, 'psu', None),
+                    optical=getattr(self, 'optical', None),
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=None  # Hardware sweep doesn't support live plotting
+                )
+                
+                # Update status with completion time
+                if timestamps:
+                    self.status_box.config(
+                        text=f"Sweep complete: {len(v_arr)} points in {timestamps[-1]:.2f}s"
+                    )
+            else:
+                # Point-by-point with live plotting
+                def _on_point(v, i, t_s):
+                    self.v_arr_disp.append(v)
+                    self.c_arr_disp.append(i)
+                    self.t_arr_disp.append(t_s)
+                
+                v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                    keithley=self.keithley,
+                    icc=icc_val,
+                    sweeps=sweeps,
+                    step_delay=step_delay,
+                    start_v=start_v,
+                    stop_v=stop_v,
+                    neg_stop_v=neg_stop_v,
+                    step_v=step_v,
+                    sweep_type=sweep_type,
+                    mode=mode,
+                    sweep_rate_v_per_s=sweep_rate,
+                    total_time_s=total_time,
+                    num_steps=nsteps,
+                    psu=getattr(self, 'psu', None),
+                    led=bool(led),
+                    power=led_power,
+                    optical=getattr(self, 'optical', None),
+                    sequence=sequence,
+                    pause_s=pause,
+                    smu_type=smu_type_str,
+                    should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                    on_point=_on_point,
+                )
             
             # If endurance selected as a custom mode via UI in future, we could branch here
             # For now, update endurance/retention plots if arrays exist from tests

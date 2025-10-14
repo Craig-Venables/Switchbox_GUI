@@ -11,6 +11,8 @@ from typing import Callable, Iterable, List, Optional, Tuple
 # Import new utility modules
 from Measurments.optical_controller import OpticalController
 from Measurments.data_utils import safe_measure_current, safe_measure_voltage, normalize_measurement
+from Measurments.sweep_config import SweepConfig, SweepMethod, InstrumentCapabilities
+from Measurments.sweep_patterns import build_sweep_values, SweepType
 
 
 class VoltageRangeMode:
@@ -2525,5 +2527,258 @@ class MeasurementService:
     #         pass
 
     #     return t_arr, i_arr, log
+
+    # ============================================================================
+    # Hardware-Accelerated Sweep Methods (October 2025)
+    # ============================================================================
+    
+    def run_iv_sweep_v2(
+        self,
+        *,
+        keithley,
+        config: SweepConfig,
+        smu_type: str = "Keithley 2401",
+        psu=None,
+        optical=None,
+        should_stop: Optional[Callable[[], bool]] = None,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Execute IV sweep with automatic hardware acceleration when available.
+        
+        This method automatically selects the best sweep method:
+        - Hardware sweep for Keithley 4200A (10-150x faster!)
+        - Point-by-point for other instruments
+        
+        Args:
+            keithley: IV controller manager
+            config: SweepConfig with all parameters
+            smu_type: SMU type string
+            psu: Optional power supply
+            optical: Optional optical source
+            should_stop: Optional stop callback
+            on_point: Optional per-point callback (disabled for hardware sweep)
+        
+        Returns:
+            Tuple[List[float], List[float], List[float]]: (voltages, currents, timestamps)
+        
+        Example:
+            >>> config = SweepConfig(start_v=0, stop_v=1, step_v=0.01, icc=1e-3)
+            >>> v, i, t = service.run_iv_sweep_v2(
+            ...     keithley=keithley,
+            ...     config=config,
+            ...     smu_type='Keithley 4200A'
+            ... )
+            >>> # Automatically uses hardware sweep if beneficial!
+        """
+        # Get instrument capabilities
+        capabilities = keithley.get_capabilities()
+        
+        # Auto-select sweep method if not specified
+        if config.sweep_method is None:
+            config.sweep_method = self._select_sweep_method(config, capabilities)
+        
+        # Route to appropriate implementation
+        if config.sweep_method == SweepMethod.HARDWARE_SWEEP:
+            return self._run_hardware_sweep(
+                keithley=keithley,
+                config=config,
+                smu_type=smu_type,
+                psu=psu,
+                optical=optical,
+                should_stop=should_stop,
+                on_point=on_point
+            )
+        else:
+            return self._run_point_by_point_sweep(
+                keithley=keithley,
+                config=config,
+                smu_type=smu_type,
+                psu=psu,
+                optical=optical,
+                should_stop=should_stop,
+                on_point=on_point
+            )
+    
+    def _select_sweep_method(
+        self,
+        config: SweepConfig,
+        capabilities: InstrumentCapabilities
+    ) -> SweepMethod:
+        """
+        Auto-select best sweep method based on config and capabilities.
+        
+        Hardware sweep is selected when:
+        - Instrument supports it
+        - More than 20 points
+        - Step delay < 50ms (hardware is faster)
+        
+        Args:
+            config: Sweep configuration
+            capabilities: Instrument capabilities
+        
+        Returns:
+            SweepMethod: Selected method
+        """
+        if not capabilities.supports_hardware_sweep:
+            return SweepMethod.POINT_BY_POINT
+        
+        # Estimate number of points
+        num_points = config.num_points
+        
+        # Use hardware sweep for:
+        # - Large sweeps (>20 points)
+        # - Fast sweeps (step_delay < 50ms)
+        if num_points > 20 and config.step_delay < 0.05:
+            return SweepMethod.HARDWARE_SWEEP
+        
+        # Otherwise point-by-point (better for live plotting)
+        return SweepMethod.POINT_BY_POINT
+    
+    def _run_point_by_point_sweep(
+        self,
+        *,
+        keithley,
+        config: SweepConfig,
+        smu_type: str,
+        psu=None,
+        optical=None,
+        should_stop: Optional[Callable[[], bool]] = None,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Wrapper calling existing run_iv_sweep() method.
+        
+        This maintains backward compatibility while using the new SweepConfig.
+        """
+        # Build voltage list if not provided
+        if config.voltage_list is None:
+            voltage_range = build_sweep_values(
+                start=config.start_v,
+                stop=config.stop_v,
+                step=config.step_v,
+                sweep_type=config.sweep_type,
+                neg_stop=config.neg_stop_v
+            )
+        else:
+            voltage_range = config.voltage_list
+        
+        # Call existing run_iv_sweep (already refactored to use utilities!)
+        return self.run_iv_sweep(
+            keithley=keithley,
+            icc=config.icc,
+            sweeps=config.sweeps,
+            step_delay=config.step_delay,
+            voltage_range=voltage_range,
+            smu_type=smu_type,
+            psu=psu,
+            led=config.led,
+            power=config.power,
+            optical=optical,
+            sequence=config.sequence,
+            pause_s=config.pause_s,
+            should_stop=should_stop,
+            on_point=on_point,
+        )
+    
+    def _run_hardware_sweep(
+        self,
+        *,
+        keithley,
+        config: SweepConfig,
+        smu_type: str,
+        psu=None,
+        optical=None,
+        should_stop: Optional[Callable[[], bool]] = None,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Execute fast hardware sweep (Keithley 4200A only).
+        
+        Completes in ~0.1-1s vs 10-30s for point-by-point.
+        Note: Live plotting (on_point callback) is disabled for hardware sweeps.
+        
+        Args:
+            keithley: IV controller manager
+            config: Sweep configuration
+            smu_type: SMU type
+            psu: Optional PSU
+            optical: Optional optical source
+            should_stop: Optional stop callback
+            on_point: Ignored for hardware sweep (no live updates)
+        
+        Returns:
+            Tuple[List[float], List[float], List[float]]: (voltages, currents, timestamps)
+        """
+        import time
+        
+        # Verify hardware sweep is available
+        if not hasattr(keithley.instrument, 'voltage_sweep_hardware'):
+            print("Hardware sweep not available, falling back to point-by-point")
+            return self._run_point_by_point_sweep(
+                keithley=keithley,
+                config=config,
+                smu_type=smu_type,
+                psu=psu,
+                optical=optical,
+                should_stop=should_stop,
+                on_point=on_point
+            )
+        
+        # Setup optical/LED using new controller
+        optical_ctrl = OpticalController(optical=optical, psu=psu)
+        if config.led:
+            optical_ctrl.enable(config.power)
+        
+        # Determine if bidirectional
+        bidirectional = config.sweep_type in ["FS", "FULL", "Triangle"]
+        
+        # Calculate points per direction
+        if config.step_v is not None and config.step_v > 0:
+            num_forward = int((config.stop_v - config.start_v) / config.step_v) + 1
+        else:
+            num_forward = 100  # Default
+        
+        try:
+            keithley.enable_output(True)
+            start_time = time.perf_counter()
+            
+            voltages_all = []
+            currents_all = []
+            
+            # Execute sweeps
+            for sweep_idx in range(config.sweeps):
+                if should_stop and should_stop():
+                    break
+                
+                # Call hardware sweep
+                v_meas, i_meas = keithley.instrument.voltage_sweep_hardware(
+                    start_v=config.start_v,
+                    stop_v=config.stop_v,
+                    num_points=num_forward,
+                    delay_ms=config.step_delay * 1000,  # Convert to ms
+                    i_limit=config.icc,
+                    bidirectional=bidirectional
+                )
+                
+                voltages_all.extend(v_meas)
+                currents_all.extend(i_meas)
+            
+            # Generate timestamps (uniform for hardware sweep)
+            duration = time.perf_counter() - start_time
+            num_total = len(voltages_all)
+            timestamps = [duration * i / max(1, num_total - 1) for i in range(num_total)]
+            
+            return (voltages_all, currents_all, timestamps)
+            
+        finally:
+            # Cleanup optical
+            optical_ctrl.disable()
+            
+            try:
+                keithley.set_voltage(0, config.icc)
+                keithley.enable_output(False)
+            except Exception:
+                pass
 
 

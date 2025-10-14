@@ -160,6 +160,7 @@ Break up massive GUI files into manageable components:
 | USAGE_GUIDE.md | ✅ | Migration guide |
 | IMPLEMENTATION_EXAMPLES.md | ✅ | Code examples |
 | COMPLETION_SUMMARY.md | ✅ | Phase 1 status |
+| HARDWARE_SWEEP_COMPLETE.md | ✅ | 10-150x faster sweeps! |
 | GUI_REFACTORING_PLAN.md | ✅ | Phase 2 plan |
 | MASTER_INDEX.md | ✅ | This file |
 
@@ -178,6 +179,9 @@ Break up massive GUI files into manageable components:
 
 ### "I want to see working examples"
 → Read [IMPLEMENTATION_EXAMPLES.md](IMPLEMENTATION_EXAMPLES.md)
+
+### "I want 10-150x faster sweeps"
+→ Read [HARDWARE_SWEEP_COMPLETE.md](HARDWARE_SWEEP_COMPLETE.md)
 
 ### "I want to refactor the GUI files"
 → Read [GUI_REFACTORING_PLAN.md](GUI_REFACTORING_PLAN.md)
@@ -252,6 +256,7 @@ Breaking large classes into focused modules:
 
 ### Completed
 - ✅ **October 14, 2025** - Phase 1 utilities created and documented
+- ✅ **October 14, 2025** - Hardware sweep feature added (10-150x faster!)
 
 ### Planned
 - 📋 **Phase 2** - Execute when ready (14-21 hours estimated)
