@@ -139,5 +139,56 @@ class IVControllerManager:
                 inst.finish_pulses(Icc=Icc, restore_autozero=restore_autozero)
             except Exception:
                 pass
+    
+    def get_capabilities(self):
+        """
+        Return instrument capabilities for sweep optimization.
+        
+        Returns:
+            InstrumentCapabilities: Capabilities object describing instrument features
+        
+        Example:
+            >>> caps = keithley.get_capabilities()
+            >>> if caps.supports_hardware_sweep:
+            ...     # Use fast hardware sweep
+        """
+        from Measurments.sweep_config import InstrumentCapabilities
+        
+        if self.smu_type == 'Keithley 4200A':
+            return InstrumentCapabilities(
+                supports_hardware_sweep=True,
+                supports_arbitrary_sweep=True,
+                supports_pulses=True,
+                supports_current_source=True,
+                min_step_delay_ms=1.0,
+                max_points_per_sweep=10000,
+                voltage_range=(-200.0, 200.0),
+                current_range=(-1.0, 1.0)
+            )
+        elif self.smu_type in ['Keithley 2401', 'Keithley 2400']:
+            return InstrumentCapabilities(
+                supports_hardware_sweep=False,
+                supports_arbitrary_sweep=False,
+                supports_pulses=True,
+                supports_current_source=True,
+                min_step_delay_ms=50.0,
+                max_points_per_sweep=2500,
+                voltage_range=(-20.0, 20.0),
+                current_range=(-1.0, 1.0)
+            )
+        elif self.smu_type == 'Hp4140b':
+            return InstrumentCapabilities(
+                supports_hardware_sweep=False,
+                supports_arbitrary_sweep=False,
+                supports_pulses=False,
+                supports_current_source=True,
+                min_step_delay_ms=100.0,
+                max_points_per_sweep=1000,
+                voltage_range=(-100.0, 100.0),
+                current_range=(1e-14, 1e-2)
+            )
+        else:
+            # Default conservative capabilities
+            return InstrumentCapabilities()
 
 
