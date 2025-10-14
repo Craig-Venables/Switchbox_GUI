@@ -10,7 +10,7 @@
             "type": "LED",
             "driver": "PowerSupply",
             "units": "mA",
-            "limits": { "min": 0.0, "max": 30.0, "ramp_mA_per_s": 50 },
+            "limits": { "min": 0.0, "max": 30.0 },
             "channels": { "380nm": 1, "420nm": 2 },
             "defaults": { "channel": "380nm", "level": 10.0 }
         }
@@ -24,9 +24,9 @@
             "address": "COM4",
             "baud": 19200,
             "units": "mW",
-            "limits": { "min": 0.0, "max": 10.0, "ramp_mW_per_s": 20 },
+            "limits": { "min": 0.0, "max": 10.0 },
             "wavelength_nm": 405,
-            "defaults": { "level": 2.5 }
+            "defaults": { "level": 0.6 }
         }
     },
     "Olegs_lab-2401": {

@@ -319,7 +319,6 @@ class MeasurementGUI:
 
 
         # right frame
-
         self.graphs_main_iv(self.Graph_frame) # main
         self.graphs_all(self.Graph_frame)
         self.graphs_current_time_rt(self.Graph_frame)
@@ -4155,14 +4154,14 @@ class MeasurementGUI:
         """Connect to the selected IV controller via GPIB using system config SMU_AND_PMU Type"""
         address = self.keithley_address_var.get()
         smu_type = getattr(self, 'SMU type', 'Keithley 2401')
-        print("3")
+        #print("3")
         try:
-            print("a")
-            print(smu_type)
-            print(address)
+            #print("a")
+            #print(smu_type)
+            #print(address)
             self.keithley = IVControllerManager(self.SMU_type, address)
             # Verify the connection using controller's handle
-            print("b")
+            #print("b")
             try:
                 self.connected = bool(self.keithley.is_connected())
             except Exception:
