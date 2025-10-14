@@ -55,6 +55,10 @@ from Measurments.measurement_services_smu import MeasurementService, VoltageRang
 from Equipment.optical_excitation import create_optical_from_system_config, OpticalExcitation
 from typing import Optional, Any, Callable, Dict, List, Tuple, Union
 
+# Import new utility modules
+from Measurments.data_utils import safe_measure_current, safe_measure_voltage
+from Measurments.optical_controller import OpticalController
+
 from Check_Connection_GUI import CheckConnection
 from TelegramBot import TelegramBot
 from typing import TYPE_CHECKING
@@ -935,14 +939,14 @@ class MeasurementGUI:
                 # Read ON
                 self.keithley.set_voltage(read_v, icc)
                 time.sleep(0.01)
-                i_on = self.keithley.measure_current()[1]
+                i_on = safe_measure_current(self.keithley)
                 # RESET
                 self.keithley.set_voltage(reset_v, icc)
                 time.sleep(width_s)
                 # Read OFF
                 self.keithley.set_voltage(read_v, icc)
                 time.sleep(0.01)
-                i_off = self.keithley.measure_current()[1]
+                i_off = safe_measure_current(self.keithley)
                 ratio = (abs(i_on) + 1e-12) / (abs(i_off) + 1e-12)
                 self.endurance_ratios.append(ratio)
                 # Update plot
@@ -997,7 +1001,7 @@ class MeasurementGUI:
                     time.sleep(0.01)
                 self.keithley.set_voltage(read_v, icc)
                 time.sleep(0.01)
-                i = self.keithley.measure_current()[1]
+                i = safe_measure_current(self.keithley)
                 self.retention_times.append(t)
                 self.retention_currents.append(abs(i))
                 # Update plot
