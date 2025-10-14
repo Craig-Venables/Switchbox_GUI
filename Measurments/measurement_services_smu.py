@@ -8,6 +8,10 @@ helpers). Designed to be UI-agnostic and callable from GUIs or scripts.
 import time
 from typing import Callable, Iterable, List, Optional, Tuple
 
+# Import new utility modules
+from Measurments.optical_controller import OpticalController
+from Measurments.data_utils import safe_measure_current, safe_measure_voltage, normalize_measurement
+
 
 class VoltageRangeMode:
     FIXED_STEP = "fixed_step"          # Default: use explicit step size
@@ -301,6 +305,9 @@ class MeasurementService:
         except Exception:
             pass
 
+        # Initialize optical controller using new utility
+        optical_ctrl = OpticalController(optical=optical, psu=psu)
+
         for sweep_idx in range(int(sweeps)):
             # Determine LED state for this sweep
             led_state = '1' if led else '0'
@@ -312,21 +319,9 @@ class MeasurementService:
                 except Exception:
                     pass
 
-            # Apply optical per-sweep
+            # Apply optical per-sweep using new controller
             try:
-                if optical is not None:
-                    if led_state == '1':
-                        # Use configured defaults
-                        optical.set_level(float(power), getattr(optical, 'capabilities', {}).get('units', 'mW'))
-                        optical.set_enabled(True)
-                    else:
-                        optical.set_enabled(False)
-                elif psu is not None:
-                    if led_state == '1':
-                        psu.led_on_380(power)
-                    else:
-                        if led:
-                            psu.led_off_380()
+                optical_ctrl.set_state(led_state == '1', power=float(power))
             except Exception:
                 pass
 
@@ -339,11 +334,8 @@ class MeasurementService:
                     # attempt to continue but capture what we can
                     pass
                 time.sleep(0.1)
-                try:
-                    current_tuple = keithley.measure_current()
-                    current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
-                except Exception:
-                    current = float('nan')
+                # Use new utility for measurement normalization
+                current = safe_measure_current(keithley)
 
                 t_now = time.time() - start_time
 
@@ -372,14 +364,8 @@ class MeasurementService:
             if should_stop and should_stop():
                 break
 
-        # Always attempt to turn optical off at the end
-        try:
-            if optical is not None:
-                optical.set_enabled(False)
-            elif psu is not None:
-                psu.led_off_380()
-        except Exception:
-            pass
+        # Always disable optical at the end using new controller
+        optical_ctrl.disable()
 
         try:
             keithley.set_voltage(0, icc)
@@ -417,14 +403,10 @@ class MeasurementService:
 
         # Session assumed prepared by caller
 
-        # Optional optical handling (basic): turn on if requested
-        try:
-            if optical is not None and led:
-                optical.set_enabled(True)
-            elif psu is not None and led:
-                psu.led_on_380(1.0)
-        except Exception:
-            pass
+        # Initialize optical controller using new utility
+        optical_ctrl = OpticalController(optical=optical, psu=psu)
+        if led:
+            optical_ctrl.enable(1.0)
 
         # Apply set pulse
         try:
@@ -443,8 +425,7 @@ class MeasurementService:
             if should_stop and should_stop():
                 break
             try:
-                current_tuple = keithley.measure_current()
-                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                current = safe_measure_current(keithley)
             except Exception:
                 current = float('nan')
             t_now = time.time() - start_t
@@ -458,14 +439,8 @@ class MeasurementService:
                     pass
             time.sleep(max(0.0, float(repeat_delay_s)))
 
-        # Optional optical off
-        try:
-            if optical is not None and led:
-                optical.set_enabled(False)
-            elif psu is not None and led:
-                psu.led_off_380()
-        except Exception:
-            pass
+        # Disable optical using controller
+        optical_ctrl.disable()
 
         try:
             keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
@@ -508,18 +483,10 @@ class MeasurementService:
         except Exception:
             pass
 
-        # Optical handling (optional)
-        try:
-            if optical is not None and led:
-                try:
-                    optical.set_level(float(power), getattr(optical, 'capabilities', {}).get('units', 'mW'))
-                except Exception:
-                    pass
-                optical.set_enabled(True)
-            elif psu is not None and led:
-                psu.led_on_380(power)
-        except Exception:
-            pass
+        # Optical handling using new controller
+        optical_ctrl = OpticalController(optical=optical, psu=psu)
+        if led:
+            optical_ctrl.enable(power)
 
         for k in range(int(num_cycles)):
             if should_stop and should_stop():
@@ -536,8 +503,7 @@ class MeasurementService:
             try:
                 keithley.set_voltage(read_voltage, icc)
                 time.sleep(0.002)
-                i_set = keithley.measure_current()
-                i_set_val = i_set[1] if isinstance(i_set, (list, tuple)) and len(i_set) > 1 else float(i_set)
+                i_set_val = safe_measure_current(keithley)
             except Exception:
                 i_set_val = float('nan')
             t_now = time.perf_counter() - start_t
@@ -560,8 +526,7 @@ class MeasurementService:
             try:
                 keithley.set_voltage(read_voltage, icc)
                 time.sleep(0.002)
-                i_reset = keithley.measure_current()
-                i_reset_val = i_reset[1] if isinstance(i_reset, (list, tuple)) and len(i_reset) > 1 else float(i_reset)
+                i_reset_val = safe_measure_current(keithley)
             except Exception:
                 i_reset_val = float('nan')
             t_now = time.perf_counter() - start_t
@@ -594,13 +559,8 @@ class MeasurementService:
                             v_arr.append(read_voltage)
 
         # Cleanup
-        try:
-            if optical is not None and led:
-                optical.set_enabled(False)
-            elif psu is not None and led:
-                psu.led_off_380()
-        except Exception:
-            pass
+        # Disable optical using controller
+        optical_ctrl.disable()
         try:
             keithley.set_voltage(0, icc)
             keithley.enable_output(False)
@@ -665,15 +625,10 @@ class MeasurementService:
         except Exception:
             pass
 
-        # Optical setup if requested
-        try:
-            if optical is not None and led:
-                optical.set_level(float(power), getattr(optical, 'capabilities', {}).get('units', 'mW'))
-                optical.set_enabled(True)
-            elif psu is not None and led:
-                psu.led_on_380(power)
-        except Exception:
-            pass
+        # Optical setup using new controller
+        optical_ctrl = OpticalController(optical=optical, psu=psu)
+        if led:
+            optical_ctrl.enable(power)
 
         for pulse_idx in range(int(num_pulses)):
             if should_stop and should_stop():
@@ -731,8 +686,7 @@ class MeasurementService:
             # Forced immediate single read after returning to read voltage
             try:
                 #time.sleep(0.0001)  # brief settle
-                current_tuple = keithley.measure_current()
-                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                current = safe_measure_current(keithley)
             except Exception:
                 current = float('nan')
             t_now = time.perf_counter() - start_time
@@ -771,14 +725,8 @@ class MeasurementService:
                         for _ in buf_t:
                             v_arr.append(read_voltage)
 
-        # Cleanup
-        try:
-            if optical is not None and led:
-                optical.set_enabled(False)
-            elif psu is not None and led:
-                psu.led_off_380()
-        except Exception:
-            pass
+        # Cleanup optical using controller
+        optical_ctrl.disable()
 
         # Do not finish session here; caller/high-level manages session
 
@@ -1201,8 +1149,7 @@ class MeasurementService:
             if should_stop and should_stop():
                 break
             try:
-                current_tuple = keithley.measure_current()
-                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                current = safe_measure_current(keithley)
             except Exception:
                 current = float('nan')
             out_w.append(0.0)
@@ -1351,8 +1298,7 @@ class MeasurementService:
             if should_stop and should_stop():
                 break
             try:
-                current_tuple = keithley.measure_current()
-                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                current = safe_measure_current(keithley)
             except Exception:
                 current = float('nan')
             t_now = time.perf_counter() - t0
@@ -1422,8 +1368,7 @@ class MeasurementService:
             if should_stop and should_stop():
                 break
             try:
-                current_tuple = keithley.measure_current()
-                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                current = safe_measure_current(keithley)
             except Exception:
                 current = float('nan')
             now = time.perf_counter() - t1
@@ -1498,7 +1443,7 @@ class MeasurementService:
                 time.sleep(max(0.0, float(read_settle_s)))
             try:
                 i1_t = keithley.measure_current()
-                i1 = i1_t[1] if isinstance(i1_t, (list, tuple)) and len(i1_t) > 1 else float(i1_t)
+                i1 = normalize_measurement(i1_t)
             except Exception:
                 i1 = float('nan')
 
@@ -1542,7 +1487,7 @@ class MeasurementService:
                 time.sleep(max(0.0, float(read_settle_s)))
             try:
                 i2_t = keithley.measure_current()
-                i2 = i2_t[1] if isinstance(i2_t, (list, tuple)) and len(i2_t) > 1 else float(i2_t)
+                i2 = normalize_measurement(i2_t)
             except Exception:
                 i2 = float('nan')
 
@@ -1590,7 +1535,7 @@ class MeasurementService:
                 keithley.set_voltage(float(read_voltage), float(icc))
                 time.sleep(max(0.0, float(read_settle_s)))
                 i0_t = keithley.measure_current()
-                i0 = i0_t[1] if isinstance(i0_t, (list, tuple)) and len(i0_t) > 1 else float(i0_t)
+                i0 = normalize_measurement(i0_t)
             except Exception:
                 i0 = float('nan')
             # Pulse order by sign of dt
@@ -1610,7 +1555,7 @@ class MeasurementService:
                     if should_stop and should_stop(): break
                     # sample during wait at read voltage
                     try:
-                        _it = keithley.measure_current(); _iv = _it[1] if isinstance(_it, (list, tuple)) and len(_it) > 1 else float(_it)
+                        _iv = safe_measure_current(keithley)
                     except Exception:
                         _iv = float('nan')
                     if timeseries_out is not None:
@@ -1625,7 +1570,7 @@ class MeasurementService:
                 while (time.perf_counter() - t1) < t_wait:
                     if should_stop and should_stop(): break
                     try:
-                        _it = keithley.measure_current(); _iv = _it[1] if isinstance(_it, (list, tuple)) and len(_it) > 1 else float(_it)
+                        _iv = safe_measure_current(keithley)
                     except Exception:
                         _iv = float('nan')
                     if timeseries_out is not None:
@@ -1638,7 +1583,7 @@ class MeasurementService:
                 keithley.set_voltage(float(read_voltage), float(icc))
                 time.sleep(max(0.0, float(read_settle_s)))
                 ia_t = keithley.measure_current()
-                ia = ia_t[1] if isinstance(ia_t, (list, tuple)) and len(ia_t) > 1 else float(ia_t)
+                ia = normalize_measurement(ia_t)
             except Exception:
                 ia = float('nan')
             out_dt.append(float(dt)); I0_list.append(i0); I_after_list.append(ia)
@@ -1785,7 +1730,7 @@ class MeasurementService:
                         time.sleep(0.0001)
             # Read immediate and relaxed after potentiation burst
             try:
-                i1_t = keithley.measure_current(); i1 = i1_t[1] if isinstance(i1_t, (list, tuple)) and len(i1_t) > 1 else float(i1_t)
+                i1 = safe_measure_current(keithley)
             except Exception:
                 i1 = float('nan')
             if relax_s and relax_s > 0:
@@ -1799,7 +1744,7 @@ class MeasurementService:
                         v_ts.append(float(read_voltage)); i_ts.append(iv_rel); t_ts.append(time.perf_counter() - t_ref)
                     time.sleep(0.0001)
             try:
-                i2_t = keithley.measure_current(); i2 = i2_t[1] if isinstance(i2_t, (list, tuple)) and len(i2_t) > 1 else float(i2_t)
+                i2 = safe_measure_current(keithley)
             except Exception:
                 i2 = float('nan')
             idx.append(c + 1); I_im.append(i1); I_post.append(i2)

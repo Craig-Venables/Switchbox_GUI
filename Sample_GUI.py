@@ -18,6 +18,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 from Measurement_GUI import MeasurementGUI
 from Equipment.Multiplexers.Multiplexer_10_OUT.Multiplexer_Class import MultiplexerController
 
+# Import new multiplexer manager
+from Equipment.multiplexer_manager import MultiplexerManager
+
 try:
     from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
 except Exception:
@@ -108,6 +111,9 @@ class SampleGUI:
 
         # initialise switchbox
         # self.switchbox = pySwitchbox.Switchbox()
+        
+        # Initialize multiplexer manager (will be set properly in update_multiplexer)
+        self.mpx_manager = None
 
         # Multiplexer Type Dropdown
         tk.Label(root, text="Multiplexer").grid(row=0, column=0, sticky='w')
@@ -352,15 +358,26 @@ class SampleGUI:
     def update_multiplexer(self, event: Optional[Any]) -> None:
         self.multiplexer_type = self.Multiplexer_type_var.get()
         print("Multiplexer set to:", self.multiplexer_type)
-        if self.multiplexer_type == "Pyswitchbox":
-            # initialise switchbox
-            # self.switchbox = pySwitchbox.Switchbox()
-            print("Initiating Py Switch box")
-        elif self.multiplexer_type == "Electronic_Mpx":
-            print("initialising Electronic_Mpx")
-            self.mpx = MultiplexerController()
-        else:
-            print("please check input")
+        
+        # Use new MultiplexerManager to create appropriate adapter
+        try:
+            if self.multiplexer_type == "Pyswitchbox":
+                self.mpx_manager = MultiplexerManager.create(
+                    "Pyswitchbox",
+                    pin_mapping=pin_mapping
+                )
+                print("Initiated Pyswitchbox via MultiplexerManager")
+            elif self.multiplexer_type == "Electronic_Mpx":
+                self.mpx = MultiplexerController()
+                self.mpx_manager = MultiplexerManager.create(
+                    "Electronic_Mpx",
+                    controller=self.mpx
+                )
+                print("Initiated Electronic_Mpx via MultiplexerManager")
+            else:
+                print("Unknown multiplexer type")
+        except Exception as e:
+            print(f"Error initializing multiplexer: {e}")
 
     def load_image(self, sample: str) -> None:
         """ Load image into canvas set up to add others later simply """
@@ -554,7 +571,7 @@ class SampleGUI:
         self.info_box.config(text=device_text)
 
     def change_relays(self) -> None:
-        """Change relays for the current device"""
+        """Change relays for the current device using MultiplexerManager"""
         current_device = self.device_list[self.current_index]
 
         # Check if current device is in selected devices
@@ -565,34 +582,23 @@ class SampleGUI:
             if not response:
                 return
 
-        if self.multiplexer_type == "Pyswitchbox":
-            def get_device_pins(device_name):
-                if device_name in pin_mapping:
-                    return pin_mapping[device_name]["pins"]
-                else:
-                    print(f"Warning: {device_name} not found in mapping.")
-                    return None
-
-            self.log_terminal("changing relays to")
-            self.log_terminal(self.device_list[self.current_index])
-            # gives pins in array
-            pins_arr = get_device_pins(self.device_list[self.current_index])
-            # self.switchbox.activate(pins_arr)
-
-            self.log_terminal(self.section_var.get() + self.device_var.get())
+        # Use unified multiplexer manager interface
+        if self.mpx_manager is not None:
+            self.log_terminal(f"Routing to {current_device} via {self.multiplexer_type}")
+            success = self.mpx_manager.route_to_device(current_device, self.current_index)
+            
+            if success:
+                self.log_terminal(f"Successfully routed to {current_device}")
+            else:
+                self.log_terminal(f"Failed to route to {current_device}")
+            
+            # Update measurement window if open
             if self.measurement_window:
                 self.measuremnt_gui.current_index = self.current_index
                 self.measuremnt_gui.update_variables()
-
-        elif self.multiplexer_type == "Electronic_Mpx":
-            self.log_terminal("changing multiplexer to")
-            self.log_terminal(self.device_list[self.current_index])
-            device_number = self.current_index + 1
-            self.mpx.select_channel(device_number)
-
-            print("Electronic_Mpx")
-        elif self.multiplexer_type == "Multiplexer_10_OUT":
-            print("Multiplexer_10_OUT")
+        else:
+            self.log_terminal("Multiplexer manager not initialized")
+            print("Error: Multiplexer manager is None")
 
     def clear_canvas(self) -> None:
         self.canvas.delete("all")
