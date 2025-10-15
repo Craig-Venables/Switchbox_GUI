@@ -1796,6 +1796,43 @@ class MeasurementGUI:
 
         self._dc_widgets = []
 
+        # Source Mode Selection (NEW - October 2025)
+        tk.Label(frame, text="Source Mode:", font=("Arial", 9, "bold")).grid(row=1, column=0, sticky="w")
+        self.source_mode_var = tk.StringVar(value="voltage")  # Default: voltage source
+        source_mode_dropdown = ttk.Combobox(
+            frame, 
+            textvariable=self.source_mode_var,
+            values=["voltage", "current"],
+            state="readonly",
+            width=18
+        )
+        source_mode_dropdown.grid(row=1, column=1, sticky="w")
+        
+        # Info label for source mode
+        info_label = tk.Label(frame, text="ℹ️ Current mode works best with Keithley 4200A", 
+                             fg="gray", font=("Arial", 7))
+        info_label.grid(row=1, column=2, sticky="w", padx=(5, 0))
+        
+        # Callback to update labels when source mode changes
+        def on_source_mode_change(*args):
+            mode = self.source_mode_var.get()
+            if mode == "voltage":
+                # Voltage source mode: Source V, Measure I
+                self._dc_lbl_start.config(text="Start Voltage (V):")
+                self._dc_lbl_vhigh.config(text="Voltage High (V):")
+                self._dc_lbl_vlow.config(text="Voltage Low (V, optional):")
+                self._dc_lbl_step.config(text="Step Size (V):")
+                self._dc_lbl_icc.config(text="Icc (A):")
+            elif mode == "current":
+                # Current source mode: Source I, Measure V
+                self._dc_lbl_start.config(text="Start Current (A):")
+                self._dc_lbl_vhigh.config(text="Current High (A):")
+                self._dc_lbl_vlow.config(text="Current Low (A, optional):")
+                self._dc_lbl_step.config(text="Step Size (A):")
+                self._dc_lbl_icc.config(text="Vcc (V):")
+        
+        self.source_mode_var.trace_add("write", on_source_mode_change)
+
         self._dc_lbl_start = tk.Label(frame, text="Start Voltage (V):")
         self._dc_lbl_start.grid(row=2, column=0, sticky="w")
         self.start_voltage = tk.DoubleVar(value=0)
@@ -3996,6 +4033,15 @@ class MeasurementGUI:
                 
                 # Create sweep config
                 from Measurments.sweep_config import SweepConfig
+                from Measurments.source_modes import SourceMode
+                
+                # Get source mode from GUI
+                source_mode_str = getattr(self, 'source_mode_var', None)
+                if source_mode_str:
+                    source_mode = SourceMode.CURRENT if source_mode_str.get() == "current" else SourceMode.VOLTAGE
+                else:
+                    source_mode = SourceMode.VOLTAGE  # Default
+                
                 config = SweepConfig(
                     start_v=start_v,
                     stop_v=stop_v,
@@ -4008,7 +4054,8 @@ class MeasurementGUI:
                     icc=icc_val,
                     led=bool(led),
                     power=led_power,
-                    sequence=sequence
+                    sequence=sequence,
+                    source_mode=source_mode
                 )
                 
                 # Use new hardware-accelerated method
@@ -4034,6 +4081,14 @@ class MeasurementGUI:
                     self.c_arr_disp.append(i)
                     self.t_arr_disp.append(t_s)
                 
+                # Get source mode for point-by-point (now supported!)
+                from Measurments.source_modes import SourceMode
+                source_mode_str = getattr(self, 'source_mode_var', None)
+                if source_mode_str:
+                    source_mode = SourceMode.CURRENT if source_mode_str.get() == "current" else SourceMode.VOLTAGE
+                else:
+                    source_mode = SourceMode.VOLTAGE  # Default
+                
                 v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
                     keithley=self.keithley,
                     icc=icc_val,
@@ -4057,6 +4112,7 @@ class MeasurementGUI:
                     smu_type=smu_type_str,
                     should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
                     on_point=_on_point,
+                    source_mode=source_mode,
                 )
             
             # If endurance selected as a custom mode via UI in future, we could branch here

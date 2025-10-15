@@ -161,6 +161,7 @@ Break up massive GUI files into manageable components:
 | IMPLEMENTATION_EXAMPLES.md | ✅ | Code examples |
 | COMPLETION_SUMMARY.md | ✅ | Phase 1 status |
 | HARDWARE_SWEEP_COMPLETE.md | ✅ | 10-150x faster sweeps! |
+| SOURCE_MODE_ADDED.md | ✅ | Current source mode GUI |
 | GUI_REFACTORING_PLAN.md | ✅ | Phase 2 plan |
 | MASTER_INDEX.md | ✅ | This file |
 
@@ -182,6 +183,9 @@ Break up massive GUI files into manageable components:
 
 ### "I want 10-150x faster sweeps"
 → Read [HARDWARE_SWEEP_COMPLETE.md](HARDWARE_SWEEP_COMPLETE.md)
+
+### "I want to use current source mode"
+→ Read [SOURCE_MODE_ADDED.md](SOURCE_MODE_ADDED.md)
 
 ### "I want to refactor the GUI files"
 → Read [GUI_REFACTORING_PLAN.md](GUI_REFACTORING_PLAN.md)
