@@ -267,11 +267,20 @@ class MeasurementService:
         pause_s: float = 0.0,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        source_mode: Optional['SourceMode'] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """Execute IV sweeps and return (v_arr, c_arr, timestamps).
 
         Notes: optional LED handling, pause-at-extrema, and stop hooks supported.
+        Supports both voltage source (default) and current source modes.
         """
+        # Import source mode utilities
+        from Measurments.source_modes import SourceMode, apply_source, measure_result
+        
+        # Default to voltage source if not specified
+        if source_mode is None:
+            source_mode = SourceMode.VOLTAGE
+        
         if voltage_range is None:
             if start_v is None or stop_v is None:
                 raise ValueError("Must provide voltage_range or (start_v, stop_v)")
@@ -331,23 +340,39 @@ class MeasurementService:
                 if should_stop and should_stop():
                     break
                 try:
-                    keithley.set_voltage(v, icc)
+                    # Use source mode abstraction
+                    apply_source(keithley, source_mode, v, icc)
                 except Exception:
                     # attempt to continue but capture what we can
                     pass
                 time.sleep(0.1)
-                # Use new utility for measurement normalization
-                current = safe_measure_current(keithley)
+                
+                # Measure appropriate quantity based on source mode
+                try:
+                    measurement = measure_result(keithley, source_mode)
+                    measurement = normalize_measurement(measurement)
+                except Exception:
+                    measurement = float('nan')
 
                 t_now = time.time() - start_time
 
-                v_arr.append(v)
-                c_arr.append(current)
+                # Store based on mode (v_arr/c_arr naming is legacy, but works)
+                if source_mode == SourceMode.VOLTAGE:
+                    v_arr.append(v)
+                    c_arr.append(measurement)  # measured current
+                elif source_mode == SourceMode.CURRENT:
+                    v_arr.append(measurement)  # measured voltage
+                    c_arr.append(v)  # sourced current
+                
                 t_arr.append(t_now)
 
                 if on_point:
                     try:
-                        on_point(v, current, t_now)
+                        # Pass source value, measurement, time
+                        if source_mode == SourceMode.VOLTAGE:
+                            on_point(v, measurement, t_now)
+                        else:
+                            on_point(measurement, v, t_now)
                     except Exception:
                         pass
 
@@ -2629,7 +2654,7 @@ class MeasurementService:
         # Use hardware sweep for:
         # - Large sweeps (>20 points)
         # - Fast sweeps (step_delay < 50ms)
-        if num_points > 20 and config.step_delay < 0.05:
+        if num_points > 5 and config.step_delay < 0.1:
             return SweepMethod.HARDWARE_SWEEP
         
         # Otherwise point-by-point (better for live plotting)
