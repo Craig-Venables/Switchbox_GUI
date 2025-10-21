@@ -161,5 +161,100 @@
       "2": {"excitation": "SMU Fast Pulses", "pulse_v": 1.2, "pulse_ms": 1.0, "num": 20, "inter_delay": 0.0, "vbase": 0.2},
       "3": {"excitation": "SMU Fast Hold", "hold_v": 0.2, "duration_s": 5.0, "sample_dt_s": 0.01}
     }
+  },
+  "Full_Feature_Test": {
+    "code_name": "full_test",
+    "sweeps": {
+      "1": {
+        "measurement_type": "IV",
+        "source_mode": "voltage",
+        "temperature_C": 25,
+        "temp_stabilization_s": 30,
+        "start_v": 0,
+        "stop_v": 1,
+        "step_v": 0.05,
+        "sweeps": 3,
+        "step_delay": 0.01,
+        "Sweep_type": "FS",
+        "LED_ON": 0,
+        "icc": 1e-3,
+        "notes": "Baseline IV measurement at room temperature"
+      },
+      "2": {
+        "measurement_type": "IV",
+        "source_mode": "current",
+        "temperature_C": 50,
+        "start_v": 0,
+        "stop_v": 1e-6,
+        "step_v": 1e-8,
+        "sweeps": 1,
+        "step_delay": 0.05,
+        "Sweep_type": "PS",
+        "LED_ON": 1,
+        "power": 1.0,
+        "icc": 10.0,
+        "delay_after_sweep_s": 10,
+        "notes": "Current source mode test at elevated temperature"
+      },
+      "3": {
+        "measurement_type": "Endurance",
+        "source_mode": "voltage",
+        "temperature_C": 25,
+        "set_v": 1.5,
+        "reset_v": -1.5,
+        "pulse_ms": 10,
+        "cycles": 100,
+        "read_v": 0.2,
+        "LED_ON": 1,
+        "sequence": "01010",
+        "icc": 1e-3,
+        "notes": "Endurance cycling with LED pattern"
+      },
+      "4": {
+        "measurement_type": "Retention",
+        "source_mode": "voltage",
+        "temperature_C": 75,
+        "set_v": 1.5,
+        "set_ms": 10,
+        "read_v": 0.2,
+        "times_s": [1, 3, 10, 30, 100, 300, 1000],
+        "LED_ON": 0,
+        "icc": 1e-3,
+        "delay_after_sweep_s": 5,
+        "notes": "Retention test at high temperature"
+      },
+      "5": {
+        "measurement_type": "PulsedIV",
+        "source_mode": "voltage",
+        "start_v": 0.0,
+        "stop_v": 1.0,
+        "step_v": 0.1,
+        "pulse_ms": 1.0,
+        "vbase": 0.2,
+        "inter_delay": 0.0,
+        "icc": 1e-3,
+        "notes": "Pulsed IV measurement"
+      },
+      "6": {
+        "measurement_type": "FastPulses",
+        "source_mode": "voltage",
+        "pulse_v": 1.2,
+        "pulse_ms": 1.0,
+        "num": 20,
+        "inter_delay": 0.0,
+        "vbase": 0.2,
+        "icc": 1e-3,
+        "notes": "Fast pulse train"
+      },
+      "7": {
+        "measurement_type": "Hold",
+        "source_mode": "voltage",
+        "hold_v": 0.2,
+        "duration_s": 5.0,
+        "sample_dt_s": 0.01,
+        "icc": 1e-3,
+        "notes": "Hold voltage for stability test"
+      }
+    }
   }
 }

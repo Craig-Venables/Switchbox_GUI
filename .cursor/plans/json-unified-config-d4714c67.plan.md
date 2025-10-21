@@ -35,7 +35,11 @@ Add new top-level fields to each sweep entry:
       "1": {
         "measurement_type": "IV",           // NEW: IV, Endurance, Retention, PulsedIV, FastPulses, Hold
         "source_mode": "voltage",           // NEW: voltage/current (defaults to voltage)
-        "temperature_C": 25,                // NEW: Target temperature
+        "temperature_C": 25,                // NEW: Target temperature (optional)
+        "temp_stabilization_s": 30,         // NEW: Wait time after temp change (optional)
+        "icc": 1e-3,                        // NEW: Compliance per sweep (optional, defaults to GUI value)
+        "delay_after_sweep_s": 5,           // NEW: Delay after this sweep completes (optional)
+        "notes": "Testing after forming",   // NEW: Metadata/comments (optional)
         "start_v": 0,
         "stop_v": 1,
         "step_v": 0.05,
@@ -81,7 +85,7 @@ elif "excitation" in params:
     measurement_type = excitation_map.get(params["excitation"], "IV")
 ```
 
-### Step 3: Add Source Mode Support
+### Step 3: Add Source Mode, Compliance, and Metadata Support
 
 **File: Measurement_GUI.py (~line 3034)**
 
@@ -92,6 +96,18 @@ Add after reading sweep parameters:
 source_mode_str = params.get("source_mode", "voltage")
 from Measurments.source_modes import SourceMode
 source_mode = SourceMode.CURRENT if source_mode_str == "current" else SourceMode.VOLTAGE
+
+# Read compliance per sweep (NEW - optional, defaults to GUI value)
+icc_val = params.get("icc", None)
+if icc_val is None:
+    icc_val = float(self.icc.get())  # Use GUI value
+else:
+    icc_val = float(icc_val)  # Use JSON value
+
+# Read metadata/notes (NEW - optional)
+sweep_notes = params.get("notes", None)
+if sweep_notes:
+    print(f"Sweep {key} notes: {sweep_notes}")
 ```
 
 Pass to all measurement service calls:
@@ -99,6 +115,7 @@ Pass to all measurement service calls:
 ```python
 v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
     # ... existing parameters ...
+    icc=icc_val,  # UPDATED: per-sweep compliance
     source_mode=source_mode,  # NEW
 )
 ```

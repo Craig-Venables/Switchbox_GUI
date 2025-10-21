@@ -187,6 +187,7 @@ class MeasurementGUI:
     retention, transient captures, etc.) using an underlying
     `MeasurementService` and instrument managers (SMU/PSU/Temp).
 
+
     Main responsibilities:
     - Construct the GUI layout (connection, sweep parameters, plots, logs)
     - Translate GUI parameters into calls to `MeasurementService`
@@ -1494,9 +1495,26 @@ class MeasurementGUI:
                                                     "Transient Decay"], state="readonly")
         self.excitation_menu.grid(row=0, column=1, sticky="ew")
 
+        # Source Mode Selection (placed right after measurement type)
+        tk.Label(frame, text="Source Mode:", font=("Arial", 9, "bold")).grid(row=1, column=0, sticky="w")
+        self.source_mode_var = tk.StringVar(value="voltage")  # Default: voltage source
+        source_mode_dropdown = ttk.Combobox(
+            frame, 
+            textvariable=self.source_mode_var,
+            values=["voltage", "current"],
+            state="readonly",
+            width=18
+        )
+        source_mode_dropdown.grid(row=1, column=1, sticky="w")
+        
+        # Info label for source mode
+        #info_label = tk.Label(frame, text="ℹ️ Current mode works best with Keithley 4200A", 
+        #                     fg="gray", font=("Arial", 7))
+        #info_label.grid(row=1, column=2, sticky="w", padx=(5, 0))
+
         # Dynamic params container for excitation-specific options
         exc_dyn = tk.Frame(frame)
-        exc_dyn.grid(row=1, column=0, columnspan=2, sticky="ew")
+        exc_dyn.grid(row=2, column=0, columnspan=2, sticky="ew")
         exc_dyn.columnconfigure(1, weight=1)
         self._excitation_params_frame = exc_dyn
 
@@ -1595,28 +1613,28 @@ class MeasurementGUI:
                         _toggle_dc_step_fields(True)
                     elif mode == VoltageRangeMode.FIXED_SWEEP_RATE:
                         _toggle_dc_step_fields(False)
-                        # Row 5: Sweep rate (V/s)
+                        # Row 6: Sweep rate (V/s)
                         self._dc_alt_lbl1 = tk.Label(frame, text="Sweep rate (V/s):")
-                        self._dc_alt_lbl1.grid(row=5, column=0, sticky="w")
+                        self._dc_alt_lbl1.grid(row=6, column=0, sticky="w")
                         self._dc_alt_ent1 = tk.Entry(frame, textvariable=self.var_sweep_rate)
-                        self._dc_alt_ent1.grid(row=5, column=1, sticky="ew")
-                        # Row 6: # Steps (optional)
+                        self._dc_alt_ent1.grid(row=6, column=1, sticky="ew")
+                        # Row 7: # Steps (optional)
                         self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):")
-                        self._dc_alt_lbl2.grid(row=6, column=0, sticky="w")
+                        self._dc_alt_lbl2.grid(row=7, column=0, sticky="w")
                         self._dc_alt_ent2 = tk.Entry(frame, textvariable=self.var_num_steps)
-                        self._dc_alt_ent2.grid(row=6, column=1, sticky="ew")
+                        self._dc_alt_ent2.grid(row=7, column=1, sticky="ew")
                     elif mode == VoltageRangeMode.FIXED_VOLTAGE_TIME:
                         _toggle_dc_step_fields(False)
-                        # Row 5: Total sweep time (s)
+                        # Row 6: Total sweep time (s)
                         self._dc_alt_lbl1 = tk.Label(frame, text="Total sweep time (s):")
-                        self._dc_alt_lbl1.grid(row=5, column=0, sticky="w")
+                        self._dc_alt_lbl1.grid(row=6, column=0, sticky="w")
                         self._dc_alt_ent1 = tk.Entry(frame, textvariable=self.var_total_time)
-                        self._dc_alt_ent1.grid(row=5, column=1, sticky="ew")
-                        # Row 6: # Steps (optional)
+                        self._dc_alt_ent1.grid(row=6, column=1, sticky="ew")
+                        # Row 7: # Steps (optional)
                         self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):")
-                        self._dc_alt_lbl2.grid(row=6, column=0, sticky="w")
+                        self._dc_alt_lbl2.grid(row=7, column=0, sticky="w")
                         self._dc_alt_ent2 = tk.Entry(frame, textvariable=self.var_num_steps)
-                        self._dc_alt_ent2.grid(row=6, column=1, sticky="ew")
+                        self._dc_alt_ent2.grid(row=7, column=1, sticky="ew")
                 sweep_mode_menu.bind("<<ComboboxSelected>>", render_dynamic_params)
                 render_dynamic_params()
                 # Show DC widgets
@@ -1796,23 +1814,6 @@ class MeasurementGUI:
 
         self._dc_widgets = []
 
-        # Source Mode Selection (NEW - October 2025)
-        tk.Label(frame, text="Source Mode:", font=("Arial", 9, "bold")).grid(row=1, column=0, sticky="w")
-        self.source_mode_var = tk.StringVar(value="voltage")  # Default: voltage source
-        source_mode_dropdown = ttk.Combobox(
-            frame, 
-            textvariable=self.source_mode_var,
-            values=["voltage", "current"],
-            state="readonly",
-            width=18
-        )
-        source_mode_dropdown.grid(row=1, column=1, sticky="w")
-        
-        # Info label for source mode
-        info_label = tk.Label(frame, text="ℹ️ Current mode works best with Keithley 4200A", 
-                             fg="gray", font=("Arial", 7))
-        info_label.grid(row=1, column=2, sticky="w", padx=(5, 0))
-        
         # Callback to update labels when source mode changes
         def on_source_mode_change(*args):
             mode = self.source_mode_var.get()
@@ -1834,63 +1835,63 @@ class MeasurementGUI:
         self.source_mode_var.trace_add("write", on_source_mode_change)
 
         self._dc_lbl_start = tk.Label(frame, text="Start Voltage (V):")
-        self._dc_lbl_start.grid(row=2, column=0, sticky="w")
+        self._dc_lbl_start.grid(row=3, column=0, sticky="w")
         self.start_voltage = tk.DoubleVar(value=0)
         self._dc_ent_start = tk.Entry(frame, textvariable=self.start_voltage)
-        self._dc_ent_start.grid(row=2, column=1)
+        self._dc_ent_start.grid(row=3, column=1)
         self._dc_widgets.extend([self._dc_lbl_start, self._dc_ent_start])
 
         self._dc_lbl_vhigh = tk.Label(frame, text="Voltage High (V):")
-        self._dc_lbl_vhigh.grid(row=3, column=0, sticky="w")
+        self._dc_lbl_vhigh.grid(row=4, column=0, sticky="w")
         self.voltage_high = tk.DoubleVar(value=1)
         self._dc_ent_vhigh = tk.Entry(frame, textvariable=self.voltage_high)
-        self._dc_ent_vhigh.grid(row=3, column=1)
+        self._dc_ent_vhigh.grid(row=4, column=1)
         self._dc_widgets.extend([self._dc_lbl_vhigh, self._dc_ent_vhigh])
 
         # Optional asymmetric negative voltage limit
         self._dc_lbl_vlow = tk.Label(frame, text="Voltage Low (V, optional):")
-        self._dc_lbl_vlow.grid(row=4, column=0, sticky="w")
+        self._dc_lbl_vlow.grid(row=5, column=0, sticky="w")
         self.voltage_low_str = tk.StringVar(value="")
         self._dc_ent_vlow = tk.Entry(frame, textvariable=self.voltage_low_str)
-        self._dc_ent_vlow.grid(row=4, column=1)
+        self._dc_ent_vlow.grid(row=5, column=1)
         self._dc_widgets.extend([self._dc_lbl_vlow, self._dc_ent_vlow])
 
         self._dc_lbl_step = tk.Label(frame, text="Step Size (V):")
-        self._dc_lbl_step.grid(row=5, column=0, sticky="w")
+        self._dc_lbl_step.grid(row=6, column=0, sticky="w")
         self.step_size = tk.DoubleVar(value=0.1)
         self._dc_ent_step = tk.Entry(frame, textvariable=self.step_size)
-        self._dc_ent_step.grid(row=5, column=1)
+        self._dc_ent_step.grid(row=6, column=1)
         self._dc_widgets.extend([self._dc_lbl_step, self._dc_ent_step])
 
         self._dc_lbl_dwell = tk.Label(frame, text="Step Delay (S):")
-        self._dc_lbl_dwell.grid(row=6, column=0, sticky="w")
+        self._dc_lbl_dwell.grid(row=7, column=0, sticky="w")
         self.step_delay = tk.DoubleVar(value=0.05)
         self._dc_ent_dwell = tk.Entry(frame, textvariable=self.step_delay)
-        self._dc_ent_dwell.grid(row=6, column=1)
+        self._dc_ent_dwell.grid(row=7, column=1)
         self._dc_widgets.extend([self._dc_lbl_dwell, self._dc_ent_dwell])
 
         self._dc_lbl_sweeps = tk.Label(frame, text="# Sweeps:")
-        self._dc_lbl_sweeps.grid(row=7, column=0, sticky="w")
+        self._dc_lbl_sweeps.grid(row=8, column=0, sticky="w")
         self.sweeps = tk.DoubleVar(value=1)
         self._dc_ent_sweeps = tk.Entry(frame, textvariable=self.sweeps)
-        self._dc_ent_sweeps.grid(row=7, column=1)
+        self._dc_ent_sweeps.grid(row=8, column=1)
         self._dc_widgets.extend([self._dc_lbl_sweeps, self._dc_ent_sweeps])
 
         self._dc_lbl_icc = tk.Label(frame, text="Icc:")
-        self._dc_lbl_icc.grid(row=8, column=0, sticky="w")
+        self._dc_lbl_icc.grid(row=9, column=0, sticky="w")
         self.icc = tk.DoubleVar(value=0.1)
         self._dc_ent_icc = tk.Entry(frame, textvariable=self.icc)
-        self._dc_ent_icc.grid(row=8, column=1)
+        self._dc_ent_icc.grid(row=9, column=1)
         self._dc_widgets.extend([self._dc_lbl_icc, self._dc_ent_icc])
 
         # Sweep Type variable already declared above; controls will be shown in DC Triangle UI
 
         # LED Controls mini title
-        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=22, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=23, column=0, columnspan=2, sticky="w",
                                                                              pady=(10, 2))
 
         # LED Toggle Button
-        tk.Label(frame, text="LED Status:").grid(row=23, column=0, sticky="w")
+        tk.Label(frame, text="LED Status:").grid(row=24, column=0, sticky="w")
         self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
 
         def toggle_led():
@@ -1907,23 +1908,23 @@ class MeasurementGUI:
 
         self.led_button = tk.Button(frame, text="OFF", bg="red", fg="white",
                                     width=8, command=toggle_led)
-        self.led_button.grid(row=23, column=1, sticky="w")
+        self.led_button.grid(row=24, column=1, sticky="w")
 
-        tk.Label(frame, text="Led_Power (0-1):").grid(row=24, column=0, sticky="w")
+        tk.Label(frame, text="Led_Power (0-1):").grid(row=25, column=0, sticky="w")
         self.led_power = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.led_power).grid(row=24, column=1)
+        tk.Entry(frame, textvariable=self.led_power).grid(row=25, column=1)
 
-        tk.Label(frame, text="Sequence: (01010)").grid(row=25, column=0, sticky="w")
+        tk.Label(frame, text="Sequence: (01010)").grid(row=26, column=0, sticky="w")
         self.sequence = tk.StringVar()
-        tk.Entry(frame, textvariable=self.sequence).grid(row=25, column=1)
+        tk.Entry(frame, textvariable=self.sequence).grid(row=26, column=1)
 
         # Other Controls mini title
-        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=26, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=27, column=0, columnspan=2, sticky="w",
                                                                       pady=(10, 2))
 
-        tk.Label(frame, text="Pause at end?:").grid(row=27, column=0, sticky="w")
+        tk.Label(frame, text="Pause at end?:").grid(row=28, column=0, sticky="w")
         self.pause = tk.DoubleVar(value=0.0)
-        tk.Entry(frame, textvariable=self.pause).grid(row=27, column=1)
+        tk.Entry(frame, textvariable=self.pause).grid(row=28, column=1)
 
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.start_measurement)
@@ -1931,11 +1932,11 @@ class MeasurementGUI:
             self.measurement_thread.start()
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=start_thread)
-        self.measure_button.grid(row=28, column=0, columnspan=1, pady=5)
+        self.measure_button.grid(row=29, column=0, columnspan=1, pady=5)
 
         # stop button
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
-        self.adaptive_button.grid(row=28, column=1, columnspan=1, pady=10)
+        self.adaptive_button.grid(row=29, column=1, columnspan=1, pady=10)
 
         # Note: Detailed sweep controls moved to popup editor; only Pause remains in main panel
 
@@ -3065,11 +3066,59 @@ class MeasurementGUI:
 
                     # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
 
-                    # Optional excitation override for this sweep (default: DC Triangle IV)
-                    try:
-                        excitation_mode = str(params.get("excitation", "DC Triangle IV"))
-                    except Exception:
-                        excitation_mode = "DC Triangle IV"
+                    # Read measurement_type (new unified field)
+                    measurement_type = str(params.get("measurement_type", "IV"))
+                    
+                    # Backward compatibility: check old "mode" and "excitation" fields
+                    if "mode" in params:
+                        measurement_type = params["mode"]  # Endurance, Retention
+                    elif "excitation" in params:
+                        # Map old excitation names to measurement_type
+                        excitation_map = {
+                            "DC Triangle IV": "IV",
+                            "SMU Pulsed IV": "PulsedIV",
+                            "SMU Fast Pulses": "FastPulses",
+                            "SMU Fast Hold": "Hold"
+                        }
+                        measurement_type = excitation_map.get(params["excitation"], "IV")
+                    
+                    # Read source mode (NEW)
+                    source_mode_str = params.get("source_mode", "voltage")
+                    from Measurments.source_modes import SourceMode
+                    source_mode = SourceMode.CURRENT if source_mode_str == "current" else SourceMode.VOLTAGE
+                    
+                    # Read compliance per sweep (NEW - optional, defaults to GUI value)
+                    icc_val = params.get("icc", None)
+                    if icc_val is None:
+                        icc_val = float(self.icc.get())  # Use GUI value
+                    else:
+                        icc_val = float(icc_val)  # Use JSON value
+                    
+                    # Read metadata/notes (NEW - optional)
+                    sweep_notes = params.get("notes", None)
+                    if sweep_notes:
+                        print(f"Sweep {key} notes: {sweep_notes}")
+                    
+                    # Read temperature (NEW - OPTIONAL, defaults to OFF)
+                    # Temperature control is ONLY activated if temperature_C is explicitly set in JSON
+                    if "temperature_C" in params:
+                        target_temp = params["temperature_C"]
+                        if hasattr(self, 'temp_controller') and self.temp_controller is not None:
+                            try:
+                                print(f"Setting temperature to {target_temp}°C")
+                                self.temp_controller.set_temperature(float(target_temp))
+                                
+                                # Optional: wait for stabilization (only if specified)
+                                stabilization_time = params.get("temp_stabilization_s", 0)
+                                if stabilization_time > 0:
+                                    print(f"Waiting {stabilization_time}s for temperature stabilization...")
+                                    time.sleep(float(stabilization_time))
+                            except Exception as e:
+                                print(f"Temperature setting failed: {e}")
+                                # Continue with measurement even if temp control fails
+                        else:
+                            print("Warning: temperature_C specified but no temp controller connected")
+                    # If "temperature_C" not in params, temperature control is completely skipped
 
                     # Helpers for SMU_AND_PMU timing defaults
                     def _min_pw_ms() -> float:
@@ -3079,7 +3128,108 @@ class MeasurementGUI:
                         except Exception:
                             return 1.0
 
-                    if excitation_mode == "SMU Pulsed IV":
+                    # Route to appropriate measurement based on measurement_type
+                    if measurement_type == "IV":
+                        # Optional per-sweep negative stop voltage: params override UI field
+                        neg_stop_v_param = None
+                        try:
+                            if 'neg_stop_v' in params:
+                                neg_stop_v_param = float(params.get('neg_stop_v'))
+                            elif 'Vneg' in params:
+                                neg_stop_v_param = float(params.get('Vneg'))
+                            else:
+                                raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
+                                if raw_neg != "":
+                                    neg_stop_v_param = float(raw_neg)
+                        except Exception:
+                            neg_stop_v_param = None
+                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v=neg_stop_v_param)
+                        
+                        def _on_point(v, i, t_s):
+                            self.v_arr_disp.append(v)
+                            self.c_arr_disp.append(i)
+                            self.t_arr_disp.append(t_s)
+                        
+                        v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                            keithley=self.keithley,
+                            start_v=start_v,
+                            stop_v=stop_v,
+                            step_v=step_v,
+                            sweeps=sweeps,
+                            step_delay=step_delay,
+                            sweep_type=sweep_type,
+                            icc=icc_val,
+                            psu=getattr(self, 'psu', None),
+                            led=led,
+                            power=power,
+                            optical=getattr(self, 'optical', None),
+                            sequence=sequence,
+                            pause_s=pause,
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            source_mode=source_mode,
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=_on_point
+                        )
+
+                    elif measurement_type == "Endurance":
+                        set_v = params.get("set_v", 1.5)
+                        reset_v = params.get("reset_v", -1.5)
+                        pulse_ms = params.get("pulse_ms", 10)
+                        cycles = params.get("cycles", 100)
+                        read_v = params.get("read_v", 0.2)
+                        
+                        def _on_point(v, i, t_s):
+                            self.v_arr_disp.append(v)
+                            self.c_arr_disp.append(i)
+                            self.t_arr_disp.append(t_s)
+                        
+                        v_arr, c_arr, timestamps = self.measurement_service.run_endurance(
+                            keithley=self.keithley,
+                            set_voltage=set_v,
+                            reset_voltage=reset_v,
+                            pulse_width_s=pulse_ms/1000,
+                            num_cycles=cycles,
+                            read_voltage=read_v,
+                            icc=icc_val,
+                            psu=getattr(self, 'psu', None),
+                            led=led,
+                            power=power,
+                            optical=getattr(self, 'optical', None),
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=_on_point
+                        )
+                        print("endurance")
+
+                    elif measurement_type == "Retention":
+                        set_v = params.get("set_v", 1.5)
+                        set_ms = params.get("set_ms", 10)
+                        read_v = params.get("read_v", 0.2)
+                        times_s = params.get("times_s", [1, 10, 100, 1000])
+                        
+                        def _on_point(v, i, t_s):
+                            self.v_arr_disp.append(v)
+                            self.c_arr_disp.append(i)
+                            self.t_arr_disp.append(t_s)
+                        
+                        v_arr, c_arr, timestamps = self.measurement_service.run_retention(
+                            keithley=self.keithley,
+                            set_voltage=set_v,
+                            set_time_s=set_ms/1000,
+                            read_voltage=read_v,
+                            repeat_delay_s=0.1,
+                            number=len(times_s),
+                            icc=icc_val,
+                            psu=getattr(self, 'psu', None),
+                            led=led,
+                            optical=getattr(self, 'optical', None),
+                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                            on_point=_on_point
+                        )
+                        print("retention")
+
+                    elif measurement_type == "PulsedIV":
                         # Parameters
                         start_amp = float(params.get("start_v", 0.0))
                         stop_amp = float(params.get("stop_v", 0.2))
@@ -3088,7 +3238,6 @@ class MeasurementGUI:
                         pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
                         vbase = float(params.get("vbase", 0.2))
                         inter_step = float(params.get("inter_delay", 0.0))
-                        icc_val = float(self.icc.get())
 
                         v_arr, c_arr, timestamps = self.measurement_service.run_pulsed_iv_sweep(
                             keithley=self.keithley,
@@ -3105,13 +3254,14 @@ class MeasurementGUI:
                             on_point=None,
                             validate_timing=True,
                         )
-                    elif excitation_mode == "SMU Fast Pulses":
+                        
+                    elif measurement_type == "FastPulses":
                         pulse_v = float(params.get("pulse_v", 0.2))
                         pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
                         num_pulses = int(params.get("num", 10))
                         inter_delay = float(params.get("inter_delay", 0.0))
                         vbase = float(params.get("vbase", 0.2))
-                        icc_val = float(self.icc.get())
+                        
                         v_arr, c_arr, timestamps = self.measurement_service.run_pulse_measurement(
                             keithley=self.keithley,
                             pulse_voltage=pulse_v,
@@ -3130,118 +3280,25 @@ class MeasurementGUI:
                             on_point=None,
                             validate_timing=True,
                         )
-                    elif excitation_mode == "SMU Fast Hold":
+                        
+                    elif measurement_type == "Hold":
                         hold_v = float(params.get("hold_v", 0.2))
                         duration = float(params.get("duration_s", 5.0))
                         sample_dt = float(params.get("sample_dt_s", 0.01))
+                        
                         v_arr, c_arr, timestamps = self.measurement_service.run_dc_capture(
                             keithley=self.keithley,
                             voltage_v=hold_v,
                             capture_time_s=duration,
                             sample_dt_s=sample_dt,
-                            icc=float(self.icc.get()),
+                            icc=icc_val,
                             on_point=None,
                             should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
                         )
-                    elif sweep_type in ("NS", "PS", "FS"):
-                        # Optional per-sweep negative stop voltage: params override UI field
-                        neg_stop_v_param = None
-                        try:
-                            if 'neg_stop_v' in params:
-                                neg_stop_v_param = float(params.get('neg_stop_v'))
-                            elif 'Vneg' in params:
-                                neg_stop_v_param = float(params.get('Vneg'))
-                            else:
-                                raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
-                                if raw_neg != "":
-                                    neg_stop_v_param = float(raw_neg)
-                        except Exception:
-                            neg_stop_v_param = None
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v=neg_stop_v_param)
-                        icc_val = float(self.icc.get())
-                        def _on_point(v, i, t_s):
-                            self.v_arr_disp.append(v)
-                            self.c_arr_disp.append(i)
-                            self.t_arr_disp.append(t_s)
-                        v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
-                            keithley=self.keithley,
-                            icc=icc_val,
-                            sweeps=sweeps,
-                            step_delay=step_delay,
-                            voltage_range=voltage_range,
-                            psu=getattr(self, 'psu', None),
-                            led=bool(led),
-                            power=power,
-                            optical=getattr(self, 'optical', None),
-                            sequence=sequence,
-                            pause_s=pause,
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=_on_point,
-                        )
-                    elif sweep_type == "Endurance":
-                        icc_val = float(self.icc.get())
-                        def _on_point(v, i, t_s):
-                            self.v_arr_disp.append(v)
-                            self.c_arr_disp.append(i)
-                            self.t_arr_disp.append(t_s)
-                        v_arr, c_arr, timestamps = self.measurement_service.run_endurance(
-                            keithley=self.keithley,
-                            set_voltage=set_voltage,
-                            reset_voltage=reset_voltage,
-                            pulse_width_s=max(0.001, float(led_time) if isinstance(led_time, (int,float)) else 0.01),
-                            num_cycles=int(number),
-                            read_voltage=read_voltage,
-                            inter_cycle_delay_s=float(repeat_delay) if isinstance(repeat_delay, (int,float)) else 0.0,
-                            icc=icc_val,
-                            psu=getattr(self, 'psu', None),
-                            led=bool(led),
-                            power=power,
-                            optical=getattr(self, 'optical', None),
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=_on_point,
-                        )
-                        print("endurance")
-                    elif sweep_type == "Retention":
-                        v_arr, c_arr, timestamps = self.retention_measure(set_voltage,set_time,read_voltage,repeat_delay,number,sequence,led,led_time,pause)
-                        print("retention")
+                        
                     else:
-                        # default to FS using service
-                        # Reuse same neg_stop_v_param logic
-                        neg_stop_v_param = None
-                        try:
-                            if 'neg_stop_v' in params:
-                                neg_stop_v_param = float(params.get('neg_stop_v'))
-                            elif 'Vneg' in params:
-                                neg_stop_v_param = float(params.get('Vneg'))
-                            else:
-                                raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
-                                if raw_neg != "":
-                                    neg_stop_v_param = float(raw_neg)
-                        except Exception:
-                            neg_stop_v_param = None
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, "FS", neg_stop_v=neg_stop_v_param)
-                        icc_val = float(self.icc.get())
-                        def _on_point(v, i, t_s):
-                            self.v_arr_disp.append(v)
-                            self.c_arr_disp.append(i)
-                            self.t_arr_disp.append(t_s)
-                        v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
-                            keithley=self.keithley,
-                            icc=icc_val,
-                            sweeps=sweeps,
-                            step_delay=step_delay,
-                            voltage_range=voltage_range,
-                            psu=getattr(self, 'psu', None),
-                            led=bool(led),
-                            power=power,
-                            sequence=sequence,
-                            pause_s=pause,
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=_on_point,
-                        )
+                        print(f"Unknown measurement_type: {measurement_type}")
+                        continue
 
                     # this isnt being used yet i dont think
                     if device not in self.measurement_data:
@@ -3284,8 +3341,20 @@ class MeasurementGUI:
                     # show graphs on main display
                     self.graphs_show(v_arr, c_arr, key, stop_v)
 
-                    # give time to sleep between measurements!
-                    time.sleep(2)
+                    # Handle inter-sweep delay (NEW - optional)
+                    delay_after_sweep = params.get("delay_after_sweep_s", None)
+                    if delay_after_sweep is not None:
+                        try:
+                            delay_time = float(delay_after_sweep)
+                            if delay_time > 0:
+                                print(f"Waiting {delay_time}s after sweep {key}...")
+                                time.sleep(delay_time)
+                        except (ValueError, TypeError):
+                            print(f"Invalid delay_after_sweep_s value: {delay_after_sweep}")
+                    
+                    # Default sleep between measurements (if no specific delay set)
+                    if delay_after_sweep is None:
+                        time.sleep(2)
                 try:
                     if hasattr(self, 'optical') and self.optical is not None and bool(led):
                         self.optical.set_enabled(False)

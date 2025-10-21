@@ -53,7 +53,7 @@ sample_config = {
         "sections": {"A": True, "B": True, "C": False, "D": True, "E": True, "F": False, "G": True, "H": True,
                      "I": True, "J": True, "K": True, "L": True},
         "devices": [str(i) for i in range(1, 11)]},
-    "Multiplexer_10_OUT": {
+    "Device_Array_10": {
         "sections": {"A": True},
         "devices": [str(i) for i in range(1, 11)]}}
 
@@ -368,7 +368,15 @@ class SampleGUI:
                 )
                 print("Initiated Pyswitchbox via MultiplexerManager")
             elif self.multiplexer_type == "Electronic_Mpx":
-                self.mpx = MultiplexerController()
+                # Try to create with real hardware, fall back to simulation if needed
+                try:
+                    self.mpx = MultiplexerController(simulation_mode=False)
+                    print("Initiated Electronic_Mpx with real hardware")
+                except Exception as e:
+                    print(f"Hardware not available, using simulation mode: {e}")
+                    self.mpx = MultiplexerController(simulation_mode=True)
+                    print("Initiated Electronic_Mpx in simulation mode")
+                
                 self.mpx_manager = MultiplexerManager.create(
                     "Electronic_Mpx",
                     controller=self.mpx
@@ -388,7 +396,7 @@ class SampleGUI:
             self.tk_img = ImageTk.PhotoImage(img)
             self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
 
-        if sample == 'Multiplexer_10_OUT':
+        if sample == 'Device_Array_10':
             sample = BASE_DIR / "Helpers" / "Sample_Infomation" / "Multiplexer_10_OUT.jpg"
             self.original_image = Image.open(sample)
             img = self.original_image.resize((400, 400))

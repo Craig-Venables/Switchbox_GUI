@@ -5,14 +5,22 @@ from nidaqmx.constants import LineGrouping
 """ Multiplexer class for controlling the multiplexer, Truth table is required to be boolean it cannot be 1,0!"""
 
 class MultiplexerController:
-    def __init__(self, device_name=None):
+    def __init__(self, device_name=None, simulation_mode=False):
         """
         Initialize the Multiplexer Controller
         Args:
             device_name (str): Name of the NI DAQ device. If None, will attempt to find first available device
+            simulation_mode (bool): If True, run in simulation mode without hardware
         """
-        # Find and set device name
-        self.device_name = self._get_device_name(device_name)
+        self.simulation_mode = simulation_mode
+        
+        if simulation_mode:
+            print("Running MultiplexerController in SIMULATION MODE")
+            self.device_name = "SIMULATION"
+        else:
+            # Find and set device name
+            self.device_name = self._get_device_name(device_name)
+        
         self.current_channel = None
 
         # Truth table mapping for channels (A3, A2, A1, A0, EN)
@@ -72,20 +80,26 @@ class MultiplexerController:
 
             # Get the binary values for the selected channel
             a3, a2, a1, a0, en = self.truth_table[channel]
+            values = [en, a0, a1, a2, a3]  # reorder
 
-            values = [en,a0,a1, a2, a3]  #reorder
+            if self.simulation_mode:
+                # Simulation mode - just log the action
+                if channel == 'None':
+                    print(f"[SIMULATION] Multiplexer disabled (all channels off)")
+                else:
+                    print(f"[SIMULATION] Selected channel {channel} with values: {values}")
+                    print(f"[SIMULATION]   EN={en}, A3={a3}, A2={a2}, A1={a1}, A0={a0}")
+            else:
+                # Real hardware mode
+                with nidaqmx.Task() as task:
+                    # Configure digital output lines
+                    task.do_channels.add_do_chan(f"{self.device_name}/port0/line0:4", line_grouping=LineGrouping.CHAN_PER_LINE)
 
-
-            with nidaqmx.Task() as task:
-                # Configure digital output lines
-                task.do_channels.add_do_chan(f"{self.device_name}/port0/line0:4" ,line_grouping=LineGrouping.CHAN_PER_LINE)
-
-                # Then write new values
-                task.write(values, auto_start=True)
-                time.sleep(0.01)  # Small delay to ensure latching
+                    # Then write new values
+                    task.write(values, auto_start=True)
+                    time.sleep(0.01)  # Small delay to ensure latching
 
             self.current_channel = channel
-            #print(f"Set channel {channel} with values: {values}")  # Debug output
 
         except nidaqmx.DaqError as e:
             raise ConnectionError(f"Failed to set channel: {e}")
