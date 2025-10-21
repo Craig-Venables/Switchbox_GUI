@@ -187,6 +187,9 @@ Break up massive GUI files into manageable components:
 ### "I want to use current source mode"
 → Read [SOURCE_MODE_ADDED.md](SOURCE_MODE_ADDED.md)
 
+### "I want to configure automated tests via JSON"
+→ Read [JSON_CONFIG_GUIDE.md](JSON_CONFIG_GUIDE.md)
+
 ### "I want to refactor the GUI files"
 → Read [GUI_REFACTORING_PLAN.md](GUI_REFACTORING_PLAN.md)
 

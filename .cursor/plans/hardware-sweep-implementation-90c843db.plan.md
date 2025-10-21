@@ -4,6 +4,7 @@
 **🆕 UPDATED:** October 14, 2025 - Plan modernized to use new modular utilities!
 
 **Changes:**
+
 - ✅ Uses `OpticalController` instead of if optical/psu blocks
 - ✅ Uses `safe_measure_current()` instead of tuple normalization  
 - ✅ Integrates with `sweep_patterns.py` and `source_modes.py`
@@ -37,6 +38,7 @@ Measurement_GUI (line 3982-4005)
 ## PHASE 1: Architecture Refactoring (Polish First)
 
 **NOTE:** Oct 2025 - We now have `sweep_patterns.py` with similar functionality.
+
 Consider using `SweepType` from that module instead of creating duplicate enums.
 
 ### 1.1 Create Sweep Configuration Module
@@ -44,6 +46,7 @@ Consider using `SweepType` from that module instead of creating duplicate enums.
 **New File**: `Measurments/sweep_config.py`
 
 Create dataclasses to encapsulate sweep parameters and instrument capabilities.
+
 This complements the existing `sweep_patterns.py` created in the modular refactoring:
 
 ```python
@@ -397,13 +400,6 @@ self.graphs_show(v_arr, c_arr, "1", stop_v)
 - [ ] Test user experience
 - [ ] Verify plotting works correctly
 
-### To-dos
-
-- [ ] Test Phase 2: test hardware sweep with various configurations and measure speedup
-- [ ] Test Phase 3: full end-to-end testing with GUI, plotting, and all features
-
----
-
 ## 🆕 UPDATES - October 2025 Modular Refactoring
 
 **The codebase has been refactored!** The following utilities now exist and should be used:
@@ -411,24 +407,29 @@ self.graphs_show(v_arr, c_arr, "1", stop_v)
 ### Existing Utilities to Leverage
 
 1. **✅ `Measurments/optical_controller.py`**
+
    - Use `OpticalController(optical, psu)` instead of if-statements
    - Already applied in measurement_services_smu.py!
 
 2. **✅ `Measurments/data_utils.py`**
+
    - Use `safe_measure_current()` and `safe_measure_voltage()`
    - Already applied in measurement_services_smu.py!
 
 3. **✅ `Measurments/sweep_patterns.py`**
+
    - Use `build_sweep_values()` for generating sweep lists
    - Use `SweepType` enum instead of strings
    - Can integrate with SweepConfig above
 
 4. **✅ `Measurments/source_modes.py`**
+
    - Use `SourceMode` enum (VOLTAGE, CURRENT)
    - Hardware sweep can support current source mode too!
    - Use `apply_source()` and `measure_result()`
 
 5. **✅ `Measurments/data_formats.py`**
+
    - Use `DataFormatter` for saving sweep results
    - Consistent file formatting
 
@@ -437,6 +438,7 @@ self.graphs_show(v_arr, c_arr, "1", stop_v)
 When implementing hardware sweep:
 
 **DO:**
+
 - ✅ Use `OpticalController` for optical/LED control
 - ✅ Use `safe_measure_current()` if any point-by-point fallback
 - ✅ Consider supporting both VOLTAGE and CURRENT source modes
@@ -444,6 +446,7 @@ When implementing hardware sweep:
 - ✅ Use `DataFormatter` when saving results
 
 **DON'T:**
+
 - ❌ Create new if optical/psu blocks (use OpticalController)
 - ❌ Create tuple normalization code (use safe_measure_*)
 - ❌ Manually build sweep lists (use build_sweep_values)
@@ -452,12 +455,14 @@ When implementing hardware sweep:
 ### Integration with New Architecture
 
 The hardware sweep should be a **fast path** that:
+
 1. Uses same utilities as point-by-point
 2. Shares optical control (OpticalController)
 3. Returns data in same format (for DataFormatter)
 4. Supports both voltage and current source modes
 
 **Example Integration:**
+
 ```python
 def run_iv_sweep_v2(self, keithley, config: SweepConfig, optical=None, psu=None, **kwargs):
     """Universal sweep with hardware acceleration when available."""
@@ -498,3 +503,8 @@ def run_iv_sweep_v2(self, keithley, config: SweepConfig, optical=None, psu=None,
 - `Changes_Ai_Fixes/REFACTORING_COMPLETE.md` - What was refactored
 - `Changes_Ai_Fixes/QUICK_REFERENCE.md` - How to use new utilities
 - `Changes_Ai_Fixes/GUI_REFACTORING_PLAN.md` - Future GUI improvements
+
+### To-dos
+
+- [ ] Test Phase 2: test hardware sweep with various configurations and measure speedup
+- [ ] Test Phase 3: full end-to-end testing with GUI, plotting, and all features
