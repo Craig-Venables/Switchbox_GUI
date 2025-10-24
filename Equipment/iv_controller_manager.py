@@ -4,6 +4,7 @@ import time
 from typing import Optional, Dict, Any
 
 from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
+from Equipment.SMU_AND_PMU.Keithley2450 import Keithley2450Controller
 from Equipment.SMU_AND_PMU.HP4140B import HP4140BController
 from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
 
@@ -26,6 +27,10 @@ class IVControllerManager:
     SUPPORTED: Dict[str, Any] = {
         'Keithley 2401': {
             'class': Keithley2400Controller,
+            'address_key': 'SMU_address',
+        },
+        'Keithley 2450': {
+            'class': Keithley2450Controller,
             'address_key': 'SMU_address',
         },
         'Hp4140b': {
@@ -164,6 +169,17 @@ class IVControllerManager:
                 max_points_per_sweep=10000,
                 voltage_range=(-200.0, 200.0),
                 current_range=(-1.0, 1.0)
+            )
+        elif self.smu_type == 'Keithley 2450':
+            return InstrumentCapabilities(
+                supports_hardware_sweep=True,  # Via TSP scripting
+                supports_arbitrary_sweep=True,
+                supports_pulses=True,  # Fast TSP pulse capabilities
+                supports_current_source=True,
+                min_step_delay_ms=1.0,  # Fast with TSP
+                max_points_per_sweep=10000,
+                voltage_range=(-200.0, 200.0),
+                current_range=(-1.05, 1.05)
             )
         elif self.smu_type in ['Keithley 2401', 'Keithley 2400']:
             return InstrumentCapabilities(
