@@ -1,55 +1,38 @@
 import pyvisa
 import time
 
-# --- Connect to the Keithley 2450 over USB ---
 rm = pyvisa.ResourceManager()
-address = "USB0::0x05E6::0x2450::04496615::INSTR"  # replace with your USB resource
-smu = rm.open_resource(address)
-smu.write_termination = '\n'
-smu.read_termination = '\n'
-smu.timeout = 10000  # ms
+keithley = rm.open_resource("GPIB0::15::INSTR")
 
-print("Connected to:", smu.query("*IDN?"))
+# Optional reset
+keithley.write("*RST")
+time.sleep(1)
 
-# Put instrument in remote mode
-smu.write("SYST:REM")
+# Combine script into one string to avoid line breaks between writes
+tsp_script = """
+loadscript SimpleSweep
 
-# --- Upload TSP script via SCPI ---
-script_name = "pulse_script"
+function SimpleSweep()
+    reset()
+    smu.source.func = smu.FUNC_DC_VOLTAGE
+    smu.measure.func = smu.FUNC_DC_CURRENT
+    smu.source.rangev = 5
+    smu.measure.rangei = 0.1
+    smu.source.output = smu.ON
 
-# Delete old script if it exists
-smu.write(f'SYSTem:SCRIPT:DELete "{script_name}"')
+    for v = 0, 2, 0.5 do
+        smu.source.levelv = v
+        delay(0.1)
+        local i = smu.measure.read()
+        print(string.format("V=%.3f V, I=%.6f A", v, i))
+    end
 
-# Create new script
-smu.write(f'SYSTem:SCRIPT:NEW "{script_name}"')
+    smu.source.output = smu.OFF
+end
 
-# Define the TSP lines (1 V, 2-second pulse)
-script_lines = [
-    "smu.source.func = smu.FUNC_DC_VOLTAGE",
-    "smu.source.levelv = 1",
-    "smu.source.output = smu.OUTPUT_ON",
-    "delay(2)",                # hold pulse for 2 seconds
-    "smu.source.levelv = 0",
-    "smu.source.output = smu.OUTPUT_OFF"
-]
+endscript
+"""
 
-# Add lines to the script
-for line in script_lines:
-    smu.write(f'SYSTem:SCRIPT:ADD "{script_name}","{line}"')
-
-# Save the script
-smu.write(f'SYSTem:SCRIPT:SAVE "{script_name}"')
-
-# --- Run the TSP script internally ---
-print(f"Running TSP script '{script_name}'...")
-smu.write(f'SYSTem:SCRIPT:RUN "{script_name}"')
-
-# Wait for script to finish
-time.sleep(3)
-
-# Optional: return front panel to local mode
-smu.write("SYST:LOC")
-
-# Close the connection
-smu.close()
-print("TSP script executed successfully over USB.")
+# Send the entire TSP script in one go
+keithley.write(tsp_script)
+time.sleep(0.5)

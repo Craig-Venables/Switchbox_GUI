@@ -49,13 +49,13 @@ class Keithley2450Controller:
     MAX_CURRENT = 1.05  # Maximum current (±1.05A absolute max)
     MIN_PULSE_WIDTH = 50e-6  # Minimum pulse width (50 microseconds)
     
-    def __init__(self, address: str = 'GPIB0::24::INSTR', timeout: int = 10000):
+    def __init__(self, address: str = 'GPIB0::15::INSTR', timeout: int = 10000):
         """
         Initialize connection to Keithley 2450 via PyVISA.
         
         Args:
             address: VISA resource address. Supports:
-                     - GPIB: 'GPIB0::24::INSTR'
+                     - GPIB: 'GPIB0::15::INSTR'
                      - USB: 'USB0::0x05E6::0x2450::04517573::INSTR'
                      - LAN: 'TCPIP0::192.168.1.100::INSTR'
             timeout: Communication timeout in milliseconds (default 10000ms)
@@ -699,7 +699,7 @@ if __name__ == "__main__":
     print()
     
     # Configuration - CHANGE THIS TO YOUR ADDRESS
-    DEVICE_ADDRESS = 'USB0::0x05E6::0x2450::04496615::INSTR'  # Change to your address
+    #DEVICE_ADDRESS = 'USB0::0x05E6::0x2450::04496615::INSTR'  # Change to your address
     # Alternatives:
     # DEVICE_ADDRESS = 'GPIB0::24::INSTR'
     # DEVICE_ADDRESS = 'TCPIP0::192.168.1.100::INSTR'
@@ -715,7 +715,7 @@ if __name__ == "__main__":
     print("-" * 70)
     
     try:
-        keithley = Keithley2450Controller(DEVICE_ADDRESS)
+        keithley = Keithley2450Controller()
         if not keithley.device:
             print("❌ Failed to connect to instrument")
             print("\nTroubleshooting:")
