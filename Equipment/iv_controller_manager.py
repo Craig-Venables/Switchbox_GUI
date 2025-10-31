@@ -4,7 +4,7 @@ import time
 from typing import Optional, Dict, Any
 
 from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
-from Equipment.SMU_AND_PMU.Keithley2450 import Keithley2450Controller
+from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
 from Equipment.SMU_AND_PMU.HP4140B import HP4140BController
 from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
 
@@ -30,7 +30,7 @@ class IVControllerManager:
             'address_key': 'SMU_address',
         },
         'Keithley 2450': {
-            'class': Keithley2450Controller,
+            'class': Keithley2450_TSP,  # Now using TSP for all 2450 operations
             'address_key': 'SMU_address',
         },
         'Hp4140b': {

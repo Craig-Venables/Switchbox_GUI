@@ -247,6 +247,137 @@ class DataFormatter:
             return np.full_like(conductance, np.nan)
 
 
+class TSPDataFormatter:
+    """
+    Specialized formatter for TSP pulse testing data.
+    
+    Handles the unique requirements of TSP tests:
+    - Variable number of measurement types (timestamps, voltages, currents, resistances, phases, etc.)
+    - Comprehensive metadata including test parameters and hardware limits
+    - Tab-delimited format matching SMU measurements
+    """
+    
+    def __init__(self, delimiter: str = "\t"):
+        self.delimiter = delimiter
+    
+    def format_tsp_data(
+        self,
+        data_dict: Dict[str, List[float]],
+        test_name: str,
+        params: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Tuple[np.ndarray, str, str, Dict[str, Any]]:
+        """
+        Format TSP test data for file output.
+        
+        Args:
+            data_dict: Dictionary with 'timestamps', 'voltages', 'currents', 'resistances' 
+                      and any additional columns (e.g., 'phase', 'pulse_widths', 'cycle_number')
+            test_name: Name of the test performed
+            params: Test parameters used
+            metadata: Additional metadata (instrument info, sample, device, etc.)
+        
+        Returns:
+            Tuple[np.ndarray, str, str, Dict]: (data_array, header, format_string, full_metadata)
+        """
+        # Required base columns (always present)
+        base_cols = ['timestamps', 'voltages', 'currents', 'resistances']
+        
+        # Build column list
+        columns = []
+        headers = []
+        formats = []
+        
+        # Measurement/Pulse number FIRST (most useful for analysis)
+        num_points = len(data_dict.get('timestamps', []))
+        measurement_numbers = np.arange(num_points)
+        columns.append(measurement_numbers)
+        headers.append('Measurement_Number')
+        formats.append('%d')
+        
+        # Timestamp second
+        if 'timestamps' in data_dict:
+            columns.append(np.array(data_dict['timestamps']))
+            headers.append('Timestamp(s)')
+            formats.append('%0.6E')
+        
+        # Voltage, Current, Resistance
+        for col in ['voltages', 'currents', 'resistances']:
+            if col in data_dict:
+                columns.append(np.array(data_dict[col]))
+                unit_map = {'voltages': 'V', 'currents': 'A', 'resistances': 'Ohm'}
+                headers.append(f'{col.replace("s", "").capitalize()}({unit_map[col]})')
+                formats.append('%0.6E')
+        
+        # Add any extra columns (e.g., phase, cycle_number, operation, pulse_widths)
+        # Exclude metadata fields that are not data columns
+        metadata_fields = ['test_name', 'params', 'plot_type']
+        extra_cols = [k for k in data_dict.keys() if k not in base_cols and k not in metadata_fields]
+        
+        # Get expected length from timestamps
+        expected_length = len(data_dict.get('timestamps', []))
+        
+        for col in extra_cols:
+            col_data = data_dict[col]
+            
+            # Skip empty or non-sequence data
+            try:
+                # Skip if not a proper sequence type
+                if isinstance(col_data, (dict, str)):
+                    continue
+                if not hasattr(col_data, '__len__'):
+                    continue
+                if len(col_data) == 0:
+                    continue
+                
+                # Convert to numpy array
+                col_array = np.array(col_data)
+                
+                # Must be 1D and match expected length
+                if col_array.ndim != 1:
+                    print(f"Warning: Skipping column '{col}' - not 1D (shape: {col_array.shape})")
+                    continue
+                if col_array.size != expected_length:
+                    print(f"Warning: Skipping column '{col}' - length mismatch ({col_array.size} vs {expected_length})")
+                    continue
+                    
+                columns.append(col_array)
+                
+                # Try to format nicely
+                col_display = col.replace('_', ' ').title()
+                headers.append(col_display)
+                
+                # Check if numeric or string
+                first_val = col_data[0]
+                if isinstance(first_val, (int, float, np.number)):
+                    formats.append('%0.6E')
+                else:
+                    formats.append('%s')
+                    
+            except Exception as e:
+                # If anything goes wrong, skip this column
+                print(f"Warning: Skipping column '{col}' due to error: {e}")
+                continue
+        
+        # Stack into array
+        if not columns:
+            raise ValueError("No data columns found to save")
+        data = np.column_stack(columns)
+        header = self.delimiter.join(headers)
+        fmt = self.delimiter.join(formats)
+        
+        # Build comprehensive metadata
+        full_metadata = {
+            'test_name': test_name,
+            'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
+            'parameters': params,
+        }
+        if metadata:
+            full_metadata.update(metadata)
+        
+        return data, header, fmt, full_metadata
+
+
 class FileNamer:
     """
     Utilities for generating consistent measurement filenames.
@@ -362,6 +493,57 @@ class FileNamer:
             folder = folder / subfolder
         
         return folder
+    
+    def create_tsp_filename(
+        self,
+        test_name: str,
+        index: int,
+        extension: str = "txt",
+        test_details: str = ""
+    ) -> str:
+        """
+        Create standardized TSP test filename with sequential numbering.
+        
+        Args:
+            test_name: Name of test (e.g., "Pulse-Read-Repeat")
+            index: Sequential index number
+            extension: File extension (default: "txt")
+            test_details: Optional test details to append (e.g., "1.5V_100us")
+        
+        Returns:
+            str: Formatted filename like "0-Pulse_Read_Repeat-1.5V_100us-20251029_143022.txt"
+        """
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        test_clean = test_name.replace(" ", "_").replace("-", "_")
+        
+        if test_details:
+            return f"{index}-{test_clean}-{test_details}-{timestamp}.{extension}"
+        else:
+            return f"{index}-{test_clean}-{timestamp}.{extension}"
+    
+    def get_next_index(self, folder: Path) -> int:
+        """
+        Get next sequential index for a folder.
+        
+        Args:
+            folder: Folder to check
+        
+        Returns:
+            int: Next available index
+        """
+        if not folder.exists():
+            return 0
+        
+        # Find all numbered files
+        max_idx = -1
+        for f in folder.glob("*-*"):
+            try:
+                idx = int(f.stem.split('-')[0])
+                max_idx = max(max_idx, idx)
+            except (ValueError, IndexError):
+                continue
+        
+        return max_idx + 1
 
 
 def save_measurement_data(
@@ -398,6 +580,106 @@ def save_measurement_data(
         return True
     except Exception as e:
         print(f"Error saving data to {filepath}: {e}")
+        return False
+
+
+def save_tsp_measurement(
+    filepath: Path,
+    data: np.ndarray,
+    header: str,
+    fmt: str,
+    metadata: Dict[str, Any],
+    save_plot: Optional[Any] = None
+) -> bool:
+    """
+    Save TSP measurement data with comprehensive metadata.
+    
+    Saves two files:
+    1. .txt file with data and metadata header
+    2. .png file with plot (if provided)
+    
+    Args:
+        filepath: Path to save main .txt file
+        data: Data array
+        header: Column header string
+        fmt: Format string for data
+        metadata: Complete metadata dictionary
+        save_plot: Matplotlib figure to save (optional)
+    
+    Returns:
+        bool: True if successful
+    
+    Example:
+        >>> save_tsp_measurement(path, data, header, fmt, metadata, fig)
+    """
+    try:
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 1. Save main data file with metadata header
+        with open(filepath, 'w', encoding='utf-8') as f:
+            # Write comprehensive header
+            f.write("# ================================================================\n")
+            f.write(f"# Keithley 2450 TSP Pulse Test: {metadata.get('test_name', 'Unknown')}\n")
+            f.write("# ================================================================\n")
+            f.write(f"# Timestamp: {metadata.get('timestamp', 'N/A')}\n")
+            f.write(f"# Sample: {metadata.get('sample', 'Unknown')}\n")
+            f.write(f"# Device: {metadata.get('device', 'Unknown')}\n")
+            f.write(f"# Instrument: {metadata.get('instrument', 'Keithley 2450')}\n")
+            f.write(f"# Address: {metadata.get('address', 'N/A')}\n")
+            f.write("#\n")
+            
+            # Write test parameters
+            f.write("# Test Parameters:\n")
+            params = metadata.get('parameters', {})
+            for key, value in params.items():
+                f.write(f"#   {key}: {value}\n")
+            f.write("#\n")
+            
+            # Write hardware limits if present
+            if 'hardware_limits' in metadata:
+                f.write("# Hardware Limits:\n")
+                limits = metadata['hardware_limits']
+                for key, value in limits.items():
+                    f.write(f"#   {key}: {value}\n")
+                f.write("#\n")
+            
+            # Write data statistics
+            f.write(f"# Data Points: {len(data)}\n")
+            f.write(f"# Duration: {data[-1][0]:.3f} s\n" if len(data) > 0 else "# Duration: N/A\n")
+            
+            # Write notes if present
+            if 'notes' in metadata and metadata['notes']:
+                f.write("#\n")
+                f.write("# User Notes:\n")
+                for line in metadata['notes'].split('\n'):
+                    f.write(f"#   {line}\n")
+            
+            f.write("#\n")
+            f.write("# ================================================================\n")
+            f.write(f"# {header}\n")
+            
+        # Append data to file
+        with open(filepath, 'ab') as f:
+            np.savetxt(f, data, fmt=fmt, delimiter='', comments='')
+        
+        # 2. Save plot if provided
+        if save_plot is not None:
+            plot_path = filepath.with_suffix('.png')
+            save_plot.savefig(plot_path, dpi=200, bbox_inches='tight')
+        
+        # 3. Append to combined log
+        log_path = filepath.parent / "tsp_test_log.txt"
+        with open(log_path, 'a') as f:
+            f.write(f"{metadata.get('timestamp', '')}, {metadata.get('test_name', '')}, "
+                   f"{filepath.name}, points={len(data)}\n")
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error saving TSP data to {filepath}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 

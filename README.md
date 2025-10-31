@@ -17,6 +17,7 @@
 ### Smu (Keithleys)
 - Keithley 2400 (SMU)
 - Keithley 2401 (SMU)
+- Keithley 2450 (TSP mode; fast pulse generation; front/rear terminal selection)
 - Keithley 4200A_smu (SMU)
 - Keithley 4200A_pmu (PMU; waveform capture; in-progress integration)
 - HP4140B (classic picoammeter/SMU)
@@ -137,6 +138,44 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
 ## Signal Messaging
 - Optional Telegram bot integration to drive interactive flows (start/continue tests, send plots/images).
 
+## TSP Testing System (Keithley 2450)
+
+- **Controller**: `Equipment/SMU_AND_PMU/Keithley2450_TSP.py` (TSP command interface)
+- **Test Scripts**: `Equipment/SMU_AND_PMU/keithley2450_tsp_scripts.py` (pre-configured test patterns)
+- **GUI**: `TSP_Testing_GUI.py` (fast pulse testing with real-time visualization)
+
+### Features
+
+- **Front/Rear Terminal Selection**: Toggle between front panel and rear BNC terminals via radio buttons in the connection section. Default selection is automatically saved and restored on next startup.
+
+- **Fast On-Instrument Execution**: All test scripts run entirely on the instrument (no PC communication during tests), enabling sub-millisecond pulse generation with high timing accuracy.
+
+- **Buffer-Based Measurements**: All measurements use instrument buffers for fast, accurate data collection with proper timestamp handling.
+
+- **Correct Setting Order**: All functions follow Keithley manual specifications (measure function/range set first, then source settings) to prevent errors 5076/5077.
+
+### Available Test Patterns
+
+- **Pulse-Read-Repeat**: (Pulse → Read → Delay) × N cycles
+- **Multi-Pulse-Then-Read**: (Pulse×N → Read×M) × Cycles
+- **Varying Width Pulses**: Sweep different pulse widths
+- **Potentiation/Depression**: Gradual SET/RESET cycles
+- **Endurance Test**: (SET → Read → RESET → Read) × N cycles
+- **Retention Test**: Pulse followed by timed reads
+- **Relaxation Tests**: Multi-pulse with relaxation monitoring
+- **Width Sweeps**: Systematic pulse width characterization
+- **Current Range Finder**: Test multiple current ranges to find optimal measurement range
+
+### Terminal Configuration
+
+- **Front Panel**: Standard front binding posts (FORCE HI/LO, SENSE HI/LO)
+- **Rear Panel**: BNC connectors for remote connections
+  - **Force HI**: Source positive (BNC center)
+  - **Force LO**: Source return (BNC center)
+  - **Sense HI**: Voltage sense positive (BNC center)
+  - **Sense LO**: Voltage sense negative (BNC center)
+- Terminal selection persists until changed and is saved as default preference
+
 ## PMU System (current capabilities)
 
 - Controller: `Equipment/SMU_AND_PMU/Keithley4200A.py` (`Keithley4200A_PMUDualChannel` low-level helper)
@@ -250,6 +289,9 @@ df = ms.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
 ## Notes
 
 - PMU-based measurements are available separately (see PMU_Testing_GUI) for accurate waveform capture.
+- TSP Testing GUI requires Keithley 2450 to be in TSP mode (not SCPI). Switch via: MENU → System → Settings → Command Set → TSP
+- Terminal selection (front/rear) is saved automatically and persists across sessions
+- All TSP functions now use correct setting order (measure function/range first) to prevent instrument errors
 
 
 

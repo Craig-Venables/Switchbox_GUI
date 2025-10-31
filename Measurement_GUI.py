@@ -43,6 +43,7 @@ import atexit
 from pathlib import Path
 import queue
 from PMU_Testing_GUI import PMUTestingGUI
+from TSP_Testing_GUI import TSPTestingGUI
 
 from telegram import PassportData
 
@@ -625,24 +626,24 @@ class MeasurementGUI:
         frame = tk.LabelFrame(parent, text="More Tests", padx=5, pady=5)
         frame.grid(row=4, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
-        # Only one button: open AutoTester GUI on demand
-        self.autopress_btn = tk.Button(frame, text="AutoPress", command=self.open_autotest)
-        self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
+        # # Only one button: open AutoTester GUI on demand
+        # self.autopress_btn = tk.Button(frame, text="AutoPress", command=self.open_autotest)
+        # self.autopress_btn.grid(row=0, column=0, padx=(5, 5), pady=(2, 2), sticky='w')
 
-        # Volatile/Non-volatile popup
-        def open_advanced():
-            try:
-                from Advanced_tests_GUI import AdvancedTestsGUI
-                AdvancedTestsGUI(self.master, provider=self)
-            except Exception as e:
-                try:
-                    import traceback
-                    traceback.print_exc()
-                except Exception:
-                    pass
-                tk.messagebox.showerror("Advanced Tests", str(e))
-        self.adv_btn = tk.Button(frame, text="Volatile/Non-volatile Testing", command=open_advanced)
-        self.adv_btn.grid(row=0, column=2, padx=(5, 5), pady=(2, 2), sticky='w')
+        # # Volatile/Non-volatile popup
+        # def open_advanced():
+        #     try:
+        #         from Advanced_tests_GUI import AdvancedTestsGUI
+        #         AdvancedTestsGUI(self.master, provider=self)
+        #     except Exception as e:
+        #         try:
+        #             import traceback
+        #             traceback.print_exc()
+        #         except Exception:
+        #             pass
+        #         tk.messagebox.showerror("Advanced Tests", str(e))
+        # self.adv_btn = tk.Button(frame, text="Volatile/Non-volatile Testing", command=open_advanced)
+        # self.adv_btn.grid(row=0, column=2, padx=(5, 5), pady=(2, 2), sticky='w')
 
         # PMU testing button: opens a lightweight PMU Testing GUI
         
@@ -655,10 +656,21 @@ class MeasurementGUI:
             print("promblem with pmu testing gui")
             # If import fails, keep UI functional without PMU
             pass
+        
+        # TSP Testing button: opens Keithley 2450 TSP pulse testing GUI
+        try:
+            self.tsp_btn = tk.Button(frame, text="2450 TSP Pulse Testing", 
+                                     command=lambda: TSPTestingGUI(self.master, provider=self))
+            self.tsp_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
+            print("TSP_Testing_GUI loaded successfully")
+        except Exception as e:
+            print(f"Problem loading TSP Testing GUI: {e}")
+            pass
 
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
         frame.columnconfigure(2, weight=1)
+        frame.columnconfigure(3, weight=1)
 
     
 
@@ -4640,17 +4652,57 @@ class MeasurementGUI:
         # Set the next update ( or 10 seconds)
         self.master.after(10000, self.update_last_sweeps)
     def check_for_sample_name(self) -> None:
-
+        """Check if sample name is set, prompt if not (thread-safe)."""
         sample_name = self.sample_name_var.get().strip()
 
         if not sample_name:
-            # Open a dialog box to get new sample name
-            new_name = simpledialog.askstring("Update Sample Name", "Enter new sample name:", parent=self.master)
-
-            # If the user entered a name and didn't cancel the dialog, update the Entry widget
-            if new_name:
-                self.sample_name_var.set(new_name)
-            else:
+            # Must run dialog on main thread - schedule it
+            result_holder = [None]  # Mutable container to store result across thread boundary
+            
+            def ask_on_main_thread():
+                """Run the dialog on the main GUI thread."""
+                new_name = simpledialog.askstring(
+                    "Sample Name Required", 
+                    "Enter sample name (or cancel for 'undefined'):", 
+                    parent=self.master
+                )
+                
+                # Clean and validate the entered name
+                if new_name:
+                    cleaned_name = new_name.strip()
+                    # Remove/replace invalid file path characters
+                    invalid_chars = '<>:"|?*\\/[]'
+                    for char in invalid_chars:
+                        cleaned_name = cleaned_name.replace(char, '_')
+                    
+                    if cleaned_name:
+                        self.sample_name_var.set(cleaned_name)
+                    else:
+                        self.sample_name_var.set("undefined")
+                else:
+                    self.sample_name_var.set("undefined")
+                
+                result_holder[0] = True  # Signal completion
+            
+            # If we're on the main thread, just call it directly
+            try:
+                if threading.current_thread() == threading.main_thread():
+                    ask_on_main_thread()
+                else:
+                    # Schedule on main thread and wait
+                    self.master.after(0, ask_on_main_thread)
+                    # Wait for dialog to complete (with timeout)
+                    timeout = 60  # 60 seconds
+                    elapsed = 0
+                    while result_holder[0] is None and elapsed < timeout:
+                        time.sleep(0.1)
+                        elapsed += 0.1
+                    
+                    if result_holder[0] is None:
+                        # Timeout - just set undefined
+                        self.sample_name_var.set("undefined")
+            except Exception as e:
+                print(f"Error in sample name dialog: {e}")
                 self.sample_name_var.set("undefined")
 
     def check_connection(self) -> None:
