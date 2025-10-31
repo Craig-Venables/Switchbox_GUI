@@ -76,31 +76,48 @@ class CheckConnection:
         time_data = []
         current_data = []
         start_time = time.time()
-        self.keithley.set_voltage(0.2,0.1)
-        self.keithley.enable_output(True)
-        time.sleep(0.5)
+        
+        try:
+            self.keithley.set_voltage(0.2, 0.1)
+            self.keithley.enable_output(True)
+            time.sleep(0.5)
+        except Exception as e:
+            print(f"Error setting up measurement: {e}")
+            return
+        
         self.previous_current = None
         while self.check_connection_window:
+            try:
+                current_value = self.keithley.measure_current()
+                elapsed_time = time.time() - start_time
+                
+                # Handle both tuple (Keithley 4200A) and float (Keithley 2400/2450) returns
+                if isinstance(current_value, (tuple, list)):
+                    current = float(current_value[1])
+                else:
+                    current = float(current_value)
+                
+                time_data.append(elapsed_time)
+                current_data.append(current)
+                
+                if self.make_sound_var.get():
+                    # Beep once when absolute current crosses or exceeds threshold
+                    if not self.noise_already and abs(current) >= self.current_threshold_a:
+                        print("sound made (threshold reached)")
+                        self.on_spike_detected()
+                
+                self.previous_current = current
+                self.update_plot(time_data, current_data)
+                time.sleep(0.2)
+                
+            except Exception as e:
+                print(f"Error in measurement loop: {e}")
+                time.sleep(0.5)  # Wait before retrying
 
-            current_value = self.keithley.measure_current()
-            elapsed_time = time.time() - start_time
-
-            time_data.append(elapsed_time)
-            current_data.append(current_value[1])
-            current = current_value[1]
-            #print(current)
-
-            if self.make_sound_var.get():
-                # Beep once when absolute current crosses or exceeds threshold
-                if not self.noise_already and abs(current) >= self.current_threshold_a:
-                    print("sound made (threshold reached)")
-                    self.on_spike_detected()
-
-            self.previous_current = current_value[1]
-            self.update_plot(time_data, current_data)
-            time.sleep(0.2)
-
-        self.keithley.shutdown()
+        try:
+            self.keithley.shutdown()
+        except Exception as e:
+            print(f"Error during shutdown: {e}")
 
     def on_spike_detected(self):
         self.keithley.beep(400,1)

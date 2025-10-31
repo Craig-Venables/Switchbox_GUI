@@ -1,0 +1,14 @@
+{
+  "Relaxation After Multi-Pulse With Pulse Measurement": {
+    "Fast_no_delay": {
+      "pulse_voltage": 2.5,
+      "num_pulses": 10,
+      "pulse_width": 0.001,
+      "delay_between_pulses": 0.0,
+      "read_voltage": 0.2,
+      "num_reads": 20,
+      "delay_between_reads": 0.0,
+      "clim": 0.0001
+    }
+  }
+}
