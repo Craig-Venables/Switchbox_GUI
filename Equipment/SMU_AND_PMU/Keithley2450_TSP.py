@@ -906,82 +906,129 @@ if __name__ == "__main__":
             exit(1)
         
         print()
+        # for i in range(5):
+        #     tsp.beep()
+        #     time.sleep(0.01)
+        #     tsp.beep(2000,0.1)
+        #     tsp.beep()
+        #     time.sleep(0.01)
+        #     tsp.beep(2000,0.1)
+        # for i in range(5):
+        #     #tsp.beep(5000,0.1)
+        #     #tsp.beep(3000,0.1)
+        #     tsp.beep(1000,0.1)
+        #     tsp.beep(500,0.1)
+        #     tsp.beep(400,0.1)
+        #     tsp.beep(200,0.1)
+        #     tsp.beep(100,0.1)
+        #     tsp.beep(50,0.1)
+        #     tsp.beep(20,0.1)
+        #     tsp.beep(20,0.1)
+        #     tsp.beep(50,0.1)
+        #     tsp.beep(100,0.1)
+        #     tsp.beep(200,0.1)
+        #     tsp.beep(400,0.1)
+        #     tsp.beep(500,0.1)
+        #     tsp.beep(1000,0.1)
+        #     tsp.beep(2000,0.1)
+        #     #tsp.beep(3000,0.1)
+
+        def pause(t):
+            time.sleep(t)
+
+        # Super Mario Bros. intro (simplified)
+        for _ in range(5):
+            tsp.beep(660, 0.1)
+            tsp.beep(660, 0.1)
+            pause(0.1)
+            tsp.beep(660, 0.1)
+            pause(0.15)
+            tsp.beep(510, 0.1)
+            tsp.beep(660, 0.1)
+            pause(0.1)
+            tsp.beep(770, 0.1)
+            pause(0.35)
+            tsp.beep(380, 0.1)
+
         
-        # Clear any previously loaded scripts to prevent error 1408
-        tsp.clear_all_scripts()
-        print()
+
+
         
-        # ====================================================================
-        # TEST 1: Single voltage pulse
-        # ====================================================================
-        print("\n" + "-" * 70)
-        print("TEST 1: Single Voltage Pulse")
-        print("-" * 70)
-        print("Sending: 1V, 100µs pulse")
-        tsp.voltage_pulse(1.0, 100e-6, clim=0.1)
-        time.sleep(0.5)
+    #     # Clear any previously loaded scripts to prevent error 1408
+    #     tsp.clear_all_scripts()
+    #     print()
         
-        # ====================================================================
-        # TEST 2: Single current pulse
-        # ====================================================================
-        print("\n" + "-" * 70)
-        print("TEST 2: Single Current Pulse")
-        print("-" * 70)
-        print("Sending: 10mA, 100µs pulse")
-        tsp.current_pulse(10e-3, 100e-6, vlim=20)
-        time.sleep(5)
+    #     # ====================================================================
+    #     # TEST 1: Single voltage pulse
+    #     # ====================================================================
+    #     print("\n" + "-" * 70)
+    #     print("TEST 1: Single Voltage Pulse")
+    #     print("-" * 70)
+    #     print("Sending: 1V, 100µs pulse")
+    #     tsp.voltage_pulse(1.0, 100e-6, clim=0.1)
+    #     time.sleep(0.5)
         
-        # ====================================================================
-        # TEST 3: Pulse with measurement
-        # ====================================================================
-        print("\n" + "-" * 70)
-        print("TEST 3: Pulse with Measurement")
-        print("-" * 70)
-        print("Sending: 2V, 500µs pulse, measuring current")
-        v, i = tsp.pulse_with_measurement(2.0, 500e-6, clim=0.1)
-        if v != 0 and i != 0:
-            print(f"Measured: V={v:.6f}V, I={i:.6e}A")
-            print(f"Calculated resistance: {v/i:.2e}Ω")
-        time.sleep(5)
+    #     # ====================================================================
+    #     # TEST 2: Single current pulse
+    #     # ====================================================================
+    #     print("\n" + "-" * 70)
+    #     print("TEST 2: Single Current Pulse")
+    #     print("-" * 70)
+    #     print("Sending: 10mA, 100µs pulse")
+    #     tsp.current_pulse(10e-3, 100e-6, vlim=20)
+    #     time.sleep(5)
         
-        # ====================================================================
-        # TEST 4: Pulse train
-        # ====================================================================
-        print("\n" + "-" * 70)
-        print("TEST 4: Pulse Train")
-        print("-" * 70)
-        print("Sending: 5 pulses, 1V, 100µs each, 1ms apart")
-        tsp.pulse_train(1.0, 100e-6, 5, 1e-3, clim=0.1)
+    #     # ====================================================================
+    #     # TEST 3: Pulse with measurement
+    #     # ====================================================================
+    #     print("\n" + "-" * 70)
+    #     print("TEST 3: Pulse with Measurement")
+    #     print("-" * 70)
+    #     print("Sending: 2V, 500µs pulse, measuring current")
+    #     v, i = tsp.pulse_with_measurement(2.0, 500e-6, clim=0.1)
+    #     if v != 0 and i != 0:
+    #         print(f"Measured: V={v:.6f}V, I={i:.6e}A")
+    #         print(f"Calculated resistance: {v/i:.2e}Ω")
+    #     time.sleep(5)
         
-        # ====================================================================
-        # Summary
-        # ====================================================================
-        print("\n" + "=" * 70)
-        print("✓ All TSP pulse tests completed!")
-        print("=" * 70)
-        print("\nNote: TSP pulses provide:")
-        print("  - Minimum width: ~50µs (vs ~2ms for SCPI)")
-        print("  - Timing accuracy: ±10µs (vs ±100µs for SCPI)")
-        print("  - No PC communication latency during pulse")
+    #     # ====================================================================
+    #     # TEST 4: Pulse train
+    #     # ====================================================================
+    #     print("\n" + "-" * 70)
+    #     print("TEST 4: Pulse Train")
+    #     print("-" * 70)
+    #     print("Sending: 5 pulses, 1V, 100µs each, 1ms apart")
+    #     tsp.pulse_train(1.0, 100e-6, 5, 1e-3, clim=0.1)
+        
+    #     # ====================================================================
+    #     # Summary
+    #     # ====================================================================
+    #     print("\n" + "=" * 70)
+    #     print("✓ All TSP pulse tests completed!")
+    #     print("=" * 70)
+    #     print("\nNote: TSP pulses provide:")
+    #     print("  - Minimum width: ~50µs (vs ~2ms for SCPI)")
+    #     print("  - Timing accuracy: ±10µs (vs ±100µs for SCPI)")
+    #     print("  - No PC communication latency during pulse")
         
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
-    
-    finally:
-        # ====================================================================
-        # Pull full event log and diagnostics
-        # ====================================================================
-        print("\n" + "=" * 70)
-        print("PULLING FULL EVENT LOG HISTORY...")
-        print("=" * 70)
+
+    # finally:
+    #     # ====================================================================
+    #     # Pull full event log and diagnostics
+    #     # ====================================================================
+    #     print("\n" + "=" * 70)
+    #     print("PULLING FULL EVENT LOG HISTORY...")
+    #     print("=" * 70)
         
-        try:
-            tsp.print_diagnostics()
-        except Exception as e:
-            print(f"⚠️  Could not retrieve diagnostics: {e}")
+    #     try:
+    #         tsp.print_diagnostics()
+    #     except Exception as e:
+    #         print(f"⚠️  Could not retrieve diagnostics: {e}")
         
-        print("\nClosing connection...")
-        tsp.close()
+    #     print("\nClosing connection...")
+    #     tsp.close()
 

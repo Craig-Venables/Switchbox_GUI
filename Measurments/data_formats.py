@@ -290,24 +290,45 @@ class TSPDataFormatter:
         
         # Measurement/Pulse number FIRST (most useful for analysis)
         num_points = len(data_dict.get('timestamps', []))
-        measurement_numbers = np.arange(num_points)
-        columns.append(measurement_numbers)
-        headers.append('Measurement_Number')
-        formats.append('%d')
+        measurement_numbers = np.arange(num_points, dtype=np.int32)
         
-        # Timestamp second
-        if 'timestamps' in data_dict:
-            columns.append(np.array(data_dict['timestamps']))
-            headers.append('Timestamp(s)')
-            formats.append('%0.6E')
+        # Timestamp second - ensure float dtype
+        timestamps_array = np.array(data_dict.get('timestamps', []), dtype=np.float64) if 'timestamps' in data_dict else None
         
-        # Voltage, Current, Resistance
-        for col in ['voltages', 'currents', 'resistances']:
-            if col in data_dict:
-                columns.append(np.array(data_dict[col]))
-                unit_map = {'voltages': 'V', 'currents': 'A', 'resistances': 'Ohm'}
-                headers.append(f'{col.replace("s", "").capitalize()}({unit_map[col]})')
-                formats.append('%0.6E')
+        # Voltage, Current, Resistance - ensure float dtype
+        voltages_array = np.array(data_dict.get('voltages', []), dtype=np.float64) if 'voltages' in data_dict else None
+        currents_array = np.array(data_dict.get('currents', []), dtype=np.float64) if 'currents' in data_dict else None
+        resistances_array = np.array(data_dict.get('resistances', []), dtype=np.float64) if 'resistances' in data_dict else None
+        
+        # Build numeric columns list with proper dtypes
+        numeric_columns = [measurement_numbers]
+        numeric_headers = ['Measurement_Number']
+        numeric_formats = ['%d']
+        
+        if timestamps_array is not None:
+            numeric_columns.append(timestamps_array)
+            numeric_headers.append('Timestamp(s)')
+            numeric_formats.append('%0.6E')
+        
+        if voltages_array is not None:
+            numeric_columns.append(voltages_array)
+            numeric_headers.append('Voltage(V)')
+            numeric_formats.append('%0.6E')
+            
+        if currents_array is not None:
+            numeric_columns.append(currents_array)
+            numeric_headers.append('Current(A)')
+            numeric_formats.append('%0.6E')
+            
+        if resistances_array is not None:
+            numeric_columns.append(resistances_array)
+            numeric_headers.append('Resistance(Ohm)')
+            numeric_formats.append('%0.6E')
+        
+        # String columns (if any)
+        string_columns = []
+        string_formats = []
+        string_headers = []
         
         # Add any extra columns (e.g., phase, cycle_number, operation, pulse_widths)
         # Exclude metadata fields that are not data columns
@@ -340,29 +361,64 @@ class TSPDataFormatter:
                 if col_array.size != expected_length:
                     print(f"Warning: Skipping column '{col}' - length mismatch ({col_array.size} vs {expected_length})")
                     continue
-                    
-                columns.append(col_array)
                 
                 # Try to format nicely
                 col_display = col.replace('_', ' ').title()
-                headers.append(col_display)
                 
-                # Check if numeric or string
-                first_val = col_data[0]
-                if isinstance(first_val, (int, float, np.number)):
-                    formats.append('%0.6E')
-                else:
-                    formats.append('%s')
+                # Check if numeric or string - try to convert to numeric first
+                try:
+                    # Try to convert to float
+                    numeric_array = np.array(col_data, dtype=np.float64)
+                    numeric_columns.append(numeric_array)
+                    numeric_headers.append(col_display)
+                    numeric_formats.append('%0.6E')
+                except (ValueError, TypeError):
+                    # If conversion fails, it's a string column
+                    string_columns.append(col_array.astype(str))
+                    string_headers.append(col_display)
+                    string_formats.append('%s')
                     
             except Exception as e:
                 # If anything goes wrong, skip this column
                 print(f"Warning: Skipping column '{col}' due to error: {e}")
                 continue
         
-        # Stack into array
-        if not columns:
+        # Stack numeric columns first (ensures proper numeric dtypes)
+        if not numeric_columns:
             raise ValueError("No data columns found to save")
-        data = np.column_stack(columns)
+        
+        # Stack numeric columns - handle mixed int/float by converting to float
+        # measurement_number is int, rest are float
+        # Convert all to float for stacking, then format appropriately
+        data_numeric = np.column_stack(numeric_columns).astype(np.float64)
+        # But keep measurement_number as int for formatting
+        if len(numeric_columns) > 0:
+            data_numeric[:, 0] = numeric_columns[0].astype(np.float64)  # Keep as float in array, but format as int
+        
+        # If we have string columns, we need object dtype array
+        if string_columns:
+            data_string = np.column_stack(string_columns)
+            # Create object array to hold both numeric and string
+            # Pre-allocate object array
+            num_rows = len(numeric_columns[0])
+            num_numeric_cols = len(numeric_columns)
+            num_string_cols = len(string_columns)
+            data = np.empty((num_rows, num_numeric_cols + num_string_cols), dtype=object)
+            
+            # Fill numeric columns (as floats/ints)
+            for i, col in enumerate(numeric_columns):
+                data[:, i] = col
+            
+            # Fill string columns
+            for i, col in enumerate(string_columns):
+                data[:, num_numeric_cols + i] = col
+            
+            headers = numeric_headers + string_headers
+            formats = numeric_formats + string_formats
+        else:
+            data = data_numeric
+            headers = numeric_headers
+            formats = numeric_formats
         header = self.delimiter.join(headers)
         fmt = self.delimiter.join(formats)
         
@@ -371,6 +427,8 @@ class TSPDataFormatter:
             'test_name': test_name,
             'timestamp': time.strftime("%Y-%m-%d %H:%M:%S"),
             'parameters': params,
+            '_has_string_columns': len(string_columns) > 0,  # Internal flag for save function
+            '_formats': formats,  # Pass formats list for save function
         }
         if metadata:
             full_metadata.update(metadata)
@@ -390,6 +448,9 @@ class FileNamer:
         ...     measurement_type="sweep"
         ... )
         >>> # "Device_1_A1_1.0V_sweep_20251014_123045.txt"
+    
+    The base_dir can be set to None to use the default ("Data_save_loc"),
+    or to a custom Path to override the save location.
     """
     
     def __init__(self, base_dir: Optional[Path] = None):
@@ -397,9 +458,11 @@ class FileNamer:
         Initialize file namer.
         
         Args:
-            base_dir: Base directory for saving files
+            base_dir: Base directory for saving files. If None, uses default "Data_save_loc".
+                     If a custom Path is provided, that will be used as the base (without sample_name subfolder).
         """
-        self.base_dir = base_dir or Path("Data_save_loc")
+        self.base_dir = base_dir if base_dir is not None else Path("Data_save_loc")
+        self.use_custom_base = base_dir is not None
     
     def create_iv_filename(
         self,
@@ -472,12 +535,18 @@ class FileNamer:
         Get the folder path for a device's data.
         
         Args:
-            sample_name: Sample name
+            sample_name: Sample name (only used if using default base_dir)
             device: Device identifier (e.g., "A1")
             subfolder: Optional subfolder name
         
         Returns:
             Path: Full path to device folder
+        
+        Note:
+            If custom base_dir is set, sample_name is NOT included in the path.
+            Structure: {custom_base}/{letter}/{number}/{subfolder}
+            If default base_dir is used, sample_name IS included:
+            Structure: Data_save_loc/{sample_name}/{letter}/{number}/{subfolder}
         """
         # Extract letter and number from device
         if len(device) >= 2:
@@ -487,7 +556,11 @@ class FileNamer:
             letter = "X"
             number = "0"
         
-        folder = self.base_dir / sample_name / letter / number
+        # If custom base is set, don't include sample_name
+        if self.use_custom_base:
+            folder = self.base_dir / letter / number
+        else:
+            folder = self.base_dir / sample_name / letter / number
         
         if subfolder:
             folder = folder / subfolder
@@ -646,7 +719,23 @@ def save_tsp_measurement(
             
             # Write data statistics
             f.write(f"# Data Points: {len(data)}\n")
-            f.write(f"# Duration: {data[-1][0]:.3f} s\n" if len(data) > 0 else "# Duration: N/A\n")
+            # Convert timestamp to float (handle numpy string types and object arrays)
+            if len(data) > 0:
+                try:
+                    # Get timestamp from second column (index 1), handle both numeric and object arrays
+                    if data.dtype == object:
+                        # Object array - convert first element of last row's timestamp column
+                        ts_val = data[-1, 1] if data.shape[1] > 1 else data[-1, 0]
+                        duration = float(ts_val)
+                    else:
+                        # Numeric array - get from second column (timestamps) or first if only one column
+                        ts_idx = 1 if data.shape[1] > 1 else 0
+                        duration = float(data[-1, ts_idx])
+                    f.write(f"# Duration: {duration:.3f} s\n")
+                except (ValueError, TypeError, IndexError):
+                    f.write("# Duration: N/A\n")
+            else:
+                f.write("# Duration: N/A\n")
             
             # Write notes if present
             if 'notes' in metadata and metadata['notes']:
@@ -660,8 +749,42 @@ def save_tsp_measurement(
             f.write(f"# {header}\n")
             
         # Append data to file
-        with open(filepath, 'ab') as f:
-            np.savetxt(f, data, fmt=fmt, delimiter='', comments='')
+        # Handle mixed numeric/string columns by writing row-by-row
+        with open(filepath, 'a', encoding='utf-8') as f:
+            # Write data row by row to handle mixed types
+            # Check if we have string columns or object dtype (mixed types)
+            has_string_cols = metadata.get('_has_string_columns', False)
+            formats = metadata.get('_formats', fmt.split('\t'))  # Get formats list from metadata
+            if data.dtype == object or has_string_cols:
+                # Mixed types - write manually
+                for row in data:
+                    row_str_parts = []
+                    for i, (val, fmt_spec) in enumerate(zip(row, formats)):
+                        if fmt_spec == '%s':
+                            row_str_parts.append(str(val) if val is not None else '')
+                        elif fmt_spec == '%d':
+                            try:
+                                # Handle measurement_number column specially
+                                row_str_parts.append(f"{int(float(val))}")
+                            except (ValueError, TypeError):
+                                row_str_parts.append("0")
+                        else:
+                            # Numeric format (%0.6E)
+                            try:
+                                val_float = float(val)
+                                row_str_parts.append(fmt_spec % val_float)
+                            except (ValueError, TypeError):
+                                row_str_parts.append("NaN")
+                    f.write('\t'.join(row_str_parts) + '\n')  # Use tab delimiter
+            else:
+                # All numeric - but need to handle int formatting for first column
+                # Convert measurement_number back to int for proper formatting
+                if len(data) > 0:
+                    data_formatted = data.copy()
+                    data_formatted[:, 0] = data[:, 0].astype(int)
+                    np.savetxt(f, data_formatted, fmt=fmt, delimiter='\t', comments='')
+                else:
+                    np.savetxt(f, data, fmt=fmt, delimiter='\t', comments='')
         
         # 2. Save plot if provided
         if save_plot is not None:
