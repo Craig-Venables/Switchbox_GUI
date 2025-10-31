@@ -2,6 +2,7 @@ import threading
 import time
 import os
 from pathlib import Path
+from typing import Optional
 import re
 from datetime import datetime
 import tkinter as tk
@@ -2227,15 +2228,8 @@ class PMUTestingGUI(tk.Toplevel):
 
     def _save_pmu_trace(self, t, v, i, mode: str):
         try:
-            # Base folder consistent with Measurement_GUI: Data_save_loc/<sample>/<letter>/<number>/PMU measurments
-            base = Path("Data_save_loc") / self.sample_name
-            dev = self.device_label if self.device_label != "UnknownDevice" else "Unknown"
-            if len(dev) >= 2:
-                letter, number = dev[0], dev[1:]
-            else:
-                letter, number = "X", "0"
-            folder = base / letter / number / "PMU measurments"
-            self._ensure_dir(folder)
+            # Base folder consistent with Measurement_GUI
+            folder = self._device_save_folder()
 
             idx = self._next_index(folder)
             ts = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -2251,15 +2245,43 @@ class PMUTestingGUI(tk.Toplevel):
             self.status_var.set(f"Save failed: {exc}")
 
     def _device_save_folder(self) -> Path:
-        base = Path("Data_save_loc") / self.sample_name
-        dev = self.device_label if self.device_label != "UnknownDevice" else "Unknown"
-        if len(dev) >= 2:
-            letter, number = dev[0], dev[1:]
+        # Load custom save location if configured
+        custom_base = self._load_custom_save_location()
+        if custom_base:
+            # Custom path: {custom_base}/{letter}/{number}/PMU measurements
+            dev = self.device_label if self.device_label != "UnknownDevice" else "Unknown"
+            if len(dev) >= 2:
+                letter, number = dev[0], dev[1:]
+            else:
+                letter, number = "X", "0"
+            folder = custom_base / letter / number / "PMU measurments"
         else:
-            letter, number = "X", "0"
-        folder = base / letter / number / "PMU measurments"
+            # Default path: Data_save_loc/{sample_name}/{letter}/{number}/PMU measurements
+            base = Path("Data_save_loc") / self.sample_name
+            dev = self.device_label if self.device_label != "UnknownDevice" else "Unknown"
+            if len(dev) >= 2:
+                letter, number = dev[0], dev[1:]
+            else:
+                letter, number = "X", "0"
+            folder = base / letter / number / "PMU measurments"
         self._ensure_dir(folder)
         return folder
+    
+    def _load_custom_save_location(self) -> Optional[Path]:
+        """Load custom save location from config file"""
+        config_file = Path("Json_Files/save_location_config.json")
+        try:
+            if config_file.exists():
+                import json
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    use_custom = config.get('use_custom_save', False)
+                    custom_path = config.get('custom_save_path', '')
+                    if use_custom and custom_path:
+                        return Path(custom_path)
+        except Exception as e:
+            print(f"Could not load save location config: {e}")
+        return None  # None means use default
 
     def _collect_common_meta(self) -> dict:
         meta = {

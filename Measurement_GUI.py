@@ -226,6 +226,7 @@ class MeasurementGUI:
         self.sample_gui = sample_gui
         self.current_index = self.sample_gui.current_index
         self.load_messaging_data()
+        
         self.psu_visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"
         self.temp_controller_address= 'ASRL12::INSTR'
         self.keithley_address = "GPIB0::24::INSTR"
@@ -1477,13 +1478,41 @@ class MeasurementGUI:
         self.sample_name_entry = ttk.Entry(mode_frame, textvariable=self.sample_name_var)
         self.sample_name_entry.grid(row=2, column=1, columnspan=1, sticky="ew")
 
-        # Sample Name Entry
+        # Additional Info Entry
         self.additional_info_label = tk.Label(mode_frame, text="Additional Info:")
         self.additional_info_label.grid(row=3, column=0, sticky="w")
 
         self.additional_info_var = tk.StringVar()  # Use a StringVar
         self.additional_info_entry = ttk.Entry(mode_frame, textvariable=self.additional_info_var)
         self.additional_info_entry.grid(row=3, column=1, columnspan=1, sticky="ew")
+        
+        # Save Location Controls
+        save_location_frame = tk.Frame(mode_frame)
+        save_location_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        mode_frame.columnconfigure(1, weight=1)
+        
+        self.use_custom_save_var = tk.BooleanVar(value=False)
+        self.custom_save_location_var = tk.StringVar(value="")
+        self.custom_save_location = None  # Will store Path object
+        
+        tk.Checkbutton(save_location_frame, text="Use custom save location", 
+                      variable=self.use_custom_save_var,
+                      command=self._on_custom_save_toggle).grid(row=0, column=0, sticky="w")
+        
+        save_path_frame = tk.Frame(save_location_frame)
+        save_path_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+        save_path_frame.columnconfigure(0, weight=1)
+        
+        self.save_path_entry = tk.Entry(save_path_frame, textvariable=self.custom_save_location_var, 
+                                        state="disabled", width=40)
+        self.save_path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        
+        tk.Button(save_path_frame, text="Browse...", 
+                 command=self._browse_save_location,
+                 state="disabled").grid(row=0, column=1)
+        
+        # Load saved preference
+        self._load_save_location_config()
 
 
 
@@ -2535,8 +2564,16 @@ class MeasurementGUI:
                     # save the current data in a folder called multiplexer and the name of the sample
 
                     # creates save directory with the selected measurement device name letter and number
-                    save_dir = f"Data_save_loc\\Multiplexer_IV_sweep\\{self.sample_name_var.get()}" \
-                               f"\\{j+1}"
+                    # For multiplexer sweeps, use special subfolder
+                    base_path = self._get_base_save_path()
+                    if base_path:
+                        # Custom path: {custom_base}/Multiplexer_IV_sweep/{sample}/{device_number}
+                        save_dir = os.path.join(str(base_path), "Multiplexer_IV_sweep", 
+                                               self.sample_name_var.get(), str(j+1))
+                    else:
+                        # Default path: Data_save_loc/Multiplexer_IV_sweep/{sample}/{device_number}
+                        save_dir = f"Data_save_loc\\Multiplexer_IV_sweep\\{self.sample_name_var.get()}" \
+                                   f"\\{j+1}"
                     # make directory if dost exist.
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
@@ -3467,7 +3504,9 @@ class MeasurementGUI:
 
         # Helper: build save directory per-device
         def _ensure_save_dir() -> str:
-            save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+            save_dir = self._get_save_directory(self.sample_name_var.get(), 
+                                               self.final_device_letter, 
+                                               self.final_device_number)
             if not os.path.exists(save_dir):
                 os.makedirs(save_dir)
             return save_dir
@@ -4651,6 +4690,124 @@ class MeasurementGUI:
 
         # Set the next update ( or 10 seconds)
         self.master.after(10000, self.update_last_sweeps)
+    
+    def _on_custom_save_toggle(self):
+        """Handle checkbox toggle for custom save location"""
+        if self.use_custom_save_var.get():
+            # Always prompt for location when enabling (don't use saved default)
+            self._prompt_save_location()
+        else:
+            self.save_path_entry.config(state="disabled")
+            # Disable browse button
+            for widget in self.save_path_entry.master.winfo_children():
+                if isinstance(widget, tk.Button):
+                    widget.config(state="disabled")
+            self.custom_save_location = None
+            self.custom_save_location_var.set("")
+        
+        # Save preference (but don't auto-load saved path on next enable)
+        self._save_save_location_config()
+    
+    def _prompt_save_location(self):
+        """Prompt user to choose a save location (folder) or cancel"""
+        from tkinter import filedialog
+        folder = filedialog.askdirectory(
+            title="Choose Custom Data Save Location",
+            mustexist=False  # Allow creating new folder
+        )
+        if folder:
+            self.custom_save_location = Path(folder)
+            self.custom_save_location_var.set(str(self.custom_save_location))
+            self.save_path_entry.config(state="normal")
+            # Enable browse button
+            for widget in self.save_path_entry.master.winfo_children():
+                if isinstance(widget, tk.Button):
+                    widget.config(state="normal")
+        else:
+            # User cancelled - uncheck the box
+            self.use_custom_save_var.set(False)
+            self.save_path_entry.config(state="disabled")
+            for widget in self.save_path_entry.master.winfo_children():
+                if isinstance(widget, tk.Button):
+                    widget.config(state="disabled")
+    
+    def _browse_save_location(self):
+        """Open folder picker to change custom save location"""
+        from tkinter import filedialog
+        folder = filedialog.askdirectory(
+            title="Choose Data Save Location",
+            mustexist=False  # Allow creating new folder
+        )
+        if folder:
+            self.custom_save_location = Path(folder)
+            self.custom_save_location_var.set(str(self.custom_save_location))
+            # Save preference (as reference, but won't auto-enable)
+            self._save_save_location_config()
+    
+    def _load_save_location_config(self):
+        """Load save location preference from config file (but don't auto-enable)"""
+        config_file = Path("Json_Files") / "save_location_config.json"
+        try:
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    # Don't auto-load the saved path - user must choose each time
+                    # Just keep the checkbox unchecked by default
+                    self.use_custom_save_var.set(False)
+                    # Store the last path for reference, but don't use it automatically
+                    custom_path = config.get('custom_save_path', '')
+                    if custom_path:
+                        # Store in entry but leave disabled (just shows last used path)
+                        self.custom_save_location_var.set(custom_path)
+                    else:
+                        self.custom_save_location_var.set("")
+        except Exception as e:
+            print(f"Could not load save location config: {e}")
+    
+    def _save_save_location_config(self):
+        """Save save location preference to config file"""
+        config_file = Path("Json_Files") / "save_location_config.json"
+        try:
+            config = {}
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+            
+            config['use_custom_save'] = self.use_custom_save_var.get()
+            config['custom_save_path'] = str(self.custom_save_location) if self.custom_save_location else ""
+            
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Could not save save location config: {e}")
+    
+    def _get_base_save_path(self) -> Optional[str]:
+        """Get base save path (custom if enabled, None for default)"""
+        if self.use_custom_save_var.get() and self.custom_save_location:
+            return str(self.custom_save_location)
+        return None  # None means use default (Data_save_loc)
+    
+    def _get_save_directory(self, sample_name: str, device_letter: str, device_number: str) -> str:
+        """
+        Get save directory path, using custom base if configured.
+        
+        Args:
+            sample_name: Sample name (only used with default base)
+            device_letter: Device letter (e.g., "A")
+            device_number: Device number (e.g., "1")
+        
+        Returns:
+            String path to save directory
+        """
+        base_path = self._get_base_save_path()
+        if base_path:
+            # Custom path: {custom_base}/{letter}/{number}
+            return os.path.join(base_path, device_letter, device_number)
+        else:
+            # Default path: Data_save_loc/{sample_name}/{letter}/{number}
+            return f"Data_save_loc\\{sample_name}\\{device_letter}\\{device_number}"
+    
     def check_for_sample_name(self) -> None:
         """Check if sample name is set, prompt if not (thread-safe)."""
         sample_name = self.sample_name_var.get().strip()

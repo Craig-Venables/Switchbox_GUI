@@ -8,6 +8,7 @@ import time
 import os
 import json
 from pathlib import Path
+from typing import Optional, List
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -28,7 +29,7 @@ from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measu
 TEST_FUNCTIONS = {
     "Pulse-Read-Repeat": {
         "function": "pulse_read_repeat",
-        "description": "Pattern: (Pulse → Read → Delay) × N\nBasic pulse response with immediate read after each pulse",
+        "description": "Pattern: Initial Read → (Pulse → Read → Delay) × N\nBasic pulse response with immediate read after each pulse",
         "params": {
             "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
@@ -43,7 +44,7 @@ TEST_FUNCTIONS = {
     
     "Multi-Pulse-Then-Read": {
         "function": "multi_pulse_then_read",
-        "description": "Pattern: (Pulse×N → Read×M) × Cycles\nMultiple pulses then multiple reads per cycle",
+        "description": "Pattern: Initial Read → (Pulse×N → Read×M) × Cycles\nMultiple pulses then multiple reads per cycle",
         "params": {
             "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
             "num_pulses_per_read": {"default": 10, "label": "Pulses Per Cycle", "type": "int"},
@@ -69,6 +70,7 @@ TEST_FUNCTIONS = {
             "num_pulses_per_width": {"default": 5, "label": "Pulses Per Width", "type": "int"},
             "reset_voltage": {"default": -1.0, "label": "Reset Voltage (V)", "type": "float"},
             "reset_width": {"default": 1e-3, "label": "Reset Width (s)", "type": "float"},
+            "delay_between_widths": {"default": 5.0, "label": "Relaxation Delay Between Width Blocks (s)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "width_vs_resistance",
@@ -84,6 +86,7 @@ TEST_FUNCTIONS = {
             "num_pulses_per_width": {"default": 5, "label": "Pulses Per Width", "type": "int"},
             "reset_voltage": {"default": -1.0, "label": "Reset Voltage (V)", "type": "float"},
             "reset_width": {"default": 1e-3, "label": "Reset Width (s)", "type": "float"},
+            "delay_between_widths": {"default": 5.0, "label": "Relaxation Delay Between Width Blocks (s)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "width_vs_resistance",
@@ -91,7 +94,7 @@ TEST_FUNCTIONS = {
     
     "Potentiation-Depression Cycle": {
         "function": "potentiation_depression_cycle",
-        "description": "Pattern: Gradual SET (LRS) → Gradual RESET (HRS)\nSynaptic weight update, neuromorphic applications",
+        "description": "Pattern: Initial Read → Gradual SET (LRS) → Gradual RESET (HRS)\nSynaptic weight update, neuromorphic applications",
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
@@ -106,13 +109,15 @@ TEST_FUNCTIONS = {
     
     "Potentiation Only": {
         "function": "potentiation_only",
-        "description": "Pattern: Repeated SET pulses with reads\nGradual conductance increase (LRS programming)",
+        "description": "Pattern: Initial Read → Repeated SET pulses with reads\nOptional post-pulse reads to observe relaxation",
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_pulses": {"default": 30, "label": "Number of Pulses", "type": "int"},
             "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "num_post_reads": {"default": 0, "label": "Post-Pulse Reads (0=disabled)", "type": "int"},
+            "post_read_interval": {"default": 1.0, "label": "Post-Read Interval (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "time_series",
@@ -120,13 +125,15 @@ TEST_FUNCTIONS = {
     
     "Depression Only": {
         "function": "depression_only",
-        "description": "Pattern: Repeated RESET pulses with reads\nGradual conductance decrease (HRS programming)",
+        "description": "Pattern: Initial Read → Repeated RESET pulses with reads\nOptional post-pulse reads to observe relaxation",
         "params": {
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_pulses": {"default": 30, "label": "Number of Pulses", "type": "int"},
             "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "num_post_reads": {"default": 0, "label": "Post-Pulse Reads (0=disabled)", "type": "int"},
+            "post_read_interval": {"default": 1.0, "label": "Post-Read Interval (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "time_series",
@@ -134,7 +141,7 @@ TEST_FUNCTIONS = {
     
     "Endurance Test": {
         "function": "endurance_test",
-        "description": "Pattern: (SET → Read → RESET → Read) × N\nDevice lifetime, cycling endurance monitoring",
+        "description": "Pattern: Initial Read → (SET → Read → RESET → Read) × N\nDevice lifetime, cycling endurance monitoring",
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
@@ -149,7 +156,7 @@ TEST_FUNCTIONS = {
     
     "Pulse-Multi-Read": {
         "function": "pulse_multi_read",
-        "description": "Pattern: (Pulse × M) → Read × N\nMonitor state relaxation/drift after pulses",
+        "description": "Pattern: Initial Read → (Pulse × M) → Read × N\nMonitor state relaxation/drift after pulses",
         "params": {
             "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
@@ -244,6 +251,15 @@ class TSPTestingGUI(tk.Toplevel):
         self.sample_name = "UnknownSample"
         self.device_label = "A"
         
+        # Save location - load from config
+        self.custom_base_path = self._load_custom_save_location()
+        
+        # Simple save location (for TSP GUI independent mode)
+        self.use_simple_save_var = tk.BooleanVar()
+        self.simple_save_path_var = tk.StringVar()
+        self.simple_save_path = None
+        self._load_simple_save_config()
+        
         # Create UI
         self.create_ui()
         
@@ -283,12 +299,27 @@ class TSPTestingGUI(tk.Toplevel):
         self.context_var = tk.StringVar(value=f"Sample: {self.sample_name}  |  Device: {self.device_label}")
         tk.Label(frame, textvariable=self.context_var, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(0, 5))
         
-        # Address
+        # Address with dropdown for auto-detection
         addr_frame = tk.Frame(frame)
         addr_frame.pack(fill=tk.X, pady=2)
         tk.Label(addr_frame, text="Device:").pack(side=tk.LEFT)
+        
         self.addr_var = tk.StringVar(value=self.device_address)
-        tk.Entry(addr_frame, textvariable=self.addr_var, width=40).pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Get available devices
+        available_devices = self._get_available_devices()
+        if self.device_address not in available_devices and available_devices:
+            # Add current address if not in list (for backwards compatibility)
+            available_devices.insert(0, self.device_address)
+        
+        self.addr_combo = ttk.Combobox(addr_frame, textvariable=self.addr_var,
+                                       values=available_devices,
+                                       width=37, state="readonly")
+        self.addr_combo.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        
+        # Refresh button to re-scan devices
+        tk.Button(addr_frame, text="🔄", command=self._refresh_devices, 
+                 width=3, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=2)
         
         # Terminal selection
         term_frame = tk.Frame(frame)
@@ -312,6 +343,20 @@ class TSPTestingGUI(tk.Toplevel):
         # Status
         self.conn_status_var = tk.StringVar(value="Disconnected")
         tk.Label(frame, textvariable=self.conn_status_var, fg="red").pack(anchor="w")
+        
+        # Save location toggle (small, inside connection box)
+        save_frame = tk.Frame(frame)
+        save_frame.pack(fill=tk.X, pady=(8, 0))
+        
+        tk.Checkbutton(save_frame, text="Simple Save:", variable=self.use_simple_save_var,
+                      command=self._on_simple_save_toggle, font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+        
+        self.simple_save_entry = tk.Entry(save_frame, textvariable=self.simple_save_path_var, 
+                                          width=25, state="disabled", font=("TkDefaultFont", 8))
+        self.simple_save_entry.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        
+        tk.Button(save_frame, text="📁", command=self._browse_simple_save, 
+                 state="disabled", width=2, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=1)
     
     def create_test_selection_section(self, parent):
         """Test type selection"""
@@ -504,6 +549,21 @@ class TSPTestingGUI(tk.Toplevel):
         # Poll every 500ms like PMU GUI
         self.after(500, self._poll_context)
     
+    def _load_custom_save_location(self) -> Optional[Path]:
+        """Load custom save location from config file"""
+        config_file = Path("Json_Files/save_location_config.json")
+        try:
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    use_custom = config.get('use_custom_save', False)
+                    custom_path = config.get('custom_save_path', '')
+                    if use_custom and custom_path:
+                        return Path(custom_path)
+        except Exception as e:
+            print(f"Could not load save location config: {e}")
+        return None  # None means use default
+    
     def load_default_terminals(self) -> str:
         """Load default terminal setting from config file"""
         config_file = Path("Json_Files/tsp_gui_config.json")
@@ -536,6 +596,112 @@ class TSPTestingGUI(tk.Toplevel):
             self.log(f"💾 Default terminals saved: {self.terminals_var.get().upper()}")
         except Exception as e:
             self.log(f"⚠️ Could not save terminal config: {e}")
+    
+    def _on_simple_save_toggle(self):
+        """Handle simple save checkbox toggle"""
+        if self.use_simple_save_var.get():
+            self.simple_save_entry.config(state="normal")
+            # Enable browse button
+            for widget in self.simple_save_entry.master.winfo_children():
+                if isinstance(widget, tk.Button):
+                    widget.config(state="normal")
+            # If no path set, prompt for one
+            if not self.simple_save_path_var.get():
+                self._browse_simple_save()
+        else:
+            self.simple_save_entry.config(state="disabled")
+            # Disable browse button
+            for widget in self.simple_save_entry.master.winfo_children():
+                if isinstance(widget, tk.Button):
+                    widget.config(state="disabled")
+            self.simple_save_path = None
+            self.simple_save_path_var.set("")
+        
+        # Save preference
+        self._save_simple_save_config()
+    
+    def _browse_simple_save(self):
+        """Open folder picker for simple save location"""
+        from tkinter import filedialog
+        folder = filedialog.askdirectory(
+            title="Choose Simple Save Location",
+            mustexist=False
+        )
+        if folder:
+            self.simple_save_path = Path(folder)
+            self.simple_save_path_var.set(str(self.simple_save_path))
+            # Save preference
+            self._save_simple_save_config()
+    
+    def _load_simple_save_config(self):
+        """Load simple save location preference from config file"""
+        config_file = Path("Json_Files/tsp_gui_save_config.json")
+        try:
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                    use_simple = config.get('use_simple_save', False)
+                    simple_path = config.get('simple_save_path', '')
+                    
+                    self.use_simple_save_var.set(use_simple)
+                    if use_simple and simple_path:
+                        self.simple_save_path = Path(simple_path)
+                        self.simple_save_path_var.set(simple_path)
+        except Exception as e:
+            print(f"Could not load simple save config: {e}")
+    
+    def _save_simple_save_config(self):
+        """Save simple save location preference to config file"""
+        config_file = Path("Json_Files/tsp_gui_save_config.json")
+        try:
+            config = {}
+            if config_file.exists():
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+            
+            config['use_simple_save'] = self.use_simple_save_var.get()
+            config['simple_save_path'] = str(self.simple_save_path) if self.simple_save_path else ""
+            
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_file, 'w') as f:
+                json.dump(config, f, indent=2)
+        except Exception as e:
+            print(f"Could not save simple save config: {e}")
+    
+    def _get_available_devices(self) -> List[str]:
+        """Scan and return list of available USB and GPIB devices"""
+        devices = []
+        try:
+            import pyvisa
+            rm = pyvisa.ResourceManager()
+            resources = rm.list_resources()
+            
+            # Filter for USB and GPIB devices (Keithley 2450 typically uses USB)
+            for res in resources:
+                if res.startswith('USB') or res.startswith('GPIB'):
+                    devices.append(res)
+            
+            # If no devices found, at least return the current one
+            if not devices:
+                devices = [self.device_address]
+            
+        except Exception as e:
+            print(f"Could not scan devices: {e}")
+            devices = [self.device_address]
+        
+        return devices
+    
+    def _refresh_devices(self):
+        """Refresh the device dropdown list"""
+        available_devices = self._get_available_devices()
+        current_selection = self.addr_var.get()
+        
+        # Update combobox values
+        if current_selection not in available_devices:
+            available_devices.insert(0, current_selection)
+        self.addr_combo['values'] = available_devices
+        
+        self.log(f"🔄 Refreshed device list: {len(available_devices)} device(s) found")
     
     def connect_device(self):
         """Connect to Keithley 2450 TSP"""
@@ -657,7 +823,7 @@ class TSPTestingGUI(tk.Toplevel):
         params = {}
         # Time parameters that need conversion from ms to seconds
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_between_cycles']
+                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval']
         
         for param_name, param_info in self.param_vars.items():
             var = param_info["var"]
@@ -749,14 +915,22 @@ class TSPTestingGUI(tk.Toplevel):
                         traceback.print_exc()
                 self.after(100, show_popup)  # Small delay to ensure GUI thread is ready
             
-            # Plot
-            self.after(0, self.plot_results)
+            # Plot first, then finish (ensure plot is rendered before saving)
+            def plot_and_finish():
+                try:
+                    self.plot_results()
+                    # Small delay to ensure plot is fully rendered
+                    self.after(100, self._test_finished)
+                except Exception as e:
+                    self.log(f"❌ Plot error: {e}")
+                    self._test_finished()
+            
+            self.after(0, plot_and_finish)
             
         except Exception as e:
             self.log(f"❌ Test error: {e}")
             import traceback
             traceback.print_exc()
-        finally:
             self.after(0, self._test_finished)
     
     def stop_test(self):
@@ -1098,28 +1272,49 @@ class TSPTestingGUI(tk.Toplevel):
             return False
         
         try:
-            # Setup file namer and formatter
-            namer = FileNamer()
             formatter = TSPDataFormatter()
             
-            # Get save directory
-            save_dir = namer.get_device_folder(
-                sample_name=self.sample_name,
-                device=self.device_label if self.device_label != "UnknownDevice" else "A1",
-                subfolder="pulse_measurements"
-            )
-            save_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Get next index for sequential numbering
-            index = namer.get_next_index(save_dir)
+            # Check if simple save mode is enabled
+            if self.use_simple_save_var.get() and self.simple_save_path:
+                # Simple save: everything in one folder
+                save_dir = Path(self.simple_save_path)
+                save_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Get next index for sequential numbering (simple mode)
+                existing_files = list(save_dir.glob("*.txt"))
+                index = len(existing_files) + 1
+            else:
+                # Structured save: use FileNamer with custom base if configured
+                namer = FileNamer(base_dir=self.custom_base_path)
+                
+                # Get save directory
+                save_dir = namer.get_device_folder(
+                    sample_name=self.sample_name,
+                    device=self.device_label if self.device_label != "UnknownDevice" else "A1",
+                    subfolder="pulse_measurements"
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Get next index for sequential numbering
+                index = namer.get_next_index(save_dir)
             
             # Create test details string with key parameters (max 3)
             test_name = self.last_results['test_name']
             params = self.last_results.get('params', {})
             test_details = self._generate_test_details(params)
             
-            # Create filename with test details
-            filename = namer.create_tsp_filename(test_name, index, extension="txt", test_details=test_details)
+            # Create filename
+            if self.use_simple_save_var.get() and self.simple_save_path:
+                # Simple mode: just test name + index + details
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                details_str = f"_{test_details}" if test_details else ""
+                filename = f"{test_name}-{index:03d}{details_str}-{timestamp}.txt"
+            else:
+                # Structured mode: use FileNamer
+                namer = FileNamer(base_dir=self.custom_base_path)
+                filename = namer.create_tsp_filename(test_name, index, extension="txt", test_details=test_details)
+            
             filepath = save_dir / filename
             
             # Get notes from text widget
@@ -1158,6 +1353,11 @@ class TSPTestingGUI(tk.Toplevel):
                 metadata=metadata
             )
             
+            # Ensure plot is updated before saving
+            if hasattr(self, 'fig') and self.fig is not None:
+                self.canvas.draw_idle()
+                self.master.update_idletasks()
+            
             # Save using standardized function (saves .txt, .png, and log)
             success = save_tsp_measurement(
                 filepath=filepath,
@@ -1165,7 +1365,7 @@ class TSPTestingGUI(tk.Toplevel):
                 header=header,
                 fmt=fmt,
                 metadata=full_metadata,
-                save_plot=self.fig
+                save_plot=self.fig if hasattr(self, 'fig') else None
             )
             
             if success:
@@ -1428,7 +1628,7 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_canvas.draw()
     
     def _draw_pulse_read_repeat(self, params):
-        """Draw: (Pulse → Read → Delay) × N"""
+        """Draw: Initial Read → (Pulse → Read → Delay) × N"""
         t = 0
         times, voltages = [], []
         read_times = []  # Track read measurement times
@@ -1436,6 +1636,13 @@ class TSPTestingGUI(tk.Toplevel):
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         cycles = min(params.get('num_cycles', 100), 5)  # Show max 5 cycles
+        
+        # Initial read before any pulses
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         for i in range(cycles):
             # Pulse
@@ -1456,12 +1663,12 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Pattern: (Pulse→Read)×{cycles}', fontsize=10)
+        self.diagram_ax.set_title(f'Pattern: Initial Read → (Pulse→Read)×{cycles}', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
     
     def _draw_multi_pulse_then_read(self, params):
-        """Draw: (Pulse×N → Read×M) × Cycles"""
+        """Draw: Initial Read → (Pulse×N → Read×M) × Cycles"""
         t = 0
         times, voltages = [], []
         read_times = []
@@ -1471,6 +1678,13 @@ class TSPTestingGUI(tk.Toplevel):
         n_pulses = min(params.get('num_pulses_per_read', 10), 5)
         n_reads = min(params.get('num_reads', 1), 5)
         cycles = min(params.get('num_cycles', 20), 2)
+        
+        # Initial read before any pulses
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         for cycle in range(cycles):
             # Multiple pulses
@@ -1492,7 +1706,7 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Pattern: {n_pulses}×Pulse→{n_reads}×Read ×{cycles} cycles', fontsize=10)
+        self.diagram_ax.set_title(f'Pattern: Initial Read → {n_pulses}×Pulse→{n_reads}×Read ×{cycles}', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
     
@@ -1543,7 +1757,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
     
     def _draw_pot_dep_cycle(self, params):
-        """Draw potentiation-depression cycle"""
+        """Draw potentiation-depression cycle with initial read"""
         t = 0
         times, voltages, colors = [], [], []
         read_times = []
@@ -1552,6 +1766,13 @@ class TSPTestingGUI(tk.Toplevel):
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         steps = min(params.get('steps', 20), 5)
+        
+        # Initial read before any pulses
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         # Potentiation (SET)
         for i in range(steps):
@@ -1584,12 +1805,12 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Pot-Dep Cycle: {steps} steps each', fontsize=10)
+        self.diagram_ax.set_title(f'Pot-Dep Cycle: Initial Read → {steps} SET → {steps} RESET', fontsize=9)
         self.diagram_ax.legend(fontsize=8)
         self.diagram_ax.grid(True, alpha=0.3)
     
     def _draw_potentiation_only(self, params):
-        """Draw potentiation only"""
+        """Draw potentiation only with initial read"""
         t = 0
         times, voltages = [], []
         read_times = []
@@ -1597,6 +1818,13 @@ class TSPTestingGUI(tk.Toplevel):
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         n = min(params.get('num_pulses', 30), 5)
+        
+        # Initial read before any pulses
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         for i in range(n):
             times.extend([t, t, t+p_w, t+p_w])
@@ -1608,18 +1836,35 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += p_w*0.3 + params.get('delay_between', 10e-3)
         
+        # Post-pulse reads (if enabled)
+        num_post_reads = params.get('num_post_reads', 0)
+        post_interval = params.get('post_read_interval', 1e-3)
+        if num_post_reads > 0:
+            t += 0.0001  # Small delay after last pulse
+            post_n = min(num_post_reads, 3)  # Show max 3 for diagram
+            for i in range(post_n):
+                t += post_interval
+                read_t = t + 0.001*0.5  # Read at middle of 1ms pulse
+                read_times.append(read_t)
+                times.extend([t, t, t+0.001, t+0.001])
+                voltages.extend([0, r_v, r_v, 0])
+                t += 0.001
+        
         self.diagram_ax.plot(np.array(times)*1e3, voltages, 'green', linewidth=2)
         self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='green')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
+        title = f'Potentiation: Initial Read → {n} SET pulses'
+        if num_post_reads > 0:
+            title += f' → {num_post_reads} post-reads'
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Potentiation: {n} SET pulses', fontsize=10)
+        self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, set_v*1.2)
     
     def _draw_depression_only(self, params):
-        """Draw depression only"""
+        """Draw depression only with initial read"""
         t = 0
         times, voltages = [], []
         read_times = []
@@ -1627,6 +1872,13 @@ class TSPTestingGUI(tk.Toplevel):
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         n = min(params.get('num_pulses', 30), 5)
+        
+        # Initial read before any pulses
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         for i in range(n):
             times.extend([t, t, t+p_w, t+p_w])
@@ -1638,18 +1890,35 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += p_w*0.3 + params.get('delay_between', 10e-3)
         
+        # Post-pulse reads (if enabled)
+        num_post_reads = params.get('num_post_reads', 0)
+        post_interval = params.get('post_read_interval', 1e-3)
+        if num_post_reads > 0:
+            t += 0.0001  # Small delay after last pulse
+            post_n = min(num_post_reads, 3)  # Show max 3 for diagram
+            for i in range(post_n):
+                t += post_interval
+                read_t = t + 0.001*0.5  # Read at middle of 1ms pulse
+                read_times.append(read_t)
+                times.extend([t, t, t+0.001, t+0.001])
+                voltages.extend([0, r_v, r_v, 0])
+                t += 0.001
+        
         self.diagram_ax.plot(np.array(times)*1e3, voltages, 'red', linewidth=2)
         self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='red')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
+        title = f'Depression: Initial Read → {n} RESET pulses'
+        if num_post_reads > 0:
+            title += f' → {num_post_reads} post-reads'
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Depression: {n} RESET pulses', fontsize=10)
+        self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(reset_v*1.2, 0.5)
     
     def _draw_endurance(self, params):
-        """Draw endurance test"""
+        """Draw endurance test with initial read"""
         t = 0
         times, voltages = [], []
         read_times = []
@@ -1658,6 +1927,13 @@ class TSPTestingGUI(tk.Toplevel):
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         cycles = min(params.get('num_cycles', 100), 3)
+        
+        # Initial read before any cycles
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         for i in range(cycles):
             # SET + read
@@ -1685,11 +1961,11 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Endurance: {cycles} SET/RESET cycles', fontsize=10)
+        self.diagram_ax.set_title(f'Endurance: Initial Read → {cycles} SET/RESET cycles', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
     
     def _draw_pulse_multi_read(self, params):
-        """Draw pulse followed by multiple reads"""
+        """Draw initial read → pulse followed by multiple reads"""
         t = 0
         times, voltages = [], []
         read_times = []
@@ -1698,6 +1974,13 @@ class TSPTestingGUI(tk.Toplevel):
         p_w = params.get('pulse_width', 1e-3)
         n_pulses = params.get('num_pulses', 1)
         n_reads = min(params.get('num_reads', 50), 8)
+        
+        # Initial read before any pulses
+        read_t = t + p_w*0.15
+        read_times.append(read_t)
+        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+        voltages.extend([0, r_v, r_v, 0])
+        t += p_w*0.3 + 0.0001
         
         # N pulses
         for i in range(min(n_pulses, 3)):
@@ -1719,7 +2002,7 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'{n_pulses}×Pulse → {n_reads} Reads', fontsize=10)
+        self.diagram_ax.set_title(f'Initial Read → {n_pulses}×Pulse → {n_reads} Reads', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, p_v*1.2)
     
