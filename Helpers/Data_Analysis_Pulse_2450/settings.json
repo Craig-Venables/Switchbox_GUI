@@ -1,0 +1,29 @@
+{
+  "window": {
+    "width": 1600,
+    "height": 900,
+    "maximized": false
+  },
+  "theme": {
+    "style": "Fusion",
+    "color_scheme": "light"
+  },
+  "recent_folders": [
+    "C:\\Users\\Craig-Desktop\\OneDrive - The University of Nottingham\\Documents\\test\\X\\0\\pulse_measurements",
+    "C:\\Users\\Craig-Desktop\\OneDrive - The University of Nottingham\\Documents\\test",
+    "C:\\Users\\Craig-Desktop\\OneDrive - The University of Nottingham\\Documents\\test\\A\\1\\pulse_measurements"
+  ],
+  "max_recent_folders": 10,
+  "plot": {
+    "default_layout": "1x1",
+    "line_width": 2,
+    "marker_size": 6,
+    "grid": true,
+    "legend": true,
+    "dpi": 100
+  },
+  "export": {
+    "default_dpi": 300,
+    "default_format": "png"
+  }
+}
