@@ -177,3 +177,4 @@ If tau = **15.5 s**, that means:
 - **Check R²** to verify fit quality
 
 
+
