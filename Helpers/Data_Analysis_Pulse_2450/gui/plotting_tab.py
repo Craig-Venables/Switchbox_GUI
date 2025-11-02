@@ -21,6 +21,7 @@ matplotlib.use('QtAgg')
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.axes import Axes
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -234,7 +235,54 @@ class PlottingTab(QWidget):
         processing_group.setLayout(processing_layout)
         control_layout.addWidget(processing_group)
         
-        # Axis Controls
+        # Axis Configuration (what to plot on each axis)
+        axis_config_group = QGroupBox("Axis Configuration")
+        axis_config_layout = QVBoxLayout()
+        
+        # X-axis selection
+        x_axis_layout = QHBoxLayout()
+        x_axis_layout.addWidget(QLabel("X-axis:"))
+        self.x_axis_combo = QComboBox()
+        self.x_axis_combo.addItems(["Time (s)", "Voltage (V)", "Current (A)", "Resistance (Ω)", 
+                                    "Measurement Number", "Cycle Number"])
+        self.x_axis_combo.currentTextChanged.connect(self.update_plot)
+        x_axis_layout.addWidget(self.x_axis_combo)
+        axis_config_layout.addLayout(x_axis_layout)
+        
+        # Left Y-axis selection
+        y_left_layout = QHBoxLayout()
+        y_left_layout.addWidget(QLabel("Y-axis (Left):"))
+        self.y_left_combo = QComboBox()
+        self.y_left_combo.addItems(["Resistance (Ω)", "Current (A)", "Voltage (V)", "Time (s)"])
+        self.y_left_combo.currentTextChanged.connect(self.update_plot)
+        y_left_layout.addWidget(self.y_left_combo)
+        axis_config_layout.addLayout(y_left_layout)
+        
+        # Enable right Y-axis checkbox
+        self.enable_right_y_check = QCheckBox("Enable Right Y-axis")
+        self.enable_right_y_check.stateChanged.connect(self.toggle_right_y_axis)
+        self.enable_right_y_check.stateChanged.connect(self.update_plot)
+        axis_config_layout.addWidget(self.enable_right_y_check)
+        
+        # Right Y-axis selection
+        y_right_layout = QHBoxLayout()
+        y_right_layout.addWidget(QLabel("Y-axis (Right):"))
+        self.y_right_combo = QComboBox()
+        self.y_right_combo.addItems(["Current (A)", "Resistance (Ω)", "Voltage (V)", "Time (s)"])
+        self.y_right_combo.setEnabled(False)
+        self.y_right_combo.currentTextChanged.connect(self.update_plot)
+        y_right_layout.addWidget(self.y_right_combo)
+        axis_config_layout.addLayout(y_right_layout)
+        
+        # Reset to defaults button
+        reset_axes_btn = QPushButton("Reset to Defaults")
+        reset_axes_btn.clicked.connect(self.reset_axis_config)
+        axis_config_layout.addWidget(reset_axes_btn)
+        
+        axis_config_group.setLayout(axis_config_layout)
+        control_layout.addWidget(axis_config_group)
+        
+        # Axis Controls (ranges)
         axis_group = QGroupBox("Axis Ranges")
         axis_layout = QVBoxLayout()
         
@@ -301,47 +349,8 @@ class PlottingTab(QWidget):
         axis_group.setLayout(axis_layout)
         control_layout.addWidget(axis_group)
         
-        # Export buttons
-        export_group = QGroupBox("Export")
-        export_layout = QVBoxLayout()
-        
-        # PNG with options
-        png_layout = QHBoxLayout()
-        save_png_btn = QPushButton("💾 PNG")
-        save_png_btn.clicked.connect(lambda: self.export_plot('png', False))
-        png_layout.addWidget(save_png_btn)
-        
-        save_png_trans_btn = QPushButton("PNG (Trans)")
-        save_png_trans_btn.setToolTip("Save with transparent background")
-        save_png_trans_btn.clicked.connect(lambda: self.export_plot('png', True))
-        png_layout.addWidget(save_png_trans_btn)
-        export_layout.addLayout(png_layout)
-        
-        # PDF with options
-        pdf_layout = QHBoxLayout()
-        save_pdf_btn = QPushButton("📄 PDF")
-        save_pdf_btn.clicked.connect(lambda: self.export_plot('pdf', False))
-        pdf_layout.addWidget(save_pdf_btn)
-        
-        save_pdf_trans_btn = QPushButton("PDF (Trans)")
-        save_pdf_trans_btn.setToolTip("Save with transparent background")
-        save_pdf_trans_btn.clicked.connect(lambda: self.export_plot('pdf', True))
-        pdf_layout.addWidget(save_pdf_trans_btn)
-        export_layout.addLayout(pdf_layout)
-        
-        # Data export
-        save_data_btn = QPushButton("📊 Export Data (TXT)")
-        save_data_btn.clicked.connect(self.export_data)
-        export_layout.addWidget(save_data_btn)
-        
-        # Origin export (future)
-        save_origin_btn = QPushButton("🔬 Export to Origin")
-        save_origin_btn.setEnabled(False)
-        save_origin_btn.setToolTip("Coming soon!")
-        export_layout.addWidget(save_origin_btn)
-        
-        export_group.setLayout(export_layout)
-        control_layout.addWidget(export_group)
+        # Add stretch to push export buttons to bottom
+        control_layout.addStretch()
         
         # Annotations section
         annotations_group = QGroupBox("Annotations")
@@ -529,6 +538,49 @@ class PlottingTab(QWidget):
         self.status_label.setStyleSheet("color: #888; padding: 5px;")
         plot_layout.addWidget(self.status_label)
         
+        # Export buttons in a horizontal line at the bottom
+        export_layout = QHBoxLayout()
+        export_layout.setContentsMargins(5, 5, 5, 5)
+        
+        export_label = QLabel("Export:")
+        export_label.setStyleSheet("font-weight: bold; padding-right: 5px;")
+        export_layout.addWidget(export_label)
+        
+        # PNG buttons
+        save_png_btn = QPushButton("💾 PNG")
+        save_png_btn.clicked.connect(lambda: self.export_plot('png', False))
+        export_layout.addWidget(save_png_btn)
+        
+        save_png_trans_btn = QPushButton("PNG (Trans)")
+        save_png_trans_btn.setToolTip("Save with transparent background")
+        save_png_trans_btn.clicked.connect(lambda: self.export_plot('png', True))
+        export_layout.addWidget(save_png_trans_btn)
+        
+        # PDF buttons
+        save_pdf_btn = QPushButton("📄 PDF")
+        save_pdf_btn.clicked.connect(lambda: self.export_plot('pdf', False))
+        export_layout.addWidget(save_pdf_btn)
+        
+        save_pdf_trans_btn = QPushButton("PDF (Trans)")
+        save_pdf_trans_btn.setToolTip("Save with transparent background")
+        save_pdf_trans_btn.clicked.connect(lambda: self.export_plot('pdf', True))
+        export_layout.addWidget(save_pdf_trans_btn)
+        
+        # Data export
+        save_data_btn = QPushButton("📊 Export Data (TXT)")
+        save_data_btn.clicked.connect(self.export_data)
+        export_layout.addWidget(save_data_btn)
+        
+        # Origin export (future)
+        save_origin_btn = QPushButton("🔬 Export to Origin")
+        save_origin_btn.setEnabled(False)
+        save_origin_btn.setToolTip("Coming soon!")
+        export_layout.addWidget(save_origin_btn)
+        
+        export_layout.addStretch()
+        
+        plot_layout.addLayout(export_layout)
+        
         # Add plot panel to splitter
         splitter.addWidget(plot_panel)
         
@@ -556,7 +608,23 @@ class PlottingTab(QWidget):
             item = DatasetListItem(data, self.dataset_colors[i])
             self.dataset_list.addItem(item)
         
-        # Update plot
+        # Auto-detect and set default axis configuration (don't update plot yet)
+        has_iv_sweep = any('IV Sweep' in data.test_name or 
+                          'iv_sweep' in data.test_name.lower() 
+                          for data in datasets)
+        
+        if has_iv_sweep:
+            self.x_axis_combo.setCurrentText("Voltage (V)")
+            self.y_left_combo.setCurrentText("Current (A)")
+            self.enable_right_y_check.setChecked(False)
+        else:
+            self.x_axis_combo.setCurrentText("Time (s)")
+            self.y_left_combo.setCurrentText("Resistance (Ω)")
+            self.enable_right_y_check.setChecked(False)
+        
+        self.toggle_right_y_axis()
+        
+        # Update plot with new axis configuration
         self.update_plot()
         
         # Update status
@@ -592,6 +660,11 @@ class PlottingTab(QWidget):
         normalize = self.normalize_check.isChecked()
         y_offset = self.y_offset_spin.value()
         
+        # Track if we need a right Y-axis
+        enable_right_y = self.enable_right_y_check.isChecked()
+        y_right_axis = self.y_right_combo.currentText() if enable_right_y else None
+        ax_right = None
+        
         # Plot each visible dataset
         visible_count = 0
         for i in range(self.dataset_list.count()):
@@ -618,19 +691,44 @@ class PlottingTab(QWidget):
                 # Apply data processing
                 processed_data = self.process_data(data, crop_start, crop_end, normalize, y_offset)
                 
-                self.plot_generator.plot_single(processed_data, self.figure, ax, color, label)
+                # Get axis configuration
+                x_axis = self.x_axis_combo.currentText()
+                y_left_axis = self.y_left_combo.currentText()
+                
+                # Create right axis on first dataset if needed
+                if enable_right_y and ax_right is None:
+                    ax_right = ax.twinx()
+                    self.plot_generator.style.apply_to_axes(ax_right)
+                
+                # Use custom axis plotting if configured
+                self.plot_with_axes(processed_data, self.figure, ax, color, label, 
+                                    x_axis, y_left_axis, y_right_axis, ax_right)
                 visible_count += 1
         
-        # Apply log scale if checked
+        # Apply log scale if checked (to left Y-axis only)
         if self.log_scale_check.isChecked():
             ax.set_yscale('log')
         
-        # Update legend
+        # Update legend - combine left and right axis legends if dual axis is enabled
         if self.legend_check.isChecked() and visible_count > 0:
-            legend = ax.legend(facecolor=self.plot_generator.style.bg_color,
-                             edgecolor=self.plot_generator.style.text_color,
-                             labelcolor=self.plot_generator.style.text_color)
-            legend.get_frame().set_alpha(0.9)
+            # Get lines and labels from both axes if dual axis is enabled
+            lines_left, labels_left = ax.get_legend_handles_labels()
+            
+            if enable_right_y and ax_right is not None:
+                lines_right, labels_right = ax_right.get_legend_handles_labels()
+                all_lines = lines_left + lines_right
+                all_labels = labels_left + labels_right
+            else:
+                all_lines = lines_left
+                all_labels = labels_left
+            
+            if all_lines:
+                legend = ax.legend(all_lines, all_labels,
+                                 facecolor=self.plot_generator.style.bg_color,
+                                 edgecolor=self.plot_generator.style.text_color,
+                                 labelcolor=self.plot_generator.style.text_color,
+                                 loc='best')
+                legend.get_frame().set_alpha(0.9)
         
         # Add statistics box if enabled
         if self.show_stats_box.isChecked() and self.calculated_stats:
@@ -753,6 +851,145 @@ class PlottingTab(QWidget):
         self.crop_start_spin.setValue(0)
         self.crop_end_spin.setValue(999999)
         self.update_plot()
+    
+    def toggle_right_y_axis(self):
+        """Enable/disable right Y-axis controls"""
+        enabled = self.enable_right_y_check.isChecked()
+        self.y_right_combo.setEnabled(enabled)
+    
+    def reset_axis_config(self):
+        """Reset axis configuration to defaults based on data type"""
+        if not self.datasets:
+            # Default: Time vs Resistance
+            self.x_axis_combo.setCurrentText("Time (s)")
+            self.y_left_combo.setCurrentText("Resistance (Ω)")
+            self.enable_right_y_check.setChecked(False)
+            return
+        
+        # Check if any dataset is IV sweep
+        has_iv_sweep = any('IV Sweep' in data.test_name or 
+                          'iv_sweep' in data.test_name.lower() 
+                          for data in self.datasets)
+        
+        if has_iv_sweep:
+            # Default for IV sweeps: Voltage vs Current
+            self.x_axis_combo.setCurrentText("Voltage (V)")
+            self.y_left_combo.setCurrentText("Current (A)")
+            self.enable_right_y_check.setChecked(False)
+        else:
+            # Default for other data: Time vs Resistance
+            self.x_axis_combo.setCurrentText("Time (s)")
+            self.y_left_combo.setCurrentText("Resistance (Ω)")
+            self.enable_right_y_check.setChecked(False)
+        
+        self.toggle_right_y_axis()
+        self.update_plot()
+    
+    def get_axis_data(self, data: TSPData, axis_name: str) -> tuple:
+        """
+        Get data array and label for a given axis name.
+        Returns (data_array, label_string)
+        """
+        axis_name_lower = axis_name.lower()
+        
+        if 'time' in axis_name_lower:
+            return data.timestamps, "Time (s)"
+        elif 'voltage' in axis_name_lower:
+            return data.voltages, "Voltage (V)"
+        elif 'current' in axis_name_lower:
+            return data.currents, "Current (A)"
+        elif 'resistance' in axis_name_lower or 'Ω' in axis_name or 'ohm' in axis_name_lower:
+            return data.resistances, "Resistance (Ω)"
+        elif 'measurement' in axis_name_lower and 'number' in axis_name_lower:
+            return data.measurement_numbers, "Measurement Number"
+        elif 'cycle' in axis_name_lower and 'number' in axis_name_lower:
+            if 'Cycle Number' in data.additional_data:
+                return data.additional_data['Cycle Number'], "Cycle Number"
+            else:
+                return data.measurement_numbers, "Measurement Number"
+        else:
+            # Try to find in additional_data
+            for key, value in data.additional_data.items():
+                if axis_name_lower in key.lower():
+                    return value, key
+        
+        # Fallback to timestamps
+        return data.timestamps, "Time (s)"
+    
+    def plot_with_axes(self, data: TSPData, fig: Figure, ax: Axes, color: str, label: str,
+                       x_axis: str, y_left_axis: str, y_right_axis: Optional[str] = None,
+                       ax_right: Optional[Axes] = None):
+        """
+        Plot data with custom axis configuration.
+        
+        Args:
+            data: TSPData object
+            fig: Matplotlib figure
+            ax: Matplotlib axes (left Y-axis)
+            color: Line color
+            label: Legend label
+            x_axis: X-axis selection (e.g., "Time (s)")
+            y_left_axis: Left Y-axis selection
+            y_right_axis: Right Y-axis selection (optional)
+            ax_right: Right Y-axis (optional, created externally for multi-dataset)
+        """
+        import numpy as np
+        
+        # Get X-axis data
+        x_data, x_label = self.get_axis_data(data, x_axis)
+        
+        # Get left Y-axis data
+        y_left_data, y_left_label = self.get_axis_data(data, y_left_axis)
+        
+        # Filter out NaN and inf values
+        valid_mask = np.isfinite(x_data) & np.isfinite(y_left_data)
+        if not np.any(valid_mask):
+            return
+        
+        x_plot = x_data[valid_mask]
+        y_left_plot = y_left_data[valid_mask]
+        
+        # Plot on left Y-axis
+        line = ax.plot(x_plot, y_left_plot,
+                      color=color,
+                      linewidth=self.plot_generator.style.line_width,
+                      marker='o',
+                      markersize=self.plot_generator.style.marker_size,
+                      label=label,
+                      markevery=max(1, len(x_plot)//50))
+        
+        # Set labels
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_left_label)
+        
+        # Handle right Y-axis if enabled
+        if y_right_axis and ax_right is not None:
+            # Get right Y-axis data
+            y_right_data, y_right_label = self.get_axis_data(data, y_right_axis)
+            
+            # Filter out NaN and inf
+            valid_mask_right = np.isfinite(x_data) & np.isfinite(y_right_data)
+            if np.any(valid_mask_right):
+                x_right_plot = x_data[valid_mask_right]
+                y_right_plot = y_right_data[valid_mask_right]
+                
+                # Use different color for right axis
+                # Shift color in palette or use complementary
+                color_index = self.plot_generator.style.COLORS.index(color) if color in self.plot_generator.style.COLORS else 0
+                right_color = self.plot_generator.style.COLORS[(color_index + 1) % len(self.plot_generator.style.COLORS)]
+                
+                # Use dashed line style to distinguish
+                ax_right.plot(x_right_plot, y_right_plot,
+                            color=right_color,
+                            linewidth=self.plot_generator.style.line_width,
+                            marker='s',
+                            markersize=self.plot_generator.style.marker_size * 0.8,
+                            label=f"{label} ({y_right_label})",
+                            linestyle='--',
+                            markevery=max(1, len(x_right_plot)//50))
+                
+                ax_right.set_ylabel(y_right_label, color=right_color)
+                ax_right.tick_params(axis='y', labelcolor=right_color)
     
     def process_data(self, data: TSPData, crop_start: int, crop_end: int, 
                     normalize: bool, y_offset: float) -> TSPData:

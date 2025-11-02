@@ -14,6 +14,7 @@ import sys
 # Import custom tabs
 from .file_browser_tab import FileBrowserTab
 from .plotting_tab import PlottingTab
+from .batch_processing_dialog import BatchProcessingDialog
 
 class MainWindow(QMainWindow):
     """Main application window"""
@@ -50,6 +51,11 @@ class MainWindow(QMainWindow):
         # Tab 2: Plotting
         self.plotting_tab = PlottingTab(self)
         self.tabs.addTab(self.plotting_tab, "📊 Plotting")
+        
+        # Tab 3: Batch Processing
+        from .batch_processing_tab import BatchProcessingTab
+        self.batch_processing_tab = BatchProcessingTab(self)
+        self.tabs.addTab(self.batch_processing_tab, "⚙️ Batch Processing")
         
         # Connect signals
         self.file_browser_tab.files_selected.connect(self.on_files_selected)
@@ -218,6 +224,12 @@ class MainWindow(QMainWindow):
         open_folder_action.triggered.connect(self.open_folder)
         file_menu.addAction(open_folder_action)
         
+        # Batch processing action
+        batch_action = QAction("Batch Processing...", self)
+        batch_action.setShortcut(QKeySequence("Ctrl+B"))
+        batch_action.triggered.connect(self.open_batch_processing)
+        file_menu.addAction(batch_action)
+        
         file_menu.addSeparator()
         
         # Exit action
@@ -269,6 +281,11 @@ class MainWindow(QMainWindow):
             self.file_browser_tab.load_folder(self.current_folder)
             self.status_bar.showMessage("Files refreshed")
     
+    def open_batch_processing(self):
+        """Open batch processing dialog"""
+        dialog = BatchProcessingDialog(self)
+        dialog.exec()
+    
     def show_about(self):
         """Show about dialog"""
         QMessageBox.about(
@@ -283,6 +300,7 @@ class MainWindow(QMainWindow):
             "<li>Compare multiple measurements</li>"
             "<li>Advanced plotting and analysis</li>"
             "<li>Export to various formats</li>"
+            "<li>Batch processing</li>"
             "</ul>"
         )
     

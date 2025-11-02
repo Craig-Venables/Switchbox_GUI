@@ -398,3 +398,4 @@ class AnnotationToolbar(QWidget):
         self.y2_spin.setValue(y)
 
 
+
