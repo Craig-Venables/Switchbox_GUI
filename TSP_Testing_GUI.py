@@ -20,8 +20,14 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
+# Legacy imports kept for compatibility
 from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
 from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import Keithley2450_TSP_Scripts
+
+# New modular pulse testing system
+from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_address, get_default_address_for_system
+from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
+
 from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
 
 
@@ -239,13 +245,17 @@ class TSPTestingGUI(tk.Toplevel):
         
         # State
         self.tsp = None
-        self.test_scripts = None
+        self.test_scripts = None  # Legacy - kept for backward compatibility
         self.provider = provider
         self.device_address = device_address
         self.current_test = None
         self.test_running = False
         self.test_thread = None
         self.last_results = None
+        
+        # New modular system wrapper
+        self.system_wrapper = SystemWrapper()
+        self.current_system_name = None  # Track which system is connected
         
         # Context from provider
         self.sample_name = "UnknownSample"
@@ -299,18 +309,53 @@ class TSPTestingGUI(tk.Toplevel):
         self.context_var = tk.StringVar(value=f"Sample: {self.sample_name}  |  Device: {self.device_label}")
         tk.Label(frame, textvariable=self.context_var, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(0, 5))
         
-        # Address with dropdown for auto-detection
+        # System selection (FIRST - above device)
+        system_frame = tk.Frame(frame)
+        system_frame.pack(fill=tk.X, pady=2)
+        tk.Label(system_frame, text="System:").pack(side=tk.LEFT)
+        
+        self.system_var = tk.StringVar()
+        # Auto-detect system from address
+        detected_system = detect_system_from_address(self.device_address)
+        if detected_system:
+            self.system_var.set(detected_system)
+        else:
+            self.system_var.set("keithley2450")  # Default
+        
+        system_combo = ttk.Combobox(system_frame, textvariable=self.system_var,
+                                   values=["keithley2450", "keithley4200a"],
+                                   state="readonly", width=20)
+        system_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Auto-detect button
+        tk.Button(system_frame, text="🔍 Auto", command=self._auto_detect_system,
+                 width=6, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=2)
+        
+        # When system changes, update device address to default
+        self.system_var.trace_add("write", lambda *args: self._on_system_changed())
+        
+        # Device address with dropdown (SECOND - below system)
         addr_frame = tk.Frame(frame)
-        addr_frame.pack(fill=tk.X, pady=2)
+        addr_frame.pack(fill=tk.X, pady=(5, 2))
         tk.Label(addr_frame, text="Device:").pack(side=tk.LEFT)
         
-        self.addr_var = tk.StringVar(value=self.device_address)
+        self.addr_var = tk.StringVar()
+        # Set initial address based on detected system
+        if detected_system:
+            default_addr = get_default_address_for_system(detected_system)
+            if default_addr:
+                self.addr_var.set(default_addr)
+            else:
+                self.addr_var.set(self.device_address)
+        else:
+            self.addr_var.set(self.device_address)
         
         # Get available devices
         available_devices = self._get_available_devices()
-        if self.device_address not in available_devices and available_devices:
-            # Add current address if not in list (for backwards compatibility)
-            available_devices.insert(0, self.device_address)
+        current_addr = self.addr_var.get()
+        if current_addr not in available_devices and available_devices:
+            # Add current address if not in list
+            available_devices.insert(0, current_addr)
         
         self.addr_combo = ttk.Combobox(addr_frame, textvariable=self.addr_var,
                                        values=available_devices,
@@ -320,6 +365,9 @@ class TSPTestingGUI(tk.Toplevel):
         # Refresh button to re-scan devices
         tk.Button(addr_frame, text="🔄", command=self._refresh_devices, 
                  width=3, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=2)
+        
+        # Update system detection when address changes (optional auto-detect)
+        self.addr_var.trace_add("write", lambda *args: self._update_system_detection())
         
         # Terminal selection
         term_frame = tk.Frame(frame)
@@ -703,21 +751,86 @@ class TSPTestingGUI(tk.Toplevel):
         
         self.log(f"🔄 Refreshed device list: {len(available_devices)} device(s) found")
     
+    def _auto_detect_system(self):
+        """Auto-detect system from current address"""
+        address = self.addr_var.get()
+        detected = detect_system_from_address(address)
+        if detected:
+            self.system_var.set(detected)
+            self.log(f"🔍 Auto-detected system: {detected}")
+        else:
+            self.log(f"⚠️ Could not auto-detect system from address: {address}")
+            messagebox.showinfo("Auto-Detect", 
+                              f"Could not detect system from address.\n"
+                              f"Please select manually or use a recognized format.")
+    
+    def _on_system_changed(self):
+        """When system changes, update device address to system default"""
+        system_name = self.system_var.get()
+        default_addr = get_default_address_for_system(system_name)
+        if default_addr:
+            self.addr_var.set(default_addr)
+            # Update available devices list
+            available_devices = self._get_available_devices()
+            if default_addr not in available_devices:
+                available_devices.insert(0, default_addr)
+            self.addr_combo['values'] = available_devices
+            self.log(f"🔧 Auto-populated device address for {system_name}: {default_addr}")
+    
+    def _update_system_detection(self):
+        """Update system selection when address changes (optional - user can override)"""
+        # Only auto-detect if user hasn't manually changed system
+        # For now, we'll allow address to suggest system but not force it
+        # User can use the "🔍 Auto" button if they want auto-detection
+        pass
+    
     def connect_device(self):
-        """Connect to Keithley 2450 TSP"""
+        """Connect to measurement system (supports multiple systems)"""
         try:
             address = self.addr_var.get()
-            terminals = self.terminals_var.get()
+            system_name = self.system_var.get()
+            
+            # Auto-detect system if not explicitly set or if address changed
+            detected = detect_system_from_address(address)
+            if detected and detected != system_name:
+                # Update system selection if auto-detection differs
+                self.system_var.set(detected)
+                system_name = detected
+                self.log(f"Auto-detected system: {system_name}")
+            
             self.log(f"Connecting to {address}...")
-            self.log(f"Using {terminals.upper()} terminals...")
+            self.log(f"System: {system_name}")
             
-            self.tsp = Keithley2450_TSP(address, terminals=terminals)
-            idn = self.tsp.get_idn()
-            self.test_scripts = Keithley2450_TSP_Scripts(self.tsp)
+            # Connect using system wrapper
+            connected_system = self.system_wrapper.connect(
+                address=address,
+                system_name=system_name,
+                terminals=self.terminals_var.get() if system_name == 'keithley2450' else None,
+            )
             
-            self.conn_status_var.set(f"Connected: {idn} ({terminals.upper()})")
+            self.current_system_name = connected_system
+            idn = self.system_wrapper.get_idn()
+            
+            # Legacy compatibility: maintain old tsp/test_scripts if 2450
+            if connected_system == 'keithley2450':
+                self.tsp = self.system_wrapper.current_system.tsp_controller
+                self.test_scripts = self.system_wrapper.current_system.test_scripts
+            else:
+                self.tsp = None
+                self.test_scripts = None
+            
+            terminals_text = f" ({self.terminals_var.get().upper()})" if connected_system == 'keithley2450' else ""
+            self.conn_status_var.set(f"Connected: {system_name.upper()} - {idn}{terminals_text}")
             self.log(f"✓ Connected: {idn}")
-            self.log(f"✓ Terminals: {terminals.upper()}")
+            if connected_system == 'keithley2450':
+                self.log(f"✓ Terminals: {self.terminals_var.get().upper()}")
+            
+            # Update test list based on capabilities - this greys out unsupported tests
+            self._update_test_list_capabilities()
+            
+            # Check current test and update button state
+            self.on_test_selected(None)
+            
             self.run_btn.config(state=tk.NORMAL)
             
         except Exception as e:
@@ -727,35 +840,98 @@ class TSPTestingGUI(tk.Toplevel):
     
     def disconnect_device(self):
         """Disconnect from device"""
+        # Disconnect using system wrapper
+        if self.system_wrapper.is_connected():
+            try:
+                self.system_wrapper.disconnect()
+                self.log("✓ Disconnected")
+            except:
+                pass
+        
+        # Legacy cleanup
         if self.tsp:
             try:
                 self.tsp.close()
-                self.log("✓ Disconnected")
             except:
                 pass
             self.tsp = None
             self.test_scripts = None
         
+        self.current_system_name = None
         self.conn_status_var.set("Disconnected")
         self.run_btn.config(state=tk.DISABLED)
+        
+        # Reset test list (enable all tests when disconnected)
+        self._update_test_list_capabilities()
+    
+    def _update_test_list_capabilities(self):
+        """Update test list to gray out unsupported tests based on current system"""
+        if not hasattr(self, 'test_combo'):
+            return  # GUI not fully initialized yet
+        
+        system_name = self.current_system_name if self.current_system_name else None
+        test_values = list(TEST_FUNCTIONS.keys())
+        
+        # Store current selection
+        current_selection = self.test_var.get()
+        
+        # Update combobox values (this will trigger capability checking)
+        self.test_combo['values'] = test_values
+        
+        # Restore selection if it exists
+        if current_selection in test_values:
+            self.test_var.set(current_selection)
+        elif test_values:
+            self.test_var.set(test_values[0])
+        
+        # Update enabled state and appearance based on capabilities
+        # Note: Tkinter combobox doesn't support individual item styling easily,
+        # so we'll handle capability checking in on_test_selected instead
     
     def on_test_selected(self, event):
         """Update UI when test is selected"""
         test_name = self.test_var.get()
-        if test_name in TEST_FUNCTIONS:
-            test_info = TEST_FUNCTIONS[test_name]
-            
-            # Update description
-            self.desc_text.config(state=tk.NORMAL)
-            self.desc_text.delete(1.0, tk.END)
-            self.desc_text.insert(1.0, test_info["description"])
-            self.desc_text.config(state=tk.DISABLED)
-            
-            # Update parameters
-            self.populate_parameters()
-            
-            # Update pulse diagram
-            self.update_pulse_diagram()
+        if test_name not in TEST_FUNCTIONS:
+            return
+        
+        test_info = TEST_FUNCTIONS[test_name]
+        test_function = test_info["function"]
+        
+        # Check if test is supported by current system
+        system_name = self.current_system_name
+        is_supported = True
+        unsupported_msg = None
+        
+        if system_name:
+            is_supported = is_test_supported(system_name, test_function)
+            if not is_supported:
+                unsupported_msg = get_test_explanation(system_name, test_function)
+        
+        # Update description (add warning if unsupported)
+        self.desc_text.config(state=tk.NORMAL)
+        self.desc_text.delete(1.0, tk.END)
+        description = test_info["description"]
+        if not is_supported and unsupported_msg:
+            description = f"⚠️ NOT SUPPORTED: {unsupported_msg}\n\n{description}"
+        self.desc_text.insert(1.0, description)
+        if not is_supported:
+            # Make text grayed out
+            self.desc_text.tag_add("unsupported", "1.0", tk.END)
+            self.desc_text.tag_config("unsupported", foreground="gray")
+        self.desc_text.config(state=tk.DISABLED)
+        
+        # Disable/enable run button based on support
+        if not is_supported:
+            self.run_btn.config(state=tk.DISABLED, bg="gray", cursor="arrow")
+            self.log(f"⚠️ Test '{test_name}' not supported by {system_name}")
+        elif self.system_wrapper.is_connected():
+            self.run_btn.config(state=tk.NORMAL, bg="#28a745", cursor="hand2")
+        
+        # Update parameters
+        self.populate_parameters()
+        
+        # Update pulse diagram
+        self.update_pulse_diagram()
     
     def populate_parameters(self):
         """Populate parameter inputs based on selected test"""
@@ -851,12 +1027,25 @@ class TSPTestingGUI(tk.Toplevel):
     
     def run_test(self):
         """Start test in background thread"""
-        if not self.test_scripts:
+        if not self.system_wrapper.is_connected():
             messagebox.showerror("Error", "Not connected to device")
             return
         
         if self.test_running:
             messagebox.showwarning("Warning", "Test already running")
+            return
+        
+        # Check if test is supported
+        test_name = self.test_var.get()
+        test_info = TEST_FUNCTIONS[test_name]
+        test_function = test_info["function"]
+        
+        if self.current_system_name and not is_test_supported(self.current_system_name, test_function):
+            explanation = get_test_explanation(self.current_system_name, test_function)
+            messagebox.showwarning(
+                "Test Not Supported",
+                f"Test '{test_name}' is not supported by {self.current_system_name}.\n\n{explanation}"
+            )
             return
         
         # Get parameters
@@ -865,9 +1054,6 @@ class TSPTestingGUI(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Parameter Error", str(e))
             return
-        
-        test_name = self.test_var.get()
-        test_info = TEST_FUNCTIONS[test_name]
         
         # UI state
         self.test_running = True
@@ -882,17 +1068,16 @@ class TSPTestingGUI(tk.Toplevel):
         self.test_thread.start()
     
     def _run_test_thread(self, test_info, params):
-        """Execute test in background"""
+        """Execute test in background using system wrapper"""
         try:
-            # Get function
+            # Get function name
             func_name = test_info["function"]
-            func = getattr(self.test_scripts, func_name)
             
-            # Execute
-            self.log(f"Executing {func_name}...")
+            # Execute using system wrapper (routes to appropriate system)
+            self.log(f"Executing {func_name} on {self.current_system_name}...")
             start_time = time.time()
             
-            results = func(**params)
+            results = self.system_wrapper.run_test(test_function=func_name, params=params)
             
             elapsed = time.time() - start_time
             self.log(f"✓ Test complete in {elapsed:.2f}s")
@@ -1328,20 +1513,35 @@ class TSPTestingGUI(tk.Toplevel):
             metadata = {
                 'sample': self.sample_name,
                 'device': self.device_label,
-                'instrument': 'Keithley 2450',
-                'address': self.address_var.get() if hasattr(self, 'address_var') else 'N/A',
+                'instrument': 'Keithley 2450',  # Default, will be updated below
+                'address': self.addr_var.get() if hasattr(self, 'addr_var') else 'N/A',
                 'test_index': index,
                 'notes': notes,
             }
             
-            # Add hardware limits from test_scripts if available
-            if hasattr(self, 'test_scripts') and self.test_scripts:
+            # Add hardware limits from system wrapper if available
+            if self.system_wrapper.is_connected():
+                try:
+                    limits = self.system_wrapper.get_hardware_limits()
+                    if limits:
+                        # Format limits for metadata
+                        metadata['hardware_limits'] = {
+                            'min_pulse_width': f"{limits.get('min_pulse_width', 0)*1e3:.3f} ms",
+                            'max_voltage': f"{limits.get('max_voltage', 0)} V",
+                            'max_current_limit': f"{limits.get('max_current_limit', 0)} A",
+                        }
+                        metadata['instrument'] = f"{self.current_system_name.upper()}" if self.current_system_name else "Unknown"
+                except:
+                    pass
+            # Legacy fallback for compatibility
+            elif hasattr(self, 'test_scripts') and self.test_scripts:
                 try:
                     metadata['hardware_limits'] = {
                         'min_pulse_width': f"{self.test_scripts.MIN_PULSE_WIDTH*1e3:.3f} ms",
                         'max_voltage': f"{self.test_scripts.MAX_VOLTAGE} V",
                         'max_current_limit': f"{self.test_scripts.MAX_CURRENT_LIMIT} A",
                     }
+                    metadata['instrument'] = 'Keithley 2450'
                 except:
                     pass
             
