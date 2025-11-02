@@ -42,7 +42,7 @@ import threading
 import atexit
 from pathlib import Path
 import queue
-from PMU_Testing_GUI import PMUTestingGUI
+#from PMU_Testing_GUI import PMUTestingGUI
 from TSP_Testing_GUI import TSPTestingGUI
 
 from telegram import PassportData

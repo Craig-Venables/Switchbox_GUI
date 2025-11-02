@@ -32,6 +32,21 @@
 - Siglent (triggered pulses)
 - Moku Go (in the works)
 
+### Cameras
+- Thorlabs Camera System (USB and Ethernet streaming)
+  - **USB Mode**: Local camera viewing for direct monitoring
+  - **Server Mode**: Stream video from one laptop to another over Ethernet
+  - **Client Mode**: Receive and display video stream from remote server
+  - **Motor Control Integration**: Frame callbacks available for automated positioning
+  - Test script: `Equipment/Camera/view_camera.py` provides GUI viewer
+  - Manager: `Equipment/camera_manager.py` for unified camera interface
+
+### Motor Control
+- Thorlabs Kinesis Linear Stages (X/Y axes)
+  - Controller: `Equipment/Motor_Controll/Kenisis_motor_control.py`
+  - GUI: `Motor_Controll_GUI.py`
+  - Camera integration ready for visual positioning feedback
+
 ## Measurement Types
 
 - DC Triangle IV: Classic FS/PS/NS triangle sweep. Configurable by Sweep Mode (fixed step, fixed sweep rate, fixed voltage time), Sweep Type (FS/PS/NS), Step/Delay or rate/time.
@@ -248,6 +263,23 @@ fg_params  = {"channel": 1, "period_s": 1.0, "high_level_v": 1.5, "cycles": 1, "
 df = ms.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
 ```
 
+## Equipment Managers
+
+All equipment follows a unified manager pattern for easy configuration and initialization:
+
+- **SMU/PMU**: `Equipment/SMU_AND_PMU/` (Keithley controllers)
+- **Temperature Controllers**: `Equipment/temperature_controller_manager.py` (Lakeshore, Oxford)
+- **Function Generators**: `Equipment/function_generator_manager.py` (Siglent, Moku)
+- **Cameras**: `Equipment/camera_manager.py` (Thorlabs USB/Ethernet)
+- **Laser Controllers**: `Equipment/laser_manager.py` (Oxxius)
+- **Power Supplies**: `Equipment/power_supply_manager.py` (Keithley 2220)
+- **Ammeters**: `Equipment/ammeter_manager.py` (Agilent)
+- **Multiplexers**: `Equipment/multiplexer_manager.py` (PySwitchbox, Electronic)
+- **Oscilloscopes**: `Equipment/oscilloscope_manager.py` (Tektronix, GW Instek)
+- **Motor Control**: `Equipment/Motor_Controll/Kenisis_motor_control.py` (Thorlabs Kinesis)
+
+All managers support `from_config()` for configuration-based initialization.
+
 ## Code Map (where to look)
 
 - Volatile Tests (GUI: More Tests → Volatile)
@@ -286,12 +318,85 @@ df = ms.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
   - Measurement Type dropdown and dynamic panels: `create_sweep_parameters(...)`
   - Execution branching and saving: `start_measurement(...)` (branches on Measurement Type)
 
+## Camera System
+
+The camera system provides local USB viewing and Ethernet streaming capabilities for remote monitoring and motor control integration.
+
+### Modes
+
+**USB Mode** - Local camera viewing:
+```python
+from Equipment.camera_manager import CameraManager
+
+camera = CameraManager.create_usb(camera_index=0, resolution=(1280, 720), fps=30)
+frame = camera.get_frame()  # Get latest frame for processing
+```
+
+**Server Mode** - Stream video over Ethernet:
+```python
+# On streaming laptop
+config = {
+    'camera_type': 'Thorlabs',
+    'mode': 'server',
+    'camera_index': 0,
+    'port': 8485
+}
+camera = CameraManager.from_config(config, auto_connect=True)
+```
+
+**Client Mode** - Receive video stream:
+```python
+# On receiving laptop
+config = {
+    'camera_type': 'Thorlabs',
+    'mode': 'client',
+    'server_ip': '192.168.1.100',  # Server laptop IP
+    'port': 8485
+}
+camera = CameraManager.from_config(config, auto_connect=True)
+frame = camera.get_frame()
+```
+
+### Features
+
+- **Frame Callbacks**: Set callbacks on new frames for motor control integration
+- **Thread-Safe**: Safe concurrent access to frames
+- **Configurable**: Resolution, FPS, and quality settings
+- **Test Viewer**: Run `python Equipment/Camera/view_camera.py` for GUI viewer
+
+### Test Script
+
+The camera viewer provides a simple GUI for testing:
+```bash
+# View camera feed (default camera index 0)
+python Equipment/Camera/view_camera.py
+
+# Specify camera index
+python Equipment/Camera/view_camera.py 1
+```
+
+**Controls:**
+- `'q'` - Quit
+- `'s'` - Save screenshot
+- `'r'` - Show resolution info
+- `'f'` - Show FPS
+
+### Motor Control Integration
+
+The camera system is designed for integration with motor control:
+- Frame callbacks can trigger motor movements based on visual feedback
+- USB mode provides low-latency local viewing
+- Ethernet streaming enables remote monitoring from control laptop
+- All modes support `set_frame_callback()` for real-time processing
+
 ## Notes
 
 - PMU-based measurements are available separately (see PMU_Testing_GUI) for accurate waveform capture.
 - TSP Testing GUI requires Keithley 2450 to be in TSP mode (not SCPI). Switch via: MENU → System → Settings → Command Set → TSP
 - Terminal selection (front/rear) is saved automatically and persists across sessions
 - All TSP functions now use correct setting order (measure function/range first) to prevent instrument errors
+- Camera system uses OpenCV; ensure camera drivers are installed for USB mode
+- For Ethernet streaming, ensure both laptops are on the same network and firewall allows the port (default: 8485)
 
 
 
