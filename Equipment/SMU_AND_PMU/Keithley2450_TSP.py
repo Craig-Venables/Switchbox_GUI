@@ -953,7 +953,6 @@ if __name__ == "__main__":
         
 
 
-        
     #     # Clear any previously loaded scripts to prevent error 1408
     #     tsp.clear_all_scripts()
     #     print()
