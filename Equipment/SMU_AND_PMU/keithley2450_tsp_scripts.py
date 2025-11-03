@@ -1,3 +1,63 @@
+"""note : below is an example of a script using propper pulsing methods  """
+
+def varying_width_pulses(self, pulse_voltage=1.0,
+                         pulse_widths=None,
+                         pulses_per_width=5,
+                         read_voltage=0.2,
+                         delay_between=10e-3,
+                         clim=100e-3):
+    if pulse_widths is None:
+        pulse_widths = [50e-6, 100e-6, 500e-6, 1e-3]
+
+    self.tsp.device.write('if varyingWidthPulses ~= nil then script.delete("varyingWidthPulses") end')
+    time.sleep(0.01)
+    self.tsp.device.write('loadscript varyingWidthPulses')
+
+    self.tsp.device.write('smu.reset()')
+    self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+    self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+    self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+    self.tsp.device.write('smu.measure.nplc = 0.01')
+    self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+    self.tsp.device.write('defbuffer1.clear()')
+
+    # prepare for timing and digital trigger line
+    self.tsp.device.write('digio.line[1].mode = digio.MODE_TRIGGER_OUT')
+    self.tsp.device.write('trigger.digout[1].logic = trigger.LOGIC_POSITIVE')
+
+    # main loop
+    self.tsp.device.write('local widths = {' + ','.join(str(w) for w in pulse_widths) + '}')
+    self.tsp.device.write(f'local readV = {read_voltage}')
+    self.tsp.device.write(f'local pulseV = {pulse_voltage}')
+    self.tsp.device.write(f'local pulses_per_width = {pulses_per_width}')
+    self.tsp.device.write(f'local delay_between = {delay_between}')
+
+    self.tsp.device.write('smu.source.output = smu.ON')
+    self.tsp.device.write('for _, width in ipairs(widths) do')
+    self.tsp.device.write('  for n = 1, pulses_per_width do')
+    self.tsp.device.write('    smu.source.level = pulseV')
+    self.tsp.device.write('    trigger.digout[1].pulsewidth = width')
+    self.tsp.device.write('    trigger.digout[1].assert()  -- 10 µs–range accuracy pulse marker')
+    self.tsp.device.write('    trigger.timer[1].delay = width')
+    self.tsp.device.write('    trigger.timer[1].start.generate()')
+    self.tsp.device.write('    trigger.timer[1].wait()')
+    self.tsp.device.write('    smu.source.level = 0')
+    self.tsp.device.write('    smu.source.level = readV')
+    self.tsp.device.write('    smu.measure.read(defbuffer1)')
+    self.tsp.device.write('    smu.source.level = 0')
+    self.tsp.device.write('    delay(delay_between)')
+    self.tsp.device.write('  end')
+    self.tsp.device.write('end')
+    self.tsp.device.write('smu.source.output = smu.OFF')
+    self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.readings)')
+    self.tsp.device.write('endscript')
+
+    # execute and collect data
+    self.tsp.device.write('varyingWidthPulses()')
+    self.tsp.device.write('waitcomplete()')
+    result = self.tsp.device.read().strip()
+    return result
+
 """
 Keithley 2450 TSP Testing Scripts
 
