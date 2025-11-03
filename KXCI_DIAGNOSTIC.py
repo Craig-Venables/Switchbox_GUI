@@ -53,7 +53,7 @@ from datetime import datetime
 from pathlib import Path
 
 class KXCIDiagnostics:
-    def __init__(self, gpib_address="GPIB0::12::INSTR", timeout=10.0):
+    def __init__(self, gpib_address="GPIB0::17::INSTR", timeout=10.0):
         """
         Initialize GPIB connection to 4200A.
         
@@ -582,7 +582,7 @@ def main():
     """)
     
     # Get GPIB address from user
-    default_address = "GPIB0::12::INSTR"
+    default_address = "GPIB0::17::INSTR"
     user_input = input(f"Enter GPIB address (default: {default_address}): ").strip()
     gpib_address = user_input if user_input else default_address
     
