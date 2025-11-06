@@ -803,3 +803,7 @@ if __name__ == "__main__":
         scope.disconnect()
         print("\nDisconnected from oscilloscope")
 
+
+
+
+

@@ -7,6 +7,8 @@ import threading
 import time
 import os
 import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -100,13 +102,14 @@ TEST_FUNCTIONS = {
     
     "Potentiation-Depression Cycle": {
         "function": "potentiation_depression_cycle",
-        "description": "Pattern: Initial Read → Gradual SET (LRS) → Gradual RESET (HRS)\nSynaptic weight update, neuromorphic applications",
+        "description": "Pattern: Initial Read → (Gradual SET → Gradual RESET) × N cycles\nSynaptic weight update, neuromorphic applications",
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "steps": {"default": 20, "label": "Steps (each direction)", "type": "int"},
+            "num_cycles": {"default": 1, "label": "Number of Cycles", "type": "int"},
             "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
@@ -182,7 +185,7 @@ TEST_FUNCTIONS = {
         "params": {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_reads": {"default": 100, "label": "Number of Reads", "type": "int"},
-            "delay_between": {"default": 100e-3, "label": "Delay Between (s)", "type": "float"},
+            "delay_between": {"default": 100.0, "label": "Delay Between (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "time_series",
@@ -230,6 +233,90 @@ TEST_FUNCTIONS = {
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "relaxation_all",
+    },
+    
+    "Voltage Amplitude Sweep": {
+        "function": "voltage_amplitude_sweep",
+        "description": "Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset\nTest different pulse voltages at fixed width (complementary to width sweep)",
+        "params": {
+            "pulse_voltage_start": {"default": 0.5, "label": "Start Voltage (V)", "type": "float"},
+            "pulse_voltage_stop": {"default": 2.5, "label": "Stop Voltage (V)", "type": "float"},
+            "pulse_voltage_step": {"default": 0.1, "label": "Voltage Step (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "num_pulses_per_voltage": {"default": 5, "label": "Pulses Per Voltage", "type": "int"},
+            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "reset_voltage": {"default": -1.0, "label": "Reset Voltage (V)", "type": "float"},
+            "reset_width": {"default": 1.0, "label": "Reset Width (ms)", "type": "float"},
+            "delay_between_voltages": {"default": 1000.0, "label": "Delay Between Voltages (ms)", "type": "float"},
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "voltage_sweep",
+    },
+    
+    "ISPP (Incremental Step Pulse Programming)": {
+        "function": "ispp_test",
+        "description": "Pattern: Start at low voltage, increase by step each pulse\nGradually increase voltage until switching occurs",
+        "params": {
+            "start_voltage": {"default": 0.5, "label": "Start Voltage (V)", "type": "float"},
+            "voltage_step": {"default": 0.05, "label": "Voltage Step (V)", "type": "float"},
+            "max_voltage": {"default": 3.0, "label": "Max Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "max_pulses": {"default": 100, "label": "Max Pulses", "type": "int"},
+            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "ispp",
+    },
+    
+    "Switching Threshold Finder": {
+        "function": "switching_threshold_test",
+        "description": "Pattern: Try increasing voltages, find minimum that causes switching\nFind minimum SET or RESET voltage",
+        "params": {
+            "direction": {"default": "set", "label": "Direction (set/reset)", "type": "str"},
+            "start_voltage": {"default": 0.5, "label": "Start Voltage (V)", "type": "float"},
+            "voltage_step": {"default": 0.05, "label": "Voltage Step (V)", "type": "float"},
+            "max_voltage": {"default": 3.0, "label": "Max Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "num_pulses_per_voltage": {"default": 3, "label": "Pulses Per Voltage", "type": "int"},
+            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "threshold",
+    },
+    
+    "Multilevel Programming": {
+        "function": "multilevel_programming",
+        "description": "Pattern: For each level: Reset → Program with pulses → Read\nTarget specific resistance states for multilevel memory",
+        "params": {
+            "target_levels": {"default": "1,2,3,4,5", "label": "Target Levels (comma-separated)", "type": "list"},
+            "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "num_pulses_per_level": {"default": 5, "label": "Pulses Per Level", "type": "int"},
+            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "reset_voltage": {"default": -1.0, "label": "Reset Voltage (V)", "type": "float"},
+            "reset_width": {"default": 1.0, "label": "Reset Width (ms)", "type": "float"},
+            "delay_between_levels": {"default": 1000.0, "label": "Delay Between Levels (ms)", "type": "float"},
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "multilevel",
+    },
+    
+    "Pulse Train with Varying Amplitudes": {
+        "function": "pulse_train_varying_amplitudes",
+        "description": "Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N\nAlternating or varying amplitude pulses",
+        "params": {
+            "pulse_voltages": {"default": "1.0,1.5,2.0,-1.0,-1.5,-2.0", "label": "Pulse Voltages (comma-separated, V)", "type": "list"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "num_repeats": {"default": 1, "label": "Number of Repeats", "type": "int"},
+            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "pulse_train",
     },
 }
 
@@ -282,10 +369,41 @@ class TSPTestingGUI(tk.Toplevel):
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Left panel: Controls
-        left_panel = tk.Frame(main_frame, width=450)
-        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5))
-        left_panel.pack_propagate(False)
+        # Left panel: Controls with scrollbar
+        left_container = tk.Frame(main_frame, width=450)
+        left_container.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5))
+        left_container.pack_propagate(False)
+        
+        # Create scrollable canvas for left panel
+        left_canvas = tk.Canvas(left_container, highlightthickness=0)
+        left_scrollbar = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
+        left_panel = tk.Frame(left_canvas)
+        
+        # Create window in canvas for the frame
+        left_canvas_window = left_canvas.create_window((0, 0), window=left_panel, anchor="nw")
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        
+        # Configure scrollable region and update canvas window width
+        def update_scroll_region(event=None):
+            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+            # Update canvas window width to match canvas width
+            canvas_width = left_canvas.winfo_width()
+            if canvas_width > 1:  # Only update if canvas has been rendered
+                left_canvas.itemconfig(left_canvas_window, width=canvas_width)
+        
+        left_panel.bind("<Configure>", update_scroll_region)
+        left_canvas.bind("<Configure>", lambda e: left_canvas.itemconfig(left_canvas_window, width=e.width))
+        
+        # Pack scrollbar and canvas
+        left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Bind mousewheel to canvas (for Windows)
+        def _on_mousewheel(event):
+            left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        left_canvas.bind("<MouseWheel>", _on_mousewheel)
+        # Also bind to the frame for better responsiveness
+        left_panel.bind("<MouseWheel>", lambda e: left_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         
         # Right panel: Visualizations
         right_panel = tk.Frame(main_frame)
@@ -507,7 +625,12 @@ class TSPTestingGUI(tk.Toplevel):
         
         self.save_btn = tk.Button(btn_frame, text="💾 Manual Save", command=self.manual_save_with_notes, 
                                   state=tk.DISABLED, font=("TkDefaultFont", 9))
-        self.save_btn.pack(side=tk.LEFT, padx=(2, 0), fill=tk.X, expand=True)
+        self.save_btn.pack(side=tk.LEFT, padx=(2, 2), fill=tk.X, expand=True)
+        
+        # Data Analysis button
+        analysis_btn = tk.Button(btn_frame, text="📊 Analysis", command=self.open_data_analysis, 
+                                bg="#FF9800", fg="white", font=("TkDefaultFont", 9))
+        analysis_btn.pack(side=tk.LEFT, padx=(2, 0), fill=tk.X, expand=True)
         
         # Auto-save toggle
         auto_save_frame = tk.Frame(frame)
@@ -517,6 +640,17 @@ class TSPTestingGUI(tk.Toplevel):
         auto_save_check = tk.Checkbutton(auto_save_frame, text="🔄 Auto-save data after test completion",
                                         variable=self.auto_save_var, font=("TkDefaultFont", 9))
         auto_save_check.pack(anchor="w")
+        
+        # Filename suffix section
+        suffix_frame = tk.LabelFrame(frame, text="📝 Filename Suffix (optional - added to filename)", padx=5, pady=5)
+        suffix_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.filename_suffix_var = tk.StringVar()
+        suffix_entry = tk.Entry(suffix_frame, textvariable=self.filename_suffix_var, 
+                               font=("TkDefaultFont", 9), width=30)
+        suffix_entry.pack(fill=tk.X, padx=2, pady=2)
+        tk.Label(suffix_frame, text="Example: 'test1', 'batchA', 'highTemp'", 
+                font=("TkDefaultFont", 7), fg="gray").pack(anchor="w", padx=2)
         
         # Notes section
         notes_frame = tk.LabelFrame(frame, text="📝 Test Notes (optional - saved with data)", padx=5, pady=5)
@@ -591,6 +725,21 @@ class TSPTestingGUI(tk.Toplevel):
                     self.sample_name = name
                 if letter and number:
                     self.device_label = f"{letter}{number}"
+                
+                # Check if provider has custom save location enabled
+                use_custom = getattr(self.provider, 'use_custom_save_var', None)
+                if use_custom and use_custom.get():
+                    custom_path = getattr(self.provider, 'custom_save_location', None)
+                    if custom_path:
+                        # Use Measurement GUI's custom save location
+                        self.custom_base_path = Path(custom_path)
+                        # Extract sample name from the last part of the custom path
+                        # e.g., "C:\...\D80-0.1mgml-ITO-PMMA(2%)-Gold-s2" -> "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2"
+                        sample_from_path = Path(custom_path).name
+                        if sample_from_path:
+                            self.sample_name = sample_from_path
+                        # Disable simple save mode when using Measurement GUI's custom location
+                        self.use_simple_save_var.set(False)
             self.context_var.set(f"Sample: {self.sample_name}  |  Device: {self.device_label}")
         except Exception:
             pass
@@ -999,7 +1148,8 @@ class TSPTestingGUI(tk.Toplevel):
         params = {}
         # Time parameters that need conversion from ms to seconds
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval']
+                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
+                      'reset_width', 'delay_between_voltages', 'delay_between_levels']
         
         for param_name, param_info in self.param_vars.items():
             var = param_info["var"]
@@ -1174,6 +1324,16 @@ class TSPTestingGUI(tk.Toplevel):
                 self._plot_relaxation_all()
             elif plot_type == 'relaxation':
                 self._plot_relaxation()
+            elif plot_type == 'voltage_sweep':
+                self._plot_voltage_sweep()
+            elif plot_type == 'ispp':
+                self._plot_ispp()
+            elif plot_type == 'threshold':
+                self._plot_threshold()
+            elif plot_type == 'multilevel':
+                self._plot_multilevel()
+            elif plot_type == 'pulse_train':
+                self._plot_pulse_train()
             else:
                 self._plot_time_series()  # Default
             
@@ -1183,8 +1343,27 @@ class TSPTestingGUI(tk.Toplevel):
     
     def _plot_time_series(self):
         """Plot resistance vs time"""
+        test_name = self.last_results['test_name']
+        params = self.last_results.get('params', {})
+        
         self.ax.plot(self.last_results['timestamps'], 
                      self.last_results['resistances'], 'o-', markersize=3)
+        
+        # Add red dotted line for potentiation/depression tests with post-reads
+        if test_name in ["Potentiation Only", "Depression Only"]:
+            num_post_reads = params.get('num_post_reads', 0)
+            if num_post_reads > 0:
+                num_pulses = params.get('num_pulses', 30)
+                # Pattern: initial read (idx 0) + num_pulses pulse+read pairs (idx 1 to num_pulses)
+                # Post-reads start at idx num_pulses + 1
+                # Find the timestamp where pulses end (right after the last pulse read)
+                pulse_end_idx = num_pulses  # Index of last pulse read (idx 0 is initial, 1-N are pulse reads)
+                if pulse_end_idx < len(self.last_results['timestamps']):
+                    pulse_end_time = self.last_results['timestamps'][pulse_end_idx]
+                    self.ax.axvline(x=pulse_end_time, color='red', linestyle='--', 
+                                   linewidth=2, alpha=0.7, label='Pulses End → Post-reads Start')
+                    self.ax.legend()
+        
         self.ax.set_xlabel('Time (s)')
         self.ax.set_ylabel('Resistance (Ω)')
         self.ax.set_title(self.last_results['test_name'])
@@ -1303,24 +1482,69 @@ class TSPTestingGUI(tk.Toplevel):
             self.ax.axvline(x=0.5, color='gray', linestyle=':', alpha=0.3, label='Initial Read')
     
     def _plot_pot_dep_cycle(self):
-        """Plot potentiation-depression cycle"""
+        """Plot potentiation-depression cycle showing all cycles separately"""
         phases = self.last_results.get('phase', [])
-        pot_idx = [i for i, p in enumerate(phases) if p == 'potentiation']
-        dep_idx = [i for i, p in enumerate(phases) if p == 'depression']
+        timestamps = self.last_results.get('timestamps', [])
+        resistances = self.last_results.get('resistances', [])
+        params = self.last_results.get('params', {})
+        num_cycles = params.get('num_cycles', 1)
+        steps = params.get('steps', 20)
         
-        if pot_idx:
-            self.ax.plot([self.last_results['timestamps'][i] for i in pot_idx],
-                        [self.last_results['resistances'][i] for i in pot_idx],
-                        'o-', label='Potentiation (SET)', color='green', markersize=4)
-        if dep_idx:
-            self.ax.plot([self.last_results['timestamps'][i] for i in dep_idx],
-                        [self.last_results['resistances'][i] for i in dep_idx],
-                        'o-', label='Depression (RESET)', color='red', markersize=4)
+        if not phases or not timestamps or not resistances:
+            self.ax.text(0.5, 0.5, "No data to plot", ha='center', va='center')
+            return
         
-        self.ax.set_xlabel('Time (s)')
-        self.ax.set_ylabel('Resistance (Ω)')
-        self.ax.set_title(self.last_results['test_name'])
-        self.ax.legend()
+        # Calculate steps per cycle (potentiation + depression)
+        steps_per_cycle = steps * 2
+        
+        # Plot each cycle separately with distinct colors
+        colors = plt.cm.tab10(np.linspace(0, 1, max(num_cycles, 1)))
+        
+        # Skip initial read (idx 0)
+        for cycle in range(num_cycles):
+            cycle_start_idx = 1 + (cycle * steps_per_cycle)
+            cycle_end_idx = 1 + ((cycle + 1) * steps_per_cycle)
+            
+            if cycle_start_idx >= len(phases):
+                break
+            
+            # Get indices for this cycle
+            cycle_indices = list(range(cycle_start_idx, min(cycle_end_idx, len(phases))))
+            
+            # Separate potentiation and depression for this cycle
+            pot_indices_cycle = [i for i in cycle_indices if i < len(phases) and phases[i] == 'potentiation']
+            dep_indices_cycle = [i for i in cycle_indices if i < len(phases) and phases[i] == 'depression']
+            
+            # Plot potentiation for this cycle
+            if pot_indices_cycle:
+                pot_times = [timestamps[i] for i in pot_indices_cycle]
+                pot_res = [resistances[i] for i in pot_indices_cycle]
+                label = f'Cycle {cycle+1}: Potentiation' if num_cycles > 1 else 'Potentiation (SET)'
+                self.ax.plot(pot_times, pot_res, 'o-', color=colors[cycle % len(colors)], 
+                           markersize=4, linewidth=2, alpha=0.8, label=label)
+            
+            # Plot depression for this cycle
+            if dep_indices_cycle:
+                dep_times = [timestamps[i] for i in dep_indices_cycle]
+                dep_res = [resistances[i] for i in dep_indices_cycle]
+                label = f'Cycle {cycle+1}: Depression' if num_cycles > 1 else 'Depression (RESET)'
+                # Use darker shade of same color for depression
+                dep_color = plt.cm.Reds(0.6 + (cycle % len(colors)) * 0.3)
+                self.ax.plot(dep_times, dep_res, 's-', color=dep_color, 
+                           markersize=4, linewidth=2, alpha=0.8, label=label)
+        
+        # Plot initial read if present
+        if len(phases) > 0 and phases[0] == 'initial':
+            self.ax.plot(timestamps[0], resistances[0], 'o', color='blue', 
+                        markersize=8, label='Initial Read', zorder=5)
+        
+        self.ax.set_xlabel('Time (s)', fontsize=11)
+        self.ax.set_ylabel('Resistance (Ω)', fontsize=11)
+        title = f'{self.last_results["test_name"]}'
+        if num_cycles > 1:
+            title += f' - {num_cycles} Cycles'
+        self.ax.set_title(title, fontsize=12, fontweight='bold')
+        self.ax.legend(loc='best', fontsize=9, ncol=2 if num_cycles > 1 else 1)
         self.ax.grid(True, alpha=0.3)
         self.ax.set_yscale('log')
     
@@ -1444,6 +1668,186 @@ class TSPTestingGUI(tk.Toplevel):
         self.ax.axvline(x=0.5, color='green', linestyle='--', alpha=0.3, label='Start')
         self.ax.axvline(x=num_pulses + 0.5, color='orange', linestyle='--', alpha=0.3, label='Post-pulse reads')
     
+    def _plot_voltage_sweep(self):
+        """Plot resistance vs pulse number for each voltage"""
+        pulse_voltages = self.last_results.get('pulse_voltages', [])
+        resistances = self.last_results['resistances']
+        
+        if not pulse_voltages or len(pulse_voltages) != len(resistances):
+            # Fallback to basic plot
+            self._plot_time_series()
+            return
+        
+        # Group data by pulse voltage
+        unique_voltages = []
+        for v in pulse_voltages:
+            if v not in unique_voltages:
+                unique_voltages.append(v)
+        
+        colors = plt.cm.plasma(np.linspace(0, 1, len(unique_voltages)))
+        params = self.last_results.get('params', {})
+        num_pulses_per_voltage = params.get('num_pulses_per_voltage', 5)
+        
+        for idx, voltage in enumerate(unique_voltages):
+            # Find all measurements for this voltage
+            voltage_indices = [i for i, v in enumerate(pulse_voltages) if v == voltage]
+            voltage_resistances = [resistances[i] for i in voltage_indices]
+            pulse_numbers = list(range(1, len(voltage_resistances) + 1))
+            
+            # Plot this voltage
+            self.ax.plot(pulse_numbers, voltage_resistances, 
+                        'o-', color=colors[idx], 
+                        label=f'{voltage:.2f}V',
+                        markersize=6, linewidth=2, alpha=0.8)
+        
+        self.ax.set_xlabel('Pulse Number', fontsize=11)
+        self.ax.set_ylabel('Resistance (Ω)', fontsize=11)
+        self.ax.set_title(f'{self.last_results["test_name"]}\nResistance Evolution per Voltage', 
+                         fontsize=12, fontweight='bold')
+        self.ax.set_yscale('log')
+        self.ax.legend(title='Pulse Voltage', loc='best', fontsize=9)
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+    
+    def _plot_ispp(self):
+        """Plot ISPP: Resistance vs Pulse Number with voltage annotation"""
+        pulse_voltages = self.last_results.get('pulse_voltages', [])
+        resistances = self.last_results['resistances']
+        timestamps = self.last_results.get('timestamps', [])
+        
+        if not pulse_voltages or len(pulse_voltages) != len(resistances):
+            # Fallback to basic plot
+            self._plot_time_series()
+            return
+        
+        # Plot resistance vs pulse number
+        pulse_numbers = list(range(len(resistances)))
+        
+        # Color by voltage (gradual increase)
+        if len(pulse_voltages) > 1:
+            scatter = self.ax.scatter(pulse_numbers, resistances, 
+                                     c=pulse_voltages, cmap='viridis',
+                                     s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+            cbar = plt.colorbar(scatter, ax=self.ax)
+            cbar.set_label('Pulse Voltage (V)', fontsize=10)
+        else:
+            self.ax.plot(pulse_numbers, resistances, 'o-', markersize=6, linewidth=2)
+        
+        self.ax.set_xlabel('Pulse Number', fontsize=11)
+        self.ax.set_ylabel('Resistance (Ω)', fontsize=11)
+        self.ax.set_title(f'{self.last_results["test_name"]}\nIncremental Step Pulse Programming', 
+                         fontsize=12, fontweight='bold')
+        self.ax.set_yscale('log')
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+    
+    def _plot_threshold(self):
+        """Plot switching threshold: Resistance vs Pulse Voltage"""
+        pulse_voltages = self.last_results.get('pulse_voltages', [])
+        resistances = self.last_results['resistances']
+        direction = self.last_results.get('direction', 'set')
+        
+        if not pulse_voltages or len(pulse_voltages) != len(resistances):
+            # Fallback to basic plot
+            self._plot_time_series()
+            return
+        
+        # Group by voltage and average resistance for each voltage
+        voltage_groups = {}
+        for v, r in zip(pulse_voltages, resistances):
+            if v != 0.0:  # Skip initial read (voltage = 0)
+                if v not in voltage_groups:
+                    voltage_groups[v] = []
+                voltage_groups[v].append(r)
+        
+        # Calculate mean resistance for each voltage
+        unique_voltages = sorted(voltage_groups.keys())
+        mean_resistances = [np.mean(voltage_groups[v]) for v in unique_voltages]
+        std_resistances = [np.std(voltage_groups[v]) for v in unique_voltages]
+        
+        # Plot with error bars
+        self.ax.errorbar(unique_voltages, mean_resistances, yerr=std_resistances,
+                        fmt='o-', markersize=8, linewidth=2, capsize=5,
+                        label=f'{direction.upper()} Threshold Test')
+        
+        self.ax.set_xlabel('Pulse Voltage (V)', fontsize=11)
+        self.ax.set_ylabel('Resistance (Ω)', fontsize=11)
+        self.ax.set_title(f'{self.last_results["test_name"]}\nSwitching Threshold ({direction.upper()})', 
+                         fontsize=12, fontweight='bold')
+        self.ax.set_yscale('log')
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+        self.ax.legend()
+    
+    def _plot_multilevel(self):
+        """Plot multilevel programming: Resistance vs Pulse Number for each level"""
+        target_levels = self.last_results.get('target_levels', [])
+        resistances = self.last_results['resistances']
+        
+        if not target_levels or len(target_levels) != len(resistances):
+            # Fallback to basic plot
+            self._plot_time_series()
+            return
+        
+        # Group data by target level
+        unique_levels = []
+        for l in target_levels:
+            if l not in unique_levels:
+                unique_levels.append(l)
+        
+        colors = plt.cm.tab10(np.linspace(0, 1, len(unique_levels)))
+        params = self.last_results.get('params', {})
+        num_pulses_per_level = params.get('num_pulses_per_level', 5)
+        
+        for idx, level in enumerate(unique_levels):
+            # Find all measurements for this level
+            level_indices = [i for i, l in enumerate(target_levels) if l == level]
+            level_resistances = [resistances[i] for i in level_indices]
+            pulse_numbers = list(range(1, len(level_resistances) + 1))
+            
+            # Plot this level
+            self.ax.plot(pulse_numbers, level_resistances, 
+                        'o-', color=colors[idx], 
+                        label=f'Level {level}',
+                        markersize=6, linewidth=2, alpha=0.8)
+        
+        self.ax.set_xlabel('Pulse Number', fontsize=11)
+        self.ax.set_ylabel('Resistance (Ω)', fontsize=11)
+        self.ax.set_title(f'{self.last_results["test_name"]}\nMultilevel Programming', 
+                         fontsize=12, fontweight='bold')
+        self.ax.set_yscale('log')
+        self.ax.legend(title='Target Level', loc='best', fontsize=9)
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+    
+    def _plot_pulse_train(self):
+        """Plot pulse train with varying amplitudes: Resistance vs Pulse Number"""
+        pulse_voltages = self.last_results.get('pulse_voltages', [])
+        resistances = self.last_results['resistances']
+        timestamps = self.last_results.get('timestamps', [])
+        
+        if not pulse_voltages or len(pulse_voltages) != len(resistances):
+            # Fallback to basic plot
+            self._plot_time_series()
+            return
+        
+        # Plot resistance vs pulse number
+        pulse_numbers = list(range(len(resistances)))
+        
+        # Color by voltage (showing the pattern)
+        if len(pulse_voltages) > 1:
+            # Use a diverging colormap for positive/negative voltages
+            scatter = self.ax.scatter(pulse_numbers, resistances, 
+                                     c=pulse_voltages, cmap='RdBu_r',
+                                     s=50, alpha=0.7, edgecolors='black', linewidth=0.5)
+            cbar = plt.colorbar(scatter, ax=self.ax)
+            cbar.set_label('Pulse Voltage (V)', fontsize=10)
+        else:
+            self.ax.plot(pulse_numbers, resistances, 'o-', markersize=6, linewidth=2)
+        
+        self.ax.set_xlabel('Pulse Number', fontsize=11)
+        self.ax.set_ylabel('Resistance (Ω)', fontsize=11)
+        self.ax.set_title(f'{self.last_results["test_name"]}\nPulse Train with Varying Amplitudes', 
+                         fontsize=12, fontweight='bold')
+        self.ax.set_yscale('log')
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+    
     def save_data(self, show_dialog=False, extra_notes=None):
         """Save test results automatically using standardized format
         
@@ -1459,6 +1863,15 @@ class TSPTestingGUI(tk.Toplevel):
         try:
             formatter = TSPDataFormatter()
             
+            # Check if using provider custom location - if so, skip sample name requirement
+            use_provider_custom = False
+            if self.provider is not None:
+                use_custom = getattr(self.provider, 'use_custom_save_var', None)
+                if use_custom and use_custom.get():
+                    custom_path = getattr(self.provider, 'custom_save_location', None)
+                    if custom_path:
+                        use_provider_custom = True
+            
             # Check if simple save mode is enabled
             if self.use_simple_save_var.get() and self.simple_save_path:
                 # Simple save: everything in one folder
@@ -1466,39 +1879,92 @@ class TSPTestingGUI(tk.Toplevel):
                 save_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Get next index for sequential numbering (simple mode)
-                existing_files = list(save_dir.glob("*.txt"))
-                index = len(existing_files) + 1
+                # Find largest number prefix from existing files
+                from Measurement_GUI import find_largest_number_in_folder
+                max_num = find_largest_number_in_folder(str(save_dir))
+                index = 0 if max_num is None else max_num + 1
             else:
                 # Structured save: use FileNamer with custom base if configured
-                namer = FileNamer(base_dir=self.custom_base_path)
+                # Check if provider (Measurement GUI) has custom save location enabled
+                # (use_provider_custom already set above)
+                custom_path = None
+                device_section = None
                 
-                # Get save directory
-                save_dir = namer.get_device_folder(
-                    sample_name=self.sample_name,
-                    device=self.device_label if self.device_label != "UnknownDevice" else "A1",
-                    subfolder="pulse_measurements"
-                )
-                save_dir.mkdir(parents=True, exist_ok=True)
+                if use_provider_custom and self.provider is not None:
+                    custom_path = getattr(self.provider, 'custom_save_location', None)
+                    if custom_path:
+                        device_section = getattr(self.provider, 'device_section_and_number', None)
                 
-                # Get next index for sequential numbering
-                index = namer.get_next_index(save_dir)
+                if use_provider_custom and custom_path and device_section:
+                    # Use Measurement GUI's custom save location
+                    # Extract section (letter) and device number from device_section (e.g., "A1" -> "A" and "1")
+                    section = device_section[0] if len(device_section) > 0 else "A"
+                    device_num = device_section[1:] if len(device_section) > 1 else "1"
+                    
+                    # Build path: custom_location / section / device_number / Pulse_measurements
+                    save_dir = Path(custom_path) / section / device_num / "Pulse_measurements"
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Get next index for sequential numbering
+                    from Measurement_GUI import find_largest_number_in_folder
+                    max_num = find_largest_number_in_folder(str(save_dir))
+                    index = 0 if max_num is None else max_num + 1
+                    
+                    # Update device_label for display
+                    self.device_label = device_section
+                else:
+                    # Use default structure (FileNamer)
+                    # Only require sample_name if not using provider custom location
+                    if not use_provider_custom:
+                        # If sample name is still unknown, try to get from provider or use default
+                        if self.sample_name == "UnknownSample" and self.provider is not None:
+                            sn = getattr(self.provider, 'sample_name_var', None)
+                            if sn is not None:
+                                provider_sample_name = sn.get().strip()
+                                if provider_sample_name:
+                                    self.sample_name = provider_sample_name
+                    
+                    # When using custom base, sample_name is not used in path, but we still need to pass something
+                    namer = FileNamer(base_dir=self.custom_base_path)
+                    save_dir = namer.get_device_folder(
+                        sample_name=self.sample_name if not use_provider_custom else "UnknownSample",
+                        device=self.device_label if self.device_label != "UnknownDevice" else "A1",
+                        subfolder="Pulse_measurements"
+                    )
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    index = namer.get_next_index(save_dir)
             
             # Create test details string with key parameters (max 3)
             test_name = self.last_results['test_name']
             params = self.last_results.get('params', {})
             test_details = self._generate_test_details(params)
             
+            # Get filename suffix if provided
+            filename_suffix = self.filename_suffix_var.get().strip()
+            # Sanitize suffix: remove invalid filename characters
+            if filename_suffix:
+                import re
+                filename_suffix = re.sub(r'[<>:"/\\|?*]', '_', filename_suffix)
+                filename_suffix = filename_suffix.replace(' ', '_')
+                suffix_str = f"-{filename_suffix}" if filename_suffix else ""
+            else:
+                suffix_str = ""
+            
             # Create filename
             if self.use_simple_save_var.get() and self.simple_save_path:
-                # Simple mode: just test name + index + details
+                # Simple mode: number at start, then test name + details + suffix + timestamp
                 from datetime import datetime
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                details_str = f"_{test_details}" if test_details else ""
-                filename = f"{test_name}-{index:03d}{details_str}-{timestamp}.txt"
+                test_clean = test_name.replace(" ", "_").replace("-", "_")
+                details_str = f"-{test_details}" if test_details else ""
+                filename = f"{index}-{test_clean}{details_str}{suffix_str}-{timestamp}.txt"
             else:
-                # Structured mode: use FileNamer
+                # Structured mode: use FileNamer, then add suffix before extension
                 namer = FileNamer(base_dir=self.custom_base_path)
                 filename = namer.create_tsp_filename(test_name, index, extension="txt", test_details=test_details)
+                # Add suffix before file extension
+                if suffix_str:
+                    filename = filename.rsplit('.', 1)[0] + suffix_str + '.' + filename.rsplit('.', 1)[1]
             
             filepath = save_dir / filename
             
@@ -1509,9 +1975,32 @@ class TSPTestingGUI(tk.Toplevel):
             if extra_notes:
                 notes = f"{notes}\n{extra_notes}" if notes else extra_notes
             
+            # Extract sample name for metadata
+            # Priority: 1) From custom path (if using custom location), 2) From provider's sample_name_var, 3) Current sample_name
+            sample_name_for_metadata = self.sample_name
+            
+            # Check if using provider custom location - extract sample name from path
+            if self.provider is not None:
+                use_custom = getattr(self.provider, 'use_custom_save_var', None)
+                if use_custom and use_custom.get():
+                    custom_path = getattr(self.provider, 'custom_save_location', None)
+                    if custom_path:
+                        # Extract sample name from the last part of the custom path
+                        sample_from_path = Path(custom_path).name
+                        if sample_from_path:
+                            sample_name_for_metadata = sample_from_path
+            
+            # If not using custom location, try to get from provider's sample_name_var
+            if sample_name_for_metadata == "UnknownSample" and self.provider is not None:
+                sn = getattr(self.provider, 'sample_name_var', None)
+                if sn is not None:
+                    provider_sample_name = sn.get().strip()
+                    if provider_sample_name:
+                        sample_name_for_metadata = provider_sample_name
+            
             # Prepare metadata
             metadata = {
-                'sample': self.sample_name,
+                'sample': sample_name_for_metadata,
                 'device': self.device_label,
                 'instrument': 'Keithley 2450',  # Default, will be updated below
                 'address': self.addr_var.get() if hasattr(self, 'addr_var') else 'N/A',
@@ -1593,6 +2082,42 @@ class TSPTestingGUI(tk.Toplevel):
     def manual_save_with_notes(self):
         """Manually save data with current notes"""
         self.save_data(show_dialog=True)
+    
+    def open_data_analysis(self):
+        """Open the TSP Data Analysis Tool"""
+        try:
+            # Get the path to the analysis tool
+            # TSP_Testing_GUI.py is in the root, so parent is the root directory
+            analysis_script = Path(__file__).parent / "Helpers" / "Data_Analysis_Pulse_2450" / "main.py"
+            
+            if not analysis_script.exists():
+                messagebox.showerror("Analysis Tool Not Found", 
+                    f"Could not find analysis tool at:\n{analysis_script}\n\n"
+                    "Please ensure the Data_Analysis_Pulse_2450 folder exists.")
+                return
+            
+            # Launch the analysis tool in a separate process
+            # Use pythonw on Windows to avoid showing console window
+            if sys.platform == "win32":
+                # Try pythonw first, fallback to python if pythonw doesn't exist
+                python_exe = sys.executable.replace("python.exe", "pythonw.exe")
+                if not Path(python_exe).exists():
+                    python_exe = sys.executable
+                # CREATE_NO_WINDOW flag to hide console window on Windows
+                try:
+                    subprocess.Popen([python_exe, str(analysis_script)],
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                except AttributeError:
+                    # Fallback if CREATE_NO_WINDOW is not available
+                    subprocess.Popen([python_exe, str(analysis_script)])
+            else:
+                subprocess.Popen([sys.executable, str(analysis_script)])
+            
+            self.log("📊 Opening TSP Data Analysis Tool...")
+            
+        except Exception as e:
+            self.log(f"❌ Error opening analysis tool: {e}")
+            messagebox.showerror("Error", f"Could not open analysis tool:\n{e}")
     
     def _show_range_finder_popup(self, results: dict):
         """Show popup window with range finder results and recommendations"""
@@ -1815,6 +2340,16 @@ class TSPTestingGUI(tk.Toplevel):
                 self._draw_multi_read_only(params)
             elif "Relaxation" in test_name:
                 self._draw_relaxation(params, "Pulse Measurement" in test_name)
+            elif "Voltage Amplitude Sweep" in test_name:
+                self._draw_voltage_sweep(params)
+            elif "ISPP" in test_name:
+                self._draw_ispp(params)
+            elif "Switching Threshold" in test_name:
+                self._draw_threshold(params)
+            elif "Multilevel Programming" in test_name:
+                self._draw_multilevel(params)
+            elif "Pulse Train" in test_name:
+                self._draw_pulse_train(params)
             else:
                 self._draw_generic_pattern()
             
@@ -1957,7 +2492,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
     
     def _draw_pot_dep_cycle(self, params):
-        """Draw potentiation-depression cycle with initial read"""
+        """Draw potentiation-depression cycle with initial read, repeated for multiple cycles"""
         t = 0
         times, voltages, colors = [], [], []
         read_times = []
@@ -1966,6 +2501,7 @@ class TSPTestingGUI(tk.Toplevel):
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         steps = min(params.get('steps', 20), 5)
+        num_cycles = min(params.get('num_cycles', 1), 3)  # Show max 3 cycles in diagram
         
         # Initial read before any pulses
         read_t = t + p_w*0.15
@@ -1974,27 +2510,29 @@ class TSPTestingGUI(tk.Toplevel):
         voltages.extend([0, r_v, r_v, 0])
         t += p_w*0.3 + 0.0001
         
-        # Potentiation (SET)
-        for i in range(steps):
-            times.extend([t, t, t+p_w, t+p_w])
-            voltages.extend([0, set_v, set_v, 0])
-            t += p_w + 0.0001
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between', 10e-3)
-        
-        # Depression (RESET)
-        for i in range(steps):
-            times.extend([t, t, t+p_w, t+p_w])
-            voltages.extend([0, reset_v, reset_v, 0])
-            t += p_w + 0.0001
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between', 10e-3)
+        # Loop through cycles
+        for cycle in range(num_cycles):
+            # Potentiation (SET)
+            for i in range(steps):
+                times.extend([t, t, t+p_w, t+p_w])
+                voltages.extend([0, set_v, set_v, 0])
+                t += p_w + 0.0001
+                read_t = t + p_w*0.15
+                read_times.append(read_t)
+                times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+                voltages.extend([0, r_v, r_v, 0])
+                t += p_w*0.3 + params.get('delay_between', 10e-3)
+            
+            # Depression (RESET)
+            for i in range(steps):
+                times.extend([t, t, t+p_w, t+p_w])
+                voltages.extend([0, reset_v, reset_v, 0])
+                t += p_w + 0.0001
+                read_t = t + p_w*0.15
+                read_times.append(read_t)
+                times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+                voltages.extend([0, r_v, r_v, 0])
+                t += p_w*0.3 + params.get('delay_between', 10e-3)
         
         self.diagram_ax.plot(np.array(times)*1e3, voltages, 'red', linewidth=2)
         self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, 
@@ -2005,7 +2543,8 @@ class TSPTestingGUI(tk.Toplevel):
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
-        self.diagram_ax.set_title(f'Pot-Dep Cycle: Initial Read → {steps} SET → {steps} RESET', fontsize=9)
+        title = f'Pot-Dep Cycle: Initial Read → {num_cycles}×({steps} SET → {steps} RESET)'
+        self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.legend(fontsize=8)
         self.diagram_ax.grid(True, alpha=0.3)
     
@@ -2281,6 +2820,246 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, p_v*1.2)
+    
+    def _draw_voltage_sweep(self, params):
+        """Draw: For each voltage: Initial Read → (Pulse → Read) × N → Reset"""
+        t = 0
+        times, voltages = [], []
+        read_times = []
+        start_v = params.get('pulse_voltage_start', 0.5)
+        stop_v = params.get('pulse_voltage_stop', 2.5)
+        step_v = params.get('pulse_voltage_step', 0.1)
+        r_v = params.get('read_voltage', 0.2)
+        p_w = params.get('pulse_width', 1e-3)
+        delay = params.get('delay_between', 10e-3)
+        reset_v = params.get('reset_voltage', -1.0)
+        reset_w = params.get('reset_width', 1e-3)
+        pulses_per_v = min(params.get('num_pulses_per_voltage', 5), 3)  # Show max 3
+        
+        # Show 2-3 voltage levels for diagram
+        num_voltages = min(int((stop_v - start_v) / step_v) + 1, 3)
+        pulse_voltages = [start_v + i * step_v for i in range(num_voltages)]
+        
+        for v_idx, pulse_v in enumerate(pulse_voltages):
+            # Initial read before pulses at this voltage
+            read_times.append(t)
+            t += 0.001
+            
+            # Pulses at this voltage
+            for p in range(pulses_per_v):
+                times.append(t)
+                voltages.append(pulse_v)
+                t += p_w
+                times.append(t)
+                voltages.append(0)
+                t += 0.00001
+                read_times.append(t)
+                t += 0.001
+                if p < pulses_per_v - 1:
+                    t += delay
+            
+            # Reset between voltages (except last)
+            if v_idx < len(pulse_voltages) - 1:
+                times.append(t)
+                voltages.append(reset_v)
+                t += reset_w
+                times.append(t)
+                voltages.append(0)
+                t += 0.00001
+        
+        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='blue')
+        for rt in read_times:
+            self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=8, markeredgewidth=2)
+        self.diagram_ax.set_xlabel('Time (ms)')
+        self.diagram_ax.set_ylabel('Voltage (V)')
+        self.diagram_ax.set_title(f'Voltage Sweep: {start_v}V to {stop_v}V, {pulses_per_v} pulses/voltage', fontsize=9)
+        self.diagram_ax.grid(True, alpha=0.3)
+        self.diagram_ax.set_ylim(min(min(voltages), reset_v)*1.2, max(max(voltages), start_v)*1.2)
+    
+    def _draw_ispp(self, params):
+        """Draw: Initial Read → (Pulse with increasing voltage → Read) × N"""
+        t = 0
+        times, voltages = [], []
+        read_times = []
+        start_v = params.get('start_voltage', 0.5)
+        step_v = params.get('voltage_step', 0.05)
+        max_v = params.get('max_voltage', 3.0)
+        r_v = params.get('read_voltage', 0.2)
+        p_w = params.get('pulse_width', 1e-3)
+        delay = params.get('delay_between', 10e-3)
+        max_pulses = min(params.get('max_pulses', 100), 10)  # Show max 10
+        
+        # Initial read
+        read_times.append(t)
+        t += 0.001
+        
+        # ISPP pulses with increasing voltage
+        current_v = start_v
+        for p in range(max_pulses):
+            if current_v > max_v:
+                break
+            times.append(t)
+            voltages.append(current_v)
+            t += p_w
+            times.append(t)
+            voltages.append(0)
+            t += 0.00001
+            read_times.append(t)
+            t += 0.001
+            current_v += step_v
+            if p < max_pulses - 1:
+                t += delay
+        
+        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='green')
+        for rt in read_times:
+            self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=8, markeredgewidth=2)
+        self.diagram_ax.set_xlabel('Time (ms)')
+        self.diagram_ax.set_ylabel('Voltage (V)')
+        self.diagram_ax.set_title(f'ISPP: {start_v}V → {max_v}V, step {step_v}V', fontsize=9)
+        self.diagram_ax.grid(True, alpha=0.3)
+        self.diagram_ax.set_ylim(-0.2, max_v*1.2)
+    
+    def _draw_threshold(self, params):
+        """Draw: For each voltage: Initial Read → (Pulse → Read) × N"""
+        t = 0
+        times, voltages = [], []
+        read_times = []
+        start_v = params.get('start_voltage', 0.5)
+        step_v = params.get('voltage_step', 0.05)
+        max_v = params.get('max_voltage', 3.0)
+        r_v = params.get('read_voltage', 0.2)
+        p_w = params.get('pulse_width', 1e-3)
+        delay = params.get('delay_between', 10e-3)
+        pulses_per_v = min(params.get('num_pulses_per_voltage', 3), 2)  # Show max 2
+        direction = params.get('direction', 'set')
+        
+        # Show 3 voltage levels for diagram
+        num_voltages = min(int((max_v - start_v) / step_v) + 1, 3)
+        pulse_voltages = [start_v + i * step_v for i in range(num_voltages)]
+        if direction.lower() == 'reset':
+            pulse_voltages = [-v for v in pulse_voltages]
+        
+        for pulse_v in pulse_voltages:
+            # Initial read before pulses at this voltage
+            read_times.append(t)
+            t += 0.001
+            
+            # Pulses at this voltage
+            for p in range(pulses_per_v):
+                times.append(t)
+                voltages.append(pulse_v)
+                t += p_w
+                times.append(t)
+                voltages.append(0)
+                t += 0.00001
+                read_times.append(t)
+                t += 0.001
+                if p < pulses_per_v - 1:
+                    t += delay
+        
+        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='orange')
+        for rt in read_times:
+            self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=8, markeredgewidth=2)
+        self.diagram_ax.set_xlabel('Time (ms)')
+        self.diagram_ax.set_ylabel('Voltage (V)')
+        self.diagram_ax.set_title(f'Threshold Test ({direction.upper()}): {start_v}V → {max_v}V', fontsize=9)
+        self.diagram_ax.grid(True, alpha=0.3)
+        min_v = min(min(voltages) if voltages else 0, -max_v)
+        max_v_plot = max(max(voltages) if voltages else 0, max_v)
+        self.diagram_ax.set_ylim(min_v*1.2, max_v_plot*1.2)
+    
+    def _draw_multilevel(self, params):
+        """Draw: For each level: Reset → Program with pulses → Read"""
+        t = 0
+        times, voltages = [], []
+        read_times = []
+        pulse_v = params.get('pulse_voltage', 1.5)
+        r_v = params.get('read_voltage', 0.2)
+        p_w = params.get('pulse_width', 1e-3)
+        delay = params.get('delay_between', 10e-3)
+        reset_v = params.get('reset_voltage', -1.0)
+        reset_w = params.get('reset_width', 1e-3)
+        pulses_per_level = min(params.get('num_pulses_per_level', 5), 3)  # Show max 3
+        target_levels = params.get('target_levels', [1, 2, 3])
+        if isinstance(target_levels, str):
+            target_levels = [float(x.strip()) for x in target_levels.split(",")]
+        levels_to_show = min(len(target_levels), 3)  # Show max 3 levels
+        
+        for level_idx in range(levels_to_show):
+            # Reset before programming each level
+            times.append(t)
+            voltages.append(reset_v)
+            t += reset_w
+            times.append(t)
+            voltages.append(0)
+            t += 0.00001
+            
+            # Initial read after reset
+            read_times.append(t)
+            t += 0.001
+            
+            # Program with pulses
+            for p in range(pulses_per_level):
+                times.append(t)
+                voltages.append(pulse_v)
+                t += p_w
+                times.append(t)
+                voltages.append(0)
+                t += 0.00001
+                read_times.append(t)
+                t += 0.001
+                if p < pulses_per_level - 1:
+                    t += delay
+        
+        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='purple')
+        for rt in read_times:
+            self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=8, markeredgewidth=2)
+        self.diagram_ax.set_xlabel('Time (ms)')
+        self.diagram_ax.set_ylabel('Voltage (V)')
+        self.diagram_ax.set_title(f'Multilevel: {levels_to_show} levels, {pulses_per_level} pulses/level', fontsize=9)
+        self.diagram_ax.grid(True, alpha=0.3)
+        self.diagram_ax.set_ylim(reset_v*1.2, pulse_v*1.2)
+    
+    def _draw_pulse_train(self, params):
+        """Draw: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
+        t = 0
+        times, voltages = [], []
+        read_times = []
+        pulse_voltages = params.get('pulse_voltages', [1.0, 1.5, 2.0, -1.0, -1.5, -2.0])
+        if isinstance(pulse_voltages, str):
+            pulse_voltages = [float(x.strip()) for x in pulse_voltages.split(",")]
+        r_v = params.get('read_voltage', 0.2)
+        p_w = params.get('pulse_width', 1e-3)
+        delay = params.get('delay_between', 10e-3)
+        num_repeats = min(params.get('num_repeats', 1), 2)  # Show max 2 repeats
+        
+        # Initial read
+        read_times.append(t)
+        t += 0.001
+        
+        # Pulse train pattern
+        for repeat in range(num_repeats):
+            for pulse_v in pulse_voltages:
+                times.append(t)
+                voltages.append(pulse_v)
+                t += p_w
+                times.append(t)
+                voltages.append(0)
+                t += 0.00001
+                read_times.append(t)
+                t += 0.001
+                t += delay
+        
+        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='cyan')
+        for rt in read_times:
+            self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=8, markeredgewidth=2)
+        self.diagram_ax.set_xlabel('Time (ms)')
+        self.diagram_ax.set_ylabel('Voltage (V)')
+        self.diagram_ax.set_title(f'Pulse Train: {len(pulse_voltages)} voltages × {num_repeats} repeats', fontsize=9)
+        self.diagram_ax.grid(True, alpha=0.3)
+        min_v = min(min(voltages) if voltages else 0, min(pulse_voltages) if pulse_voltages else 0)
+        max_v_plot = max(max(voltages) if voltages else 0, max(pulse_voltages) if pulse_voltages else 0)
+        self.diagram_ax.set_ylim(min_v*1.2, max_v_plot*1.2)
     
     def _draw_generic_pattern(self):
         """Generic pattern for unknown tests"""

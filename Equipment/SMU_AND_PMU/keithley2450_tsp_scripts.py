@@ -380,6 +380,25 @@ class Keithley2450_TSP_Scripts:
         result.update(extras)
         return result
 
+    def _flush_output_buffer(self):
+        """Clear any leftover data in the instrument's output buffer.
+        
+        This prevents reading stale data from previous test runs.
+        """
+        try:
+            # Try to read and discard any leftover data (non-blocking with short timeout)
+            old_timeout = self.tsp.device.timeout
+            self.tsp.device.timeout = 100  # Very short timeout for flushing
+            try:
+                # Read until buffer is empty (will raise exception when empty)
+                while True:
+                    self.tsp.device.read()
+            except:
+                pass  # Expected when buffer is empty
+            self.tsp.device.timeout = old_timeout
+        except:
+            pass  # If flushing fails, continue anyway
+    
     def _parse_timestamped_buffer(self, response: str) -> Optional[Dict]:
         """Parse buffer output containing (timestamp, source, reading) triplets.
 
@@ -481,11 +500,30 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
         self.tsp.device.write('endscript')
         
+        # Calculate expected duration for proper timeout
+        # Pattern: Initial read + num_cycles × (pulse_width + read_time + delay_between)
+        time_per_cycle = pulse_width + 0.001 + delay_between  # Pulse + read + delay
+        expected_duration = 0.001 + num_cycles * time_per_cycle + 0.5  # Initial read + cycles + safety margin
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        # Set longer timeout for long tests
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
+        
         # Execute script (runs entirely on instrument)
         print(f"  Executing {num_cycles} cycles on instrument...")
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('pulseReadRepeat()')
+        
+        # Wait for script to complete - waitcomplete() is non-blocking in this context
+        print(f"  Waiting {expected_duration:.1f}s for instrument to complete...")
+        time.sleep(expected_duration + 0.5)  # Wait full duration + safety margin
+        
         self.tsp.device.write('waitcomplete()')
-        time.sleep(0.1)  # Give instrument time to complete
+        time.sleep(0.1)  # Small additional wait after waitcomplete
         
         # Collect all results at once from buffer
         timestamps = []
@@ -688,6 +726,10 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('endscript')
         
         print(f"  Executing {total_measurements} measurements...")
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('varyingWidthPulses()')
         self.tsp.device.write('waitcomplete()')
         time.sleep(0.1)
@@ -762,13 +804,17 @@ class Keithley2450_TSP_Scripts:
                                      pulse_width: float = 100e-6,
                                      read_voltage: float = 0.2,
                                      steps: int = 20,
+                                     num_cycles: int = 1,
                                      delay_between: float = 10e-3,
                                      clim: float = 100e-3) -> Dict:
-        """Full potentiation then depression cycle. FAST buffer-based."""
-        print(f"Starting FAST potentiation-depression cycle: {steps} steps each phase")
+        """Full potentiation then depression cycle, repeated N times. FAST buffer-based.
+        
+        Pattern: Initial Read → (Potentiation → Depression) × num_cycles
+        """
+        print(f"Starting FAST potentiation-depression cycle: {num_cycles} cycle(s), {steps} steps each phase")
         
         start_time = time.time()
-        total_measurements = steps * 2
+        total_measurements = 1 + (steps * 2 * num_cycles)  # Initial read + (pot + dep) × cycles
         
         self.tsp.device.write('if potDepCycle ~= nil then script.delete("potDepCycle") end')
         time.sleep(0.01)
@@ -795,27 +841,30 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('smu.measure.read(defbuffer1)')
         self.tsp.device.write('smu.source.level = 0')
         self.tsp.device.write('delay(0.000010)')
+        # Main cycle loop: (Potentiation → Depression) × num_cycles
+        self.tsp.device.write(f'for cycle = 1, {num_cycles} do')
         # Potentiation phase
-        self.tsp.device.write(f'for step = 1, {steps} do')
-        self.tsp.device.write(f'  smu.source.level = {set_voltage}')
-        self.tsp.device.write(f'  delay({pulse_width})')
-        self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write('  delay(0.000010)')
-        self.tsp.device.write(f'  smu.source.level = {read_voltage}')
-        self.tsp.device.write('  smu.measure.read(defbuffer1)')
-        self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write(f'  if step < {steps} then delay({delay_between}) end')
-        self.tsp.device.write('end')
+        self.tsp.device.write(f'  for step = 1, {steps} do')
+        self.tsp.device.write(f'    smu.source.level = {set_voltage}')
+        self.tsp.device.write(f'    delay({pulse_width})')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write(f'    smu.source.level = {read_voltage}')
+        self.tsp.device.write('    smu.measure.read(defbuffer1)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write(f'    if step < {steps} then delay({delay_between}) end')
+        self.tsp.device.write('  end')
         # Depression phase
-        self.tsp.device.write(f'for step = 1, {steps} do')
-        self.tsp.device.write(f'  smu.source.level = {reset_voltage}')
-        self.tsp.device.write(f'  delay({pulse_width})')
-        self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write('  delay(0.000010)')
-        self.tsp.device.write(f'  smu.source.level = {read_voltage}')
-        self.tsp.device.write('  smu.measure.read(defbuffer1)')
-        self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write(f'  if step < {steps} then delay({delay_between}) end')
+        self.tsp.device.write(f'  for step = 1, {steps} do')
+        self.tsp.device.write(f'    smu.source.level = {reset_voltage}')
+        self.tsp.device.write(f'    delay({pulse_width})')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write(f'    smu.source.level = {read_voltage}')
+        self.tsp.device.write('    smu.measure.read(defbuffer1)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write(f'    if step < {steps} then delay({delay_between}) end')
+        self.tsp.device.write('  end')
         self.tsp.device.write('end')
         self.tsp.device.write('smu.source.autorange = smu.ON')
         self.tsp.device.write('smu.measure.autorange = smu.ON')
@@ -824,10 +873,32 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
         self.tsp.device.write('endscript')
         
+        # Calculate expected duration for proper timeout
+        # Pattern: Initial read + num_cycles × (potentiation + depression)
+        # Each step: pulse_width + 0.00001 settle + read_time (~0.001) + delay_between
+        time_per_step = pulse_width + 0.00001 + 0.001 + delay_between
+        time_per_cycle = steps * 2 * time_per_step  # Potentiation + Depression
+        expected_duration = 0.001 + num_cycles * time_per_cycle + 0.5  # Initial read + cycles + safety margin
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        # Set longer timeout for long tests
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
+        
         print("  Running potentiation-depression cycle on instrument...")
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('potDepCycle()')
+        
+        # Wait for script to complete - waitcomplete() is non-blocking in this context
+        # We need to wait the full expected duration
+        print(f"  Waiting {expected_duration:.1f}s for instrument to complete...")
+        time.sleep(expected_duration + 0.5)  # Wait full duration + safety margin
+        
         self.tsp.device.write('waitcomplete()')
-        time.sleep(0.1)
+        time.sleep(0.1)  # Small additional wait after waitcomplete
         
         timestamps = []
         voltages = []
@@ -837,21 +908,27 @@ class Keithley2450_TSP_Scripts:
         
         print("  Collecting buffer data...")
         try:
-            original_timeout = self.tsp.device.timeout
-            self.tsp.device.timeout = 10000
-            
+            # Timeout already set above for script execution, keep it for reading
             response = self.tsp.device.read().strip()
+            
+            # Restore original timeout after reading
             self.tsp.device.timeout = original_timeout
             
             parsed = self._parse_timestamped_buffer(response)
             if parsed:
                 print(f"  Retrieved {len(parsed['timestamps'])} measurements")
-                # Assign phases based on count - first is initial, rest are potentiation/depression
+                # Assign phases based on count - first is initial, rest alternate potentiation/depression per cycle
                 count = len(parsed['timestamps'])
                 phases.append('initial')  # First measurement is initial read
                 for idx in range(1, count):  # Start from 1 (skip initial read)
-                    step_idx = idx - 1  # Step number
-                    phases.append('potentiation' if step_idx < steps else 'depression')
+                    step_idx = idx - 1  # Step number (idx 0 is initial read)
+                    # Calculate which cycle and phase we're in
+                    steps_per_cycle = steps * 2  # Potentiation + Depression
+                    cycle_num = step_idx // steps_per_cycle
+                    step_in_cycle = step_idx % steps_per_cycle
+                    # Determine phase: first half of cycle is potentiation, second half is depression
+                    phase = 'potentiation' if step_in_cycle < steps else 'depression'
+                    phases.append(phase)
                 return self._format_results(parsed['timestamps'], parsed['voltages'], parsed['currents'], parsed['resistances'],
                                            phase=phases)
             
@@ -865,7 +942,10 @@ class Keithley2450_TSP_Scripts:
                     ts = 0.0
                 else:
                     step_idx = idx - 1  # Step number (idx 0 is initial read)
-                    phase = 'potentiation' if step_idx < steps else 'depression'
+                    # Calculate which cycle and phase we're in
+                    steps_per_cycle = steps * 2  # Potentiation + Depression
+                    step_in_cycle = step_idx % steps_per_cycle
+                    phase = 'potentiation' if step_in_cycle < steps else 'depression'
                     ts = 0.001 + step_idx * (pulse_width + 0.001 + delay_between)
                 v = read_voltage
                 r = v / i if abs(i) > 1e-12 else 1e12
@@ -956,9 +1036,29 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
         self.tsp.device.write('endscript')
         
+        # Calculate expected duration for proper timeout
+        # Pattern: Initial read + num_pulses × (pulse_width + settle + read_time + delay_between) + post_reads
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between  # Pulse + settle + read + delay
+        pulse_phase_time = num_pulses * time_per_pulse
+        post_read_time = num_post_reads * (post_read_interval + 0.001) if post_reads_enabled else 0
+        expected_duration = 0.001 + pulse_phase_time + post_read_time + 0.5  # Initial read + pulses + post_reads + safety margin
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        # Set longer timeout for long tests
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('potentiationOnly()')
+        
+        # Wait for script to complete - waitcomplete() is non-blocking in this context
+        print(f"  Waiting {expected_duration:.1f}s for instrument to complete...")
+        time.sleep(expected_duration + 0.5)  # Wait full duration + safety margin
+        
         self.tsp.device.write('waitcomplete()')
-        time.sleep(0.1)
+        time.sleep(0.1)  # Small additional wait after waitcomplete
         
         timestamps = []
         voltages = []
@@ -967,10 +1067,10 @@ class Keithley2450_TSP_Scripts:
         
         print("  Collecting buffer data...")
         try:
-            original_timeout = self.tsp.device.timeout
-            self.tsp.device.timeout = 10000
-            
+            # Timeout already set above for script execution, keep it for reading
             response = self.tsp.device.read().strip()
+            
+            # Restore original timeout after reading
             self.tsp.device.timeout = original_timeout
             
             parsed = self._parse_timestamped_buffer(response)
@@ -1077,9 +1177,29 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
         self.tsp.device.write('endscript')
         
+        # Calculate expected duration for proper timeout
+        # Pattern: Initial read + num_pulses × (pulse_width + settle + read_time + delay_between) + post_reads
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between  # Pulse + settle + read + delay
+        pulse_phase_time = num_pulses * time_per_pulse
+        post_read_time = num_post_reads * (post_read_interval + 0.001) if post_reads_enabled else 0
+        expected_duration = 0.001 + pulse_phase_time + post_read_time + 0.5  # Initial read + pulses + post_reads + safety margin
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        # Set longer timeout for long tests
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('depressionOnly()')
+        
+        # Wait for script to complete - waitcomplete() is non-blocking in this context
+        print(f"  Waiting {expected_duration:.1f}s for instrument to complete...")
+        time.sleep(expected_duration + 0.5)  # Wait full duration + safety margin
+        
         self.tsp.device.write('waitcomplete()')
-        time.sleep(0.1)
+        time.sleep(0.1)  # Small additional wait after waitcomplete
         
         timestamps = []
         voltages = []
@@ -1088,10 +1208,10 @@ class Keithley2450_TSP_Scripts:
         
         print("  Collecting buffer data...")
         try:
-            original_timeout = self.tsp.device.timeout
-            self.tsp.device.timeout = 10000
-            
+            # Timeout already set above for script execution, keep it for reading
             response = self.tsp.device.read().strip()
+            
+            # Restore original timeout after reading
             self.tsp.device.timeout = original_timeout
             
             parsed = self._parse_timestamped_buffer(response)
@@ -1184,6 +1304,10 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('endscript')
         
         print(f"  {num_pulses} pulse(s): {pulse_voltage}V, {pulse_width*1e6:.1f}µs, then {num_reads} reads...")
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('pulseMultiRead()')
         self.tsp.device.write('waitcomplete()')
         time.sleep(0.1)
@@ -1283,9 +1407,30 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
         self.tsp.device.write('endscript')
         
+        # Calculate expected duration for proper timeout
+        # Each read: set voltage + measurement (~0.001s) + delay + set to 0
+        time_per_read = 0.001 + delay_between + 0.00001  # ~1ms for measurement + delay + settle
+        expected_duration = num_reads * time_per_read + 0.5  # Add 0.5s buffer
+        
+        # Set longer timeout for long tests and large buffer reads
+        original_timeout = self.tsp.device.timeout
+        # For large buffers: with timestamps + source values + readings, each point is ~30 bytes
+        # At 115200 baud (typical USB), that's ~0.3ms per point, but add overhead
+        # For 1000 reads: ~30KB = ~0.3s at max speed, but allow 10x for safety = 3s minimum
+        # Scale with num_reads, but cap reasonable max
+        buffer_read_time_seconds = max(3.0, num_reads * 0.003)  # At least 3s, ~3ms per read
+        script_timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
+        read_timeout = max(30000, int(buffer_read_time_seconds * 1000))  # At least 30s for reading large buffers
+        
+        self.tsp.device.timeout = script_timeout
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('multiReadOnly()')
         self.tsp.device.write('waitcomplete()')
-        time.sleep(0.1)
+        # Wait for full execution - dynamic sleep based on expected duration
+        time.sleep(expected_duration + 0.5)
         
         timestamps = []
         voltages = []
@@ -1294,8 +1439,8 @@ class Keithley2450_TSP_Scripts:
         
         print("  Collecting buffer data...")
         try:
-            original_timeout = self.tsp.device.timeout
-            self.tsp.device.timeout = 10000
+            # Set timeout for reading large buffers
+            self.tsp.device.timeout = read_timeout
             
             response = self.tsp.device.read().strip()
             self.tsp.device.timeout = original_timeout
@@ -1851,6 +1996,10 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write('endscript')
         
         print(f"  Executing {num_cycles} cycles on instrument...")
+        
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('multiPulseThenRead()')
         self.tsp.device.write('waitcomplete()')
         time.sleep(0.1)
@@ -2013,6 +2162,9 @@ class Keithley2450_TSP_Scripts:
         original_timeout = self.tsp.device.timeout
         self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
         
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('relaxAfterMulti()')
         
         # Wait for script to complete - waitcomplete() is non-blocking in this context
@@ -2145,6 +2297,9 @@ class Keithley2450_TSP_Scripts:
         original_timeout = self.tsp.device.timeout
         self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))  # 1.5x expected, min 30s
         
+        # Clear any leftover data in the instrument's output buffer before starting
+        self._flush_output_buffer()
+        
         self.tsp.device.write('relaxWithPulseMeas()')
         
         # Wait for script to complete - waitcomplete() is non-blocking in this context
@@ -2275,6 +2430,9 @@ class Keithley2450_TSP_Scripts:
             self.tsp.device.write('smu.source.output = smu.OFF')
             self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
             self.tsp.device.write('endscript')
+            
+            # Clear any leftover data in the instrument's output buffer before starting
+            self._flush_output_buffer()
             
             self.tsp.device.write(f'widthSweep{width_idx}()')
             self.tsp.device.write('waitcomplete()')
@@ -2411,6 +2569,9 @@ class Keithley2450_TSP_Scripts:
             self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
             self.tsp.device.write('endscript')
             
+            # Clear any leftover data in the instrument's output buffer before starting
+            self._flush_output_buffer()
+            
             self.tsp.device.write(f'widthSweepAll{width_idx}()')
             self.tsp.device.write('waitcomplete()')
             time.sleep(0.1)
@@ -2457,13 +2618,656 @@ class Keithley2450_TSP_Scripts:
         return self._format_results(timestamps, voltages, currents, resistances, 
                                     pulse_widths=pulse_widths_log)
     
-    def switching_threshold_test(self, **kwargs) -> Dict:
-        """Find minimum voltage to switch state - TO BE IMPLEMENTED."""
-        raise NotImplementedError("Switching threshold test - future implementation")
+    def voltage_amplitude_sweep(self, pulse_voltage_start: float = 0.5,
+                               pulse_voltage_stop: float = 2.5,
+                               pulse_voltage_step: float = 0.1,
+                               pulse_width: float = 100e-6,
+                               read_voltage: float = 0.2,
+                               num_pulses_per_voltage: int = 5,
+                               delay_between: float = 10e-3,
+                               reset_voltage: float = -1.0,
+                               reset_width: float = 1e-3,
+                               delay_between_voltages: float = 1.0,
+                               clim: float = 100e-3) -> Dict:
+        """Voltage amplitude sweep: test different pulse voltages at fixed width. FAST buffer-based.
+        
+        Pattern: For each voltage: Initial Read → (Pulse → Read) × num_pulses → Reset
+        """
+        # Generate voltage list
+        num_voltages = int((pulse_voltage_stop - pulse_voltage_start) / pulse_voltage_step) + 1
+        pulse_voltages = [pulse_voltage_start + i * pulse_voltage_step for i in range(num_voltages)]
+        pulse_voltages = [min(v, pulse_voltage_stop) for v in pulse_voltages]  # Ensure we don't exceed stop
+        
+        print(f"Starting FAST voltage amplitude sweep: {num_voltages} voltages from {pulse_voltage_start}V to {pulse_voltage_stop}V")
+        print(f"  {num_pulses_per_voltage} pulses per voltage, {pulse_width*1000:.1f}ms width")
+        
+        start_time = time.time()
+        total_measurements = num_voltages * (1 + num_pulses_per_voltage)  # Initial read + pulses per voltage
+        
+        self.tsp.device.write('if voltageAmplitudeSweep ~= nil then script.delete("voltageAmplitudeSweep") end')
+        time.sleep(0.01)
+        
+        v_range = max(max(abs(v) for v in pulse_voltages), abs(reset_voltage), abs(read_voltage)) * 1.2
+        v_range = max(v_range, 0.2)
+        i_range = clim * 1.2
+        
+        self.tsp.device.write('loadscript voltageAmplitudeSweep')
+        buffer_capacity = max(total_measurements + 10, 10)
+        self.tsp.device.write('defbuffer1.clear()')
+        self.tsp.device.write(f'defbuffer1.capacity = {buffer_capacity}')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.range = {v_range}')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+        self.tsp.device.write(f'smu.measure.range = {i_range}')
+        self.tsp.device.write('smu.measure.nplc = 0.01')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        
+        # Voltage list
+        voltages_str = '{' + ','.join(str(v) for v in pulse_voltages) + '}'
+        self.tsp.device.write(f'local voltages = {voltages_str}')
+        self.tsp.device.write(f'local readV = {read_voltage}')
+        self.tsp.device.write(f'local resetV = {reset_voltage}')
+        self.tsp.device.write(f'local resetW = {reset_width}')
+        self.tsp.device.write(f'local pulseW = {pulse_width}')
+        self.tsp.device.write(f'local pulses_per_volt = {num_pulses_per_voltage}')
+        self.tsp.device.write(f'local delay_between = {delay_between}')
+        
+        # Main loop: for each voltage
+        self.tsp.device.write('for _, pulseV in ipairs(voltages) do')
+        # Initial read before pulses at this voltage
+        self.tsp.device.write('  smu.source.level = readV')
+        self.tsp.device.write('  smu.measure.read(defbuffer1)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  delay(0.000010)')
+        # Pulses at this voltage
+        self.tsp.device.write('  for pulse = 1, pulses_per_volt do')
+        self.tsp.device.write('    smu.source.level = pulseV')
+        self.tsp.device.write('    delay(pulseW)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write('    smu.source.level = readV')
+        self.tsp.device.write('    smu.measure.read(defbuffer1)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    if pulse < pulses_per_volt then delay(delay_between) end')
+        self.tsp.device.write('  end')
+        # Reset between voltages (except last)
+        self.tsp.device.write('  delay(0.000010)')
+        self.tsp.device.write('  smu.source.level = resetV')
+        self.tsp.device.write('  delay(resetW)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  delay(0.000010)')
+        self.tsp.device.write('end')
+        
+        self.tsp.device.write('smu.source.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
+        self.tsp.device.write('endscript')
+        
+        # Calculate expected duration
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between
+        time_per_voltage = 0.001 + (num_pulses_per_voltage * time_per_pulse) + reset_width + 0.00002
+        expected_duration = num_voltages * time_per_voltage + delay_between_voltages * (num_voltages - 1) + 0.5
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))
+        
+        self._flush_output_buffer()
+        
+        self.tsp.device.write('voltageAmplitudeSweep()')
+        time.sleep(expected_duration + delay_between_voltages * (num_voltages - 1) + 0.5)
+        self.tsp.device.write('waitcomplete()')
+        time.sleep(0.1)
+        
+        timestamps = []
+        voltages_list = []
+        currents = []
+        resistances = []
+        pulse_voltages_log = []  # Track which pulse voltage was used
+        
+        print("  Collecting buffer data...")
+        try:
+            response = self.tsp.device.read().strip()
+            self.tsp.device.timeout = original_timeout
+            
+            parsed = self._parse_timestamped_buffer(response)
+            if parsed:
+                print(f"  Retrieved {len(parsed['timestamps'])} measurements")
+                # Assign pulse voltages to each measurement
+                measurements_per_voltage = 1 + num_pulses_per_voltage  # Initial read + pulses
+                for idx in range(len(parsed['timestamps'])):
+                    voltage_idx = idx // measurements_per_voltage
+                    if voltage_idx < len(pulse_voltages):
+                        pulse_voltages_log.append(pulse_voltages[voltage_idx])
+                    else:
+                        pulse_voltages_log.append(pulse_voltages[-1])  # Fallback
+                return self._format_results(parsed['timestamps'], parsed['voltages'], 
+                                          parsed['currents'], parsed['resistances'],
+                                          pulse_voltages=pulse_voltages_log)
+        except Exception as e:
+            print(f"  ❌ Error reading buffer: {e}")
+        
+        elapsed = time.time() - start_time
+        print(f"✓ Voltage amplitude sweep complete in {elapsed:.2f}s")
+        return self._format_results(timestamps, voltages_list, currents, resistances,
+                                   pulse_voltages=pulse_voltages_log)
     
-    def multilevel_switching_test(self, **kwargs) -> Dict:
-        """Test intermediate resistance states - TO BE IMPLEMENTED."""
-        raise NotImplementedError("Multi-level switching test - future implementation")
+    def ispp_test(self, start_voltage: float = 0.5,
+                  voltage_step: float = 0.05,
+                  max_voltage: float = 3.0,
+                  pulse_width: float = 100e-6,
+                  read_voltage: float = 0.2,
+                  target_resistance: float = None,
+                  resistance_threshold_factor: float = 0.5,
+                  max_pulses: int = 100,
+                  delay_between: float = 10e-3,
+                  clim: float = 100e-3) -> Dict:
+        """ISPP (Incremental Step Pulse Programming): Gradually increase voltage until switching. FAST buffer-based.
+        
+        Pattern: Start at low voltage, increase by step each pulse until target resistance reached or max voltage.
+        """
+        print(f"Starting FAST ISPP test: {start_voltage}V start, {voltage_step}V step, {max_voltage}V max")
+        print(f"  Target: {target_resistance:.2e}Ω" if target_resistance else "  Target: No target (will run to max voltage)")
+        
+        start_time = time.time()
+        total_measurements = max_pulses + 1  # Initial read + pulses
+        
+        self.tsp.device.write('if isppTest ~= nil then script.delete("isppTest") end')
+        time.sleep(0.01)
+        
+        v_range = max(max_voltage, abs(read_voltage)) * 1.2
+        v_range = max(v_range, 0.2)
+        i_range = clim * 1.2
+        
+        self.tsp.device.write('loadscript isppTest')
+        buffer_capacity = max(total_measurements + 10, 10)
+        self.tsp.device.write('defbuffer1.clear()')
+        self.tsp.device.write(f'defbuffer1.capacity = {buffer_capacity}')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.range = {v_range}')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+        self.tsp.device.write(f'smu.measure.range = {i_range}')
+        self.tsp.device.write('smu.measure.nplc = 0.01')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        
+        # Initial read
+        self.tsp.device.write(f'smu.source.level = {read_voltage}')
+        self.tsp.device.write('smu.measure.read(defbuffer1)')
+        self.tsp.device.write('smu.source.level = 0')
+        self.tsp.device.write('delay(0.000010)')
+        
+        # ISPP loop: increment voltage each pulse
+        self.tsp.device.write(f'local startV = {start_voltage}')
+        self.tsp.device.write(f'local stepV = {voltage_step}')
+        self.tsp.device.write(f'local maxV = {max_voltage}')
+        self.tsp.device.write(f'local readV = {read_voltage}')
+        self.tsp.device.write(f'local pulseW = {pulse_width}')
+        self.tsp.device.write(f'local delay_between = {delay_between}')
+        self.tsp.device.write(f'local max_pulses = {max_pulses}')
+        
+        self.tsp.device.write('local currentV = startV')
+        self.tsp.device.write('for pulse = 1, max_pulses do')
+        self.tsp.device.write('  if currentV > maxV then break end')
+        self.tsp.device.write('  smu.source.level = currentV')
+        self.tsp.device.write('  delay(pulseW)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  delay(0.000010)')
+        self.tsp.device.write('  smu.source.level = readV')
+        self.tsp.device.write('  smu.measure.read(defbuffer1)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  currentV = currentV + stepV')
+        self.tsp.device.write('  if pulse < max_pulses then delay(delay_between) end')
+        self.tsp.device.write('end')
+        
+        self.tsp.device.write('smu.source.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
+        self.tsp.device.write('endscript')
+        
+        # Calculate expected duration
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between
+        expected_duration = 0.001 + max_pulses * time_per_pulse + 0.5
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))
+        
+        self._flush_output_buffer()
+        
+        self.tsp.device.write('isppTest()')
+        time.sleep(expected_duration + 0.5)
+        self.tsp.device.write('waitcomplete()')
+        time.sleep(0.1)
+        
+        timestamps = []
+        voltages_list = []
+        currents = []
+        resistances = []
+        pulse_voltages_log = []  # Track pulse voltage used
+        
+        print("  Collecting buffer data...")
+        try:
+            response = self.tsp.device.read().strip()
+            self.tsp.device.timeout = original_timeout
+            
+            parsed = self._parse_timestamped_buffer(response)
+            if parsed:
+                print(f"  Retrieved {len(parsed['timestamps'])} measurements")
+                # Calculate pulse voltages used (incremental)
+                for idx in range(len(parsed['timestamps'])):
+                    if idx == 0:
+                        pulse_voltages_log.append(0.0)  # Initial read
+                    else:
+                        pulse_num = idx - 1
+                        pulse_volt = start_voltage + pulse_num * voltage_step
+                        pulse_volt = min(pulse_volt, max_voltage)
+                        pulse_voltages_log.append(pulse_volt)
+                return self._format_results(parsed['timestamps'], parsed['voltages'],
+                                          parsed['currents'], parsed['resistances'],
+                                          pulse_voltages=pulse_voltages_log)
+        except Exception as e:
+            print(f"  ❌ Error reading buffer: {e}")
+        
+        elapsed = time.time() - start_time
+        print(f"✓ ISPP test complete in {elapsed:.2f}s")
+        return self._format_results(timestamps, voltages_list, currents, resistances,
+                                   pulse_voltages=pulse_voltages_log)
+    
+    def switching_threshold_test(self, direction: str = "set",
+                                start_voltage: float = 0.5,
+                                voltage_step: float = 0.05,
+                                max_voltage: float = 3.0,
+                                pulse_width: float = 100e-6,
+                                read_voltage: float = 0.2,
+                                resistance_threshold_factor: float = 0.5,
+                                num_pulses_per_voltage: int = 3,
+                                delay_between: float = 10e-3,
+                                clim: float = 100e-3) -> Dict:
+        """Find minimum voltage to switch state (SET or RESET). FAST buffer-based.
+        
+        Pattern: Try increasing voltages, find the minimum that causes significant resistance change.
+        """
+        print(f"Starting FAST switching threshold test ({direction.upper()}): {start_voltage}V start, {voltage_step}V step, {max_voltage}V max")
+        print(f"  {num_pulses_per_voltage} pulses per voltage to verify switching")
+        
+        start_time = time.time()
+        num_voltages = int((max_voltage - start_voltage) / voltage_step) + 1
+        total_measurements = num_voltages * (1 + num_pulses_per_voltage)  # Initial read + pulses per voltage
+        
+        self.tsp.device.write('if switchingThreshold ~= nil then script.delete("switchingThreshold") end')
+        time.sleep(0.01)
+        
+        v_range = max(max_voltage, abs(read_voltage)) * 1.2
+        v_range = max(v_range, 0.2)
+        i_range = clim * 1.2
+        
+        self.tsp.device.write('loadscript switchingThreshold')
+        buffer_capacity = max(total_measurements + 10, 10)
+        self.tsp.device.write('defbuffer1.clear()')
+        self.tsp.device.write(f'defbuffer1.capacity = {buffer_capacity}')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.range = {v_range}')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+        self.tsp.device.write(f'smu.measure.range = {i_range}')
+        self.tsp.device.write('smu.measure.nplc = 0.01')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        
+        # Generate voltage list
+        pulse_voltages = [start_voltage + i * voltage_step for i in range(num_voltages)]
+        pulse_voltages = [min(v, max_voltage) for v in pulse_voltages]
+        if direction.lower() == "reset":
+            pulse_voltages = [-v for v in pulse_voltages]  # Negative for RESET
+        
+        voltages_str = '{' + ','.join(str(v) for v in pulse_voltages) + '}'
+        self.tsp.device.write(f'local voltages = {voltages_str}')
+        self.tsp.device.write(f'local readV = {read_voltage}')
+        self.tsp.device.write(f'local pulseW = {pulse_width}')
+        self.tsp.device.write(f'local pulses_per_volt = {num_pulses_per_voltage}')
+        self.tsp.device.write(f'local delay_between = {delay_between}')
+        
+        # Main loop: for each voltage
+        self.tsp.device.write('for _, pulseV in ipairs(voltages) do')
+        # Initial read before pulses at this voltage
+        self.tsp.device.write('  smu.source.level = readV')
+        self.tsp.device.write('  smu.measure.read(defbuffer1)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  delay(0.000010)')
+        # Pulses at this voltage
+        self.tsp.device.write('  for pulse = 1, pulses_per_volt do')
+        self.tsp.device.write('    smu.source.level = pulseV')
+        self.tsp.device.write('    delay(pulseW)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write('    smu.source.level = readV')
+        self.tsp.device.write('    smu.measure.read(defbuffer1)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    if pulse < pulses_per_volt then delay(delay_between) end')
+        self.tsp.device.write('  end')
+        self.tsp.device.write('end')
+        
+        self.tsp.device.write('smu.source.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
+        self.tsp.device.write('endscript')
+        
+        # Calculate expected duration
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between
+        time_per_voltage = 0.001 + (num_pulses_per_voltage * time_per_pulse)
+        expected_duration = num_voltages * time_per_voltage + 0.5
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))
+        
+        self._flush_output_buffer()
+        
+        self.tsp.device.write('switchingThreshold()')
+        time.sleep(expected_duration + 0.5)
+        self.tsp.device.write('waitcomplete()')
+        time.sleep(0.1)
+        
+        timestamps = []
+        voltages_list = []
+        currents = []
+        resistances = []
+        pulse_voltages_log = []
+        
+        print("  Collecting buffer data...")
+        try:
+            response = self.tsp.device.read().strip()
+            self.tsp.device.timeout = original_timeout
+            
+            parsed = self._parse_timestamped_buffer(response)
+            if parsed:
+                print(f"  Retrieved {len(parsed['timestamps'])} measurements")
+                # Assign pulse voltages
+                measurements_per_voltage = 1 + num_pulses_per_voltage
+                for idx in range(len(parsed['timestamps'])):
+                    voltage_idx = idx // measurements_per_voltage
+                    if voltage_idx < len(pulse_voltages):
+                        pulse_voltages_log.append(pulse_voltages[voltage_idx])
+                    else:
+                        pulse_voltages_log.append(pulse_voltages[-1])
+                return self._format_results(parsed['timestamps'], parsed['voltages'],
+                                          parsed['currents'], parsed['resistances'],
+                                          pulse_voltages=pulse_voltages_log,
+                                          direction=direction)
+        except Exception as e:
+            print(f"  ❌ Error reading buffer: {e}")
+        
+        elapsed = time.time() - start_time
+        print(f"✓ Switching threshold test complete in {elapsed:.2f}s")
+        return self._format_results(timestamps, voltages_list, currents, resistances,
+                                   pulse_voltages=pulse_voltages_log,
+                                   direction=direction)
+    
+    def multilevel_programming(self, target_levels: list = None,
+                              pulse_voltage: float = 1.5,
+                              pulse_width: float = 100e-6,
+                              read_voltage: float = 0.2,
+                              num_pulses_per_level: int = 5,
+                              delay_between: float = 10e-3,
+                              reset_voltage: float = -1.0,
+                              reset_width: float = 1e-3,
+                              delay_between_levels: float = 1.0,
+                              clim: float = 100e-3) -> Dict:
+        """Multilevel programming: Target specific resistance states. FAST buffer-based.
+        
+        Pattern: For each target level: Reset → Program with pulses until target reached → Read
+        """
+        if target_levels is None:
+            target_levels = [1, 2, 3, 4, 5]  # Default: 5 levels
+        
+        print(f"Starting FAST multilevel programming: {len(target_levels)} target levels")
+        print(f"  {num_pulses_per_level} pulses per level, {pulse_voltage}V pulse")
+        
+        start_time = time.time()
+        total_measurements = len(target_levels) * (1 + num_pulses_per_level)  # Initial read + pulses per level
+        
+        self.tsp.device.write('if multilevelProgramming ~= nil then script.delete("multilevelProgramming") end')
+        time.sleep(0.01)
+        
+        v_range = max(abs(pulse_voltage), abs(reset_voltage), abs(read_voltage)) * 1.2
+        v_range = max(v_range, 0.2)
+        i_range = clim * 1.2
+        
+        self.tsp.device.write('loadscript multilevelProgramming')
+        buffer_capacity = max(total_measurements + 10, 10)
+        self.tsp.device.write('defbuffer1.clear()')
+        self.tsp.device.write(f'defbuffer1.capacity = {buffer_capacity}')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.range = {v_range}')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+        self.tsp.device.write(f'smu.measure.range = {i_range}')
+        self.tsp.device.write('smu.measure.nplc = 0.01')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        
+        # Target levels list
+        levels_str = '{' + ','.join(str(l) for l in target_levels) + '}'
+        self.tsp.device.write(f'local levels = {levels_str}')
+        self.tsp.device.write(f'local readV = {read_voltage}')
+        self.tsp.device.write(f'local resetV = {reset_voltage}')
+        self.tsp.device.write(f'local resetW = {reset_width}')
+        self.tsp.device.write(f'local pulseV = {pulse_voltage}')
+        self.tsp.device.write(f'local pulseW = {pulse_width}')
+        self.tsp.device.write(f'local pulses_per_level = {num_pulses_per_level}')
+        self.tsp.device.write(f'local delay_between = {delay_between}')
+        
+        # Main loop: for each target level
+        self.tsp.device.write('for _, level in ipairs(levels) do')
+        # Reset before programming each level
+        self.tsp.device.write('  smu.source.level = resetV')
+        self.tsp.device.write('  delay(resetW)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  delay(0.000010)')
+        # Initial read after reset
+        self.tsp.device.write('  smu.source.level = readV')
+        self.tsp.device.write('  smu.measure.read(defbuffer1)')
+        self.tsp.device.write('  smu.source.level = 0')
+        self.tsp.device.write('  delay(0.000010)')
+        # Program with pulses
+        self.tsp.device.write('  for pulse = 1, pulses_per_level do')
+        self.tsp.device.write('    smu.source.level = pulseV')
+        self.tsp.device.write('    delay(pulseW)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write('    smu.source.level = readV')
+        self.tsp.device.write('    smu.measure.read(defbuffer1)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    if pulse < pulses_per_level then delay(delay_between) end')
+        self.tsp.device.write('  end')
+        self.tsp.device.write('  delay(0.000010)')
+        self.tsp.device.write('end')
+        
+        self.tsp.device.write('smu.source.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
+        self.tsp.device.write('endscript')
+        
+        # Calculate expected duration
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between
+        time_per_level = reset_width + 0.00002 + 0.001 + (num_pulses_per_level * time_per_pulse)
+        expected_duration = len(target_levels) * time_per_level + delay_between_levels * (len(target_levels) - 1) + 0.5
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))
+        
+        self._flush_output_buffer()
+        
+        self.tsp.device.write('multilevelProgramming()')
+        time.sleep(expected_duration + delay_between_levels * (len(target_levels) - 1) + 0.5)
+        self.tsp.device.write('waitcomplete()')
+        time.sleep(0.1)
+        
+        timestamps = []
+        voltages_list = []
+        currents = []
+        resistances = []
+        target_levels_log = []
+        
+        print("  Collecting buffer data...")
+        try:
+            response = self.tsp.device.read().strip()
+            self.tsp.device.timeout = original_timeout
+            
+            parsed = self._parse_timestamped_buffer(response)
+            if parsed:
+                print(f"  Retrieved {len(parsed['timestamps'])} measurements")
+                # Assign target levels
+                measurements_per_level = 1 + num_pulses_per_level
+                for idx in range(len(parsed['timestamps'])):
+                    level_idx = idx // measurements_per_level
+                    if level_idx < len(target_levels):
+                        target_levels_log.append(target_levels[level_idx])
+                    else:
+                        target_levels_log.append(target_levels[-1])
+                return self._format_results(parsed['timestamps'], parsed['voltages'],
+                                          parsed['currents'], parsed['resistances'],
+                                          target_levels=target_levels_log)
+        except Exception as e:
+            print(f"  ❌ Error reading buffer: {e}")
+        
+        elapsed = time.time() - start_time
+        print(f"✓ Multilevel programming complete in {elapsed:.2f}s")
+        return self._format_results(timestamps, voltages_list, currents, resistances,
+                                   target_levels=target_levels_log)
+    
+    def pulse_train_varying_amplitudes(self, pulse_voltages: list = None,
+                                      pulse_width: float = 100e-6,
+                                      read_voltage: float = 0.2,
+                                      num_repeats: int = 1,
+                                      delay_between: float = 10e-3,
+                                      clim: float = 100e-3) -> Dict:
+        """Pulse train with varying amplitudes: Alternating or varying amplitude pulses. FAST buffer-based.
+        
+        Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × num_repeats
+        """
+        if pulse_voltages is None:
+            pulse_voltages = [1.0, 1.5, 2.0, -1.0, -1.5, -2.0]  # Default: alternating pattern
+        
+        print(f"Starting FAST pulse train with varying amplitudes: {len(pulse_voltages)} different voltages × {num_repeats} repeats")
+        
+        start_time = time.time()
+        total_measurements = 1 + (len(pulse_voltages) * num_repeats)  # Initial read + pulses
+        
+        self.tsp.device.write('if pulseTrainVarying ~= nil then script.delete("pulseTrainVarying") end')
+        time.sleep(0.01)
+        
+        v_range = max(max(abs(v) for v in pulse_voltages), abs(read_voltage)) * 1.2
+        v_range = max(v_range, 0.2)
+        i_range = clim * 1.2
+        
+        self.tsp.device.write('loadscript pulseTrainVarying')
+        buffer_capacity = max(total_measurements + 10, 10)
+        self.tsp.device.write('defbuffer1.clear()')
+        self.tsp.device.write(f'defbuffer1.capacity = {buffer_capacity}')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.range = {v_range}')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+        self.tsp.device.write(f'smu.measure.range = {i_range}')
+        self.tsp.device.write('smu.measure.nplc = 0.01')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        
+        # Initial read
+        self.tsp.device.write(f'smu.source.level = {read_voltage}')
+        self.tsp.device.write('smu.measure.read(defbuffer1)')
+        self.tsp.device.write('smu.source.level = 0')
+        self.tsp.device.write('delay(0.000010)')
+        
+        # Pulse voltages list
+        voltages_str = '{' + ','.join(str(v) for v in pulse_voltages) + '}'
+        self.tsp.device.write(f'local voltages = {voltages_str}')
+        self.tsp.device.write(f'local readV = {read_voltage}')
+        self.tsp.device.write(f'local pulseW = {pulse_width}')
+        self.tsp.device.write(f'local num_repeats = {num_repeats}')
+        self.tsp.device.write(f'local delay_between = {delay_between}')
+        
+        # Main loop: repeat the voltage pattern
+        self.tsp.device.write('for repeat = 1, num_repeats do')
+        self.tsp.device.write('  for _, pulseV in ipairs(voltages) do')
+        self.tsp.device.write('    smu.source.level = pulseV')
+        self.tsp.device.write('    delay(pulseW)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write('    smu.source.level = readV')
+        self.tsp.device.write('    smu.measure.read(defbuffer1)')
+        self.tsp.device.write('    smu.source.level = 0')
+        self.tsp.device.write('    delay(delay_between)')
+        self.tsp.device.write('  end')
+        self.tsp.device.write('end')
+        
+        self.tsp.device.write('smu.source.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autorange = smu.ON')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, defbuffer1.sourcevalues, defbuffer1.readings)')
+        self.tsp.device.write('endscript')
+        
+        # Calculate expected duration
+        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between
+        expected_duration = 0.001 + num_repeats * len(pulse_voltages) * time_per_pulse + 0.5
+        print(f"  Expected duration: {expected_duration:.2f}s")
+        
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = max(30000, int(expected_duration * 1000 * 1.5))
+        
+        self._flush_output_buffer()
+        
+        self.tsp.device.write('pulseTrainVarying()')
+        time.sleep(expected_duration + 0.5)
+        self.tsp.device.write('waitcomplete()')
+        time.sleep(0.1)
+        
+        timestamps = []
+        voltages_list = []
+        currents = []
+        resistances = []
+        pulse_voltages_log = []
+        
+        print("  Collecting buffer data...")
+        try:
+            response = self.tsp.device.read().strip()
+            self.tsp.device.timeout = original_timeout
+            
+            parsed = self._parse_timestamped_buffer(response)
+            if parsed:
+                print(f"  Retrieved {len(parsed['timestamps'])} measurements")
+                # Assign pulse voltages (repeated pattern)
+                for idx in range(len(parsed['timestamps'])):
+                    if idx == 0:
+                        pulse_voltages_log.append(0.0)  # Initial read
+                    else:
+                        pulse_idx = (idx - 1) % len(pulse_voltages)
+                        pulse_voltages_log.append(pulse_voltages[pulse_idx])
+                return self._format_results(parsed['timestamps'], parsed['voltages'],
+                                          parsed['currents'], parsed['resistances'],
+                                          pulse_voltages=pulse_voltages_log)
+        except Exception as e:
+            print(f"  ❌ Error reading buffer: {e}")
+        
+        elapsed = time.time() - start_time
+        print(f"✓ Pulse train with varying amplitudes complete in {elapsed:.2f}s")
+        return self._format_results(timestamps, voltages_list, currents, resistances,
+                                   pulse_voltages=pulse_voltages_log)
 
 
 if __name__ == "__main__":
