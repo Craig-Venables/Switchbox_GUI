@@ -74,5 +74,17 @@
       "delay_between_widths": 1.0,
       "clim": 0.0001
     }
+  },
+  "Potentiation Only": {
+    "test": {
+      "set_voltage": 1.5,
+      "pulse_width": 0.001,
+      "read_voltage": 0.2,
+      "num_pulses": 30,
+      "delay_between": 0.001,
+      "num_post_reads": 20,
+      "post_read_interval": 0.0,
+      "clim": 0.0001
+    }
   }
 }

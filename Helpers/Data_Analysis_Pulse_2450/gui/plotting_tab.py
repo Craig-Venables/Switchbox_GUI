@@ -128,6 +128,55 @@ class PlottingTab(QWidget):
         dataset_group.setLayout(dataset_layout)
         control_layout.addWidget(dataset_group)
         
+        # Multi-Panel Layout
+        layout_group = QGroupBox("📐 Multi-Panel Layout")
+        layout_group_layout = QVBoxLayout()
+        
+        # Layout selection
+        layout_select_layout = QHBoxLayout()
+        layout_select_layout.addWidget(QLabel("Layout:"))
+        self.layout_combo = QComboBox()
+        self.layout_combo.addItems([
+            "Single Panel (1×1) - All Overlaid",
+            "2 Panels (2×1)", 
+            "2 Panels (1×2)",
+            "4 Panels (2×2)",
+            "6 Panels (3×2)",
+            "9 Panels (3×3)"
+        ])
+        self.layout_combo.setCurrentIndex(0)
+        self.layout_combo.currentIndexChanged.connect(self.on_layout_changed)
+        self.layout_combo.setToolTip("Single Panel: All datasets on same graph. Multi-Panel: Split into separate panels")
+        layout_select_layout.addWidget(self.layout_combo)
+        layout_group_layout.addLayout(layout_select_layout)
+        
+        # Panel assignment button (only enabled for multi-panel)
+        self.assign_panels_btn = QPushButton("📋 Assign Datasets to Panels")
+        self.assign_panels_btn.setEnabled(False)
+        self.assign_panels_btn.setToolTip("Manually assign which dataset goes to which panel")
+        self.assign_panels_btn.clicked.connect(self.show_panel_assignment_dialog)
+        layout_group_layout.addWidget(self.assign_panels_btn)
+        
+        # Shared axes option
+        self.shared_axes_check = QCheckBox("Share Axes Between Panels")
+        self.shared_axes_check.setChecked(False)
+        self.shared_axes_check.setToolTip("Use same axis ranges for all panels")
+        self.shared_axes_check.setEnabled(False)
+        self.shared_axes_check.stateChanged.connect(self.update_plot)
+        layout_group_layout.addWidget(self.shared_axes_check)
+        
+        # Panel assignment info
+        self.layout_info_label = QLabel("💡 All datasets shown together on same graph")
+        self.layout_info_label.setStyleSheet("color: #888; font-size: 9pt; padding: 3px;")
+        self.layout_info_label.setWordWrap(True)
+        layout_group_layout.addWidget(self.layout_info_label)
+        
+        # Store panel assignments: {dataset_index: panel_index}
+        self.panel_assignments = {}
+        
+        layout_group.setLayout(layout_group_layout)
+        control_layout.addWidget(layout_group)
+        
         # Plot settings
         settings_group = QGroupBox("Plot Settings")
         settings_layout = QVBoxLayout()
@@ -178,6 +227,12 @@ class PlottingTab(QWidget):
         self.log_scale_check = QCheckBox("Log Scale (Y)")
         self.log_scale_check.stateChanged.connect(self.update_plot)
         settings_layout.addWidget(self.log_scale_check)
+        
+        # Show difference for endurance tests
+        self.show_difference_check = QCheckBox("Show R_off - R_on (Endurance)")
+        self.show_difference_check.setToolTip("Plot the difference between RESET and SET resistances for endurance tests")
+        self.show_difference_check.stateChanged.connect(self.update_plot)
+        settings_layout.addWidget(self.show_difference_check)
         
         settings_group.setLayout(settings_layout)
         control_layout.addWidget(settings_group)
@@ -231,6 +286,75 @@ class PlottingTab(QWidget):
         self.y_offset_spin.valueChanged.connect(self.update_plot)
         offset_layout.addWidget(self.y_offset_spin)
         processing_layout.addLayout(offset_layout)
+        
+        # Data Smoothing
+        smoothing_label = QLabel("Data Smoothing:")
+        smoothing_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        processing_layout.addWidget(smoothing_label)
+        
+        # Smoothing method
+        smooth_method_layout = QHBoxLayout()
+        smooth_method_layout.addWidget(QLabel("Method:"))
+        self.smoothing_method_combo = QComboBox()
+        self.smoothing_method_combo.addItems([
+            "None",
+            "Moving Average",
+            "Savitzky-Golay",
+            "Gaussian Filter"
+        ])
+        self.smoothing_method_combo.setCurrentIndex(0)
+        self.smoothing_method_combo.currentTextChanged.connect(self.update_smoothing_controls)
+        self.smoothing_method_combo.currentTextChanged.connect(self.update_plot)
+        smooth_method_layout.addWidget(self.smoothing_method_combo)
+        processing_layout.addLayout(smooth_method_layout)
+        
+        # Window size (for Moving Average and Savitzky-Golay)
+        smooth_window_layout = QHBoxLayout()
+        smooth_window_layout.addWidget(QLabel("Window Size:"))
+        self.smoothing_window_spin = QSpinBox()
+        self.smoothing_window_spin.setRange(3, 101)
+        self.smoothing_window_spin.setValue(5)
+        self.smoothing_window_spin.setSingleStep(2)
+        self.smoothing_window_spin.setToolTip("Number of points to average (must be odd for Savitzky-Golay)")
+        self.smoothing_window_spin.valueChanged.connect(self.ensure_odd_window_size)
+        self.smoothing_window_spin.valueChanged.connect(self.update_plot)
+        smooth_window_layout.addWidget(self.smoothing_window_spin)
+        processing_layout.addLayout(smooth_window_layout)
+        
+        # Polynomial order (for Savitzky-Golay)
+        smooth_poly_layout = QHBoxLayout()
+        smooth_poly_layout.addWidget(QLabel("Polynomial Order:"))
+        self.smoothing_poly_spin = QSpinBox()
+        self.smoothing_poly_spin.setRange(1, 5)
+        self.smoothing_poly_spin.setValue(2)
+        self.smoothing_poly_spin.setToolTip("Polynomial order for Savitzky-Golay filter (typically 2-3)")
+        self.smoothing_poly_spin.valueChanged.connect(self.update_plot)
+        smooth_poly_layout.addWidget(self.smoothing_poly_spin)
+        processing_layout.addLayout(smooth_poly_layout)
+        
+        # Sigma (for Gaussian filter)
+        smooth_sigma_layout = QHBoxLayout()
+        smooth_sigma_layout.addWidget(QLabel("Sigma (σ):"))
+        self.smoothing_sigma_spin = QDoubleSpinBox()
+        self.smoothing_sigma_spin.setRange(0.1, 10.0)
+        self.smoothing_sigma_spin.setValue(1.0)
+        self.smoothing_sigma_spin.setDecimals(2)
+        self.smoothing_sigma_spin.setSingleStep(0.1)
+        self.smoothing_sigma_spin.setToolTip("Standard deviation for Gaussian filter (higher = more smoothing)")
+        self.smoothing_sigma_spin.valueChanged.connect(self.update_plot)
+        smooth_sigma_layout.addWidget(self.smoothing_sigma_spin)
+        processing_layout.addLayout(smooth_sigma_layout)
+        
+        # Initially hide smoothing controls
+        self.smoothing_window_spin.setEnabled(False)
+        self.smoothing_poly_spin.setEnabled(False)
+        self.smoothing_sigma_spin.setEnabled(False)
+        
+        # Smoothing info label
+        smoothing_info_label = QLabel("💡 Smoothing reduces noise in noisy datasets")
+        smoothing_info_label.setStyleSheet("color: #888; font-size: 9pt; padding: 3px;")
+        smoothing_info_label.setWordWrap(True)
+        processing_layout.addWidget(smoothing_info_label)
         
         processing_group.setLayout(processing_layout)
         control_layout.addWidget(processing_group)
@@ -566,6 +690,12 @@ class PlottingTab(QWidget):
         save_pdf_trans_btn.clicked.connect(lambda: self.export_plot('pdf', True))
         export_layout.addWidget(save_pdf_trans_btn)
         
+        # SVG export
+        save_svg_btn = QPushButton("🖼️ SVG")
+        save_svg_btn.setToolTip("Vector format for publications")
+        save_svg_btn.clicked.connect(lambda: self.export_plot('svg', False))
+        export_layout.addWidget(save_svg_btn)
+        
         # Data export
         save_data_btn = QPushButton("📊 Export Data (TXT)")
         save_data_btn.clicked.connect(self.export_data)
@@ -590,23 +720,52 @@ class PlottingTab(QWidget):
         # Add splitter to main layout
         layout.addWidget(splitter)
     
-    def load_datasets(self, datasets: List[TSPData]):
-        """Load datasets for plotting"""
-        self.datasets = datasets
-        self.dataset_colors = []
-        self.custom_labels = [None] * len(datasets)
-        self.custom_samples = [None] * len(datasets)
+    def load_datasets(self, datasets: List[TSPData], append: bool = False):
+        """Load datasets for plotting
         
-        # Assign colors
-        for i, data in enumerate(datasets):
-            color = self.plot_generator.style.COLORS[i % len(self.plot_generator.style.COLORS)]
-            self.dataset_colors.append(color)
-        
-        # Update dataset list
-        self.dataset_list.clear()
-        for i, data in enumerate(datasets):
-            item = DatasetListItem(data, self.dataset_colors[i])
-            self.dataset_list.addItem(item)
+        Args:
+            datasets: List of TSPData objects to load
+            append: If True, append to existing datasets instead of replacing
+        """
+        if append and hasattr(self, 'datasets') and self.datasets:
+            # Append to existing datasets
+            start_idx = len(self.datasets)
+            self.datasets.extend(datasets)
+            
+            # Assign colors for new datasets
+            for i, data in enumerate(datasets):
+                color_idx = (start_idx + i) % len(self.plot_generator.style.COLORS)
+                color = self.plot_generator.style.COLORS[color_idx]
+                self.dataset_colors.append(color)
+            
+            # Extend custom labels and samples
+            self.custom_labels.extend([None] * len(datasets))
+            self.custom_samples.extend([None] * len(datasets))
+            
+            # Add to dataset list
+            for i, data in enumerate(datasets):
+                item = DatasetListItem(data, self.dataset_colors[start_idx + i])
+                self.dataset_list.addItem(item)
+        else:
+            # Replace existing datasets
+            self.datasets = datasets
+            self.dataset_colors = []
+            self.custom_labels = [None] * len(datasets)
+            self.custom_samples = [None] * len(datasets)
+            
+            # Assign colors
+            for i, data in enumerate(datasets):
+                color = self.plot_generator.style.COLORS[i % len(self.plot_generator.style.COLORS)]
+                self.dataset_colors.append(color)
+            
+            # Update dataset list
+            self.dataset_list.clear()
+            for i, data in enumerate(datasets):
+                item = DatasetListItem(data, self.dataset_colors[i])
+                self.dataset_list.addItem(item)
+            
+            # Clear panel assignments when replacing
+            self.panel_assignments = {}
         
         # Auto-detect and set default axis configuration (don't update plot yet)
         has_iv_sweep = any('IV Sweep' in data.test_name or 
@@ -638,7 +797,6 @@ class PlottingTab(QWidget):
         
         # Clear figure
         self.figure.clear()
-        ax = self.figure.add_subplot(111)
         
         # Apply style settings
         self.plot_generator.style.line_width = self.line_width_spin.value()
@@ -647,102 +805,273 @@ class PlottingTab(QWidget):
         self.plot_generator.style.legend = self.legend_check.isChecked()
         
         self.plot_generator.style.apply_to_figure(self.figure)
-        self.plot_generator.style.apply_to_axes(ax)
         
-        # Initialize annotation manager (after axes exist)
-        self.annotation_manager = AnnotationManager(ax)
+        # Get layout configuration
+        layout_text = self.layout_combo.currentText()
+        shared_axes = self.shared_axes_check.isChecked()
+        is_single_panel = "Single Panel" in layout_text
         
-        # Get crop range
-        crop_start = self.crop_start_spin.value()
-        crop_end = self.crop_end_spin.value()
-        
-        # Get normalization and offset settings
-        normalize = self.normalize_check.isChecked()
-        y_offset = self.y_offset_spin.value()
-        
-        # Track if we need a right Y-axis
-        enable_right_y = self.enable_right_y_check.isChecked()
-        y_right_axis = self.y_right_combo.currentText() if enable_right_y else None
-        ax_right = None
-        
-        # Plot each visible dataset
-        visible_count = 0
+        # Collect visible datasets
+        visible_datasets = []
         for i in range(self.dataset_list.count()):
             item = self.dataset_list.item(i)
             if isinstance(item, DatasetListItem) and item.visible:
+                visible_datasets.append((i, item))
+        
+        visible_count = len(visible_datasets)
+        
+        if visible_count == 0:
+            self.status_label.setText("No visible datasets to plot")
+            return
+        
+        # Get crop range and processing settings
+        crop_start = self.crop_start_spin.value()
+        crop_end = self.crop_end_spin.value()
+        normalize = self.normalize_check.isChecked()
+        y_offset = self.y_offset_spin.value()
+        
+        # Get axis configuration
+        x_axis = self.x_axis_combo.currentText()
+        y_left_axis = self.y_left_combo.currentText()
+        enable_right_y = self.enable_right_y_check.isChecked()
+        y_right_axis = self.y_right_combo.currentText() if enable_right_y else None
+        
+        # Create subplots
+        if is_single_panel:
+            # Single panel - ALL datasets on same graph (overlaid)
+            ax = self.figure.add_subplot(111)
+            axes_list = [ax]
+            self.plot_generator.style.apply_to_axes(ax)
+            
+            # Initialize annotation manager
+            self.annotation_manager = AnnotationManager(ax)
+            
+            # Create right axis if needed
+            ax_right = None
+            if enable_right_y:
+                ax_right = ax.twinx()
+                self.plot_generator.style.apply_to_axes(ax_right)
+            
+            # Plot ALL visible datasets on the same axis
+            for dataset_idx, item in visible_datasets:
                 data = item.tsp_data
                 color = item.color
                 
-                # Use custom label if available, otherwise generate default
-                if self.custom_labels[i]:
-                    label = self.custom_labels[i]
+                # Use custom label if available
+                if self.custom_labels[dataset_idx]:
+                    label = self.custom_labels[dataset_idx]
                 else:
-                    # Use custom sample if available
-                    if self.custom_samples[i]:
-                        label = f"{self.custom_samples[i]} - {data.filename}"
+                    if self.custom_samples[dataset_idx]:
+                        label = f"{self.custom_samples[dataset_idx]} - {data.filename}"
                     else:
                         label = data.get_display_name()
                     
-                    # Add key parameters to label (only if not custom)
                     key_params = data.get_key_parameters()
-                    if key_params and not self.custom_labels[i]:
+                    if key_params and not self.custom_labels[dataset_idx]:
                         label += f" ({key_params})"
                 
                 # Apply data processing
                 processed_data = self.process_data(data, crop_start, crop_end, normalize, y_offset)
                 
-                # Get axis configuration
-                x_axis = self.x_axis_combo.currentText()
-                y_left_axis = self.y_left_combo.currentText()
+                # Plot on the same axis
+                self.plot_with_axes(processed_data, self.figure, ax, color, label, 
+                                  x_axis, y_left_axis, y_right_axis, ax_right)
+            
+            # Apply log scale if checked
+            if self.log_scale_check.isChecked():
+                ax.set_yscale('log')
+            
+            # Update legend
+            if self.legend_check.isChecked():
+                lines_left, labels_left = ax.get_legend_handles_labels()
+                if enable_right_y and ax_right is not None:
+                    lines_right, labels_right = ax_right.get_legend_handles_labels()
+                    all_lines = lines_left + lines_right
+                    all_labels = labels_left + labels_right
+                else:
+                    all_lines = lines_left
+                    all_labels = labels_left
                 
-                # Create right axis on first dataset if needed
-                if enable_right_y and ax_right is None:
+                if all_lines:
+                    legend = ax.legend(all_lines, all_labels,
+                                     facecolor=self.plot_generator.style.bg_color,
+                                     edgecolor=self.plot_generator.style.text_color,
+                                     labelcolor=self.plot_generator.style.text_color,
+                                     loc='best')
+                    legend.get_frame().set_alpha(0.9)
+            
+            # Add statistics box if enabled
+            if self.show_stats_box.isChecked() and self.calculated_stats:
+                self.draw_statistics_box(ax)
+            
+            # Apply manual axis ranges if not auto-scaling
+            if not self.autoscale_check.isChecked():
+                self.apply_axis_ranges()
+            
+        else:
+            # Multi-panel layout
+            # Parse layout
+            if "2×1" in layout_text:
+                rows, cols = 2, 1
+            elif "1×2" in layout_text:
+                rows, cols = 1, 2
+            elif "2×2" in layout_text:
+                rows, cols = 2, 2
+            elif "3×2" in layout_text:
+                rows, cols = 3, 2
+            elif "3×3" in layout_text:
+                rows, cols = 3, 3
+            else:
+                rows, cols = 1, 1
+            
+            total_panels = rows * cols
+            
+            # Create subplots
+            axes_array = self.figure.subplots(rows, cols, sharex=shared_axes, sharey=shared_axes)
+            # Flatten axes array to list
+            if isinstance(axes_array, np.ndarray):
+                axes_list = axes_array.flatten().tolist()
+            elif hasattr(axes_array, 'flatten'):
+                axes_list = list(axes_array.flatten())
+            elif isinstance(axes_array, list):
+                axes_list = []
+                for item in axes_array:
+                    if isinstance(item, list):
+                        axes_list.extend(item)
+                    else:
+                        axes_list.append(item)
+            else:
+                axes_list = [axes_array]
+            
+            # Track axis ranges for shared axes
+            x_min_vals, x_max_vals = [], []
+            y_min_vals, y_max_vals = [], []
+            
+            # Create mapping: panel_idx -> list of dataset indices
+            panel_to_datasets = {i: [] for i in range(total_panels)}
+            
+            # Assign datasets to panels based on assignments or auto-assign
+            for dataset_idx, item in visible_datasets:
+                if dataset_idx in self.panel_assignments:
+                    # Use manual assignments (can be list for multiple panels)
+                    assigned = self.panel_assignments[dataset_idx]
+                    if isinstance(assigned, list):
+                        for panel_idx in assigned:
+                            if panel_idx < total_panels:
+                                panel_to_datasets[panel_idx].append((dataset_idx, item))
+                    elif assigned < total_panels:
+                        panel_to_datasets[assigned].append((dataset_idx, item))
+                else:
+                    # Auto-assign: first dataset to panel 0, second to panel 1, etc.
+                    panel_idx = len([d for ds in panel_to_datasets.values() for d in ds]) % total_panels
+                    panel_to_datasets[panel_idx].append((dataset_idx, item))
+            
+            # Plot datasets on their assigned panels
+            for panel_idx in range(total_panels):
+                ax = axes_list[panel_idx]
+                self.plot_generator.style.apply_to_axes(ax)
+                
+                # Initialize annotation manager on first panel only
+                if panel_idx == 0:
+                    self.annotation_manager = AnnotationManager(ax)
+                
+                # Get datasets for this panel
+                panel_datasets = panel_to_datasets[panel_idx]
+                
+                if not panel_datasets:
+                    # No datasets for this panel - hide it
+                    ax.set_visible(False)
+                    continue
+                
+                # Create right axis if needed (only for first panel)
+                ax_right = None
+                if enable_right_y and panel_idx == 0:
                     ax_right = ax.twinx()
                     self.plot_generator.style.apply_to_axes(ax_right)
                 
-                # Use custom axis plotting if configured
-                self.plot_with_axes(processed_data, self.figure, ax, color, label, 
-                                    x_axis, y_left_axis, y_right_axis, ax_right)
-                visible_count += 1
-        
-        # Apply log scale if checked (to left Y-axis only)
-        if self.log_scale_check.isChecked():
-            ax.set_yscale('log')
-        
-        # Update legend - combine left and right axis legends if dual axis is enabled
-        if self.legend_check.isChecked() and visible_count > 0:
-            # Get lines and labels from both axes if dual axis is enabled
-            lines_left, labels_left = ax.get_legend_handles_labels()
+                # Plot all datasets assigned to this panel
+                for dataset_idx, item in panel_datasets:
+                    data = item.tsp_data
+                    color = item.color
+                    
+                    # Use custom label if available
+                    if self.custom_labels[dataset_idx]:
+                        label = self.custom_labels[dataset_idx]
+                    else:
+                        if self.custom_samples[dataset_idx]:
+                            label = f"{self.custom_samples[dataset_idx]} - {data.filename}"
+                        else:
+                            label = data.get_display_name()
+                        
+                        key_params = data.get_key_parameters()
+                        if key_params and not self.custom_labels[dataset_idx]:
+                            label += f" ({key_params})"
+                    
+                    # Apply data processing
+                    processed_data = self.process_data(data, crop_start, crop_end, normalize, y_offset)
+                    
+                    # Plot on this panel
+                    self.plot_with_axes(processed_data, self.figure, ax, color, label, 
+                                      x_axis, y_left_axis, y_right_axis, ax_right)
+                
+                # Apply log scale if checked
+                if self.log_scale_check.isChecked():
+                    ax.set_yscale('log')
+                
+                # Collect axis ranges for shared axes
+                if not self.autoscale_check.isChecked():
+                    x_min_vals.append(self.x_min_spin.value())
+                    x_max_vals.append(self.x_max_spin.value())
+                    y_min_vals.append(self.y_min_spin.value())
+                    y_max_vals.append(self.y_max_spin.value())
+                else:
+                    xlim = ax.get_xlim()
+                    ylim = ax.get_ylim()
+                    x_min_vals.append(xlim[0])
+                    x_max_vals.append(xlim[1])
+                    y_min_vals.append(ylim[0])
+                    y_max_vals.append(ylim[1])
+                
+                # Update legend for this panel
+                if self.legend_check.isChecked():
+                    lines, labels = ax.get_legend_handles_labels()
+                    if lines:
+                        legend = ax.legend(lines, labels,
+                                         facecolor=self.plot_generator.style.bg_color,
+                                         edgecolor=self.plot_generator.style.text_color,
+                                         labelcolor=self.plot_generator.style.text_color,
+                                         loc='best', fontsize=8)
+                        legend.get_frame().set_alpha(0.9)
             
-            if enable_right_y and ax_right is not None:
-                lines_right, labels_right = ax_right.get_legend_handles_labels()
-                all_lines = lines_left + lines_right
-                all_labels = labels_left + labels_right
-            else:
-                all_lines = lines_left
-                all_labels = labels_left
+            # Add statistics box if enabled (only on first panel with data)
+            if self.show_stats_box.isChecked() and self.calculated_stats:
+                first_panel_with_data = next((i for i, ax in enumerate(axes_list) if ax.get_visible()), 0)
+                self.draw_statistics_box(axes_list[first_panel_with_data])
             
-            if all_lines:
-                legend = ax.legend(all_lines, all_labels,
-                                 facecolor=self.plot_generator.style.bg_color,
-                                 edgecolor=self.plot_generator.style.text_color,
-                                 labelcolor=self.plot_generator.style.text_color,
-                                 loc='best')
-                legend.get_frame().set_alpha(0.9)
-        
-        # Add statistics box if enabled
-        if self.show_stats_box.isChecked() and self.calculated_stats:
-            self.draw_statistics_box(ax)
+            # Apply shared axes ranges if enabled
+            if shared_axes:
+                if x_min_vals and x_max_vals:
+                    x_min_global = min(x_min_vals)
+                    x_max_global = max(x_max_vals)
+                    for ax in axes_list:
+                        if ax.get_visible():
+                            ax.set_xlim(x_min_global, x_max_global)
+                
+                if y_min_vals and y_max_vals:
+                    y_min_global = min(y_min_vals)
+                    y_max_global = max(y_max_vals)
+                    for ax in axes_list:
+                        if ax.get_visible():
+                            ax.set_ylim(y_min_global, y_max_global)
         
         self.figure.tight_layout()
-        
-        # Apply manual axis ranges if not auto-scaling
-        if not self.autoscale_check.isChecked():
-            self.apply_axis_ranges()
-        
         self.canvas.draw()
         
-        self.status_label.setText(f"Showing {visible_count} of {len(self.datasets)} dataset(s)")
+        if is_single_panel:
+            self.status_label.setText(f"Showing {visible_count} dataset(s) overlaid on same graph")
+        else:
+            panel_info = f" ({total_panels} panel{'s' if total_panels > 1 else ''})"
+            self.status_label.setText(f"Showing {visible_count} dataset(s) across{panel_info}")
     
     def toggle_dataset_visibility(self, item: QListWidgetItem):
         """Toggle visibility of a dataset"""
@@ -852,6 +1181,185 @@ class PlottingTab(QWidget):
         self.crop_end_spin.setValue(999999)
         self.update_plot()
     
+    def on_layout_changed(self):
+        """Handle layout change - enable/disable multi-panel controls"""
+        layout_text = self.layout_combo.currentText()
+        is_multi_panel = "Single Panel" not in layout_text
+        
+        self.assign_panels_btn.setEnabled(is_multi_panel)
+        self.shared_axes_check.setEnabled(is_multi_panel)
+        
+        if is_multi_panel:
+            self.layout_info_label.setText("💡 Click 'Assign Datasets' to choose which datasets go to which panels")
+        else:
+            self.layout_info_label.setText("💡 All datasets shown together on same graph")
+        
+        self.update_plot()
+    
+    def show_panel_assignment_dialog(self):
+        """Show dialog to assign datasets to panels"""
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem, QPushButton, QDialogButtonBox
+        
+        # Get current layout
+        layout_text = self.layout_combo.currentText()
+        if "2×1" in layout_text:
+            rows, cols = 2, 1
+        elif "1×2" in layout_text:
+            rows, cols = 1, 2
+        elif "2×2" in layout_text:
+            rows, cols = 2, 2
+        elif "3×2" in layout_text:
+            rows, cols = 3, 2
+        elif "3×3" in layout_text:
+            rows, cols = 3, 3
+        else:
+            QMessageBox.information(self, "Info", "Select a multi-panel layout first")
+            return
+        
+        total_panels = rows * cols
+        
+        # Get visible datasets
+        visible_datasets = []
+        for i in range(self.dataset_list.count()):
+            item = self.dataset_list.item(i)
+            if isinstance(item, DatasetListItem) and item.visible:
+                visible_datasets.append((i, item))
+        
+        if not visible_datasets:
+            QMessageBox.warning(self, "No Data", "No visible datasets to assign")
+            return
+        
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Assign Datasets to Panels ({rows}×{cols})")
+        dialog.setMinimumWidth(600)
+        dialog.setMinimumHeight(400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Instructions
+        info_label = QLabel(f"Assign {len(visible_datasets)} dataset(s) to {total_panels} panel(s). Each panel can have multiple datasets.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("padding: 10px; background-color: #3c3c3c; border-radius: 5px;")
+        layout.addWidget(info_label)
+        
+        # Table: rows = datasets, columns = panels
+        table = QTableWidget(len(visible_datasets), total_panels)
+        table.setHorizontalHeaderLabels([f"Panel {i+1}" for i in range(total_panels)])
+        
+        # Set dataset names as row headers
+        dataset_names = []
+        for idx, item in visible_datasets:
+            name = self.custom_labels[idx] if self.custom_labels[idx] else item.tsp_data.get_display_name()
+            dataset_names.append(name)
+        table.setVerticalHeaderLabels(dataset_names)
+        
+        # Populate table with checkboxes
+        for row, (dataset_idx, item) in enumerate(visible_datasets):
+            # Check if already assigned
+            assigned_panels = self.panel_assignments.get(dataset_idx, [])
+            if not isinstance(assigned_panels, list):
+                assigned_panels = [assigned_panels] if assigned_panels is not None else []
+            
+            for col in range(total_panels):
+                checkbox_item = QTableWidgetItem()
+                checkbox_item.setFlags(checkbox_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                
+                # Check if this dataset was previously assigned to this panel
+                if col in assigned_panels:
+                    checkbox_item.setCheckState(Qt.CheckState.Checked)
+                else:
+                    checkbox_item.setCheckState(Qt.CheckState.Unchecked)
+                
+                table.setItem(row, col, checkbox_item)
+        
+        # Auto-assign button
+        auto_assign_layout = QHBoxLayout()
+        auto_assign_btn = QPushButton("Auto-Assign (Sequential)")
+        auto_assign_btn.clicked.connect(lambda: self.auto_assign_datasets(table, visible_datasets, total_panels))
+        auto_assign_layout.addWidget(auto_assign_btn)
+        auto_assign_layout.addStretch()
+        layout.addLayout(auto_assign_layout)
+        
+        layout.addWidget(table)
+        
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(lambda: self.apply_panel_assignments(dialog, table, visible_datasets, total_panels))
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        dialog.exec()
+    
+    def auto_assign_datasets(self, table, visible_datasets, total_panels):
+        """Auto-assign datasets to panels sequentially"""
+        for row, (dataset_idx, item) in enumerate(visible_datasets):
+            panel_idx = row % total_panels
+            checkbox_item = table.item(row, panel_idx)
+            if checkbox_item:
+                checkbox_item.setCheckState(Qt.CheckState.Checked)
+                # Uncheck all other panels for this dataset
+                for col in range(total_panels):
+                    if col != panel_idx:
+                        other_item = table.item(row, col)
+                        if other_item:
+                            other_item.setCheckState(Qt.CheckState.Unchecked)
+    
+    def apply_panel_assignments(self, dialog, table, visible_datasets, total_panels):
+        """Apply panel assignments from dialog"""
+        # Clear existing assignments
+        self.panel_assignments.clear()
+        
+        # Read assignments from table
+        for row, (dataset_idx, item) in enumerate(visible_datasets):
+            for col in range(total_panels):
+                checkbox_item = table.item(row, col)
+                if checkbox_item and checkbox_item.checkState() == Qt.CheckState.Checked:
+                    # This dataset should be on this panel
+                    if dataset_idx not in self.panel_assignments:
+                        self.panel_assignments[dataset_idx] = []
+                    if isinstance(self.panel_assignments[dataset_idx], list):
+                        self.panel_assignments[dataset_idx].append(col)
+                    else:
+                        self.panel_assignments[dataset_idx] = [col]
+        
+        dialog.accept()
+        self.update_plot()
+    
+    def ensure_odd_window_size(self):
+        """Ensure window size is odd when Savitzky-Golay is selected"""
+        method = self.smoothing_method_combo.currentText()
+        if method == "Savitzky-Golay":
+            current_val = self.smoothing_window_spin.value()
+            if current_val % 2 == 0:
+                # Block signals to avoid recursion
+                self.smoothing_window_spin.blockSignals(True)
+                self.smoothing_window_spin.setValue(current_val + 1)
+                self.smoothing_window_spin.blockSignals(False)
+    
+    def update_smoothing_controls(self):
+        """Enable/disable smoothing controls based on selected method"""
+        method = self.smoothing_method_combo.currentText()
+        
+        if method == "None":
+            self.smoothing_window_spin.setEnabled(False)
+            self.smoothing_poly_spin.setEnabled(False)
+            self.smoothing_sigma_spin.setEnabled(False)
+        elif method == "Moving Average":
+            self.smoothing_window_spin.setEnabled(True)
+            self.smoothing_poly_spin.setEnabled(False)
+            self.smoothing_sigma_spin.setEnabled(False)
+        elif method == "Savitzky-Golay":
+            self.smoothing_window_spin.setEnabled(True)
+            self.smoothing_poly_spin.setEnabled(True)
+            self.smoothing_sigma_spin.setEnabled(False)
+            # Ensure window size is odd for Savitzky-Golay
+            self.ensure_odd_window_size()
+        elif method == "Gaussian Filter":
+            self.smoothing_window_spin.setEnabled(False)
+            self.smoothing_poly_spin.setEnabled(False)
+            self.smoothing_sigma_spin.setEnabled(True)
+    
     def toggle_right_y_axis(self):
         """Enable/disable right Y-axis controls"""
         enabled = self.enable_right_y_check.isChecked()
@@ -935,6 +1443,12 @@ class PlottingTab(QWidget):
         """
         import numpy as np
         
+        # Special handling for endurance tests: use plot_single to get SET/RESET separation
+        if data.test_name == "Endurance Test" and 'Resistance (Reset)' in data.additional_data and 'Resistance (Set)' in data.additional_data:
+            show_difference = self.show_difference_check.isChecked()
+            self.plot_generator.plot_single(data, fig, ax, color, label, show_difference=show_difference)
+            return
+        
         # Get X-axis data
         x_data, x_label = self.get_axis_data(data, x_axis)
         
@@ -994,11 +1508,13 @@ class PlottingTab(QWidget):
     def process_data(self, data: TSPData, crop_start: int, crop_end: int, 
                     normalize: bool, y_offset: float) -> TSPData:
         """
-        Process data with cropping, normalization, and offset.
+        Process data with cropping, normalization, offset, and smoothing.
         Returns a modified copy of the data.
         """
         import copy
         import numpy as np
+        from scipy import signal
+        from scipy.ndimage import gaussian_filter1d
         
         # Create a copy
         processed = copy.deepcopy(data)
@@ -1019,6 +1535,45 @@ class PlottingTab(QWidget):
                 if len(data.additional_data[key]) == len(data.timestamps):
                     processed.additional_data[key] = data.additional_data[key][start_idx:end_idx]
         
+        # Apply smoothing (to resistance, current, and voltage)
+        smoothing_method = self.smoothing_method_combo.currentText()
+        if smoothing_method != "None" and len(processed.resistances) > 0:
+            window_size = self.smoothing_window_spin.value()
+            poly_order = self.smoothing_poly_spin.value()
+            sigma = self.smoothing_sigma_spin.value()
+            
+            # Ensure we have enough points for smoothing
+            min_points = max(3, window_size if window_size > 3 else 3)
+            if len(processed.resistances) >= min_points:
+                try:
+                    if smoothing_method == "Moving Average":
+                        # Moving average with proper edge handling
+                        # Use scipy's uniform_filter1d which handles edges better
+                        from scipy.ndimage import uniform_filter1d
+                        processed.resistances = uniform_filter1d(processed.resistances, size=window_size, mode='reflect')
+                        if len(processed.currents) == len(processed.resistances):
+                            processed.currents = uniform_filter1d(processed.currents, size=window_size, mode='reflect')
+                    
+                    elif smoothing_method == "Savitzky-Golay":
+                        # Ensure window size is odd
+                        if window_size % 2 == 0:
+                            window_size += 1
+                        if window_size > len(processed.resistances):
+                            window_size = len(processed.resistances) if len(processed.resistances) % 2 == 1 else len(processed.resistances) - 1
+                        
+                        if window_size >= 3 and poly_order < window_size:
+                            processed.resistances = signal.savgol_filter(processed.resistances, window_size, poly_order)
+                            if len(processed.currents) == len(processed.resistances):
+                                processed.currents = signal.savgol_filter(processed.currents, window_size, poly_order)
+                    
+                    elif smoothing_method == "Gaussian Filter":
+                        processed.resistances = gaussian_filter1d(processed.resistances, sigma=sigma)
+                        if len(processed.currents) == len(processed.resistances):
+                            processed.currents = gaussian_filter1d(processed.currents, sigma=sigma)
+                except Exception as e:
+                    # If smoothing fails, continue without smoothing
+                    print(f"Warning: Smoothing failed: {e}")
+        
         # Apply normalization (to resistance only)
         if normalize and len(processed.resistances) > 0:
             r_min = np.nanmin(processed.resistances)
@@ -1038,44 +1593,82 @@ class PlottingTab(QWidget):
             QMessageBox.warning(self, "No Data", "No data to export!")
             return
         
+        # Get default save location from first dataset's filepath
+        default_dir = None
+        default_name = f"tsp_plot.{format}"
+        
+        if self.datasets:
+            # Use directory of first dataset
+            first_filepath = self.datasets[0].filepath
+            if first_filepath and first_filepath.parent.exists():
+                default_dir = str(first_filepath.parent)
+                # Generate better default name from first dataset
+                base_name = first_filepath.stem
+                trans_suffix = "_transparent" if transparent else ""
+                default_name = f"{base_name}_plot{trans_suffix}.{format}"
+        
         # Get save location
-        trans_suffix = "_transparent" if transparent else ""
-        default_name = f"tsp_plot{trans_suffix}.{format}"
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            f"Save Plot as {format.upper()}" + (" (Transparent)" if transparent else ""),
-            default_name,
-            f"{format.upper()} Files (*.{format});;All Files (*.*)"
-        )
+        if default_dir:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                f"Save Plot as {format.upper()}" + (" (Transparent)" if transparent else ""),
+                str(Path(default_dir) / default_name),
+                f"{format.upper()} Files (*.{format});;All Files (*.*)"
+            )
+        else:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                f"Save Plot as {format.upper()}" + (" (Transparent)" if transparent else ""),
+                default_name,
+                f"{format.upper()} Files (*.{format});;All Files (*.*)"
+            )
         
         if file_path:
             try:
-                dpi = 300 if format == 'png' else 150
+                # Set DPI based on format
+                if format == 'png':
+                    dpi = 300
+                elif format == 'pdf':
+                    dpi = 150
+                elif format == 'svg':
+                    dpi = None  # SVG is vector, no DPI
+                else:
+                    dpi = 150
                 
                 if transparent:
                     # Save with transparent background
                     original_bg = self.figure.get_facecolor()
-                    original_ax_bg = self.figure.axes[0].get_facecolor() if self.figure.axes else None
+                    original_ax_bgs = []
+                    for ax in self.figure.axes:
+                        original_ax_bgs.append(ax.get_facecolor())
                     
                     # Set transparent
                     self.figure.patch.set_facecolor('none')
-                    if self.figure.axes:
-                        self.figure.axes[0].patch.set_facecolor('none')
+                    for ax in self.figure.axes:
+                        ax.patch.set_facecolor('none')
                     
                     # Save
-                    self.figure.savefig(file_path, dpi=dpi, transparent=True, bbox_inches='tight')
+                    save_kwargs = {'transparent': True, 'bbox_inches': 'tight'}
+                    if dpi is not None:
+                        save_kwargs['dpi'] = dpi
+                    self.figure.savefig(file_path, **save_kwargs)
                     
                     # Restore original colors
                     self.figure.patch.set_facecolor(original_bg)
-                    if self.figure.axes and original_ax_bg:
-                        self.figure.axes[0].patch.set_facecolor(original_ax_bg)
+                    for ax, original_bg in zip(self.figure.axes, original_ax_bgs):
+                        ax.patch.set_facecolor(original_bg)
                 else:
                     # Save with current background
-                    self.plot_generator.save_figure(self.figure, Path(file_path), dpi=dpi)
+                    if format == 'svg':
+                        self.figure.savefig(file_path, format='svg', bbox_inches='tight')
+                    else:
+                        self.plot_generator.save_figure(self.figure, Path(file_path), dpi=dpi)
                 
                 QMessageBox.information(self, "Success", f"Plot saved to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save plot:\n{e}")
+                import traceback
+                traceback.print_exc()
     
     def export_data(self):
         """Export data to text file with proper column format"""
@@ -1094,13 +1687,32 @@ class PlottingTab(QWidget):
             QMessageBox.warning(self, "No Visible Data", "No visible datasets to export!")
             return
         
+        # Get default save location from first dataset's filepath
+        default_dir = None
+        default_name = "tsp_data_export.txt"
+        
+        if visible_datasets:
+            first_filepath = visible_datasets[0].filepath
+            if first_filepath and first_filepath.parent.exists():
+                default_dir = str(first_filepath.parent)
+                base_name = first_filepath.stem
+                default_name = f"{base_name}_export.txt"
+        
         # Get save location
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Export Data as TXT",
-            "tsp_data_export.txt",
-            "Text Files (*.txt);;All Files (*.*)"
-        )
+        if default_dir:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Data as TXT",
+                str(Path(default_dir) / default_name),
+                "Text Files (*.txt);;All Files (*.*)"
+            )
+        else:
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export Data as TXT",
+                default_name,
+                "Text Files (*.txt);;All Files (*.*)"
+            )
         
         if file_path:
             try:

@@ -97,7 +97,7 @@ class PlotGenerator:
     
     def plot_single(self, data: TSPData, fig: Optional[Figure] = None, 
                    ax: Optional[Axes] = None, color: Optional[str] = None,
-                   label: Optional[str] = None) -> Tuple[Figure, Axes]:
+                   label: Optional[str] = None, show_difference: bool = False) -> Tuple[Figure, Axes]:
         """
         Plot a single TSP dataset.
         
@@ -107,6 +107,7 @@ class PlotGenerator:
             ax: Existing axes (optional)
             color: Line color (optional)
             label: Legend label (optional)
+            show_difference: For endurance tests, show R_off - R_on difference (optional)
         
         Returns:
             Figure and Axes objects
@@ -133,7 +134,7 @@ class PlotGenerator:
         elif plot_type == 'pot_dep_cycle':
             self._plot_potentiation_depression(ax, data, color, label)
         elif plot_type == 'endurance':
-            self._plot_endurance(ax, data, color, label)
+            self._plot_endurance(ax, data, color, label, show_difference=show_difference)
         elif plot_type == 'relaxation_reads':
             self._plot_relaxation_reads(ax, data, color, label)
         elif plot_type == 'relaxation_all':
@@ -267,9 +268,60 @@ class PlotGenerator:
         ax.set_ylabel('Resistance (Ω)')
         ax.set_title('Potentiation-Depression Cycle')
     
-    def _plot_endurance(self, ax: Axes, data: TSPData, color: str, label: str):
-        """Plot endurance test (Cycle Number vs Resistance)"""
-        if 'Cycle Number' in data.additional_data:
+    def _plot_endurance(self, ax: Axes, data: TSPData, color: str, label: str, show_difference: bool = False):
+        """Plot endurance test (Cycle Number vs Resistance)
+        
+        Args:
+            ax: Matplotlib axes
+            data: TSPData object
+            color: Base color for plotting
+            label: Dataset label
+            show_difference: If True, also plot R_off - R_on difference
+        """
+        # Check if we have both SET and RESET resistances
+        if 'Resistance (Reset)' in data.additional_data and 'Resistance (Set)' in data.additional_data:
+            r_reset = data.additional_data['Resistance (Reset)']
+            r_set = data.additional_data['Resistance (Set)']
+            
+            # Get cycle numbers (use measurement_numbers if Cycle Number not available)
+            if 'Cycle Number' in data.additional_data:
+                cycle_numbers = data.additional_data['Cycle Number']
+            else:
+                cycle_numbers = data.measurement_numbers
+            
+            # Plot RESET (HRS) - typically higher resistance
+            reset_color = self.style.COLORS[3] if color == self.style.COLORS[0] else color  # Red for HRS
+            ax.plot(cycle_numbers, r_reset,
+                   color=reset_color, linewidth=self.style.line_width,
+                   marker='s', markersize=self.style.marker_size,
+                   label=f'{label} - RESET (HRS)', 
+                   markevery=max(1, len(cycle_numbers)//50))
+            
+            # Plot SET (LRS) - typically lower resistance
+            set_color = self.style.COLORS[2] if color == self.style.COLORS[0] else self.style.COLORS[1]  # Green for LRS
+            ax.plot(cycle_numbers, r_set,
+                   color=set_color, linewidth=self.style.line_width,
+                   marker='o', markersize=self.style.marker_size,
+                   label=f'{label} - SET (LRS)',
+                   markevery=max(1, len(cycle_numbers)//50))
+            
+            # Optionally plot difference (R_off - R_on)
+            if show_difference:
+                r_diff = r_reset - r_set
+                diff_color = self.style.COLORS[4]  # Purple for difference
+                ax.plot(cycle_numbers, r_diff,
+                       color=diff_color, linewidth=self.style.line_width,
+                       marker='^', markersize=self.style.marker_size,
+                       linestyle='--',
+                       label=f'{label} - Difference (R_off - R_on)',
+                       markevery=max(1, len(cycle_numbers)//50))
+            
+            ax.set_xlabel('Cycle Number')
+            ax.set_ylabel('Resistance (Ω)')
+            ax.set_title('Endurance Test - SET vs RESET')
+            ax.set_yscale('log')
+        elif 'Cycle Number' in data.additional_data:
+            # Fallback: plot only primary resistance if SET/RESET not available
             cycle_numbers = data.additional_data['Cycle Number']
             ax.plot(cycle_numbers, data.resistances,
                    color=color, linewidth=self.style.line_width,

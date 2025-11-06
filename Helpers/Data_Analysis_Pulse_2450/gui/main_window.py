@@ -5,16 +5,19 @@ PyQt6-based main window with tabs for file browsing and plotting.
 """
 
 from PyQt6.QtWidgets import (QMainWindow, QTabWidget, QWidget, QVBoxLayout, 
-                              QStatusBar, QMenuBar, QMenu, QFileDialog, QMessageBox)
+                              QStatusBar, QMenuBar, QMenu, QFileDialog, QMessageBox, QDialog)
 from PyQt6.QtCore import Qt, QSettings
 from PyQt6.QtGui import QAction, QKeySequence
 from pathlib import Path
+from collections import defaultdict
 import sys
 
 # Import custom tabs
 from .file_browser_tab import FileBrowserTab
 from .plotting_tab import PlottingTab
 from .batch_processing_dialog import BatchProcessingDialog
+from .combined_plot_dialog import CombinedPlotDialog
+from .combined_plot_tab import CombinedPlotTab
 
 class MainWindow(QMainWindow):
     """Main application window"""
@@ -48,8 +51,10 @@ class MainWindow(QMainWindow):
         self.file_browser_tab = FileBrowserTab(self)
         self.tabs.addTab(self.file_browser_tab, "📁 File Browser")
         
-        # Tab 2: Plotting
+        # Tab 2: Plotting (first plotting tab)
+        self.plotting_tabs = []  # List of all plotting tabs
         self.plotting_tab = PlottingTab(self)
+        self.plotting_tabs.append(self.plotting_tab)
         self.tabs.addTab(self.plotting_tab, "📊 Plotting")
         
         # Tab 3: Batch Processing
@@ -59,6 +64,9 @@ class MainWindow(QMainWindow):
         
         # Connect signals
         self.file_browser_tab.files_selected.connect(self.on_files_selected)
+        
+        # Connect tab change signal to refresh combined plots
+        self.tabs.currentChanged.connect(self.on_tab_changed)
         
         # Set modern dark style
         self.setStyleSheet("""
@@ -241,6 +249,22 @@ class MainWindow(QMainWindow):
         # View menu
         view_menu = menubar.addMenu("&View")
         
+        # New plotting tab action
+        new_plot_tab_action = QAction("New Plotting Tab", self)
+        new_plot_tab_action.setShortcut(QKeySequence("Ctrl+T"))
+        new_plot_tab_action.setToolTip("Create a new plotting tab for separate analysis")
+        new_plot_tab_action.triggered.connect(self.create_new_plotting_tab)
+        view_menu.addAction(new_plot_tab_action)
+        
+        # Combined plot action
+        combined_plot_action = QAction("Create Combined Plot", self)
+        combined_plot_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
+        combined_plot_action.setToolTip("Combine datasets from multiple plotting tabs into one plot")
+        combined_plot_action.triggered.connect(self.create_combined_plot)
+        view_menu.addAction(combined_plot_action)
+        
+        view_menu.addSeparator()
+        
         # Refresh action
         refresh_action = QAction("Refresh", self)
         refresh_action.setShortcut(QKeySequence("F5"))
@@ -324,16 +348,113 @@ class MainWindow(QMainWindow):
         settings.setValue("geometry", self.saveGeometry())
         settings.setValue("windowState", self.saveState())
     
-    def on_files_selected(self, tsp_datasets):
-        """Handle files selected from file browser"""
-        # Load datasets into plotting tab
-        self.plotting_tab.load_datasets(tsp_datasets)
+    def create_new_plotting_tab(self):
+        """Create a new plotting tab"""
+        new_tab = PlottingTab(self)
+        tab_number = len(self.plotting_tabs) + 1
+        tab_name = f"📊 Plotting {tab_number}"
         
-        # Switch to plotting tab
-        self.tabs.setCurrentWidget(self.plotting_tab)
+        self.plotting_tabs.append(new_tab)
+        
+        # Insert before Batch Processing tab
+        batch_index = self.tabs.indexOf(self.batch_processing_tab)
+        self.tabs.insertTab(batch_index, new_tab, tab_name)
+        
+        # Switch to new tab
+        self.tabs.setCurrentWidget(new_tab)
         
         # Update status
-        self.status_bar.showMessage(f"Loaded {len(tsp_datasets)} dataset(s) for plotting")
+        self.status_bar.showMessage(f"Created new plotting tab: {tab_name}")
+    
+    def create_combined_plot(self):
+        """Create a combined plot from multiple plotting tabs"""
+        # Filter plotting tabs that have datasets (exclude combined plots)
+        tabs_with_data = [tab for tab in self.plotting_tabs 
+                          if tab.datasets and not hasattr(tab, 'is_combined')]
+        
+        if len(tabs_with_data) < 1:
+            QMessageBox.information(
+                self, 
+                "No Data", 
+                "No plotting tabs with data available.\n"
+                "Please load some data into plotting tabs first."
+            )
+            return
+        
+        # Show dialog to select tabs
+        dialog = CombinedPlotDialog(self, tabs_with_data)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Get selected tabs
+            selected_tabs = dialog.get_selected_tabs()
+            
+            if not selected_tabs:
+                return
+            
+            # Create new combined plotting tab with selected tabs
+            combined_tab = CombinedPlotTab(self, source_tabs=selected_tabs)
+            tab_number = len([t for t in self.plotting_tabs if hasattr(t, 'is_combined')]) + 1
+            tab_name = f"🔗 Combined Plot {tab_number}"
+            
+            self.plotting_tabs.append(combined_tab)
+            
+            # Insert before Batch Processing tab
+            batch_index = self.tabs.indexOf(self.batch_processing_tab)
+            self.tabs.insertTab(batch_index, combined_tab, tab_name)
+            
+            # Switch to combined tab
+            self.tabs.setCurrentWidget(combined_tab)
+            
+            # Update status
+            self.status_bar.showMessage(
+                f"Created combined plot with {len(selected_tabs)} tab(s) in multi-panel layout"
+            )
+    
+    def on_tab_changed(self, index: int):
+        """Handle tab change - refresh combined plots when switching to them"""
+        widget = self.tabs.widget(index)
+        if isinstance(widget, CombinedPlotTab):
+            # Refresh the combined plot when switching to it
+            widget.refresh_from_sources()
+    
+    def on_files_selected(self, tsp_datasets):
+        """Handle files selected from file browser"""
+        # Check if append mode is enabled in file browser
+        append = self.file_browser_tab.append_check.isChecked()
+        
+        # Find the target plotting tab
+        # First, check if user is currently viewing a plotting tab
+        current_tab = self.tabs.currentWidget()
+        
+        if isinstance(current_tab, PlottingTab):
+            # User is on a plotting tab - use that one
+            target_tab = current_tab
+        else:
+            # User is on file browser or other tab
+            # Find the last plotting tab that was active (or use first)
+            target_tab = None
+            
+            # Try to find the most recently active plotting tab
+            # by checking which plotting tab was last selected
+            for i in range(self.tabs.count() - 1, -1, -1):
+                widget = self.tabs.widget(i)
+                if isinstance(widget, PlottingTab):
+                    target_tab = widget
+                    break
+            
+            # Fallback to first plotting tab if none found
+            if target_tab is None:
+                target_tab = self.plotting_tab
+        
+        # Load datasets into target tab
+        target_tab.load_datasets(tsp_datasets, append=append)
+        
+        # Switch to plotting tab
+        self.tabs.setCurrentWidget(target_tab)
+        
+        # Update status
+        action = "Added" if append else "Loaded"
+        tab_name = self.tabs.tabText(self.tabs.indexOf(target_tab))
+        self.status_bar.showMessage(f"{action} {len(tsp_datasets)} dataset(s) to {tab_name}")
     
     def closeEvent(self, event):
         """Handle window close event"""

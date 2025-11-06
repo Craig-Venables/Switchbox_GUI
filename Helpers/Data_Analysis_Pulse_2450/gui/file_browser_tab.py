@@ -7,8 +7,8 @@ Tab for browsing folders, previewing files, and selecting datasets for analysis.
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                               QLabel, QListWidget, QListWidgetItem, QFileDialog,
                               QGroupBox, QTextEdit, QSplitter, QComboBox,
-                              QLineEdit, QScrollArea, QGridLayout)
-from PyQt6.QtCore import Qt, pyqtSignal
+                              QLineEdit, QScrollArea, QGridLayout, QCheckBox)
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 from pathlib import Path
 from typing import List, Optional
@@ -58,6 +58,13 @@ class FileBrowserTab(QWidget):
         self.all_files: List[TSPData] = []
         self.selected_data: List[TSPData] = []
         
+        # Auto-refresh state
+        self.auto_refresh_enabled = False
+        self.file_timestamps = {}  # Track file modification times
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.timeout.connect(self.check_for_changes)
+        self.refresh_interval_ms = 2000  # Check every 2 seconds
+        
         self.setup_ui()
         self.load_recent_folders()
     
@@ -90,6 +97,18 @@ class FileBrowserTab(QWidget):
         self.recent_folders_combo.currentTextChanged.connect(self.load_recent_folder)
         recent_layout.addWidget(self.recent_folders_combo, 1)
         folder_layout.addLayout(recent_layout)
+        
+        # Auto-refresh toggle
+        refresh_layout = QHBoxLayout()
+        self.auto_refresh_checkbox = QCheckBox("🔄 Auto-refresh folder (every 2s)")
+        self.auto_refresh_checkbox.setChecked(False)
+        self.auto_refresh_checkbox.toggled.connect(self.toggle_auto_refresh)
+        refresh_layout.addWidget(self.auto_refresh_checkbox)
+        refresh_layout.addStretch()
+        self.refresh_status_label = QLabel("")
+        self.refresh_status_label.setStyleSheet("color: #4CAF50; font-size: 10px;")
+        refresh_layout.addWidget(self.refresh_status_label)
+        folder_layout.addLayout(refresh_layout)
         
         folder_group.setLayout(folder_layout)
         layout.addWidget(folder_group)
@@ -189,6 +208,11 @@ class FileBrowserTab(QWidget):
         
         button_layout.addStretch()
         
+        # Append checkbox
+        self.append_check = QCheckBox("Append to existing plot")
+        self.append_check.setToolTip("Add datasets to current plot instead of replacing")
+        button_layout.addWidget(self.append_check)
+        
         self.plot_btn = QPushButton("📊 Plot Selected Files")
         self.plot_btn.setEnabled(False)
         self.plot_btn.setStyleSheet("""
@@ -227,10 +251,15 @@ class FileBrowserTab(QWidget):
         if folder:
             self.load_folder(Path(folder))
     
-    def load_folder(self, folder_path: Path):
-        """Load all TSP files from folder"""
-        # Prevent loading same folder twice
-        if self.current_folder == folder_path:
+    def load_folder(self, folder_path: Path, force_reload: bool = False):
+        """Load all TSP files from folder
+        
+        Args:
+            folder_path: Path to folder containing TSP files
+            force_reload: If True, reload even if folder is the same (for auto-refresh)
+        """
+        # Prevent loading same folder twice (unless force_reload)
+        if not force_reload and self.current_folder == folder_path:
             return
             
         self.current_folder = folder_path
@@ -253,6 +282,14 @@ class FileBrowserTab(QWidget):
         # Filter out log files
         txt_files = [f for f in txt_files if not f.name.startswith("tsp_test_log")]
         
+        # Store file timestamps for change detection
+        self.file_timestamps = {}
+        for txt_file in txt_files:
+            try:
+                self.file_timestamps[txt_file] = txt_file.stat().st_mtime
+            except (OSError, FileNotFoundError):
+                pass
+        
         # Parse files
         self.all_files = []
         for txt_file in txt_files:
@@ -264,6 +301,10 @@ class FileBrowserTab(QWidget):
         self.update_file_list()
         self.update_test_type_filter()
         self.update_stats()
+        
+        # Start auto-refresh if enabled
+        if self.auto_refresh_enabled:
+            self.refresh_timer.start(self.refresh_interval_ms)
     
     def update_file_list(self):
         """Update the file list widget"""
@@ -490,6 +531,62 @@ class FileBrowserTab(QWidget):
         if self.selected_data:
             self.files_selected.emit(self.selected_data)
             # TODO: Switch to plotting tab
+    
+    def toggle_auto_refresh(self, enabled: bool):
+        """Enable/disable auto-refresh"""
+        self.auto_refresh_enabled = enabled
+        if enabled and self.current_folder:
+            self.refresh_timer.start(self.refresh_interval_ms)
+            self.refresh_status_label.setText("🔄 Auto-refresh active")
+        else:
+            self.refresh_timer.stop()
+            self.refresh_status_label.setText("")
+    
+    def check_for_changes(self):
+        """Periodically check if files have changed and update if needed"""
+        if not self.current_folder or not self.auto_refresh_enabled:
+            return
+        
+        try:
+            # Find all .txt files
+            txt_files = list(self.current_folder.glob("*.txt"))
+            txt_files = [f for f in txt_files if not f.name.startswith("tsp_test_log")]
+            
+            # Check for new or modified files
+            files_changed = False
+            current_timestamps = {}
+            
+            for txt_file in txt_files:
+                try:
+                    mtime = txt_file.stat().st_mtime
+                    current_timestamps[txt_file] = mtime
+                    
+                    # Check if file is new or modified
+                    if txt_file not in self.file_timestamps or self.file_timestamps[txt_file] != mtime:
+                        files_changed = True
+                        break
+                except (OSError, FileNotFoundError):
+                    continue
+            
+            # Check for deleted files
+            if not files_changed:
+                for old_file in self.file_timestamps:
+                    if old_file not in current_timestamps:
+                        files_changed = True
+                        break
+            
+            # If changes detected, reload folder
+            if files_changed:
+                # Reload folder (force reload even if same folder)
+                folder = self.current_folder
+                self.load_folder(folder, force_reload=True)
+                self.refresh_status_label.setText("✓ Files updated")
+                # Clear status after 1 second
+                QTimer.singleShot(1000, lambda: self.refresh_status_label.setText("🔄 Auto-refresh active"))
+                
+        except Exception as e:
+            # Silently handle errors (folder might have been deleted, etc.)
+            pass
     
     def load_recent_folders(self):
         """Load recent folders into combo box"""

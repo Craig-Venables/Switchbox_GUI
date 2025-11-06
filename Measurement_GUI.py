@@ -62,6 +62,7 @@ from Measurments.optical_controller import OpticalController
 
 from Check_Connection_GUI import CheckConnection
 from TelegramBot import TelegramBot
+from Motor_Controll_GUI import MotorControlWindow
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -441,13 +442,17 @@ class MeasurementGUI:
         self.loop_label = tk.Label(info_frame, text="Loop: 5", font=("Helvetica", 12))
         self.loop_label.grid(row=1, column=2, padx=10, sticky="w")
 
-        # Show last sweeps button
-        self.show_results_button = tk.Button(info_frame, text="Show Last Sweeps", command=self.show_last_sweeps)
-        self.show_results_button.grid(row=1, column=3, columnspan=1, pady=5)
+        # Motor Control button
+        self.motor_control_button = tk.Button(info_frame, text="Motor Control", command=self.open_motor_control)
+        self.motor_control_button.grid(row=1, column=3, columnspan=1, pady=5)
 
         # Show last sweeps button
-        self.show_results_button = tk.Button(info_frame, text="check_connection", command=self.check_connection)
+        self.show_results_button = tk.Button(info_frame, text="Show Last Sweeps", command=self.show_last_sweeps)
         self.show_results_button.grid(row=1, column=4, columnspan=1, pady=5)
+
+        # Check connection button
+        self.check_connection_button = tk.Button(info_frame, text="check_connection", command=self.check_connection)
+        self.check_connection_button.grid(row=1, column=5, columnspan=1, pady=5)
 
         # Start periodic status updates for device/voltage/loop
         self._status_updates_active = True
@@ -2503,7 +2508,9 @@ class MeasurementGUI:
         self.measuring = True
         self.stop_measurement_flag = False
         self.bring_to_top()  # make sure the window is visible
-        self.check_for_sample_name()  # ensure sample name is set (or prompt)
+        # Skip sample name check if custom save location is enabled (custom path takes priority)
+        if not (self.use_custom_save_var.get() and self.custom_save_location):
+            self.check_for_sample_name()  # ensure sample name is set (or prompt)
 
         print("Running sequential measurement:")
 
@@ -2582,7 +2589,13 @@ class MeasurementGUI:
                     file_path = f"{save_dir}\\{name}.txt"
 
 
-                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+                    try:
+                        np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+                        abs_path = os.path.abspath(file_path)
+                        print(f"[SAVE] File saved to: {abs_path}")
+                        self.log_terminal(f"File saved: {abs_path}")
+                    except Exception as e:
+                        print(f"[SAVE ERROR] Failed to save file: {e}")
 
                     # change device only if measuring all devices
                     if not self.single_device_flag:
@@ -2959,7 +2972,9 @@ class MeasurementGUI:
         self.bring_to_top()
 
         # checks for sample name if not prompts user
-        self.check_for_sample_name()
+        # Skip sample name check if custom save location is enabled (custom path takes priority)
+        if not (self.use_custom_save_var.get() and self.custom_save_location):
+            self.check_for_sample_name()
 
         selected_measurement = self.custom_measurement_var.get()
         # Reset any prior sweep edits from the popup for a fresh run
@@ -3363,9 +3378,10 @@ class MeasurementGUI:
                     data = np.column_stack((v_arr, c_arr, timestamps))
 
                     # creates save directory with the selected measurement device name letter and number
-                    save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}" \
-                               f"\\{self.final_device_number}"
-
+                    save_dir = self._get_save_directory(self.sample_name_var.get(), 
+                                                       self.final_device_letter, 
+                                                       self.final_device_number)
+                    
                     # make directory if dost exist.
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
@@ -3385,7 +3401,13 @@ class MeasurementGUI:
                         messagebox.showerror("ERROR", "file already exists, you should check before continueing as "
                                                       "this will overwrite")
 
-                    np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+                    try:
+                        np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+                        abs_path = os.path.abspath(file_path)
+                        print(f"[SAVE] File saved to: {abs_path}")
+                        self.log_terminal(f"File saved: {abs_path}")
+                    except Exception as e:
+                        print(f"[SAVE ERROR] Failed to save file: {e}")
 
                     # show graphs on main display
                     self.graphs_show(v_arr, c_arr, key, stop_v)
@@ -3415,8 +3437,13 @@ class MeasurementGUI:
 
                 plot_filename_iv = f"{save_dir}\\All_graphs_IV.png"
                 plot_filename_log = f"{save_dir}\\All_graphs_LOG.png"
-                self.ax_all_iv.figure.savefig(plot_filename_iv, dpi=400)
-                self.ax_all_logiv.figure.savefig(plot_filename_log, dpi=400)
+                try:
+                    self.ax_all_iv.figure.savefig(plot_filename_iv, dpi=400)
+                    self.ax_all_logiv.figure.savefig(plot_filename_log, dpi=400)
+                    print(f"[SAVE] Graph saved to: {os.path.abspath(plot_filename_iv)}")
+                    print(f"[SAVE] Graph saved to: {os.path.abspath(plot_filename_log)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save graphs: {e}")
                 # Save final sweep plot(s)
                 final_iv_path, final_log_path = self._save_final_sweep_plot(save_dir)
                 # Create combined BEFORE clearing axes so "All" plots retain data
@@ -3592,8 +3619,10 @@ class MeasurementGUI:
                 try:
                     data = np.column_stack((v_out, i_out, t_out))
                     np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Amplitude(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
@@ -3725,14 +3754,17 @@ class MeasurementGUI:
                 try:
                     data = np.column_stack((v_out, i_out, t_out))
                     np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Amplitude(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
                 try:
                     import json as _json
                     with open(dbg_path, 'w', encoding='utf-8') as f:
                         _json.dump(dbg, f, indent=2)
-                except Exception:
-                    pass
+                    print(f"[SAVE] Debug file saved to: {os.path.abspath(dbg_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save debug file: {e}")
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
@@ -3795,8 +3827,10 @@ class MeasurementGUI:
                     # Save as Time (elapsed), Current, Voltage with higher precision
                     data = np.column_stack((t_arr, c_arr, v_arr))
                     np.savetxt(file_path, data, fmt="%0.9E\t%0.9E\t%0.6E", header="Time(s) Current(A) Voltage(V)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
@@ -3847,8 +3881,10 @@ class MeasurementGUI:
                 try:
                     data = np.column_stack((v_arr, c_arr, t_arr))
                     np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
 
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
@@ -3893,15 +3929,16 @@ class MeasurementGUI:
                     self.graphs_show(v_arr, c_arr, "ISPP", stop_v)
                 except Exception:
                     pass
-                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
-                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                save_dir = _ensure_save_dir()
                 key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
                 name = f"{save_key}-ISPP-{stop_v}v-{pulse_ms}ms-Py"
                 file_path = f"{save_dir}\\{name}.txt"
                 try:
                     data = np.column_stack((v_arr, c_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Amplitude(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
             self._finalize_output()
@@ -3940,15 +3977,16 @@ class MeasurementGUI:
                     self.graphs_show(w_arr, i_arr, "PWidth", amp)
                 except Exception:
                     pass
-                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
-                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                save_dir = _ensure_save_dir()
                 key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
                 name = f"{save_key}-PWIDTH-{amp}v-Py"
                 file_path = f"{save_dir}\\{name}.txt"
                 try:
                     data = np.column_stack((w_arr, i_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Width(ms) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
             self._finalize_output()
@@ -3986,15 +4024,16 @@ class MeasurementGUI:
                     self.graphs_show(v_arr, c_arr, "THRESH", v_hi)
                 except Exception:
                     pass
-                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
-                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                save_dir = _ensure_save_dir()
                 key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
                 name = f"{save_key}-THRESH-{v_lo}-{v_hi}v-{pulse_ms}ms-Py"
                 file_path = f"{save_dir}\\{name}.txt"
                 try:
                     data = np.column_stack((v_arr, c_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="TestV(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
             self.measuring = False; self.status_box.config(text="Measurement Complete")
@@ -4025,15 +4064,16 @@ class MeasurementGUI:
                     on_point=None,
                 )
                 # Save time series
-                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
-                if not os.path.exists(save_dir): os.makedirs(save_dir)
+                save_dir = _ensure_save_dir()
                 key = find_largest_number_in_folder(save_dir); save_key = 0 if key is None else key + 1
                 name = f"{save_key}-TRANSIENT-{p_v}v-{p_ms}ms-Read{r_v}v-{cap_s}s@{dt_s}s-Py"
                 file_path = f"{save_dir}\\{name}.txt"
                 try:
                     data = np.column_stack((v_arr, i_arr, t_arr)); np.savetxt(file_path, data, fmt="%0.6E\t%0.6E\t%0.6E", header="Voltage(V) Current(A) Time(s)", comments="")
-                except Exception:
-                    pass
+                    print(f"[SAVE] File saved to: {os.path.abspath(file_path)}")
+                    self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save file: {e}")
                 if not self.single_device_flag:
                     self.sample_gui.next_device(); time.sleep(0.1); self.sample_gui.change_relays(); time.sleep(0.1)
             self.measuring = False; self.status_box.config(text="Measurement Complete")
@@ -4108,7 +4148,9 @@ class MeasurementGUI:
         self.bring_to_top()
 
         # checks for sample name if not prompts user
-        self.check_for_sample_name()
+        # Skip sample name check if custom save location is enabled (custom path takes priority)
+        if not (self.use_custom_save_var.get() and self.custom_save_location):
+            self.check_for_sample_name()
 
         # checks for the current device and the index for start
         if self.current_device in self.device_list:
@@ -4259,12 +4301,7 @@ class MeasurementGUI:
             data = np.column_stack((v_arr, c_arr, timestamps))
 
             # creates save directory with the selected measurement device name letter and number
-            save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}" \
-                       f"\\{self.final_device_number}"
-
-            # make directory if dost exist.
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
+            save_dir = _ensure_save_dir()
             # find a way top extract key from previous device
             if sequence != "":
                 additional = "-"+sequence
@@ -4295,7 +4332,13 @@ class MeasurementGUI:
             name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{sweeps}{additional}{opt_suffix}{extra_info}"
             file_path = f"{save_dir}\\{name}.txt"
 
-            np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+            try:
+                np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
+                abs_path = os.path.abspath(file_path)
+                print(f"[SAVE] File saved to: {abs_path}")
+                self.log_terminal(f"File saved: {abs_path}")
+            except Exception as e:
+                print(f"[SAVE ERROR] Failed to save file: {e}")
 
             self.graphs_show(v_arr, c_arr, "1", stop_v)
 
@@ -4319,13 +4362,21 @@ class MeasurementGUI:
         try:
             # Also send post-measurement flow for single/normal measurement path
             if self._bot_enabled():
-                save_dir = f"Data_save_loc\\{self.sample_name_var.get()}\\{self.final_device_letter}\\{self.final_device_number}"
+                save_dir = self._get_save_directory(self.sample_name_var.get(), 
+                                                   self.final_device_letter, 
+                                                   self.final_device_number)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
                 try:
                     # Save all plots to ensure combined has the latest
-                    self.ax_all_iv.figure.savefig(f"{save_dir}\\All_graphs_IV.png", dpi=400)
-                    self.ax_all_logiv.figure.savefig(f"{save_dir}\\All_graphs_LOG.png", dpi=400)
-                except Exception:
-                    pass
+                    iv_path = f"{save_dir}\\All_graphs_IV.png"
+                    log_path = f"{save_dir}\\All_graphs_LOG.png"
+                    self.ax_all_iv.figure.savefig(iv_path, dpi=400)
+                    self.ax_all_logiv.figure.savefig(log_path, dpi=400)
+                    print(f"[SAVE] Graph saved to: {os.path.abspath(iv_path)}")
+                    print(f"[SAVE] Graph saved to: {os.path.abspath(log_path)}")
+                except Exception as e:
+                    print(f"[SAVE ERROR] Failed to save graphs: {e}")
                 combined = self._save_combined_summary_plot(save_dir)
                 # Store last combined for consistency with custom flow
                 self._last_combined_summary_path = combined
@@ -4333,8 +4384,8 @@ class MeasurementGUI:
                 threading.Thread(target=self._post_measurement_options_worker,
                                  args=(save_dir, combined),
                                  daemon=True).start()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[SAVE ERROR] Post-measurement save failed: {e}")
 
     def retention_measure(self,
                           set_voltage: float,
@@ -4630,9 +4681,15 @@ class MeasurementGUI:
             file_path = os.path.join(device_dir, filename)
 
             # Save data
-            np.savetxt(file_path, data, fmt=fmt, header=header, comments="# ")
-
-            self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
+            try:
+                np.savetxt(file_path, data, fmt=fmt, header=header, comments="# ")
+                abs_path = os.path.abspath(file_path)
+                print(f"[SAVE] File saved to: {abs_path}")
+                self.log_terminal(f"Saved data for device {device}: {num_measurements} measurements")
+                self.log_terminal(f"File saved: {abs_path}")
+            except Exception as e:
+                print(f"[SAVE ERROR] Failed to save file: {e}")
+                self.log_terminal(f"Error saving file: {e}")
 
     def send_temp(self) -> None:
         self.itc.set_temperature(int(self.temp_var.get()))
@@ -4867,6 +4924,29 @@ class MeasurementGUI:
         time.sleep(0.1)
         self.Check_connection_gui = CheckConnection(self.master, self.keithley)
 
+    def open_motor_control(self) -> None:
+        """Open the Motor Control GUI window."""
+        try:
+            # Check if motor control window already exists and is valid
+            if hasattr(self, 'motor_control_window') and self.motor_control_window:
+                try:
+                    # Check if window still exists
+                    if self.motor_control_window.root.winfo_exists():
+                        # Bring to front
+                        self.motor_control_window.root.lift()
+                        self.motor_control_window.root.focus_force()
+                        return
+                except tk.TclError:
+                    # Window was destroyed, create new one
+                    pass
+            
+            # Create new motor control window
+            self.motor_control_window = MotorControlWindow()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open Motor Control GUI: {e}")
+            import traceback
+            traceback.print_exc()
+
     def open_adaptive_settings(self) -> None:
         if self.adaptive_measurement is None or not self.adaptive_measurement.master.winfo_exists():
             self.adaptive_measurement = AdaptiveMeasurement(self.master)
@@ -5028,7 +5108,13 @@ class MeasurementGUI:
 
         # Save to CSV
         filepath = os.path.join(base_dir, filename)
-        df.to_csv(filepath, index=False)
+        try:
+            df.to_csv(filepath, index=False)
+            abs_path = os.path.abspath(filepath)
+            print(f"[SAVE] CSV file saved to: {abs_path}")
+            self.log_terminal(f"CSV file saved: {abs_path}")
+        except Exception as e:
+            print(f"[SAVE ERROR] Failed to save CSV file: {e}")
 
         # Create graphs directory
         graphs_dir = os.path.join(base_dir, "graphs")

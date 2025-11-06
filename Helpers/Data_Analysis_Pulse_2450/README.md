@@ -14,6 +14,7 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
 
 ### Interactive Plotting
 - Interactive matplotlib canvas with zoom/pan
+- **Multiple plotting tabs** (Ctrl+T) for separate analyses
 - Plot multiple datasets for comparison
 - Dataset visibility toggle (double-click)
 - Real-time plot customization:
@@ -25,10 +26,30 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
 - Dark theme optimized for long viewing
 - Resizable splitter for better control panel visibility
 
+### Multi-Panel Layouts
+- **Single Panel**: All datasets overlaid (default)
+- **Multi-Panel**: 2×1, 1×2, 2×2, 3×2, 3×3 layouts
+- Manual dataset-to-panel assignment
+- Auto-assign option for quick setup
+- Shared axes option for comparison
+
+### Combined Plots
+- **Combine multiple plotting tabs** into one multi-panel view (Ctrl+Shift+C)
+- Each source tab becomes a panel
+- **Live updates** from source tabs
+- **Panel reordering** (Up/Down buttons)
+- **Layout selection** (Auto, 1×1, 2×2, etc.)
+- **Read-only data** (preserves original plots)
+- **Annotations supported** on combined plots
+
 ### Data Processing
 - **Crop**: Set start/end points to focus on specific range
 - **Normalize**: Scale to 0-1 range for comparison
 - **Y-axis offset**: Add offset to separate curves
+- **Data Smoothing**: 
+  - Moving Average (with better edge handling)
+  - Savitzky-Golay (preserves features)
+  - Gaussian Filter (gentle smoothing)
 - **Manual axis ranges**: Set min/max with auto-scale toggle
 
 ### Background & Export
@@ -38,8 +59,10 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
 - **Export formats**:
   - PNG (standard & transparent, 300 DPI)
   - PDF (standard & transparent, 150 DPI)
+  - SVG (vector format for publications)
   - TXT (column format with headers, units, and metadata comments)
   - CSV (statistics export)
+- **Default save location**: Exports default to source file directory
 
 ### Annotations
 - Add text boxes, arrows, circles, rectangles
@@ -92,6 +115,7 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
 
 4. **Plot data:**
    - Click "📊 Plot Selected Files"
+   - Files go to the currently active plotting tab
    - Use toolbar to zoom/pan
    - Double-click datasets to toggle visibility
 
@@ -113,9 +137,11 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
    - Export stats to CSV
 
 8. **Export:**
-   - PNG/PDF: Plot images (with or without background)
+   - PNG/PDF/SVG: Plot images (with or without background)
    - TXT: Processed data in column format
    - CSV: Calculated statistics
+
+**📖 For detailed instructions, see [USAGE_GUIDE.md](USAGE_GUIDE.md)**
 
 ## File Structure
 
@@ -189,6 +215,7 @@ The tool supports multiple formats:
 ## Documentation
 
 ### For Users
+- **[USAGE_GUIDE.md](USAGE_GUIDE.md)**: Complete user guide with all features and workflows ⭐ **START HERE**
 - **[TSP_DATA_FORMAT_SPECIFICATION.md](TSP_DATA_FORMAT_SPECIFICATION.md)**: Detailed data format specification
 - **[RELAXATION_TIME_EXPLANATION.md](RELAXATION_TIME_EXPLANATION.md)**: How tau is calculated and what it means
 - **[STATISTICS_USAGE_GUIDE.md](STATISTICS_USAGE_GUIDE.md)**: Comprehensive statistics feature guide
@@ -201,18 +228,21 @@ The tool supports multiple formats:
 
 - Annotation system may have positioning issues (under investigation)
 
-## Future Enhancements
+## Recent Updates (v2.0)
 
-- Origin graph format export
-- Multiple plot layouts (2x1, 2x2, etc.)
-- Per-dataset color customization
-- Plot templates and presets
-- Multi-axis plotting (R + I on same graph)
-- Batch processing for multiple files
-- Initial read reference normalization
+✅ **Multi-Panel Layouts**: Support for 2×1, 1×2, 2×2, 3×2, 3×3 layouts with manual dataset assignment  
+✅ **Combined Plots**: Combine multiple plotting tabs into one multi-panel view with live updates  
+✅ **Data Smoothing**: Moving Average, Savitzky-Golay, and Gaussian filter options  
+✅ **Multiple Plotting Tabs**: Create and manage multiple independent plotting tabs  
+✅ **Panel Reordering**: Rearrange panels in combined plots  
+✅ **Layout Selection**: Choose grid layout for combined plots  
+✅ **Annotations on Combined Plots**: Add annotations to any panel in combined plots  
+✅ **Improved Edge Handling**: Better smoothing at data boundaries  
+✅ **SVG Export**: Vector format for publication-quality figures  
+✅ **Default Save Location**: Exports default to source file directory  
 
 ---
 
-**Version:** 1.1  
-**Last Updated:** 2025-11-01  
+**Version:** 2.0  
+**Last Updated:** 2025-01-29  
 **Status:** Production Ready ✅
