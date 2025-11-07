@@ -52,7 +52,13 @@ double *MpulseI = NULL;
 double *MpulseT = NULL;
 
 static int not_init = 1;
+static int trigger_override_segment = -1;
 
+void ret_set_trigger_override(int segmentIndex)
+{
+    trigger_override_segment = segmentIndex;
+}
+ 
 void ret_AllocateMemoryILimit(int npts);
 void ret_AllocateMeasArraysILimit(int npts);
 void ret_FreeMemoryILimit(void);
@@ -233,331 +239,13 @@ double *MpulseI = NULL;
 double *MpulseT = NULL;
 
 static int not_init = 1;
+static int trigger_override_segment = -1;
 
-void ret_AllocateMemoryILimit(int npts);
-void ret_AllocateMeasArraysILimit(int npts);
-void ret_FreeMemoryILimit(void);
-double ret_Define_SegmentsILimit(double *v, double *t, int pts, double bias);
-BOOL LPTIsInCurrentConfiguration(char* hrid);
-
-__declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts) ;
-
-int debug = 0;
-int details = 0;
-
-/* USRLIB MODULE MAIN FUNCTION */
-int retention_pulse_ilimitNK( char *InstrName, long ForceCh, double ForceVRange, double ForceIRange, double iFLimit, double iMLimit, long MeasureCh, double MeasureVRange, double MeasureIRange, int max_pts, double MeasureBias, double *Volts, int volts_size, double *Times, int times_size, double *VF, int vf_size, double *IF, int if_size, double *VM, int vm_size, double *IM, int im_size, double *T, int t_size, int *npts )
+void ret_set_trigger_override(int segmentIndex)
 {
-/* USRLIB MODULE CODE */
-  int stat = 1;
-  int status;
-  INSTR_ID InstId;
-  double t;
-  int i, j;
-  char mod[] = "retention_pulse_ilimitNK";
-  long SeqList[1] = {1};
-  double LoopCountList[1] = {1};
-  int numpts;
-  int NumDataPts;
-  double ttime;
-  int allocate_pts = 0;
-  int used_rate = 0;
-  double ratio;
-
-  if(debug) printf("%s: starts\n", mod);
-  
-  numpts = volts_size - 1;
-  ret_AllocateMemoryILimit(volts_size);
-
-  // error checks 
-  if(volts_size != times_size + 1 || volts_size < 4) { stat = -1; goto RETURN;}
-  if(vf_size < 10 || vf_size != t_size || if_size != t_size) { stat = -2; goto RETURN;}
-  if(vm_size < 10 || vm_size != t_size || im_size != t_size || t_size > max_pts) 
-  {
-     if(debug) printf("%s: vm_size:%d t_size:%d im_size:%d max_pts:%d\n",
-     mod, vm_size, t_size, im_size, max_pts); 
-     stat = -3; goto RETURN;
-   }
-
- if(debug) printf("Note: In the following segments, TTime is the time at the end of the segment so a probe measurement needs to be before this time\n");
-   //Define Seqments:
-  ttime = ret_Define_SegmentsILimit(Volts, Times, volts_size - 1, MeasureBias);
-
-  //determine required number of points and required rate
-  //number of points should not exceed user defined max_pts and function max: MAXPTS (10000)
-
-  used_rate = ret_getRate(ttime, max_pts, &allocate_pts, &NumDataPts);
-  if(0 > used_rate)
-  {
-     if(debug) printf("%s: used rate is invalid!\n", mod);
-     stat = -33;
-     goto RETURN;
-  }
-
-  ret_AllocateMeasArraysILimit(allocate_pts);
-
-  if(fabs(MeasureIRange) > 1e-2)
-  {
-      stat = -44;
-      if(debug)printf("%s: RPMs are in bypass!\n", mod);
-      goto RETURN;
-  }
-  
-  if(!LPTIsInCurrentConfiguration(InstrName)) {stat = -4; goto RETURN;}
-
- 
-  // get instrument ID
-  getinstid(InstrName, &InstId);
-  if(-1 == InstId) {stat = -5; goto RETURN;}
-  if(debug) printf("%s: Instrument ID:%d\n", mod, InstId);
-
-  not_init = 1;
-  
-  //initialize PMU
-  if(not_init)
-  {
-      // NK added 24/10/2024
-      // **************************************************************
-      status = rpm_config(InstId, ForceCh, KI_RPM_PATHWAY, KI_RPM_PULSE);
-      if(debug)printf("RPM is initialized for ForceCh! %s (0 or null is good)\n", status);
-
-      status = rpm_config(InstId, MeasureCh, KI_RPM_PATHWAY, KI_RPM_PULSE);
-      if(debug)printf("RPM is initialized for MeasCh! %s (0 or null is good)\n", status);
-
-     // **************************************************************
-
-
-      status = pg2_init(InstId, PULSE_MODE_SARB);
-      if(status) { stat = -6; goto RETURN; }
-      if(debug)printf("%s: PMU is initialized!\n", mod);
-  }
-
-  if(iFLimit == 0.0)
-    {
-    OpenLimit(InstId);
-    }
-    else
-    {
-      status = Set_RPM_ICompliance( InstId, ForceCh, iFLimit);
-      if(debug)printf("%s: called Set_RPM_ICompliance for channel:%d and limit %g. Returned:%d\n",
-              mod, ForceCh, iFLimit, status);
-      if(status) { stat = -141; goto RETURN; }
-    }
-  if(ForceCh != MeasureCh && MeasureCh > 0)
-  {
-    if(iMLimit == 0.0)
-    {
-        OpenLimit(InstId);
-    }
-    else
-    {
-        status = Set_RPM_ICompliance( InstId, MeasureCh, iMLimit);
-         if(debug)printf("%s: called Set_RPM_ICompliance for channel:%d and limit %g. Returned:%d\n",
-         mod, MeasureCh, iMLimit, status);
-         if(status) { stat = -142; goto RETURN; }
-    }
-  }
-  //setup loads
-
-  //for Force Channel
-  if(not_init)
-  {
-
-      status = pulse_load(InstId, ForceCh, 1e+6);
-      if(status) { stat = -7; goto RETURN; }
-      if(debug)printf("%s: pulse_load set\n", mod);
-  } 
-
-  status = pulse_ranges(InstId, ForceCh, 
-            ForceVRange, PULSE_MEAS_FIXED, 
-            ForceVRange, PULSE_MEAS_FIXED, 
-            ForceIRange);
-  if(status) { stat = -8; goto RETURN; }
-
-  if(not_init)
-  {
-      status = pulse_burst_count(InstId, ForceCh, 1);
-      if(status) { stat = -9; goto RETURN; }
-
-      status = pulse_output(InstId, ForceCh, 1);
-      if(status) { stat = -10; goto RETURN; }
-
- }
-
-  //for Measure Channel
-  if(ForceCh != MeasureCh && MeasureCh > 0)
-    {
-      if(not_init)
-      {
-          status = pulse_load(InstId, MeasureCh, 50);
-          if(status) if(status) { stat = -11; goto RETURN; }
-      }
-
-      status = pulse_ranges(InstId, MeasureCh, 
-              MeasureVRange, PULSE_MEAS_FIXED, 
-              MeasureVRange, PULSE_MEAS_FIXED, 
-              MeasureIRange);
-      if(status) { stat = -12; goto RETURN; }
-
-// ****************************************
- if (debug) printf(" Made it here 0\n");
-
-      if(not_init)
-      {
-          status = pulse_burst_count(InstId, MeasureCh, 1);
-          if(status) { stat = -13; goto RETURN; }
-
-          status = pulse_output(InstId, MeasureCh, 1);
-          if(status) { stat = -14; goto RETURN; }
-      }
-    }
-    
-  status = pulse_sample_rate(InstId, used_rate);      
-  if(status) if(status) { stat = -15; goto RETURN; }
-
-// ****************************************************
-  if (debug) printf(" Made it here 1\n");
-  // problem is here with segtime
-
-  int increm=0;
-  if (debug) 
-  {
-  for (increm=0; increm<31; increm++)    //was 20 made 31 6 pulses .....but just for debugging purposes
-       { 
-        printf("increm: %d, seg time is %e \n",increm, segtime[increm]);
-        }
-   }
-  //Perform Forcing on HIGH
-  status = seg_arb_sequence(InstId,  ForceCh, 1,  
-              numpts, fstartv, fstopv, 
-              segtime, trig, ssrctrl, meastypes, 
-              measstart, measstop);
-  if(status) { stat = -16; goto RETURN; }
-
-// ****************************************************
-  if (debug) printf(" Made it here 1.5\n");
-
-  //forcing on LOW, if needed
-  if(ForceCh != MeasureCh && MeasureCh > 0)
-    {
-      status = seg_arb_sequence(InstId,  MeasureCh, 1,  
-                  numpts, mstartv, mstopv, 
-                  segtime, trig, ssrctrl, meastypes, 
-                  measstart, measstop);
-      if(status) { stat = -17; goto RETURN; }
-    }
-
-  status = seg_arb_waveform(InstId, ForceCh, 1, SeqList, LoopCountList);
-  if(status) { stat = -18; goto RETURN; }
-
-  if(ForceCh != MeasureCh && MeasureCh > 0)
-    {
-      status = seg_arb_waveform(InstId, MeasureCh, 1, SeqList, LoopCountList);
-      if(status) { stat = -19; goto RETURN; }
-    }
-
-// ****************************************************
-  if (debug) printf(" Made it here 2\n");
-
-  // Execute the pulse
-  status = pulse_exec(0);
-
-  // wait till execution completion
-  i = 0;
-  while(pulse_exec_status(&t) == 1 && i < 100)
-    {
-      Sleep(20);
-      i++;
-    }
-
-
-  // wait on pulse fetching
-  //Sleep(5000);
-  
-  status = pulse_fetch(InstId, ForceCh, 0, NumDataPts, pulseV, pulseI, pulseT, NULL);
-  if(status) { stat = -20; goto RETURN; }
-
-  if(ForceCh != MeasureCh && MeasureCh > 0)
-    {
-      // wait on pulse fetching
-      status = pulse_fetch(InstId, MeasureCh, 0, NumDataPts, MpulseV, MpulseI, MpulseT, NULL);
-      if(status) { stat = -21; goto RETURN; }      
-      //Sleep(5000);
-    }
-
-  if(debug && details)
-    {
-      i = 0;
-      while(i < NumDataPts)
-      {
-         printf("=>%s: i:%d V:%g I:%g t:%g\n", mod, i, pulseV[i], pulseI[i], pulseT[i]);
-         if(ForceCh != MeasureCh && MeasureCh > 0)
-         {
-            printf("=>%s: i:%d MV:%g MI:%g Mt:%g\n", mod, i, MpulseV[i], MpulseI[i], MpulseT[i]);
-         }
-        i++;
-      }
-    }
-
-  //fill out data and interpolate
-  i = 0;
-  *npts = 0;
-  while(i < vf_size)
-    {
-      // first clean arrays:
-      VF[i] = 0.0;
-      IF[i] = 0.0;
-      VM[i] = 0.0;
-      IM[i] = 0.0;
-      T[i] = 0.0;
-
-      ratio = ((double)NumDataPts - 1.0)/((double)vf_size - 1.0);
-      if(ratio < 1.0)
-        j = i;
-      else
-        j = (int) (i * ratio);
-      if(j > -1 && j < NumDataPts)
-      {
-
-          VF[i] = pulseV[j];
-          IF[i] = pulseI[j];
-          
-          if(ForceCh != MeasureCh && MeasureCh > 0)
-          {
-             VM[i] = MpulseV[j];
-             IM[i] = MpulseI[j];
-
-             if(debug && details)printf("%s: Adding i= %d j= %d VM= %g IM= %g\n", mod, i, j, VM[i], IM[i]);
-
-              if(ForceCh != MeasureCh)
-                IM[i] *= -1.0;
-
-         }else{
-             VM[i] = 0.0;
-             IM[i] = 0.0;
-          }
-
-      T[i] = pulseT[j];
-      if(0.0 != T[i]) *npts = *npts + 1;
-    }
-      if(debug && details){
-          printf("%s: Output: i: %d j: %d VF: %g IF: %g t: %g\n", mod, i, j, VF[i], IF[i], T[i]);
-          printf("%s: Output: i: %d j: %d VM: %g IM: %g t: %g\n", mod, i, j, VM[i], IM[i], T[i]);
-      }
-      i++;
-    }
-
-
- RETURN:
-  if(debug) printf("%s: returns with status: %d Number of points: %d\n", mod, stat, *npts);
-  ret_FreeMemoryILimit();
-  if(stat > 0)
-  {
-    not_init = 0;
-  }
-  return(stat);
+    trigger_override_segment = segmentIndex;
 }
-
+ 
 void ret_AllocateMemoryILimit(int npts)
 {
     fstartv = (double *)calloc(npts, sizeof(double));
@@ -636,7 +324,9 @@ double ret_Define_SegmentsILimit(double *v, double *t, int pts, double bias)
       mstartv[i] = bias;
       mstopv[i] = bias;
       
-      if(i == 0)
+      if(trigger_override_segment >= 0)
+        trig[i] = (i == trigger_override_segment) ? 1 : 0;
+      else if(i == 0)
         trig[i] = 1;
       else
         trig[i] = 0;

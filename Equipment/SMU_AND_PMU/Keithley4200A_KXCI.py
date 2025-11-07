@@ -792,15 +792,20 @@ class Keithley4200A_KXCI:
                 'success': False,
                 'error': 'Failed to enter UL mode'
             }
+            
         
         # Use the exact command string provided (hardcoded)
         # This matches the working LabVIEW command exactly
         # Library is "Labview_Controlled_PLabview_Controlled_Programs_Kemp Kemp3)
         
-        num_pulses=11 # num of measure pulses after read
-        # extra value added for
-        ex_command = f"EX ACraig1 ACraig1_PMU_retention(1.00E-7,1.00E+0,1.00E-6,5.00E-7,3.00E-1,1.00E-6,2.00E-6,1.00E-6,1.00E-7,1.00E-6,3.00E-1,3.00E-1,0,1.00E-4,10000,,12,,12,,12,,12,1,,12,VF,,200,T,,12,{num_pulses},0)"
-        z= num_pulses
+        num_pulses = 20  # number of user-requested measurement probes after the initial baseline read
+        total_probe_count = num_pulses + 2  # baseline probe + requested probes + trailing probe
+
+        ex_command = (
+            "EX ACraig2 ACraig1_PMU_retention(1.00E-7,1.00E+0,1.00E-6,5.00E-7,3.00E-1,1.00E-6,2.00E-6,"
+            "1.00E-6,1.00E-7,1.00E-6,3.00E-1,3.00E-1,0,1.00E-4,10000,,{0},,{0},,{0},,{0},1,,{0},VF,,200,T,,{0},{1},1)"
+        ).format(total_probe_count, num_pulses)
+        z = total_probe_count
         print(f"\n[KXCI] Sending exact command:")
         print(f"[KXCI] {ex_command}")
         
@@ -816,6 +821,7 @@ class Keithley4200A_KXCI:
         if error and "failed" in error.lower():
             return {
                 'success': False,
+            
                 'error': error,
                 'return_value': return_value
             }
