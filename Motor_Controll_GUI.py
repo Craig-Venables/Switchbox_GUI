@@ -1,4 +1,4 @@
-"""
+""" 
 Advanced Motor Control GUI with Laser Positioning
 
 Description:
@@ -50,6 +50,7 @@ from tkinter import ttk, messagebox, simpledialog
 import json
 import os
 from pathlib import Path
+import sys
 
 # ---------- Optional FG Protocol (for type hints) ----------
 
@@ -59,9 +60,25 @@ class FunctionGenerator(Protocol):
     def get_amplitude(self) -> float: ...  # noqa: E701
 
 # Use existing project motor control
-from Equipment.Motor_Controll.Kenisis_motor_control import MotorController as KinesisController
-from Equipment.function_generator_manager import FunctionGeneratorManager
+try:
+    from Equipment.function_generator_manager import FunctionGeneratorManager
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    FunctionGeneratorManager = None  # type: ignore[assignment]
+    _FG_IMPORT_ERROR = exc
+else:
+    _FG_IMPORT_ERROR = None
+
 import Equipment.Motor_Controll.config as config
+
+try:
+    from Equipment.Motor_Controll.Kenisis_motor_control import MotorController as KinesisController
+except ModuleNotFoundError as exc:  # pragma: no cover - import guard
+    KinesisController = None  # type: ignore[assignment]
+    _KINESIS_IMPORT_ERROR = exc
+    MOTOR_DRIVER_AVAILABLE = False
+else:
+    _KINESIS_IMPORT_ERROR = None
+    MOTOR_DRIVER_AVAILABLE = True
 
 
 # ---------- GUI Window ----------
@@ -156,6 +173,13 @@ class MotorControlWindow:
         self._build_ui()
         self._update_canvas_display()
         self._setup_keyboard_shortcuts()
+
+        if not MOTOR_DRIVER_AVAILABLE or KinesisController is None:
+            self.var_status.set("Motors: Driver unavailable (install pylablib)")
+            try:
+                self.btn_connect.configure(state=tk.DISABLED)
+            except Exception:
+                pass
 
     # ---------- UI Construction ----------
     def _build_ui(self) -> None:
@@ -591,22 +615,24 @@ class MotorControlWindow:
         addr_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 5))
         addr_frame.columnconfigure(0, weight=1)
         
-        tk.Entry(
+        addr_entry = tk.Entry(
             addr_frame, 
             textvariable=self.var_fg_addr,
             bg=self.COLORS['bg_light'],
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        )
+        addr_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
         
-        tk.Button(
+        auto_btn = tk.Button(
             addr_frame,
             text="🔍",
             command=self._auto_detect_fg,
             bg=self.COLORS['accent_blue'],
             fg='white',
             width=3
-        ).grid(row=0, column=1)
+        )
+        auto_btn.grid(row=0, column=1)
 
         # Connection buttons
         btn_frame = tk.Frame(fg_frame, bg=self.COLORS['bg_medium'])
@@ -614,23 +640,25 @@ class MotorControlWindow:
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         
-        tk.Button(
+        connect_btn = tk.Button(
             btn_frame, 
             text="Connect", 
             command=self._on_fg_connect,
             bg=self.COLORS['accent_green'],
             fg='black',
             font=("Arial", 8)
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 2))
+        )
+        connect_btn.grid(row=0, column=0, sticky="ew", padx=(0, 2))
         
-        tk.Button(
+        disconnect_btn = tk.Button(
             btn_frame, 
             text="Disconnect", 
             command=self._on_fg_disconnect,
             bg=self.COLORS['accent_red'],
             fg='white',
             font=("Arial", 8)
-        ).grid(row=0, column=1, sticky="ew", padx=(2, 0))
+        )
+        disconnect_btn.grid(row=0, column=1, sticky="ew", padx=(2, 0))
 
         # Status
         status_label = tk.Label(
@@ -663,25 +691,40 @@ class MotorControlWindow:
             fg=self.COLORS['fg_primary'],
             bg=self.COLORS['bg_medium']
         ).grid(row=5, column=0, sticky="w", pady=2)
-        tk.Entry(
+        amplitude_entry = tk.Entry(
             fg_frame, 
             textvariable=self.var_fg_amplitude,
             bg=self.COLORS['bg_light'],
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
-        ).grid(row=5, column=1, sticky="ew", pady=2)
+        )
+        amplitude_entry.grid(row=5, column=1, sticky="ew", pady=2)
 
         # Apply button
-        tk.Button(
+        apply_btn = tk.Button(
             fg_frame, 
             text="Apply Voltage", 
             command=self._on_apply_amplitude,
             bg=self.COLORS['accent_blue'],
             fg='white',
             font=("Arial", 9)
-        ).grid(row=6, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        )
+        apply_btn.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(5, 0))
 
         fg_frame.columnconfigure(1, weight=1)
+
+        if FunctionGeneratorManager is None:
+            self.var_fg_status.set("FG: Driver unavailable (install pyvisa)")
+            for widget in (
+                addr_entry,
+                auto_btn,
+                connect_btn,
+                disconnect_btn,
+                output_check,
+                amplitude_entry,
+                apply_btn,
+            ):
+                widget.configure(state=tk.DISABLED)
 
     def _build_canvas_and_camera(self) -> None:
         """Build canvas and camera feed area."""
@@ -979,31 +1022,41 @@ class MotorControlWindow:
     # ---------- Event Handlers ----------
     def _on_connect(self) -> None:
         """Connect to motors."""
+        if not MOTOR_DRIVER_AVAILABLE or KinesisController is None:
+            details = (
+                "pylablib is not installed, so the Thorlabs Kinesis motor driver "
+                "cannot be loaded."
+            )
+            if _KINESIS_IMPORT_ERROR:
+                details += f"\nOriginal import error: {_KINESIS_IMPORT_ERROR}"
+            messagebox.showerror("Motor Driver Unavailable", details)
+            return
+
         try:
             self.var_status.set("Motors: Connecting...")
             self.root.update()
-            
+
             self.motor = KinesisController()
-            
+
             # Check for initialization errors
             err_parts = []
             if getattr(self.motor, "error_x", None):
                 err_parts.append(f"X: {self.motor.error_x}")
             if getattr(self.motor, "error_y", None):
                 err_parts.append(f"Y: {self.motor.error_y}")
-            
+
             if err_parts:
                 self.var_status.set("Motors: Connected (with errors)")
                 messagebox.showwarning("Connection Warning", "; ".join(err_parts))
             else:
                 self.var_status.set("Motors: Connected ✓")
-            
+
             # Apply motor settings
             self._apply_motor_settings()
-            
+
             # Read initial position
             self._refresh_position()
-            
+
         except Exception as exc:
             self.var_status.set("Motors: Connection Failed")
             messagebox.showerror("Connection Error", f"Failed to connect to motors:\n{exc}")
@@ -1308,6 +1361,12 @@ class MotorControlWindow:
     # ---------- Function Generator Controls ----------
     def _auto_detect_fg(self) -> None:
         """Auto-detect function generator VISA address."""
+        if FunctionGeneratorManager is None:
+            messagebox.showerror(
+                "Function Generator",
+                "pyvisa is not installed, so auto-detect is unavailable.",
+            )
+            return
         try:
             import pyvisa
             rm = pyvisa.ResourceManager()
@@ -1342,6 +1401,12 @@ class MotorControlWindow:
 
     def _on_fg_connect(self) -> None:
         """Connect to function generator."""
+        if FunctionGeneratorManager is None:
+            detail = "pyvisa is not installed, so function generator control is disabled."
+            if _FG_IMPORT_ERROR:
+                detail += f"\nOriginal import error: {_FG_IMPORT_ERROR}"
+            messagebox.showerror("Function Generator", detail)
+            return
         try:
             addr = self.var_fg_addr.get().strip()
             if not addr:
@@ -1449,7 +1514,18 @@ class MotorControlWindow:
         self.root.mainloop()
 
 
+def _self_test() -> None:
+    """Lightweight check that the import guard behaves as expected."""
+    if MOTOR_DRIVER_AVAILABLE:
+        print("Motor driver available.")
+    else:
+        print("Motor driver unavailable (expected if pylablib missing).")
+        assert KinesisController is None
+
+
 if __name__ == "__main__":
-    # Open the GUI
-    window = MotorControlWindow()
-    window.run()
+    if "--test" in sys.argv:
+        _self_test()
+    else:
+        window = MotorControlWindow()
+        window.run()
