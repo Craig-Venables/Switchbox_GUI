@@ -38,19 +38,23 @@ This directory contains documentation for the modular utilities and configuratio
 - `DataFormatter` - Consistent file formatting
 - `FileNamer` - Standardized filename generation
 
+#### Measurement Orchestrators
+- `Measurments/single_measurement_runner.py` – Standard DC IV sweep orchestrator
+- `Measurments/pulsed_measurement_runner.py` – SMU/PMU pulsed and fast-pulse/hold flows
+- `Measurments/special_measurement_runner.py` – ISPP, pulse-width sweep, threshold search, transient capture
+- `Measurments/telegram_coordinator.py` – Telegram post-measurement automation
+- `Measurments/background_workers.py` – Manual endurance/retention worker threads
+
 ## Testing
 
-Test each module:
+Run the automated test suite with:
 ```bash
-python -m Measurments.data_utils
-python -m Measurments.optical_controller
-python -m Measurments.source_modes
-python -m Measurments.sweep_patterns
-python -m Equipment.multiplexer_manager
-python -m Measurments.data_formats
+pytest tests
 ```
 
-All should print "All tests passed!" ✓
+The tests cover summary plot generation (`MeasurementDataSaver`) and directory utilities (e.g. `find_largest_number_in_folder`).  They run headlessly using `matplotlib`’s Agg backend, so no GUI is required.
+
+Individual modules can still be smoke-tested with `python -m` if needed.
 
 ## Getting Started
 
