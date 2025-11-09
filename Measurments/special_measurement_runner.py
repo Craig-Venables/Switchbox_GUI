@@ -38,6 +38,8 @@ class SpecialMeasurementRunner:
             "Pulse Width Sweep": self._run_pulse_width_sweep,
             "Threshold Search": self._run_threshold_search,
             "Transient Decay": self._run_transient_decay,
+            "Endurance": self._run_endurance,
+            "Retention": self._run_retention,
         }
         handler = handlers.get(excitation)
         if not handler:
@@ -59,7 +61,7 @@ class SpecialMeasurementRunner:
     def _finalize(self) -> None:
         self._finalize_output()
         self.measuring = False
-        self.status_box.config(text="Measurement Complete")
+        self.set_status_message("Measurement Complete")
 
         save_dir = self._get_save_directory(
             self.sample_name_var.get(),
@@ -87,7 +89,7 @@ class SpecialMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (ISPP)...")
+            self.set_status_message(f"Measuring {device} (ISPP)...")
             self.master.update()
 
             start_v = float(getattr(self, "_ispp_start", self._wrap(0.0)).get())
@@ -146,12 +148,150 @@ class SpecialMeasurementRunner:
 
         self._finalize()
 
+    def _run_endurance(self, device_count: int, start_index: int) -> None:
+        for i in range(device_count):
+            device = self.device_list[(start_index + i) % device_count]
+            if self.stop_measurement_flag:
+                break
+            self.set_status_message(f"Measuring {device} (Endurance)...")
+            self.master.update()
+
+            set_v = float(self.end_set_v.get())
+            reset_v = float(self.end_reset_v.get())
+            pulse_ms = float(self.end_pulse_ms.get())
+            cycles = int(self.end_cycles.get())
+            read_v = float(self.end_read_v.get())
+            icc_val = float(self.icc.get())
+
+            def _on_point(v: float, i_val: float, t_s: float) -> None:
+                self.v_arr_disp.append(v)
+                self.c_arr_disp.append(i_val)
+                self.t_arr_disp.append(t_s)
+
+            v_arr, c_arr, t_arr = self.measurement_service.run_endurance(
+                keithley=self.keithley,
+                set_voltage=set_v,
+                reset_voltage=reset_v,
+                pulse_width_s=pulse_ms / 1000.0,
+                num_cycles=cycles,
+                read_voltage=read_v,
+                icc=icc_val,
+                psu=getattr(self, "psu", None),
+                led=False,
+                power=1.0,
+                optical=getattr(self, "optical", None),
+                smu_type=getattr(self, "SMU_type", "Keithley 2401"),
+                should_stop=lambda: getattr(self, "stop_measurement_flag", False),
+                on_point=_on_point,
+            )
+
+            try:
+                self.graphs_show(v_arr, c_arr, "ENDURANCE", set_v)
+            except Exception:
+                pass
+
+            save_dir = self._ensure_save_dir()
+            key = find_largest_number_in_folder(save_dir)
+            save_key = 0 if key is None else key + 1
+            name = f"{save_key}-ENDURANCE-{set_v}v-{reset_v}v-{pulse_ms}ms-Py"
+            file_path = Path(save_dir) / f"{name}.txt"
+            try:
+                data = np.column_stack((v_arr, c_arr, t_arr))
+                np.savetxt(
+                    file_path,
+                    data,
+                    fmt="%0.3E\t%0.3E\t%0.3E",
+                    header="Voltage(V) Current(A) Time(s)",
+                    comments="",
+                )
+                self.log_terminal(f"File saved: {file_path.resolve()}")
+            except Exception as exc:
+                print(f"[SAVE ERROR] Failed to save endurance file: {exc}")
+
+            if not self.single_device_flag:
+                self.sample_gui.next_device()
+                time.sleep(0.1)
+                self.sample_gui.change_relays()
+                time.sleep(0.1)
+
+        self._finalize()
+
+    def _run_retention(self, device_count: int, start_index: int) -> None:
+        for i in range(device_count):
+            device = self.device_list[(start_index + i) % device_count]
+            if self.stop_measurement_flag:
+                break
+            self.set_status_message(f"Measuring {device} (Retention)...")
+            self.master.update()
+
+            set_v = float(self.ret_set_v.get())
+            set_ms = float(self.ret_set_ms.get())
+            read_v = float(self.ret_read_v.get())
+            try:
+                delay_s = float(self.ret_measure_delay.get())
+            except Exception:
+                delay_s = 10.0
+            times_s = [delay_s]
+            icc_val = float(self.icc.get())
+
+            def _on_point(v: float, i_val: float, t_s: float) -> None:
+                self.v_arr_disp.append(v)
+                self.c_arr_disp.append(i_val)
+                self.t_arr_disp.append(t_s)
+
+            v_arr, c_arr, t_arr = self.measurement_service.run_retention(
+                keithley=self.keithley,
+                set_voltage=set_v,
+                set_time_s=set_ms / 1000.0,
+                read_voltage=read_v,
+                repeat_delay_s=0.1,
+                number=len(times_s),
+                icc=icc_val,
+                psu=getattr(self, "psu", None),
+                led=False,
+                optical=getattr(self, "optical", None),
+                smu_type=getattr(self, "SMU_type", "Keithley 2401"),
+                should_stop=lambda: getattr(self, "stop_measurement_flag", False),
+                on_point=_on_point,
+            )
+
+            try:
+                self.graphs_show(v_arr, c_arr, "RETENTION", read_v)
+            except Exception:
+                pass
+
+            save_dir = self._ensure_save_dir()
+            key = find_largest_number_in_folder(save_dir)
+            save_key = 0 if key is None else key + 1
+            name = f"{save_key}-RETENTION-{set_v}v-{read_v}v-Py"
+            file_path = Path(save_dir) / f"{name}.txt"
+            try:
+                data = np.column_stack((t_arr, c_arr, v_arr))
+                np.savetxt(
+                    file_path,
+                    data,
+                    fmt="%0.3E\t%0.3E\t%0.3E",
+                    header="Time(s) Current(A) Voltage(V)",
+                    comments="",
+                )
+                self.log_terminal(f"File saved: {file_path.resolve()}")
+            except Exception as exc:
+                print(f"[SAVE ERROR] Failed to save retention file: {exc}")
+
+            if not self.single_device_flag:
+                self.sample_gui.next_device()
+                time.sleep(0.1)
+                self.sample_gui.change_relays()
+                time.sleep(0.1)
+
+        self._finalize()
+
     def _run_pulse_width_sweep(self, device_count: int, start_index: int) -> None:
         for i in range(device_count):
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (Pulse Width Sweep)...")
+            self.set_status_message(f"Measuring {device} (Pulse Width Sweep)...")
             self.master.update()
 
             amp = float(getattr(self, "_pws_amp", self._wrap(0.5)).get())
@@ -215,7 +355,7 @@ class SpecialMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (Threshold Search)...")
+            self.set_status_message(f"Measuring {device} (Threshold Search)...")
             self.master.update()
 
             v_lo = float(getattr(self, "_th_lo", self._wrap(0.0)).get())
@@ -277,7 +417,7 @@ class SpecialMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (Transient Decay)...")
+            self.set_status_message(f"Measuring {device} (Transient Decay)...")
             self.master.update()
 
             p_v = float(getattr(self, "_tr_pulse_v", self._wrap(0.8)).get())

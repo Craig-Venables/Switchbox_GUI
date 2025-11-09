@@ -249,7 +249,9 @@ class MeasurementGUI:
         self.measurment_number = None
         self.sweep_num = None
         self.master = tk.Toplevel(master)
-        self.master.title("Measurement Setup")
+        self._base_title = "Measurement Setup"
+        self._status_message = ""
+        self.master.title(self._base_title)
         self.master.geometry("1800x1200")
         #200+100
         self.sample_gui = sample_gui
@@ -259,6 +261,9 @@ class MeasurementGUI:
         self.psu_visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"
         self.temp_controller_address= 'ASRL12::INSTR'
         self.keithley_address = "GPIB0::24::INSTR"
+        self.controller_type: str = "Auto-Detect"
+        self.controller_address: str = self.temp_controller_address
+        self.temp_setpoint: Optional[str] = None
         self.axis_font_size = 8
         self.title_font_size = 10
         self.sequential_number_of_sweeps = 100
@@ -274,7 +279,7 @@ class MeasurementGUI:
         self.device_list = device_list
         self.current_device = self.device_list[self.current_index]
         self.device_section_and_number = self.convert_to_name(self.current_index)
-        self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
+        self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
         self._update_device_identifiers(self.device_section_and_number)
 
         # Flags
@@ -353,11 +358,8 @@ class MeasurementGUI:
                 "on_system_change": self.on_system_change,
                 "on_custom_save_toggle": self._on_custom_save_toggle,
                 "browse_save": self._browse_save_location,
-                "reconnect_temperature": self.reconnect_temperature_controller,
                 "open_motor_control": self.open_motor_control,
-                "show_last_sweeps": self.show_last_sweeps,
                 "check_connection": self.check_connection,
-                "send_temp": self.send_temp,
                 "start_manual_endurance": self.start_manual_endurance,
                 "start_manual_retention": self.start_manual_retention,
                 "toggle_manual_led": self.toggle_manual_led,
@@ -567,7 +569,7 @@ class MeasurementGUI:
         # Info display
         info_frame = tk.Frame(top_frame)
         info_frame.grid(row=1, column=0, columnspan=4, sticky="ew")
-        info_frame.columnconfigure([0, 1, 2], weight=1)
+        info_frame.columnconfigure([0, 1, 2, 3, 4], weight=1)
 
         # Device
         self.device_label = tk.Label(info_frame, text="Device: XYZ", font=("Helvetica", 12))
@@ -585,17 +587,31 @@ class MeasurementGUI:
         self.motor_control_button = tk.Button(info_frame, text="Motor Control", command=self.open_motor_control)
         self.motor_control_button.grid(row=1, column=3, columnspan=1, pady=5)
 
-        # Show last sweeps button
-        self.show_results_button = tk.Button(info_frame, text="Show Last Sweeps", command=self.show_last_sweeps)
-        self.show_results_button.grid(row=1, column=4, columnspan=1, pady=5)
-
         # Check connection button
         self.check_connection_button = tk.Button(info_frame, text="check_connection", command=self.check_connection)
-        self.check_connection_button.grid(row=1, column=5, columnspan=1, pady=5)
+        self.check_connection_button.grid(row=1, column=4, columnspan=1, pady=5)
 
         # Start periodic status updates for device/voltage/loop
         self._status_updates_active = True
         self.master.after(250, self._status_update_tick)
+
+    def set_status_message(self, message: str) -> None:
+        """Update the window title and terminal log with the latest status."""
+        previous = getattr(self, "_status_message", "")
+        if message == previous:
+            return
+        self._status_message = message
+        try:
+            base = getattr(self, "_base_title", "Measurement Setup")
+            title = base if not message else f"{base} - {message}"
+            self.master.title(title)
+        except Exception:
+            pass
+        if message and message != previous:
+            try:
+                self.log_terminal(message)
+            except Exception:
+                print(message)
 
     def log_test(self, msg: str) -> None:
         """Append a line to the tests log widget or stdout if unavailable."""
@@ -639,7 +655,7 @@ class MeasurementGUI:
                     self.current_device = self.device_list[self.current_index]
                     # Update any GUI labels that display the device name
                     self.device_section_and_number = self.convert_to_name(self.current_index)
-                    self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
+                    self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
                     try:
                         self.device_label.config(text=f"Device: {self.display_index_section_number}")
                     except Exception:
@@ -795,8 +811,7 @@ class MeasurementGUI:
         self.plot_panels.attach_to(self)
 
     def graphs_vi_logiv(self, parent: tk.Misc) -> None:
-        """Legacy wrapper retained for backward compatibility."""
-        self.plot_panels.create_vi_logiv_plots(parent)
+        """Legacy wrapper retained for backward compatibility (no-op)."""
         self.plot_panels.attach_to(self)
         self._start_plot_threads()
 
@@ -877,8 +892,7 @@ class MeasurementGUI:
         self._start_plot_threads()
 
     def graphs_resistance_time_rt(self, parent: tk.Misc) -> None:
-        """Legacy wrapper retained for backward compatibility."""
-        self.plot_panels.create_resistance_time_plot(parent)
+        """Legacy wrapper retained for backward compatibility (no-op)."""
         self.plot_panels.attach_to(self)
         self._start_plot_threads()
 
@@ -1060,8 +1074,8 @@ class MeasurementGUI:
 
             # updater controller type
             self.temp_controller_type = config.get("temp_controller", "")
-            self.controller_type_var.set(self.temp_controller_type)
-            self.controller_address_var.set(temp_address)
+            self.controller_type = self.temp_controller_type or "Auto-Detect"
+            self.controller_address = temp_address or self.temp_controller_address
 
             # smu type
             self.SMU_type = config.get("SMU Type", "")
@@ -1111,10 +1125,12 @@ class MeasurementGUI:
         self.excitation_var = tk.StringVar(value="DC Triangle IV")
         self.excitation_menu = ttk.Combobox(frame, textvariable=self.excitation_var,
                                             values=["DC Triangle IV",
-                                                    "SMU_AND_PMU Pulsed IV <1.5v",
-                                                    "SMU_AND_PMU Pulsed IV >1.5v",
-                                                    "SMU_AND_PMU Fast Pulses",
-                                                    "SMU_AND_PMU Fast Hold",
+                                                    "Endurance",
+                                                    "Retention",
+                                                    "Pulsed IV <1.5V",
+                                                    "Pulsed IV >1.5V",
+                                                    "Fast Pulses",
+                                                    "Fast Hold",
                                                     "ISPP",
                                                     "Pulse Width Sweep",
                                                     "Threshold Search",
@@ -1271,7 +1287,45 @@ class MeasurementGUI:
                 except Exception:
                     pass
                 return
-            if sel == "SMU_AND_PMU Pulsed IV <1.5v":
+            if sel == "Endurance":
+                tk.Label(self._excitation_params_frame, text="Repeated SET/RESET pulses with readback.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="SET Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_set_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="RESET Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_reset_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse Width (ms)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Cycles").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_cycles, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Read Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "Retention":
+                tk.Label(self._excitation_params_frame, text="Measure state retention over time.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="SET Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.ret_set_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="SET Time (ms)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.ret_set_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Read Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.ret_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                if not hasattr(self, "ret_measure_delay"):
+                    self.ret_measure_delay = tk.DoubleVar(value=10.0)
+                tk.Label(self._excitation_params_frame, text="Measure after (s)").grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.ret_measure_delay, width=14).grid(row=r, column=1, sticky="w"); r+=1
+                try:
+                    for w in self._dc_widgets:
+                        try: w.grid_remove()
+                        except Exception: pass
+                except Exception:
+                    pass
+                return
+            if sel == "Pulsed IV <1.5V":
                 # Defaults tied to SMU_AND_PMU min pulse width and base 0.2 V
                 try:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
@@ -1297,7 +1351,7 @@ class MeasurementGUI:
                 tk.Label(self._excitation_params_frame, text="Note: Output is typically limited ~1.5 V depending on pulse width.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Tip: Verify pulse width on an oscilloscope; effective width is often slower than the set value.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 return
-            if sel == "SMU_AND_PMU Pulsed IV >1.5v":
+            if sel == "Pulsed IV >1.5V":
                 try:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
@@ -1320,7 +1374,7 @@ class MeasurementGUI:
                 tk.Label(self._excitation_params_frame, text="Note: 20 V range is slower; use ≥100 ms pulse width for reliable amplitude.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Tip: Verify pulses on an oscilloscope; rise/fall can reduce effective width.", fg="grey", wraplength=380, justify='left').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 return
-            if sel == "SMU_AND_PMU Fast Pulses":
+            if sel == "Fast Pulses":
                 try:
                     self.ex_fp_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
@@ -1340,7 +1394,7 @@ class MeasurementGUI:
                 except Exception:
                     pass
                 return
-            if sel == "SMU_AND_PMU Fast Hold":
+            if sel == "Fast Hold":
                 tk.Label(self._excitation_params_frame, text="Hold DC and sample I(t).", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 # For pulse modes, hide DC sweep-mode/type
                 tk.Label(self._excitation_params_frame, text="Hold V").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_fh_voltage, width=10).grid(row=r, column=1, sticky="w"); r+=1
@@ -1551,17 +1605,25 @@ class MeasurementGUI:
         self.pause = tk.DoubleVar(value=0.0)
         tk.Entry(frame, textvariable=self.pause).grid(row=28, column=1)
 
+        temp_row = 29
+        tk.Label(frame, text="Target Temp (°C):").grid(row=temp_row, column=0, sticky="w")
+        self.target_temp_var = tk.DoubleVar(value=25.0)
+        self.target_temp_entry = tk.Entry(frame, textvariable=self.target_temp_var, state="disabled")
+        self.target_temp_entry.grid(row=temp_row, column=1, sticky="w")
+        self.target_temp_button = tk.Button(frame, text="Set Temp", command=self.send_temp, state="disabled")
+        self.target_temp_button.grid(row=temp_row, column=2, padx=(5, 0), sticky="w")
+
         def start_thread():
             self.measurement_thread = threading.Thread(target=self.start_measurement)
             self.measurement_thread.daemon = True
             self.measurement_thread.start()
 
         self.measure_button = tk.Button(frame, text="Start Measurement", command=start_thread)
-        self.measure_button.grid(row=29, column=0, columnspan=1, pady=5)
+        self.measure_button.grid(row=30, column=0, columnspan=1, pady=5)
 
         # stop button
         self.adaptive_button = tk.Button(frame, text="Stop Measurement!", command=self.set_measurment_flag_true)
-        self.adaptive_button.grid(row=29, column=1, columnspan=1, pady=10)
+        self.adaptive_button.grid(row=30, column=1, columnspan=1, pady=10)
 
         # Note: Detailed sweep controls moved to popup editor; only Pause remains in main panel
 
@@ -1802,8 +1864,20 @@ class MeasurementGUI:
 
     def reconnect_temperature_controller(self) -> None:
         """Reconnect temperature controller based on GUI selection."""
-        controller_type = self.controller_type_var.get()
-        address = self.controller_address_var.get()
+        controller_type = getattr(self, "controller_type", "Auto-Detect")
+        if hasattr(self, "controller_type_var"):
+            try:
+                controller_type = self.controller_type_var.get()
+            except Exception:
+                controller_type = getattr(self, "controller_type", "Auto-Detect")
+        address = getattr(self, "controller_address", self.temp_controller_address)
+        if hasattr(self, "controller_address_var"):
+            try:
+                address = self.controller_address_var.get()
+            except Exception:
+                address = getattr(self, "controller_address", self.temp_controller_address)
+        self.controller_type = controller_type or "Auto-Detect"
+        self.controller_address = address
 
         # Close existing connection
         try:
@@ -1838,16 +1912,25 @@ class MeasurementGUI:
     def update_controller_status(self) -> None:
         """Update controller status indicator."""
         info = self.connections.get_temperature_info()
-        if info:
-            self.controller_status_label.config(
-                text=f"● Connected: {info['type']}",
-                fg="green"
-            )
-        else:
-            self.controller_status_label.config(
-                text="● Disconnected",
-                fg="red"
-            )
+        label = getattr(self, "controller_status_label", None)
+        entry = getattr(self, "target_temp_entry", None)
+        btn = getattr(self, "target_temp_button", None)
+        if label:
+            if info:
+                label.config(
+                    text=f"● Connected: {info['type']}",
+                    fg="green"
+                )
+            else:
+                label.config(
+                    text="● Disconnected",
+                    fg="red"
+                )
+        state = "normal" if info else "disabled"
+        if entry:
+            entry.configure(state=state)
+        if btn:
+            btn.configure(state=state)
 
     def sequential_measure(self) -> None:
         """Delegate sequential measurement logic to the runner module."""
@@ -1891,9 +1974,6 @@ class MeasurementGUI:
 
             # Update status
             elapsed = time.time() - start_time
-            self.status_box.config(
-                text=f"Measuring... {elapsed:.1f}/{duration}s"
-            )
             self.master.update()
 
             # Wait for next sample
@@ -2027,7 +2107,6 @@ class MeasurementGUI:
             for i in range(device_count):  # Ensure we process each device exactly once
                 device = self.device_list[(start_index + i) % device_count]  # Wrap around when reaching the end
 
-                self.status_box.config(text=f"Measuring {device}...")
                 self.master.update()
                 time.sleep(1)
 
@@ -2261,11 +2340,11 @@ class MeasurementGUI:
                         )
 
                     elif measurement_type == "Endurance":
-                        set_v = params.get("set_v", 1.5)
-                        reset_v = params.get("reset_v", -1.5)
-                        pulse_ms = params.get("pulse_ms", 10)
-                        cycles = params.get("cycles", 100)
-                        read_v = params.get("read_v", 0.2)
+                        set_v = float(self.end_set_v.get())
+                        reset_v = float(self.end_reset_v.get())
+                        pulse_ms = float(self.end_pulse_ms.get())
+                        cycles = int(self.end_cycles.get())
+                        read_v = float(self.end_read_v.get())
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -2291,10 +2370,11 @@ class MeasurementGUI:
                         print("endurance")
 
                     elif measurement_type == "Retention":
-                        set_v = params.get("set_v", 1.5)
-                        set_ms = params.get("set_ms", 10)
-                        read_v = params.get("read_v", 0.2)
-                        times_s = params.get("times_s", [1, 10, 100, 1000])
+                        set_v = float(self.ret_set_v.get())
+                        set_ms = float(self.ret_set_ms.get())
+                        read_v = float(self.ret_read_v.get())
+                        delay_s = float(self.ret_measure_delay.get())
+                        times_s = [delay_s]
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -2491,7 +2571,6 @@ class MeasurementGUI:
 
             # Always mark measurement complete in GUI
             self.measuring = False
-            self.status_box.config(text="Measurement Complete")
             if self.telegram.is_enabled():
                 combined = getattr(self, '_last_combined_summary_path', None)
                 self.telegram.start_post_measurement_worker(save_dir, combined)
@@ -2601,7 +2680,6 @@ class MeasurementGUI:
             instrument = self.connections.connect_keithley(smu_type, address)
             self.keithley = instrument
             self.connected = self.connections.is_connected("keithley")
-            self.status_box.config(text="Status: Connected")
             if hasattr(self.keithley, 'beep'):
                 self.keithley.beep(4000, 0.2)
                 time.sleep(0.2)
@@ -2745,9 +2823,34 @@ class MeasurementGUI:
             self.log_terminal(f"Saved data to: {abs_path}")
 
     def send_temp(self) -> None:
-        self.itc.set_temperature(int(self.temp_var.get()))
+        """Apply a new temperature setpoint if hardware is connected."""
+        target = getattr(self, "target_temp_var", None)
+        if hasattr(target, "get"):
+            try:
+                value = target.get()
+            except Exception:
+                value = None
+        else:
+            value = target
+
+        if value in ("", None):
+            print("No temperature setpoint specified.")
+            return
+
+        try:
+            setpoint = float(value)
+        except (TypeError, ValueError):
+            print(f"Invalid temperature setpoint: {value}")
+            return
+
+        if not getattr(self, "itc", None):
+            print("Temperature controller not connected.")
+            return
+
+        self.itc.set_temperature(setpoint)
+        self.temp_setpoint = str(value)
         self.graphs_temp_time_rt(self.Graph_frame)
-        print("temperature set too", self.temp_var.get())
+        print(f"temperature set to {value}")
 
     def update_variables(self) -> None:
         # update current device
@@ -2755,7 +2858,7 @@ class MeasurementGUI:
         # Update number (ie device_11)
         self.device_section_and_number = self.convert_to_name(self.current_index)
         # Update section and number
-        self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
+        self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
         self.device_var.config(text=self.display_index_section_number)
         self._update_device_identifiers(self.device_section_and_number)
         # print(self.convert_to_name(self.current_index))
@@ -2767,51 +2870,6 @@ class MeasurementGUI:
         else:
             print("Measuring all devices")
             self.single_device_flag = False
-
-    def update_last_sweeps(self) -> None:
-        """Automatically updates the plot every 1000ms"""
-        # Re-draw the latest data on the axes
-        for i, (device, measurements) in enumerate(self.measurement_data.items()):
-            if i >= 100:
-                break  # Limit to 100 devices
-
-            row, col = divmod(i, 10)  # Convert index to 10x10 grid position
-            ax = self.axes[row, col]
-            last_key = list(measurements.keys())[-1]  # Get the last sweep key
-            v_arr, c_arr = measurements[last_key]
-            ax.clear()  # Clear the old plot
-            ax.plot(v_arr, c_arr, marker="o", markersize=1)
-
-            # # Add labels to axes (you can adjust the label text and font size)
-            # ax.set_xlabel('Voltage (V)', fontsize=6)  # X-axis label
-            # ax.set_ylabel('Current (Across Ito)', fontsize=6)  # Y-axis label
-
-            # Make tick labels visible and set font size
-            ax.tick_params(axis='x', labelsize=6)  # X-axis tick labels font size
-            ax.tick_params(axis='y', labelsize=6)  # Y-axis tick labels font size
-
-            # Optionally, set limits or show minor ticks if needed
-            ax.set_xticks(np.linspace(min(v_arr), max(v_arr), 3))  # Adjust the number of ticks
-            ax.set_yticks(np.linspace(min(c_arr), max(c_arr), 3))  # Adjust the number of ticks
-
-            ax.ticklabel_format(style='sci', axis='y', scilimits=(0, 0))
-            ax.set_title(f"Device {device}", fontsize=6)
-
-        self.canvas.draw()  # Redraw the canvas with the new data
-
-        # Set the next update ( or 10 seconds)
-        self.master.after(10000, self.update_last_sweeps)
-    
-    def show_last_sweeps(self) -> None:
-        """Raise the All Sweeps plot window."""
-        try:
-            canvas = getattr(self, "canvas_all_iv", None)
-            if canvas:
-                widget = canvas.get_tk_widget()
-                widget.master.lift()
-                widget.master.focus_set()
-        except Exception:
-            pass
 
     def bring_to_top(self) -> None:
         """Raise the main window and ensure it gains focus."""
@@ -2828,17 +2886,32 @@ class MeasurementGUI:
 
     def convert_to_name(self, index: int) -> str:
         """Translate a device index into the legacy section/number label."""
-        # Prefer sample GUI helper if available
+        try:
+            device = self.device_list[index]
+        except Exception:
+            return f"device_{index + 1}"
+
+        # Prefer Sample GUI friendly labels if available
+        try:
+            if hasattr(self.sample_gui, "get_device_label"):
+                label = self.sample_gui.get_device_label(device)
+                if label:
+                    return str(label)
+        except Exception:
+            pass
+
+        # Backwards compatibility with older Sample GUI helper
+        try:
+            if hasattr(self.sample_gui, "convert_to_name"):
+                return str(self.sample_gui.convert_to_name(device))
+        except Exception:
+            pass
+
         try:
             if hasattr(self.sample_gui, "convert_to_name"):
                 return str(self.sample_gui.convert_to_name(index))
         except Exception:
             pass
-
-        try:
-            device = self.device_list[index]
-        except Exception:
-            return f"device_{index + 1}"
 
         section = getattr(self, "section", "")
         if section:

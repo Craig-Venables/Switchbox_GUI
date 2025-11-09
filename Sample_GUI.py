@@ -93,6 +93,13 @@ class SampleGUI:
         self.current_device_map: str = "Cross_bar"
         self.pyswitchbox: bool = True
         self.Electronic_Mpx: bool = False
+
+        # Device label mappings
+        self.device_labels: List[str] = []
+        self.device_labels_by_key: Dict[str, str] = {}
+        self.device_keys_by_label: Dict[str, str] = {}
+        self.device_section_number_by_key: Dict[str, Tuple[str, Optional[int]]] = {}
+
         self.update_device_type(self.current_device_map)
         self.current_index: int = 0  # Index of currently selected device
 
@@ -256,8 +263,9 @@ class SampleGUI:
 
         # Create new checkboxes
         for i, device in enumerate(self.device_list):
+            label = self.get_device_label(device)
             var = tk.BooleanVar(value=True)  # Default to selected
-            cb = tk.Checkbutton(self.scrollable_frame, text=device, variable=var,
+            cb = tk.Checkbutton(self.scrollable_frame, text=label, variable=var,
                                 command=self.update_selected_devices)
             cb.grid(row=i, column=0, sticky='w')
 
@@ -309,7 +317,9 @@ class SampleGUI:
         self.update_canvas_selection_highlights()
 
         # Log selection
-        self.log_terminal(f"Selected devices: {', '.join(sorted(self.selected_devices))}")
+        friendly_selected = [self.get_device_label(self.device_list[idx]) for idx in self.selected_indices]
+        selection_text = ", ".join(friendly_selected) if friendly_selected else "None"
+        self.log_terminal(f"Selected devices: {selection_text}")
 
     def update_canvas_selection_highlights(self) -> None:
         """Update visual indicators on canvas for selected devices"""
@@ -413,9 +423,64 @@ class SampleGUI:
         self.current_map_map = device_maps[current_device_map]
         self.device_maps_list = list(device_maps.keys())
         self.device_list = list(device_maps[current_device_map].keys())  # Dictionary of devices
+        self._build_device_name_mapping()
         # Update device checkboxes when device type changes
         if hasattr(self, 'device_checkboxes'):
             self.update_device_checkboxes()
+
+    def _build_device_name_mapping(self) -> None:
+        """Build mapping between device keys and user-facing labels (e.g., A1)."""
+        self.device_labels = []
+        self.device_labels_by_key = {}
+        self.device_keys_by_label = {}
+        self.device_section_number_by_key = {}
+
+        section_counts: Dict[str, int] = {}
+        for device_key in self.device_list:
+            info = self.device_mapping.get(device_key, {})
+            section_raw = info.get("section", "")
+            section = str(section_raw) if section_raw is not None else ""
+
+            if section:
+                section_counts[section] = section_counts.get(section, 0) + 1
+                number = section_counts[section]
+                label = f"{section}{number}"
+            else:
+                number = None
+                section = ""
+                label = device_key
+
+            if label in self.device_keys_by_label:
+                suffix = len(self.device_labels) + 1
+                label = f"{label}_{suffix}"
+
+            self.device_labels.append(label)
+            self.device_labels_by_key[device_key] = label
+            self.device_keys_by_label[label] = device_key
+            self.device_section_number_by_key[device_key] = (section, number)
+
+    def get_device_label(self, device_key: str) -> str:
+        """Return the user-facing label for a device key."""
+        return self.device_labels_by_key.get(device_key, device_key)
+
+    def get_device_section_and_number(self, device_key: str) -> Tuple[str, Optional[int]]:
+        """Return the (section, number) tuple for a device key."""
+        return self.device_section_number_by_key.get(device_key, ("", None))
+
+    def get_device_key_from_label(self, label: str) -> Optional[str]:
+        """Resolve a user-facing label back to a device key."""
+        return self.device_keys_by_label.get(label)
+
+    def convert_to_name(self, identifier: Any) -> str:
+        """Provide Measurement GUI compatible label lookup by index or device key."""
+        if isinstance(identifier, str):
+            return self.get_device_label(identifier)
+        if isinstance(identifier, int):
+            if 0 <= identifier < len(self.device_list):
+                device_key = self.device_list[identifier]
+                return self.get_device_label(device_key)
+            return f"device_{identifier + 1}"
+        return str(identifier)
 
     def update_dropdowns(self, event: Optional[Any]) -> None:
         sample = self.sample_type_var.get()
@@ -431,7 +496,7 @@ class SampleGUI:
             self.section_dropdown["state"] = "readonly"
 
             # Update device numbers
-            self.device_dropdown["values"] = sample_config[sample]["devices"]
+            self.device_dropdown["values"] = self.device_labels
             self.device_dropdown.set("")
 
             # Call do_something when sample changes
@@ -456,11 +521,12 @@ class SampleGUI:
             self.current_index = self.selected_indices[0] if self.selected_indices else 0
 
         new_device = self.device_list[self.current_index]
-        self.log_terminal(f"Previous device: {new_device}")
+        label = self.get_device_label(new_device)
+        self.log_terminal(f"Previous device: {label}")
 
         # Update the displayed device information
-        self.device_var.set(new_device)
-        self.info_box.config(text=f"Current Device: {new_device}")
+        self.device_var.set(label)
+        self.info_box.config(text=f"Current Device: {label}")
 
         # Update the highlight
         self.update_highlight(new_device)
@@ -483,11 +549,12 @@ class SampleGUI:
             self.current_index = self.selected_indices[0] if self.selected_indices else 0
 
         new_device = self.device_list[self.current_index]
-        self.log_terminal(f"Next device: {new_device}")
+        label = self.get_device_label(new_device)
+        self.log_terminal(f"Next device: {label}")
 
         # Update the displayed device information
-        self.device_var.set(new_device)
-        self.info_box.config(text=f"Current Device: {new_device}")
+        self.device_var.set(label)
+        self.info_box.config(text=f"Current Device: {label}")
 
         # Update the highlight
         self.update_highlight(new_device)
@@ -517,10 +584,11 @@ class SampleGUI:
                 # Update index
                 self.current_index = i  # Now it holds the current index of the device
 
-                self.device_var.set(device)
+                label = self.get_device_label(device)
+                self.device_var.set(label)
                 self.sample_type_var.set(bounds["sample"])
                 self.section_var.set(bounds["section"])
-                self.info_box.config(text=f"Current Device: {device}")
+                self.info_box.config(text=f"Current Device: {label}")
 
                 # Draw a rectangle around the clicked device
                 self.canvas.create_rectangle(
@@ -564,7 +632,7 @@ class SampleGUI:
             self.change_relays()
             print("")
             print("Selected devices:")
-            print(selected_device_list)
+            print([self.get_device_label(device) for device in selected_device_list])
             print("")
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
@@ -572,9 +640,28 @@ class SampleGUI:
             self.measuremnt_gui.bring_to_top()
 
     def update_info_box(self, event: Optional[Any] = None) -> None:
+        selected_device = self.device_var.get()
+        device_key = self.get_device_key_from_label(selected_device) if selected_device else None
+
+        if device_key and device_key in self.device_list:
+            idx = self.device_list.index(device_key)
+            if idx != self.current_index:
+                self.current_index = idx
+            device_meta = self.device_mapping.get(device_key, {})
+            section = device_meta.get("section")
+            sample = device_meta.get("sample")
+            if sample:
+                self.sample_type_var.set(sample)
+            if section:
+                self.section_var.set(section)
+            if hasattr(self, 'original_image'):
+                try:
+                    self.update_highlight(device_key)
+                except Exception:
+                    pass
+
         selected_sample = self.sample_type_var.get()
         selected_section = self.section_var.get()
-        selected_device = self.device_var.get()
         device_text = f"Current Device: {selected_sample} - {selected_section} - {selected_device}"
         self.info_box.config(text=device_text)
 
@@ -583,22 +670,24 @@ class SampleGUI:
         current_device = self.device_list[self.current_index]
 
         # Check if current device is in selected devices
+        label = self.get_device_label(current_device)
+
         if current_device not in self.selected_devices:
-            self.log_terminal(f"Warning: Device {current_device} is not selected")
+            self.log_terminal(f"Warning: Device {label} is not selected")
             response = messagebox.askyesno("Device Not Selected",
-                                           f"Device {current_device} is not in the selected list. Continue anyway?")
+                                           f"Device {label} is not in the selected list. Continue anyway?")
             if not response:
                 return
 
         # Use unified multiplexer manager interface
         if self.mpx_manager is not None:
-            self.log_terminal(f"Routing to {current_device} via {self.multiplexer_type}")
+            self.log_terminal(f"Routing to {label} via {self.multiplexer_type}")
             success = self.mpx_manager.route_to_device(current_device, self.current_index)
             
             if success:
-                self.log_terminal(f"Successfully routed to {current_device}")
+                self.log_terminal(f"Successfully routed to {label}")
             else:
-                self.log_terminal(f"Failed to route to {current_device}")
+                self.log_terminal(f"Failed to route to {label}")
             
             # Update measurement window if open
             if self.measurement_window:
@@ -680,7 +769,7 @@ class SampleGUI:
         if device_name in self.device_list:
             idx = self.device_list.index(device_name)
             self.current_index = idx
-            self.device_var.set(device_name)
+            self.device_var.set(self.get_device_label(device_name))
             self.update_highlight(device_name)
             self.change_relays()
 
@@ -818,9 +907,10 @@ class SampleGUI:
             for idx in self.selected_indices:
                 device = self.device_list[idx]
                 self.current_index = idx
-                self.device_var.set(device)
-                self.info_box.config(text=f"Current Device: {device}")
-                self.info_box.config(text=f"Current Device: {device}")
+                label = self.get_device_label(device)
+                self.device_var.set(label)
+                self.info_box.config(text=f"Current Device: {label}")
+                self.info_box.config(text=f"Current Device: {label}")
                 self.update_highlight(device)
                 self.change_relays()
                 yield device

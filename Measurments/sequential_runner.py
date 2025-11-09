@@ -392,8 +392,15 @@ def _safe_master_update(gui: Any) -> None:
 
 
 def _update_status(gui: Any, message: str) -> None:
+    setter = getattr(gui, "set_status_message", None)
+    if callable(setter):
+        try:
+            setter(message)
+            return
+        except Exception:
+            pass
     try:
-        gui.status_box.config(text=message)
+        gui.master.title(message)
     except Exception:
         pass
 

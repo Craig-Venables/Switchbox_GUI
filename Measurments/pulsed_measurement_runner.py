@@ -42,11 +42,11 @@ class PulsedMeasurementRunner:
         handled, False to let the caller continue with other branches.
         """
         handlers = {
-            "SMU_AND_PMU Pulsed IV <1.5v": self._run_pulsed_lt_1p5,
-            "SMU_AND_PMU Pulsed IV >1.5v": self._run_pulsed_gt_1p5,
-            "SMU_AND_PMU Pulsed IV (fixed 20V)": self._run_pulsed_fixed_20,
-            "SMU_AND_PMU Fast Pulses": self._run_fast_pulses,
-            "SMU_AND_PMU Fast Hold": self._run_fast_hold,
+            "Pulsed IV <1.5V": self._run_pulsed_lt_1p5,
+            "Pulsed IV >1.5V": self._run_pulsed_gt_1p5,
+            "Pulsed IV (fixed 20V)": self._run_pulsed_fixed_20,
+            "Fast Pulses": self._run_fast_pulses,
+            "Fast Hold": self._run_fast_hold,
         }
         handler = handlers.get(excitation)
         if not handler:
@@ -72,7 +72,7 @@ class PulsedMeasurementRunner:
             if self.stop_measurement_flag:
                 break
 
-            self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Pulsed IV <1.5v)...")
+            self.set_status_message(f"Measuring {device} (SMU_AND_PMU Pulsed IV <1.5v)...")
             self.master.update()
 
             start_v = float(self.ex_piv_start.get())
@@ -157,7 +157,7 @@ class PulsedMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Pulsed IV >1.5v)...")
+            self.set_status_message(f"Measuring {device} (SMU_AND_PMU Pulsed IV >1.5v)...")
             self.master.update()
 
             start_v = float(self.ex_piv_start.get())
@@ -222,8 +222,8 @@ class PulsedMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(
-                text=f"Measuring {device} (SMU_AND_PMU Pulsed IV - fixed 20V)..."
+            self.set_status_message(
+                f"Measuring {device} (SMU_AND_PMU Pulsed IV - fixed 20V)..."
             )
             self.master.update()
 
@@ -313,7 +313,7 @@ class PulsedMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Fast Pulses)...")
+            self.set_status_message(f"Measuring {device} (SMU_AND_PMU Fast Pulses)...")
             self.master.update()
 
             pulse_v = float(self.ex_fp_voltage.get())
@@ -383,7 +383,7 @@ class PulsedMeasurementRunner:
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
                 break
-            self.status_box.config(text=f"Measuring {device} (SMU_AND_PMU Fast Hold)...")
+            self.set_status_message(f"Measuring {device} (SMU_AND_PMU Fast Hold)...")
             self.master.update()
 
             hold_v = float(self.ex_fh_voltage.get())
@@ -447,7 +447,7 @@ class PulsedMeasurementRunner:
     def _finalize_mode(self) -> None:
         self._finalize_output()
         self.measuring = False
-        self.status_box.config(text="Measurement Complete")
+        self.set_status_message("Measurement Complete")
 
         save_dir = self._get_save_directory(
             self.sample_name_var.get(),

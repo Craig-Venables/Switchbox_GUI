@@ -51,9 +51,13 @@ def test_plot_updaters_populate_live_plots():
     assert list(x_iv) == dummy_gui.v_arr_disp
     assert list(y_iv) == dummy_gui.c_arr_disp
 
-    x_vi, y_vi = panels.lines["rt_vi"].get_data()
-    assert list(x_vi) == dummy_gui.c_arr_disp
-    assert list(y_vi) == dummy_gui.v_arr_disp
+    x_logiv, y_logiv = panels.lines["rt_logiv"].get_data()
+    assert list(x_logiv) == dummy_gui.v_arr_disp
+    assert all(val > 0 for val in y_logiv)
+
+    x_loglog, y_loglog = panels.lines["rt_logilogv"].get_data()
+    assert all(val > 0 for val in x_loglog)
+    assert list(y_loglog) == list(y_logiv)
 
     x_ct, y_ct = panels.lines["ct_rt"].get_data()
     assert list(x_ct) == dummy_gui.t_arr_disp

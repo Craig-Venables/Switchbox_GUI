@@ -31,11 +31,8 @@ class MeasurementGUILayoutBuilder:
     ) -> None:
         self._build_connection_section(left_frame)
         self._build_mode_selection(left_frame)
-        self._build_status_box(left_frame)
-        self._build_controller_selection(left_frame)
-        self._build_temperature_panel(left_frame)
         self._build_signal_messaging(left_frame)
-        self._build_manual_endurance_retention(left_frame)
+        # self._build_manual_endurance_retention(left_frame)
         self._build_custom_measurement_section(middle_frame)
         self.build_sequential_controls(middle_frame)
         if top_frame is not None:
@@ -165,47 +162,6 @@ class MeasurementGUILayoutBuilder:
 
         self.widgets["mode_frame"] = frame
 
-    def _build_status_box(self, parent: tk.Misc) -> None:
-        gui = self.gui
-        frame = tk.LabelFrame(parent, text="Status", padx=5, pady=5)
-        frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
-        gui.status_box = tk.Label(frame, text="Status: Not Connected", width=30)
-        gui.status_box.grid(row=0, column=0, padx=5)
-        self.widgets["status_frame"] = frame
-
-    def _build_controller_selection(self, parent: tk.Misc) -> None:
-        gui = self.gui
-        frame = tk.LabelFrame(parent, text="Temperature Controller", padx=5, pady=5)
-        frame.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
-
-        tk.Label(frame, text="Type:").grid(row=0, column=0, sticky='w')
-        gui.controller_type_var = tk.StringVar(value=getattr(gui, "temp_controller_type", "Auto-Detect"))
-        gui.controller_type_dropdown = ttk.Combobox(
-            frame,
-            textvariable=gui.controller_type_var,
-            values=["Auto-Detect", "None", "Lakeshore 335", "Oxford ITC4"],
-            state="readonly",
-        )
-        gui.controller_type_dropdown.grid(row=0, column=1, padx=5)
-
-        tk.Label(frame, text="Address:").grid(row=1, column=0, sticky='w')
-        gui.controller_address_var = tk.StringVar(value=getattr(gui, "temp_controller_address", ""))
-        gui.controller_address_entry = tk.Entry(frame, textvariable=gui.controller_address_var)
-        gui.controller_address_entry.grid(row=1, column=1, padx=5)
-
-        gui.connect_controller_button = tk.Button(
-            frame,
-            text="Connect",
-            command=self.callbacks.get("reconnect_temperature"),
-        )
-        gui.connect_controller_button.grid(row=2, column=0, padx=5)
-
-        gui.controller_status_label = tk.Label(frame, text="● Disconnected", fg="red")
-        gui.controller_status_label.grid(row=2, column=1, padx=5)
-
-        frame.columnconfigure(1, weight=1)
-        self.widgets["controller_frame"] = frame
-
     def _build_top_banner(self, parent: tk.Misc) -> None:
         gui = self.gui
         frame = tk.LabelFrame(parent, text="", padx=10, pady=10)
@@ -223,7 +179,7 @@ class MeasurementGUILayoutBuilder:
 
         info_frame = tk.Frame(frame)
         info_frame.grid(row=1, column=0, columnspan=4, sticky="ew")
-        info_frame.columnconfigure([0, 1, 2], weight=1)
+        info_frame.columnconfigure([0, 1, 2, 3, 4], weight=1)
 
         gui.device_label = tk.Label(info_frame, text="Device: XYZ", font=("Helvetica", 12))
         gui.device_label.grid(row=1, column=0, padx=10, sticky="w")
@@ -243,15 +199,6 @@ class MeasurementGUILayoutBuilder:
         )
         gui.motor_control_button.grid(row=1, column=3, columnspan=1, pady=5)
 
-        show_sweeps_cb = self.callbacks.get("show_last_sweeps")
-        gui.show_results_button = tk.Button(
-            info_frame,
-            text="Show Last Sweeps",
-            command=show_sweeps_cb,
-            state=tk.NORMAL if show_sweeps_cb else tk.DISABLED,
-        )
-        gui.show_results_button.grid(row=1, column=4, columnspan=1, pady=5)
-
         check_conn_cb = self.callbacks.get("check_connection")
         gui.check_connection_button = tk.Button(
             info_frame,
@@ -259,37 +206,12 @@ class MeasurementGUILayoutBuilder:
             command=check_conn_cb,
             state=tk.NORMAL if check_conn_cb else tk.DISABLED,
         )
-        gui.check_connection_button.grid(row=1, column=5, columnspan=1, pady=5)
+        gui.check_connection_button.grid(row=1, column=4, columnspan=1, pady=5)
 
         gui._status_updates_active = True
         gui.master.after(250, gui._status_update_tick)
 
         self.widgets["top_banner"] = frame
-
-    def _build_temperature_panel(self, parent: tk.Misc) -> None:
-        gui = self.gui
-        frame = tk.LabelFrame(parent, text="Itc4 Temp Set", padx=5, pady=5)
-        frame.grid(row=4, column=0, padx=10, pady=5, sticky="ew")
-
-        tk.Label(frame, text="Set_temp:").grid(row=1, column=0, sticky="w")
-        existing_temp = getattr(gui, "temp_var", "")
-        if hasattr(existing_temp, "get"):
-            existing_temp = existing_temp.get()
-        gui.temp_var = tk.StringVar(value=existing_temp or "")
-        gui.temp_var_entry = ttk.Entry(frame, textvariable=gui.temp_var)
-        gui.temp_var_entry.grid(row=1, column=1, columnspan=1, sticky="ew")
-
-        send_temp_cb = self.callbacks.get("send_temp")
-        gui.temp_go_button = tk.Button(
-            frame,
-            text="Apply",
-            command=send_temp_cb or getattr(gui, "send_temp", None),
-            state=tk.NORMAL if (send_temp_cb or getattr(gui, "send_temp", None)) else tk.DISABLED,
-        )
-        gui.temp_go_button.grid(row=1, column=2)
-
-        frame.columnconfigure(1, weight=1)
-        self.widgets["temperature_panel"] = frame
 
     def _build_signal_messaging(self, parent: tk.Misc) -> None:
         gui = self.gui
@@ -673,16 +595,12 @@ def _self_test() -> None:
             "on_system_change": lambda _: None,
             "on_custom_save_toggle": lambda: None,
             "browse_save": lambda: None,
-            "reconnect_temperature": lambda: None,
             "open_motor_control": lambda: None,
-            "show_last_sweeps": lambda: None,
             "check_connection": lambda: None,
-            "send_temp": lambda: None,
         },
     )
     builder.build_all_panels(left, middle, top)
 
-    assert hasattr(dummy, "status_box")
     assert "top_banner" in builder.widgets
 
     root.destroy()

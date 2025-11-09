@@ -41,9 +41,7 @@ class PlotUpdaters:
         """Ensure the core plot updater threads are running."""
         for name, target in (
             ("iv", self._update_iv_plots),
-            ("vi", self._update_vi_plots),
             ("ct", self._update_current_time_plot),
-            ("rt", self._update_resistance_time_plot),
         ):
             self._ensure_thread(name, target)
 
@@ -123,30 +121,22 @@ class PlotUpdaters:
                 i = list(self.gui.c_arr_disp)
                 n = min(len(v), len(i))
                 if n > 0:
-                    self._update_line("rt_iv", v[:n], i[:n])
+                    voltages = v[:n]
+                    currents = np.array(i[:n], dtype=float)
+                    self._update_line("rt_iv", voltages, currents.tolist())
 
-                log_i = list(self.gui.c_arr_disp_abs)
-                n_log = min(len(v), len(log_i))
-                if n_log > 0:
-                    self._update_line("rt_logiv", v[:n_log], log_i[:n_log])
-            time.sleep(self.interval_s)
+                    abs_currents = np.abs(currents)
+                    abs_currents[abs_currents == 0] = 1e-12
+                    abs_list = abs_currents.tolist()
+                    try:
+                        self.gui.c_arr_disp_abs = abs_list
+                    except Exception:
+                        pass
+                    self._update_line("rt_logiv", voltages, abs_list)
 
-    def _update_vi_plots(self) -> None:
-        name = "vi"
-        while self._thread_running(name):
-            if getattr(self.gui, "measuring", False):
-                c = list(self.gui.c_arr_disp)
-                v = list(self.gui.v_arr_disp)
-                n = min(len(c), len(v))
-                if n > 0:
-                    self._update_line("rt_vi", c[:n], v[:n])
-
-                if v and c:
-                    n2 = min(len(v), len(c))
-                    vx = v[:n2]
-                    vy = c[:n2]
-                    if np.any(np.array(vx) > 0):
-                        self._update_line("rt_logilogv", vx, vy)
+                    abs_voltages = np.abs(np.array(voltages, dtype=float))
+                    abs_voltages[abs_voltages == 0] = 1e-12
+                    self._update_line("rt_logilogv", abs_voltages.tolist(), abs_list)
             time.sleep(self.interval_s)
 
     def _update_current_time_plot(self) -> None:
@@ -158,17 +148,6 @@ class PlotUpdaters:
                 n = min(len(t), len(c))
                 if n > 0:
                     self._update_line("ct_rt", t[:n], c[:n])
-            time.sleep(self.interval_s)
-
-    def _update_resistance_time_plot(self) -> None:
-        name = "rt"
-        while self._thread_running(name):
-            if getattr(self.gui, "measuring", False):
-                t = list(self.gui.t_arr_disp)
-                r = list(self.gui.r_arr_disp)
-                n = min(len(t), len(r))
-                if n > 0:
-                    self._update_line("rt_rt", t[:n], r[:n])
             time.sleep(self.interval_s)
 
     def _update_temperature_plot(self) -> None:
