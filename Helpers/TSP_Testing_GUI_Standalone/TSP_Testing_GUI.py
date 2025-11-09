@@ -21,7 +21,9 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
+from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
 from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import Keithley2450_TSP_Scripts
+from Equipment.SMU_AND_PMU.keithley2450_tsp_sim_scripts import Keithley2450_TSP_Sim_Scripts
 from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
 
 
@@ -711,9 +713,15 @@ class TSPTestingGUI(tk.Toplevel):
             self.log(f"Connecting to {address}...")
             self.log(f"Using {terminals.upper()} terminals...")
             
-            self.tsp = Keithley2450_TSP(address, terminals=terminals)
+            address_lower = address.strip().lower()
+            if address_lower.startswith(("sim", "simulation")):
+                self.tsp = Keithley2450_TSP_Sim(address, terminals=terminals)
+                self.test_scripts = Keithley2450_TSP_Sim_Scripts(self.tsp)
+            else:
+                self.tsp = Keithley2450_TSP(address, terminals=terminals)
+                self.test_scripts = Keithley2450_TSP_Scripts(self.tsp)
+
             idn = self.tsp.get_idn()
-            self.test_scripts = Keithley2450_TSP_Scripts(self.tsp)
             
             self.conn_status_var.set(f"Connected: {idn} ({terminals.upper()})")
             self.log(f"✓ Connected: {idn}")

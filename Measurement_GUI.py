@@ -48,7 +48,30 @@ from telegram import PassportData
 from Equipment.optical_excitation import create_optical_from_system_config, OpticalExcitation
 from typing import Optional, Any, Callable, Dict, List, Tuple, Union
 
-# Import new utility modules
+# Optional dependencies --------------------------------------------------------
+try:  # PMU testing GUI is optional (requires PMU hardware stack)
+    from PMU_Testing_GUI import PMUTestingGUI  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    PMUTestingGUI = None  # type: ignore
+
+try:  # Legacy live plotter utility (not always present)
+    from Measurement_Plotter import MeasurementPlotter  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    try:
+        from measurement_plotter import MeasurementPlotter  # type: ignore
+    except Exception:  # pragma: no cover
+        MeasurementPlotter = None  # type: ignore
+
+try:  # Automated test framework (external package)
+    from automated_tests.framework import MeasurementDriver, TestRunner, load_thresholds  # type: ignore
+    _HAS_TEST_FRAMEWORK = True
+except Exception:  # pragma: no cover - optional dependency
+    MeasurementDriver = None  # type: ignore
+    TestRunner = None  # type: ignore
+    load_thresholds = None  # type: ignore
+    _HAS_TEST_FRAMEWORK = False
+
+# Import new utility modules ---------------------------------------------------
 from Measurments.data_utils import safe_measure_current, safe_measure_voltage
 from Measurments.data_saver import MeasurementDataSaver, SummaryPlotData
 from Measurments.optical_controller import OpticalController
@@ -64,6 +87,7 @@ from Measurments.single_measurement_runner import SingleMeasurementRunner
 from Measurments.pulsed_measurement_runner import PulsedMeasurementRunner
 from Measurments.special_measurement_runner import SpecialMeasurementRunner
 from gui.plot_panels import MeasurementPlotPanels
+from gui.plot_updaters import PlotUpdaters
 from gui.layout_builder import MeasurementGUILayoutBuilder
 
 from Check_Connection_GUI import CheckConnection
@@ -251,6 +275,7 @@ class MeasurementGUI:
         self.current_device = self.device_list[self.current_index]
         self.device_section_and_number = self.convert_to_name(self.current_index)
         self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
+        self._update_device_identifiers(self.device_section_and_number)
 
         # Flags
         self.connected = False
@@ -288,8 +313,9 @@ class MeasurementGUI:
 
         # Central measurement engine
         self.measurement_service = MeasurementService()
-        # Shared persistence helper
-        self.data_saver = MeasurementDataSaver()
+        # Shared persistence helper with updated default storage root
+        self.default_save_root = self._resolve_default_save_root()
+        self.data_saver = MeasurementDataSaver(default_base=self.default_save_root)
         # Instrument connection manager (handles SMU/PSU/temp lifecycles)
         self.connections = InstrumentConnectionManager(status_logger=self.log_terminal)
 
@@ -355,8 +381,9 @@ class MeasurementGUI:
         )
         self.plot_panels.create_all_plots(self.Graph_frame, temp_enabled=self.itc_connected)
         self.plot_panels.attach_to(self)
-        self._start_plot_threads()
-        self._start_temperature_thread()
+        self.plot_updaters = PlotUpdaters(gui=self, plot_panels=self.plot_panels)
+        self.plot_updaters.start_all_threads()
+        self.plot_updaters.start_temperature_thread(self.itc_connected)
 
         # self.measurement_thread = None
         # self.plotter = None
@@ -385,6 +412,12 @@ class MeasurementGUI:
         controllers are left in a safe state when the GUI exits. It performs
         best-effort cleanup and swallows exceptions so shutdown proceeds.
         """
+
+        try:
+            if hasattr(self, "plot_updaters"):
+                self.plot_updaters.stop_all_threads()
+        except Exception:
+            pass
 
         #  self.keithley.shutdown()
         # # todo send comand to temp if connected to cool down to 0
@@ -662,7 +695,20 @@ class MeasurementGUI:
         The helper `load_thresholds` (from the test framework) provides a
         named structure containing probe settings, thresholds and safety limits.
         """
-        t = load_thresholds()
+        if not _HAS_TEST_FRAMEWORK or not callable(load_thresholds):
+            messagebox.showinfo(
+                "Test Preferences",
+                "Automated test framework is not installed; thresholds unavailable.",
+            )
+            return
+        try:
+            t = load_thresholds()
+        except Exception as exc:  # pragma: no cover - optional dependency
+            messagebox.showerror(
+                "Test Preferences",
+                f"Unable to load thresholds: {exc}",
+            )
+            return
         info = (
             f"Probe: {t.probe_voltage_v} V for {t.probe_duration_s}s @ {t.probe_sample_hz} Hz\n"
             f"Working I threshold: {t.working_current_a} A\n"
@@ -701,14 +747,26 @@ class MeasurementGUI:
         # PMU testing button: opens a lightweight PMU Testing GUI
         
         try:
-            self.pmu_btn = tk.Button(frame, text="PMU Testing", command=lambda: PMUTestingGUI(self.master, provider=self))
-            
+            if PMUTestingGUI is not None:
+                self.pmu_btn = tk.Button(
+                    frame,
+                    text="PMU Testing",
+                    command=lambda: PMUTestingGUI(self.master, provider=self),
+                )
+            else:
+                raise RuntimeError("PMU_Testing_GUI module not available")
+
             self.pmu_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
             print("importing PMU_Testing_GUI completed")
         except Exception:
             print("promblem with pmu testing gui")
             # If import fails, keep UI functional without PMU
-            pass
+            self.pmu_btn = tk.Button(
+                frame,
+                text="PMU Testing (unavailable)",
+                state=tk.DISABLED,
+            )
+            self.pmu_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
         
         # TSP Testing button: opens Keithley 2450 TSP pulse testing GUI
         try:
@@ -864,133 +922,6 @@ class MeasurementGUI:
             if self._status_updates_active and self.master.winfo_exists():
                 self.master.after(250, self._status_update_tick)
 
-    def plot_current_time(self) -> None:
-        """Background plotter thread: update Current vs Time plot.
-
-        This method runs in a dedicated thread and periodically checks the
-        `self.measuring` flag. When measurements are active it copies the
-        plotting buffers and updates the matplotlib line objects safely.
-        """
-        while True:
-            if self.measuring:
-                try:
-                    x = list(self.t_arr_disp)
-                    y = list(self.c_arr_disp)
-                    n = min(len(x), len(y))
-                    if n > 0:
-                        self.line_ct_rt.set_data(x[:n], y[:n])
-                        self.ax_ct_rt.relim()
-                        self.ax_ct_rt.autoscale_view()
-                        self.canvas_ct_rt.draw()
-                except Exception:
-                    pass
-            time.sleep(0.1)
-
-    def plot_vi_logilogv(self) -> None:
-        """Background plotter thread: update V/I and log-log axes.
-
-        Keeps the V/I and log-log plots in sync with the shared buffers.
-        """
-        while True:
-            if self.measuring:
-                try:
-                    x = list(self.c_arr_disp)
-                    y = list(self.v_arr_disp)
-                    n = min(len(x), len(y))
-                    if n > 0:
-                        self.line_rt_vi.set_data(x[:n], y[:n])
-                        self.ax_rt_vi.relim()
-                        self.ax_rt_vi.autoscale_view()
-                        self.canvas_rt_vi.draw()
-                except Exception:
-                    pass
-
-                try:
-                    vx = list(self.v_arr_disp)
-                    vy = list(self.c_arr_disp)
-                    n2 = min(len(vx), len(vy))
-                    if n2 > 0 and np.any(np.array(vx[:n2]) > 0):
-                        self.line_rt_logilogv.set_data(vx[:n2], vy[:n2])
-                        self.ax_rt_logilogv.relim()
-                        self.ax_rt_logilogv.autoscale_view()
-                        self.canvas_rt_logilogv.draw()
-                except Exception:
-                    pass
-
-            time.sleep(0.1)
-
-    def plot_voltage_current(self) -> None:
-        """Background plotter thread: update IV and |I| (log) plots.
-
-        Regularly copies shared buffers into the live line objects so the GUI
-        displays the most recent measurement points.
-        """
-        while True:
-            if self.measuring:
-                try:
-                    x = list(self.v_arr_disp)
-                    y = list(self.c_arr_disp)
-                    n = min(len(x), len(y))
-                    if n > 0:
-                        self.line_rt_iv.set_data(x[:n], y[:n])
-                        self.ax_rt_iv.relim()
-                        self.ax_rt_iv.autoscale_view()
-                        self.canvas_rt_iv.draw()
-                except Exception:
-                    pass
-
-                try:
-                    x2 = list(self.v_arr_disp)
-                    y2 = list(self.c_arr_disp_abs)
-                    n2 = min(len(x2), len(y2))
-                    if n2 > 0:
-                        self.line_rt_logiv.set_data(x2[:n2], y2[:n2])
-                        self.ax_rt_logiv.relim()
-                        self.ax_rt_logiv.autoscale_view()
-                        self.canvas_rt_logiv.draw()
-                except Exception:
-                    pass
-
-            time.sleep(0.1)
-
-    def plot_resistance_time(self) -> None:
-        """Background plotter thread: update Resistance vs Time plot."""
-        while True:
-            if self.measuring:
-                try:
-                    x = list(self.t_arr_disp)
-                    y = list(self.r_arr_disp)
-                    n = min(len(x), len(y))
-                    if n > 0:
-                        self.line_rt_rt.set_data(x[:n], y[:n])
-                        self.ax_rt_rt.relim()
-                        self.ax_rt_rt.autoscale_view()
-                        self.canvas_rt_rt.draw()
-                except Exception:
-                    pass
-            time.sleep(0.1)
-
-    def plot_Temp_time(self) -> None:
-        """Background plotter thread: update temperature-time plot (if enabled)."""
-        while True:
-            if self.measuring:
-                try:
-                    x = list(self.t_arr_disp)
-                    y = list(self.c_arr_disp)
-                    n = min(len(x), len(y))
-                    if n > 0:
-                        self.line_tt_rt.set_data(x[:n], y[:n])
-                        self.ax_tt_rt.relim()
-                        self.ax_tt_rt.autoscale_view()
-                        self.canvas_tt_rt.draw()
-                except Exception:
-                    pass
-            time.sleep(0.1)
-
-    ###################################################################
-    # seequencial plotting
-    ###################################################################
-
     # Add to your GUI initialization
     def create_plot_menu(self) -> None:
         """Create menu options for plotting."""
@@ -1005,6 +936,12 @@ class MeasurementGUI:
 
     def open_live_plotter(self) -> None:
         """Open a standalone live plotter window."""
+        if MeasurementPlotter is None:
+            messagebox.showinfo(
+                "Plotter",
+                "MeasurementPlotter module is not available on this installation.",
+            )
+            return
         if not hasattr(self, 'standalone_plotter') or not self.standalone_plotter.window.winfo_exists():
             measurement_type = self.Sequential_measurement_var.get()
             if measurement_type == "Iv Sweep":
@@ -1657,6 +1594,15 @@ class MeasurementGUI:
 
     def _tests_worker(self) -> None:
         try:
+            if (
+                MeasurementDriver is None
+                or TestRunner is None
+                or not callable(load_thresholds)
+            ):
+                self.test_log_queue.put(
+                    "Automated test framework not available; skipping run."
+                )
+                return
             inst = self.keithley
             driver = MeasurementDriver(inst, abort_flag=lambda: self.abort_tests_flag)
             runner = TestRunner(driver, load_thresholds())
@@ -2023,7 +1969,7 @@ class MeasurementGUI:
         sweep editor popup are applied on-the-fly.
 
         The GUI's `stop_measurement_flag` is checked frequently to allow
-        cooperative abort. Results are saved per-sweep in `Data_save_loc` and
+        cooperative abort. Results are saved per-sweep in the default `Data_folder`
         basic summary plots are produced.
         """
 
@@ -2279,7 +2225,14 @@ class MeasurementGUI:
                                     neg_stop_v_param = float(raw_neg)
                         except Exception:
                             neg_stop_v_param = None
-                        voltage_range = get_voltage_range(start_v, stop_v, step_v, sweep_type, neg_stop_v=neg_stop_v_param)
+                        voltage_range = self.measurement_service.compute_voltage_range(
+                            start_v=start_v,
+                            stop_v=stop_v,
+                            step_v=step_v,
+                            sweep_type=sweep_type,
+                            mode=VoltageRangeMode.FIXED_STEP,
+                            neg_stop_v=neg_stop_v_param,
+                        )
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -2804,6 +2757,7 @@ class MeasurementGUI:
         # Update section and number
         self.display_index_section_number = self.current_device + "/" + self.device_section_and_number
         self.device_var.config(text=self.display_index_section_number)
+        self._update_device_identifiers(self.device_section_and_number)
         # print(self.convert_to_name(self.current_index))
 
     def measure_one_device(self) -> None:
@@ -2858,7 +2812,20 @@ class MeasurementGUI:
                 widget.master.focus_set()
         except Exception:
             pass
-    
+
+    def bring_to_top(self) -> None:
+        """Raise the main window and ensure it gains focus."""
+        try:
+            master = getattr(self, "master", None)
+            if master:
+                master.deiconify()
+                master.lift()
+                master.focus_force()
+                master.attributes("-topmost", True)
+                master.after(100, lambda: master.attributes("-topmost", False))
+        except Exception as exc:
+            print(f"[GUI] Failed to bring window to top: {exc}")
+
     def convert_to_name(self, index: int) -> str:
         """Translate a device index into the legacy section/number label."""
         # Prefer sample GUI helper if available
@@ -2877,6 +2844,16 @@ class MeasurementGUI:
         if section:
             return f"{section}_{device}"
         return str(device)
+
+    def _update_device_identifiers(self, label: str) -> None:
+        """Derive the legacy letter/number components for save paths."""
+        letter = "".join(ch for ch in str(label) if ch.isalpha()) or "A"
+        number = "".join(ch for ch in str(label) if ch.isdigit()) or "1"
+        self.final_device_letter = letter
+        try:
+            self.final_device_number = int(number)
+        except ValueError:
+            self.final_device_number = number
 
     def open_motor_control(self) -> None:
         """Launch or raise the motor control GUI."""
@@ -3025,11 +3002,51 @@ class MeasurementGUI:
         except Exception as e:
             print(f"Could not save save location config: {e}")
     
-    def _get_base_save_path(self) -> Optional[str]:
-        """Get base save path (custom if enabled, None for default)"""
+    def _resolve_default_save_root(self) -> Path:
+        """
+        Determine the default base directory for measurement data.
+
+        Preference order:
+        1. OneDrive commercial root (environment-provided) ➜ Documents ➜ Data_folder
+        2. Explicit `%USERPROFILE%/OneDrive - The University of Nottingham/Documents/Data_folder`
+        3. Local `%USERPROFILE%/Documents/Data_folder`
+
+        The folder is created on demand. If none of the OneDrive locations
+        exist, the method falls back to the local Documents directory.
+        """
+        home = Path.home()
+        candidates: List[Path] = []
+
+        for env_key in ("OneDriveCommercial", "OneDrive"):
+            env_path = os.environ.get(env_key)
+            if env_path:
+                root = Path(env_path)
+                candidates.append(root / "Documents")
+
+        candidates.append(home / "OneDrive - The University of Nottingham" / "Documents")
+        candidates.append(home / "Documents")
+
+        for documents_path in candidates:
+            try:
+                root_exists = documents_path.parent.exists()
+                if not root_exists:
+                    continue
+                documents_path.mkdir(parents=True, exist_ok=True)
+                target = documents_path / "Data_folder"
+                target.mkdir(parents=True, exist_ok=True)
+                return target
+            except Exception:
+                continue
+
+        fallback = home / "Documents" / "Data_folder"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+    def _get_base_save_path(self) -> str:
+        """Get base save path (custom if enabled, default root otherwise)."""
         if self.use_custom_save_var.get() and self.custom_save_location:
             return str(self.custom_save_location)
-        return None  # None means use default (Data_save_loc)
+        return str(self.default_save_root)
     
     def _get_save_directory(self, sample_name: str, device_letter: str, device_number: str) -> str:
         """
@@ -3043,13 +3060,10 @@ class MeasurementGUI:
         Returns:
             String path to save directory
         """
-        base_path = self._get_base_save_path()
-        if base_path:
-            # Custom path: {custom_base}/{letter}/{number}
-            return os.path.join(base_path, device_letter, device_number)
-        else:
-            # Default path: Data_save_loc/{sample_name}/{letter}/{number}
-            return f"Data_save_loc\\{sample_name}\\{device_letter}\\{device_number}"
+        base_path = Path(self._get_base_save_path())
+        device_path = base_path / sample_name / device_letter / str(device_number)
+        device_path.mkdir(parents=True, exist_ok=True)
+        return str(device_path)
     
     def check_for_sample_name(self) -> None:
         """Check if sample name is set, prompt if not (thread-safe)."""
@@ -3110,31 +3124,11 @@ class MeasurementGUI:
         self.Check_connection_gui = CheckConnection(self.master, self.keithley)
 
     def _start_plot_threads(self) -> None:
-        """Ensure background plotting threads are running exactly once."""
-        def _ensure(name: str, target: Callable[[], None], enabled: bool = True) -> None:
-            if not enabled:
-                return
-            attr = f"measurement_{name}_thread"
-            existing = getattr(self, attr, None)
-            if existing is not None and getattr(existing, "is_alive", lambda: False)():
-                return
-            thread = threading.Thread(target=target, daemon=True)
-            setattr(self, attr, thread)
-            thread.start()
-
-        _ensure("iv", self.plot_voltage_current)
-        _ensure("vi_logilogv", self.plot_vi_logilogv)
-        _ensure("ct", self.plot_current_time)
-        _ensure("rt", self.plot_resistance_time)
+        """Compatibility shim: delegate to PlotUpdaters."""
+        if hasattr(self, "plot_updaters"):
+            self.plot_updaters.start_all_threads()
 
     def _start_temperature_thread(self) -> None:
-        """Start the temperature monitoring thread when hardware is available."""
-        if not self.itc_connected or not hasattr(self, "plot_panels"):
-            return
-        attr = "measurement_tt_thread"
-        existing = getattr(self, attr, None)
-        if existing is not None and getattr(existing, "is_alive", lambda: False)():
-            return
-        thread = threading.Thread(target=self.plot_Temp_time, daemon=True)
-        setattr(self, attr, thread)
-        thread.start()
+        """Compatibility shim for legacy callers."""
+        if hasattr(self, "plot_updaters"):
+            self.plot_updaters.start_temperature_thread(self.itc_connected)

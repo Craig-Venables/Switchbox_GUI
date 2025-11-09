@@ -441,7 +441,7 @@ class TSPTestingGUI(tk.Toplevel):
             self.system_var.set("keithley2450")  # Default
         
         system_combo = ttk.Combobox(system_frame, textvariable=self.system_var,
-                                   values=["keithley2450", "keithley4200a"],
+                                   values=["keithley2450", "keithley2450_sim", "keithley4200a"],
                                    state="readonly", width=20)
         system_combo.pack(side=tk.LEFT, padx=5)
         
@@ -954,24 +954,30 @@ class TSPTestingGUI(tk.Toplevel):
             connected_system = self.system_wrapper.connect(
                 address=address,
                 system_name=system_name,
-                terminals=self.terminals_var.get() if system_name == 'keithley2450' else None,
+                terminals=self.terminals_var.get()
+                if system_name in ('keithley2450', 'keithley2450_sim') else None,
             )
             
             self.current_system_name = connected_system
             idn = self.system_wrapper.get_idn()
             
             # Legacy compatibility: maintain old tsp/test_scripts if 2450
-            if connected_system == 'keithley2450':
-                self.tsp = self.system_wrapper.current_system.tsp_controller
-                self.test_scripts = self.system_wrapper.current_system.test_scripts
+            if connected_system in ('keithley2450', 'keithley2450_sim'):
+                system = self.system_wrapper.current_system
+                self.tsp = getattr(system, 'tsp_controller', None)
+                self.test_scripts = getattr(system, 'test_scripts', None)
             else:
                 self.tsp = None
                 self.test_scripts = None
             
-            terminals_text = f" ({self.terminals_var.get().upper()})" if connected_system == 'keithley2450' else ""
+            terminals_text = (
+                f" ({self.terminals_var.get().upper()})"
+                if connected_system in ('keithley2450', 'keithley2450_sim')
+                else ""
+            )
             self.conn_status_var.set(f"Connected: {system_name.upper()} - {idn}{terminals_text}")
             self.log(f"✓ Connected: {idn}")
-            if connected_system == 'keithley2450':
+            if connected_system in ('keithley2450', 'keithley2450_sim'):
                 self.log(f"✓ Terminals: {self.terminals_var.get().upper()}")
             
             # Update test list based on capabilities - this greys out unsupported tests

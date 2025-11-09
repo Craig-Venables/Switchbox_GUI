@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 
 from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
 from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
+from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
 from Equipment.SMU_AND_PMU.HP4140B import HP4140BController
 from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
 
@@ -31,6 +32,10 @@ class IVControllerManager:
         },
         'Keithley 2450': {
             'class': Keithley2450_TSP,  # Now using TSP for all 2450 operations
+            'address_key': 'SMU_address',
+        },
+        'Keithley 2450 (Simulation)': {
+            'class': Keithley2450_TSP_Sim,
             'address_key': 'SMU_address',
         },
         'Hp4140b': {
