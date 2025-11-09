@@ -80,6 +80,61 @@ Measurement_GUI.py (1,000 lines) - Main orchestrator
 
 ---
 
+## 🧭 PyQt6 Migration Status & Decision Guide
+
+### Overview (November 2025)
+- ✅ **Qt core window (`qt/measurement_window.py`)** now mirrors the Tk layout:
+  - Connection presets, system selector, SMU/PSU/ITC controls
+  - Mode selection, sweep parameters (DC + pulsed + ISPP + threshold + transient forms)
+  - Manual endurance/retention, sequential controls, automation launchers
+  - Live plotting parity (IV, log-IV, V/I, log-log, current-time, resistance-time, history tabs)
+- ✅ **Measurement execution**: DC sweeps, pulsed modes, special modes and manual tests reuse the existing `MeasurementService` APIs; all outputs route through `MeasurementDataSaver`.
+- ✅ **Persistence parity**: single-measurement saves, sequential exports, manual test data, optical metadata, custom save paths.
+- ✅ **External tooling**: PMU/TSP/Advanced test buttons launch the legacy Tk apps via `QProcess` with context shared through environment variables.
+- ⚠️ **Hardware confidence**: Qt path has been exercised without instruments; expect to validate with real hardware (SMU, PSU, optical, multiplexer) before adopting fully.
+- ⚠️ **Nice-to-have polish**: drag/sizing tweaks, theme alignment, optional history management preferences still pending.
+
+### How to Run Either GUI
+```bash
+# Tkinter (current production)
+python main.py --gui tk
+
+# PyQt6 preview
+python main.py --gui qt
+
+# or set DEFAULT_GUI inside main.py
+DEFAULT_GUI = "qt"
+```
+
+### What to Test Before Switching
+- **Instrument connectivity**: SMU/PSU/ITC connect/disconnect, address presets, failure handling.
+- **Measurement loops**: DC, pulsed (LT/GT/fast hold), ISPP, threshold search, transient decay.
+- **Sequential runner**: multi-device routing, custom delays, stop button, average exports.
+- **Manual tests**: endurance cycles, retention logging + saved files.
+- **External panels**: PMU/TSP/Advanced test launch, data paths, shared context.
+- **Persistence**: verify directory structure, filenames, summary plots, metadata JSON.
+
+#### Pending Implementation Tasks (if adopting Qt)
+| Area | Items Remaining | Notes |
+|------|-----------------|-------|
+| Hardware validation | Exercise every measurement mode with real instruments | Confirm timing, stop flags, device routing |
+| UI polish | Fine-tune widget spacing, theme, and window resizing | Optional before go-live |
+| History tools | Add “clear/save history” buttons per operator feedback | Nice-to-have |
+| Docs & SOP | Update screenshots, operator guides, lab how-to | Required before rollout |
+| Packaging | Decide on default GUI (`DEFAULT_GUI`) & communicate switch | Keep `--gui tk` fallback |
+
+### Decision Checklist
+| Question | If **Yes** | If **No** |
+|----------|------------|-----------|
+| Lab team validated Qt UI on real hardware? | You can plan a phased cut-over | Schedule a lab day and log results |
+| Operators comfortable with new layout? | Update SOPs & training material | Collect feedback; adjust layout/styling |
+| Third-party scripts rely on Tk widgets? | Hold Tk as fallback (keep CLI `--gui tk`) | Migrate scripts or expose adapters |
+| Expandability needed (multiple windows, platform styling)? | Qt is the better long-term base | Tk can remain default |
+
+**Recommendation:** keep Tk as default until Qt passes a full lab smoke test. Once verified, flip `DEFAULT_GUI` to `"qt"` and document the change; the Tk code remains available via CLI flag if roll-back is required.
+
+---
+
 ## 🏗️ Detailed Architecture Design
 
 ### Module 1: GUI Layout Builder
