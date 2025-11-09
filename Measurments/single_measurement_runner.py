@@ -191,7 +191,7 @@ class SingleMeasurementRunner:
             self.keithley.enable_output(True)
 
             print("working on device - ", device)
-            self.status_box.config(text=f"Measuring {device}...")
+            self.set_status_message(f"Measuring {device}...")
             self.master.update()
             time.sleep(1)
 
@@ -208,7 +208,7 @@ class SingleMeasurementRunner:
             )
 
             if using_hardware_sweep:
-                self.status_box.config(text="Hardware sweep in progress (fast mode)...")
+                self.set_status_message("Hardware sweep in progress (fast mode)...")
                 self.master.update()
 
                 from Measurments.sweep_config import SweepConfig
@@ -251,8 +251,8 @@ class SingleMeasurementRunner:
                 )
 
                 if timestamps:
-                    self.status_box.config(
-                        text=f"Sweep complete: {len(v_arr)} points in {timestamps[-1]:.2f}s"
+                    self.set_status_message(
+                        f"Sweep complete: {len(v_arr)} points in {timestamps[-1]:.2f}s"
                     )
             else:
                 def _on_point(v, i, t_s):
@@ -385,7 +385,7 @@ class SingleMeasurementRunner:
         # Finalise run ---------------------------------------------------
         self._finalize_output()
         self.measuring = False
-        self.status_box.config(text="Measurement Complete")
+        self.set_status_message("Measurement Complete")
 
         save_dir = self._get_save_directory(
             self.sample_name_var.get(),
