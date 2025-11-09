@@ -151,6 +151,77 @@ class MeasurementDataSaver:
         save_measurement_data(target, data, header, fmt)
         return target
 
+    def save_measurement_trace(
+        self,
+        *,
+        sample_name: str,
+        device_label: str,
+        measurement_label: str,
+        x_values: Sequence[float],
+        y_values: Sequence[float],
+        x_label: str = "X",
+        y_label: str = "Y",
+        timestamps: Optional[Sequence[float]] = None,
+        extra_series: Optional[Dict[str, Sequence[float]]] = None,
+        metadata: Optional[Dict[str, object]] = None,
+        base_override: Optional[Path | str] = None,
+    ) -> Optional[Path]:
+        """
+        Save a generic measurement trace (time series, pulse sweep, etc.).
+
+        The resulting file is a tab-delimited text file containing at least two
+        columns (X and Y). Optional timestamp and extra series columns can be
+        included. Metadata is stored in the header as a JSON blob to make it
+        easy to recover run context during analysis.
+        """
+        x_arr = np.asarray(list(x_values), dtype=float)
+        y_arr = np.asarray(list(y_values), dtype=float)
+        if x_arr.size == 0 or y_arr.size == 0:
+            return None
+
+        columns = [x_arr, y_arr]
+        headers = [x_label or "X", y_label or "Y"]
+
+        if timestamps is not None:
+            t_arr = np.asarray(list(timestamps), dtype=float)
+            if t_arr.size:
+                columns.append(t_arr)
+                headers.append("Timestamp(s)")
+
+        if extra_series:
+            for name, series in extra_series.items():
+                arr = np.asarray(list(series), dtype=float)
+                if arr.size:
+                    columns.append(arr)
+                    headers.append(str(name))
+
+        min_len = min(col.size for col in columns if col.size)
+        if min_len == 0:
+            return None
+        columns = [col[:min_len] for col in columns]
+
+        data = np.column_stack(columns)
+
+        folder = self.get_device_folder(sample_name, device_label, base_override)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        raw_slug = measurement_label.lower().replace(" ", "_")
+        slug = "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in raw_slug).strip("_")
+        if not slug:
+            slug = "measurement"
+        filename = f"{timestamp}-{slug}.txt"
+        target = folder / filename
+
+        meta = metadata or {}
+        try:
+            meta_str = json.dumps(meta, ensure_ascii=False, default=str)
+        except Exception:
+            meta_str = "{}"
+        header = f"Metadata: {meta_str}\n" + "\t".join(headers)
+
+        fmt = "\t".join(["%0.6E"] * data.shape[1])
+        np.savetxt(target, data, fmt=fmt, header=header, comments="# ")
+        return target
+
     def save_averaged_data(
         self,
         device_data: Dict[str, Dict[str, Sequence[float]]],

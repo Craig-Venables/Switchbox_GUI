@@ -8,6 +8,7 @@
 - Auto-saving data with device/sample folders and incrementing filenames
 - Beep on instrument connect
 - Sequential measurement across devices
+- PyQt6 preview GUI with native plotting (enable via `main.py`)
 
 ## Current Multiplexers
 - PySwitchbox: 100-device array (Raven’s creation), Arduino-controlled relay box
@@ -127,6 +128,14 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
   - Inter-pulse delay is user-configurable; "Max speed" can set it to 0, bounded by device limits.
 - Python/OS timing: `time.sleep(0.001)` is not hard real-time; actual resolution and jitter depend on the OS scheduler (on Windows typically ~1 ms best case). Expect a few ms of timing uncertainty on SMU pulses.
 - Recommendation: For sub-ms or waveform-accurate pulses, use the PMU flows (see PMU_Testing_GUI and PMU_* methods in `measurement_service.py`).
+
+-## GUI Variants
+
+- Legacy Tkinter GUI remains the default. Launch with `py -3 main.py` or by calling `main(gui="tk")`.
+- Experimental PyQt6 GUI offers the refactored layout, live Matplotlib tabs, and external motor-control launcher. Enable PyQt dependencies (`py -3 -m pip install PyQt6 PyQt6-Qt6`), then either:
+  - Flip the toggle at the end of `main.py` (`DEFAULT_GUI = "qt"`), or
+  - Run `py -3 main.py --qt` / `py -3 main.py --gui qt`.
+- Sequential measurements are temporarily disabled in the Qt build; use the Tk interface for that workflow until the Qt runner is ported.
 
 ## Specific Measurements
 ### Volatile

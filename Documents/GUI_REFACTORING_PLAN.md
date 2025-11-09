@@ -1,14 +1,14 @@
 # Measurement GUI Refactoring Plan
 
 **Created:** October 14, 2025  
-**Objective:** Break down massive 5,899-line `Measurement_GUI.py` into modular, maintainable components
+**Objective:** Break down massive 5,424-line `Measurement_GUI.py` into modular, maintainable components
 
 ---
 
 ## 🎯 Aim and End Goal
 
 ### Current Problem
-`Measurement_GUI.py` is a **5,899-line monolithic file** containing:
+`Measurement_GUI.py` is a **5,424-line monolithic file** containing:
 - GUI layout construction (12 methods, ~1,200 lines)
 - Plotting setup and updates (12 methods, ~1,100 lines)
 - Measurement execution logic (8+ methods, ~2,500 lines)
@@ -51,7 +51,7 @@ Measurement_GUI.py (1,000 lines) - Main orchestrator
 ## 📊 Current State Analysis
 
 ### File Statistics
-- **Total lines:** 5,899
+- **Total lines:** 5,424
 - **Classes:** 2 (SMUAdapter, MeasurementGUI)
 - **Methods in MeasurementGUI:** ~60+
 - **Duplicated patterns:** Using old if-statement style (to be replaced with new utilities)
@@ -69,42 +69,14 @@ Measurement_GUI.py (1,000 lines) - Main orchestrator
 | Telegram | 5 | ~400 | `_post_measurement_options_worker` |
 | Utilities | 10+ | ~400 | `convert_to_name`, `check_for_sample_name` |
 
-### Refactor Progress as of November 2025
-
-- ✅ Shared measurement utilities now live in `Measurments/data_utils.py`, `Measurments/source_modes.py`, `Measurments/sweep_patterns.py`, and `Measurments/optical_controller.py`. These replace dozens of ad-hoc helper snippets that used to live inside `Measurement_GUI.py`.
-- ✅ SMU/PMU execution has been centralized in `Measurments/measurement_services_smu.py` (and the PMU companion). Pulsed IV routines already delegate here and are production-tested.
-- ✅ File formatting helpers (`Measurments/data_formats.py`) standardize headers and naming. The GUI still saves files inline, but the formatting logic is ready to reuse.
-- ✅ `gui/layout_builder.py` now owns the top banner, the manual ITC4 temperature set panel, and Telegram/signal messaging controls; `Measurement_GUI.py` just wires callbacks.
-- ✅ `Motor_Controll_GUI` can be imported without `pylablib`/`pyvisa`; optional hardware features expose guarded fallbacks and a `--test` smoke mode.
-- ✅ Manual endurance/retention workers now live in `Measurments/background_workers.py`; the GUI just delegates to shared helpers.
-- ✅ Telegram messaging helpers were extracted to `Measurments/telegram_coordinator.py` with `MeasurementGUI` delegating all bot access.
-- ✅ Introduced `Measurments/single_measurement_runner.py`; the default (DC) IV flow now runs through this orchestrator, leaving the GUI to handle only mode dispatch and UI wiring.
-- ✅ SMU/PMU pulsed modes (`<1.5 V`, `>1.5 V`, fixed 20 V) plus fast pulse/hold routines moved into `Measurments/pulsed_measurement_runner.py`; `MeasurementGUI.start_measurement` now delegates via a dispatcher.
-- ✅ ISPP, pulse-width sweep, threshold search, and transient decay branches now live in `Measurments/special_measurement_runner.py`, keeping the GUI as a thin router.
-- ✅ Summary plot/log generation now funnels through `MeasurementDataSaver.save_summary_plots`; GUI runners use `_save_summary_artifacts` so Telegram and file exports stay consistent.
-- ✅ Sequential measurement UI *and* logic now live in `gui/layout_builder.py` (panel injected into the middle column) plus `Measurments/sequential_runner.py`, preserving the original layout location while trimming the GUI controller.
-- ✅ Real-time plot updater threads were extracted to `gui/plot_updaters.py`; `MeasurementGUI` now delegates start/stop hooks to the helper instead of managing threads directly.
-- ✅ `MeasurementGUI` gained a reusable `bring_to_top()` helper so runner modules can surface the main window without tightly coupling to Tk internals.
-- ✅ Added `tests/conftest.py` to place the repo root on `sys.path`, unblocking pytest runs without `python -m`.
-- ⚠️ Synchronous measurement wrappers, data saving helpers, and Telegram orchestration logic remain embedded inside `Measurement_GUI.py`. These are the next targets for extraction.
-- ⚠️ No `GUI/` subpackage exists yet. Creating it will make the separation explicit and keep PEP 8–style module names (lowercase with underscores).
-
----
-
-## ✅ 2025-11-09 Smoke-Test Checklist (Initial Pass)
-
-| Flow | Status | Notes |
-|------|--------|-------|
-| Standard IV (single_runner) | ⚠️ Partial | Runs through main path; uses simulated Keithley 2450. Requires hardware or full simulator for end-to-end validation. |
-| Sequential measurements | ⚠️ Partial | UI renders in middle column; runner invoked but still depends on hardware for verification. |
-| Custom measurement plans | ⚠️ Partial | Executes JSON-driven IV branch; relies on `MeasurementService.compute_voltage_range`. Needs hardware to complete sweep. |
-| Pulsed / Special modes | ⚠️ Pending | Not yet exercised after refactor; schedule targeted pass once optional libs (`pyvisa`, gpib bindings) available. |
-| Manual endurance/retention workers | ⚠️ Pending | Background threads extracted; require manual trigger during next hardware session. |
-| Telegram messaging | ⚠️ Pending | `TelegramCoordinator` instantiated; needs token/chat setup to verify post-measurement worker. |
-| Data/plot saving | ✅ | `tests/test_summary_artifacts.py` covers summary plots/log creation; manual run saved `Combined_summary.png` artifacts under simulated path. |
-| Pytest regression suite | ✅ | `py -3 -m pytest tests` passes (3 tests). |
-
-**Next smoke pass:** repeat once lab instruments or fully mocked drivers are connected; record failures and regressions here.
+- ✅ **PyQt6 preview window** (`qt/measurement_window.py`) now offers:
+  - Connection panel, sweep controls (with compliance & delay inputs), live IV/log plots
+  - Background worker wiring to `MeasurementService`
+  - External motor-control launcher (reuses existing Tk GUI via `QProcess`)
+  - Sequential measurements temporarily disabled with UI notice (runner pending)
+- ✅ `main.py` switch allows quick Tk/Qt toggling (`DEFAULT_GUI = "tk" | "qt"` or CLI `--gui`)
+- ⚠️ Qt build still missing: sequential runner, pulsed/special measurement flows, advanced dialogs
+- 🧪 `pytest tests` succeeds (skips optional hardware suites requiring `pyvisa`)
 
 ---
 
@@ -114,7 +86,7 @@ Measurement_GUI.py (1,000 lines) - Main orchestrator
 
 **File:** `GUI/layout_builder.py`
 
-**Purpose:** Create all Tkinter widgets and frames without mixing in measurement behaviour.
+**Purpose:** Create all Tkinter widgets and frames
 
 **Responsibilities:**
 - Build connection panel (SMU, PSU, temp controller)
@@ -123,11 +95,6 @@ Measurement_GUI.py (1,000 lines) - Main orchestrator
 - Build custom measurement panel
 - Build status displays
 - Build control buttons
-
-**Why split this out?**
-- Keeps all Tkinter widget construction in one place so layout tweaks don’t risk breaking measurement logic.
-- Makes it easier for newer contributors to reason about the GUI: they can read a single module to understand which widgets exist and what callbacks they trigger.
-- Encourages smaller, focused methods (e.g., one method per panel) that can be unit-tested with Tkinter’s `tk.Misc` stubs.
 
 **Interface:**
 ```python
@@ -172,22 +139,18 @@ class MeasurementGUILayoutBuilder:
 **Methods to Move:**
 - `create_connection_section()`
 - `create_mode_selection()`
-- ✅ `create_status_box()` → layout builder handles status frame.
-- ✅ `create_controller_selection()` → layout builder builds controller dropdown and status badge.
+- `create_status_box()`
+- `create_controller_selection()`
 - `create_sweep_parameters()`
-- ✅ `create_custom_measurement_section()` → layout builder builds custom measurement menu, run/pause controls, and sweep editor button.
-- ✅ `create_manual_endurance_retention()` → layout builder now renders manual endurance/retention controls and LED toggle callbacks.
+- `create_custom_measurement_section()`
+- `create_manual_endurance_retention()`
 - `create_automated_tests_section()`
-- ✅ `temp_measurments_itc4()` → converted to layout builder temperature panel.
-- ✅ `signal_messaging()` → migrated to layout builder with callback wiring.
-- ✅ `sequential_measurments()` → sequential controls now live in layout builder with start/stop callbacks.
-- ✅ `top_banner()` → layout builder creates top banner/quick action buttons.
+- `temp_measurments_itc4()`
+- `signal_messaging()`
+- `sequential_measurments()`
+- `top_banner()`
 
 **Size:** ~1,200 lines
-
-**Implementation notes:**
-- Follow standard Python style (`snake_case` module names, clear docstrings at the top of the file explaining the module’s role).
-- Keep widget member names descriptive (e.g., `self.sample_name_entry`) and store them in dictionaries when the main GUI needs to read values.
 
 ---
 
@@ -195,18 +158,13 @@ class MeasurementGUILayoutBuilder:
 
 **File:** `GUI/plot_panels.py`
 
-**Purpose:** Create and manage all matplotlib figures, isolated from measurement code.
+**Purpose:** Create and manage all matplotlib figures
 
 **Responsibilities:**
 - Create matplotlib figures and axes
 - Setup plot styling and labels
 - Provide methods to update plots
 - Clear and reset plots
-
-**Why split this out?**
-- Plot construction is currently interwoven with business logic. Moving it keeps plotting bugs from breaking instrument control.
-- Dedicated plotting module lets us reuse the same panels in other GUIs (e.g., PMU testing) without copying code.
-- Makes it straightforward to write tests that instantiate the panel with a dummy Tk root and assert axes exist.
 
 **Interface:**
 ```python
@@ -273,28 +231,19 @@ class MeasurementPlotPanels:
 
 **Size:** ~800 lines
 
-**Implementation notes:**
-- Store matplotlib objects in dictionaries keyed by intent (`rt_iv`, `all_iv`) so the rest of the code can update them without keeping multiple attributes in sync.
-- Keep figure creation code close together and add short comments explaining axis scaling choices (log axes, legends, etc.).
-
 ---
 
 ### Module 3: Plot Updaters
 
 **File:** `GUI/plot_updaters.py`
 
-**Purpose:** Background threads that update plots in real-time.
+**Purpose:** Background threads that update plots in real-time
 
 **Responsibilities:**
 - Run background plotting threads
 - Poll data arrays and update matplotlib
 - Handle thread synchronization
 - Update status labels
-
-**Why split this out?**
-- Threading code is easy to break accidentally. Keeping it in one module limits the blast radius of synchronization changes.
-- Decouples background polling from Tkinter widget creation, which simplifies troubleshooting race conditions for new contributors.
-- Gives us a clean surface for future async/queue-based updates if we move away from threads.
 
 **Interface:**
 ```python
@@ -347,17 +296,13 @@ class PlotUpdaters:
 
 **Size:** ~300 lines
 
-**Implementation notes:**
-- Share data through explicit dictionaries (e.g., `data_refs["v_arr_disp"]`) so we know exactly which arrays are thread-shared.
-- Document thread lifecycles (`start_all_threads`, `stop_all_threads`) with clear comments to help newcomers reason about shutdown order.
-
 ---
 
 ### Module 4: Measurement Executor
 
 **File:** `Measurments/measurement_executor.py`
 
-**Purpose:** Execute all measurement types while delegating low-level work to `MeasurementService`.
+**Purpose:** Execute all measurement types
 
 **Responsibilities:**
 - Coordinate measurement sequences
@@ -365,11 +310,6 @@ class PlotUpdaters:
 - Control optical sources using new utilities
 - Handle stop flags and threading
 - Call MeasurementService for actual measurements
-
-**Why split this out?**
-- We already have `MeasurementService` doing the heavy lifting. A thin executor module keeps GUI code focused on UI flow while bundling together configuration, stop flags, and callbacks.
-- Makes it easier to add new measurement flavours (capacitance, custom sweeps) without touching Tkinter code.
-- Encourages writing integration tests that exercise the executor against mocked instruments.
 
 **Interface:**
 ```python
@@ -445,28 +385,19 @@ class MeasurementExecutor:
 - `data_utils.py` for measurement normalization
 - `sweep_patterns.py` for voltage list generation
 
-**Implementation notes:**
-- Keep executor methods short: gather GUI parameters, call into `MeasurementService`, push results through callbacks (plotting, saving, messaging). Comments should explain the flow in plain language.
-- Store new shared state (e.g., stop flags, selected devices) in lightweight dataclasses or dictionaries, avoiding global lists where possible.
-
 ---
 
 ### Module 5: Data Saver
 
 **File:** `Measurments/data_saver.py`
 
-**Purpose:** Handle all data persistence and file management.
+**Purpose:** Handle all data persistence and file management
 
 **Responsibilities:**
 - Save measurement data to files
 - Create summary plots
 - Generate graphs and images
 - Organize file structure
-
-**Why split this out?**
-- Saving files currently mixes path handling, NumPy formatting, and matplotlib export logic inside the GUI. Extracting it prevents accidental regressions when changing save locations.
-- Centralizing saving enables reuse in scripts or other GUIs, and makes it straightforward to swap in new formats later (e.g., parquet).
-- Keeps GUI classes focused on orchestration: they call `self.saver.save_iv_sweep(...)` and move on.
 
 **Interface:**
 ```python
@@ -531,17 +462,13 @@ class MeasurementDataSaver:
 
 **Size:** ~600 lines
 
-**Implementation notes:**
-- Lean heavily on the existing `DataFormatter` and `FileNamer` classes. This avoids duplicating header logic and keeps filenames consistent.
-- Add comments near each save call that clarify what the output file contains (“per-device IV sweep”, “combined summary figure”), so newcomers know where to look when debugging saves.
-
 ---
 
 ### Module 6: Connection Manager
 
 **File:** `Measurments/connection_manager.py`
 
-**Purpose:** Manage all instrument connections.
+**Purpose:** Manage all instrument connections
 
 **Responsibilities:**
 - Connect to SMU/PMU instruments
@@ -550,11 +477,6 @@ class MeasurementDataSaver:
 - Connect to optical sources
 - Handle connection errors
 - Cleanup on exit
-
-**Why split this out?**
-- Connection logic talks to hardware and has lots of error handling; moving it out avoids cluttering the GUI class with try/except blocks.
-- A dedicated manager makes mocking easier in tests and means we can share the same connection code with other GUIs.
-- Clarifies ownership: the manager exposes `connect_*`, `is_connected`, and `cleanup`, while the GUI simply calls those methods.
 
 **Interface:**
 ```python
@@ -635,17 +557,13 @@ class InstrumentConnectionManager:
 
 **Size:** ~200 lines
 
-**Implementation notes:**
-- Keep configuration lookups (addresses, model names) together at the top of the module, with comments referencing the relevant JSON config keys.
-- Return booleans from `connect_*` methods and log concise status messages; this makes it simpler for new developers to trace startup issues.
-
 ---
 
 ### Module 7: Telegram Coordinator
 
 **File:** `Measurments/telegram_coordinator.py`
 
-**Purpose:** Handle all Telegram bot interactions.
+**Purpose:** Handle all Telegram bot interactions
 
 **Responsibilities:**
 - Send measurement status updates
@@ -653,11 +571,6 @@ class InstrumentConnectionManager:
 - Interactive parameter selection via chat
 - Handle user responses
 - Coordinate next actions
-
-**Why split this out?**
-- Messaging code is orthogonal to measurement logic; isolating it keeps network errors from spilling into GUI code.
-- Lets us disable or swap messaging channels by replacing the coordinator without touching the rest of the app.
-- Helps new contributors understand the messaging flow by reading one concise module with obvious method names.
 
 **Interface:**
 ```python
@@ -717,28 +630,19 @@ class TelegramMeasurementCoordinator:
 
 **Size:** ~400 lines
 
-**Implementation notes:**
-- Guard all bot calls so the coordinator can operate in “disabled” mode when no credentials are provided. Comments should explain when each method is safe to call.
-- Consider exposing small status callbacks (e.g., `on_user_selection`) so the GUI can subscribe without knowing Telegram internals.
-
 ---
 
 ### Module 8: Background Workers
 
 **File:** `Measurments/background_workers.py`
 
-**Purpose:** Manage background measurement threads.
+**Purpose:** Manage background measurement threads
 
 **Responsibilities:**
 - Start measurement threads
 - Handle stop flags
 - Thread synchronization
 - Progress reporting
-
-**Why split this out?**
-- Thread wrappers for measurements are mixed into `MeasurementGUI` today, which makes the class difficult to read. A separate module keeps concurrency details in one place.
-- Simplifies adding future async features (e.g., progress callbacks, queue-based messaging) without reopening the main GUI file.
-- Allows targeted unit tests that verify stop flags and completion handlers fire correctly.
 
 **Interface:**
 ```python
@@ -779,20 +683,6 @@ class MeasurementBackgroundWorkers:
 - Automated test thread logic
 
 **Size:** ~300 lines
-
-**Implementation notes:**
-- Keep worker functions small and document the steps they perform (set stop flag, call executor, trigger callbacks). This guidance helps newer developers trace control flow.
-- Use `threading.Thread(daemon=True)` consistently and provide a clear `stop_measurement` method to request shutdown.
-
----
-
-## 🚀 Next Improvement Ideas (Post-Refactor)
-
-- Finalize a `gui/` package layout with `__init__.py` so the layout/plot modules share a consistent namespace.
-- Add instrument abstraction interfaces (mockable drivers) to unblock richer unit tests and simplify CI.
-- Expand automated coverage with instrument mocks so runners can be validated without hardware. Target sequential, pulsed/special runners, and data saver integration.
-- Explore migrating background threads to a centralized job queue or `asyncio` for easier shutdown and coordination.
-- Introduce structured logging/telemetry so console, file, and Telegram outputs all reuse a common event schema.
 
 ---
 
@@ -887,55 +777,82 @@ class MeasurementGUI:
 
 ## 🔄 Migration Strategy
 
-The plan keeps risk low by moving self-contained responsibilities first, then teasing apart logic with heavier dependencies. Each phase ends with a manual smoke test (launch GUI, run a short IV sweep, confirm plots and saves).
+### Phase 1: Extract Non-Breaking Components (Start Here)
 
-### Phase 0: Foundations (✅ Complete)
-- Shared utilities (`data_utils`, `source_modes`, `sweep_patterns`, `optical_controller`, `data_formats`) and `measurement_services_*` provide the building blocks for new modules.
-- Action: No work required—just lean on these helpers during extractions.
+**Step 1.1: Create GUI folder**
+```bash
+mkdir GUI
+```
 
-### Phase 1: Safe Extractions (start here)
-These steps peel away code that already behaves like stand-alone helpers.
+**Step 1.2: Extract Plot Panels (Safest first step)**
 
-1. **Create packages**
-   - Add `GUI/__init__.py` and `Measurments/__init__.py` (empty is fine) so imports stay tidy.
-2. **Extract `Measurments/data_saver.py`**
-   - Move all `save_*` helpers.
-   - Replace inline NumPy formatting with calls to `DataFormatter` and `FileNamer`.
-   - Update `Measurement_GUI.py` to instantiate `MeasurementDataSaver` and delegate saves.
-3. **Extract `GUI/plot_panels.py`**
-   - Move every `graphs_*` and `clear_axis` method.
-   - Store axes/canvases/lines in dictionaries; expose simple `update_plot` / `clear_plot`.
-   - Swap GUI references (`self.ax_rt_iv`) with `self.plots.axes["rt_iv"]`.
-4. **Extract `Measurments/connection_manager.py`**
-   - Move `connect_*`, `reconnect_*`, `cleanup`.
-   - Return booleans and surface instrument handles so the GUI can store them.
+1. Create `GUI/plot_panels.py`
+2. Copy all `graphs_*` methods
+3. Refactor to store references in dictionaries
+4. Test: Verify plots still appear
 
-### Phase 2: Behavioural Separation
-Here we remove logic that still talks to Tkinter or threads but benefits most from the new utilities.
+**Step 1.3: Extract Data Saver**
 
-1. **Extract `GUI/layout_builder.py`**
-   - Move every `create_*` and UI helper.
-   - Collect Tk variables in dictionaries and expose `get_values()` / `set_defaults()` methods.
-2. **Extract `GUI/plot_updaters.py`**
-   - Move all `plot_*` background loops plus `_status_update_tick`.
-   - Accept the `MeasurementPlotPanels` instance and a dict of shared arrays/flags.
-3. **Extract `Measurments/measurement_executor.py`**
-   - Move `start_measurement`, `run_custom_measurement`, sequential helpers, manual endurance/retention workers.
-   - Delegate measurement work to `MeasurementService`; remove duplicated sweep/optical logic in favour of utilities.
+1. Create `Measurments/data_saver.py`
+2. Copy all `save_*` and `_save_*` methods
+3. Integrate `data_formats.py` utilities (already created!)
+4. Replace calls in main file with `self.saver.save_*(...)`
+5. Test: Verify files save correctly
 
-### Phase 3: Polish & Orchestration
-After core behaviour is modular, finish by decoupling messaging and worker threads, then shrink the main class.
+**Step 1.4: Extract Connection Manager**
 
-1. **Extract `Measurments/telegram_coordinator.py`**
-   - Move `_bot_*` methods and `_post_measurement_options_worker`.
-   - Provide high-level methods (`send_measurement_start`, `ask_next_action`).
-2. **Extract `Measurments/background_workers.py`**
-   - Gather all measurement thread wrappers in one place.
-   - Accept callbacks for success/failure so the GUI only wires events.
-3. **Simplify `Measurement_GUI.py`**
-   - Remove migrated methods, wire up new modules in `__init__`.
-   - Keep only orchestration helpers (callback wiring, small utility checks).
-   - Re-run lint checks and smoke tests.
+1. Create `Measurments/connection_manager.py`
+2. Copy all `connect_*` methods
+3. Refactor to return connection objects
+4. Test: Verify instruments connect
+
+### Phase 2: Extract Complex Components
+
+**Step 2.1: Extract Layout Builder**
+
+1. Create `GUI/layout_builder.py`
+2. Copy all `create_*` methods
+3. Store widget references and Tk variables
+4. Provide `get_values()` method for reading parameters
+5. Test: Verify GUI appears correctly
+
+**Step 2.2: Extract Plot Updaters**
+
+1. Create `GUI/plot_updaters.py`
+2. Copy all `plot_*` thread methods
+3. Provide shared data reference interface
+4. Test: Verify real-time updates work
+
+**Step 2.3: Extract Measurement Executor**
+
+1. Create `Measurments/measurement_executor.py`
+2. Copy all measurement execution methods
+3. **Refactor to use new utilities:**
+   - Replace tuple checks with `safe_measure_current()`
+   - Replace optical if-blocks with `OpticalController`
+   - Replace sweep generation with `build_sweep_values()`
+4. Test: Verify measurements produce same results
+
+### Phase 3: Polish and Optimize
+
+**Step 3.1: Extract Telegram Coordinator**
+
+1. Create `Measurments/telegram_coordinator.py`
+2. Copy all `_bot_*` and `_post_measurement_*` methods
+3. Test: Verify Telegram messages work
+
+**Step 3.2: Extract Background Workers**
+
+1. Create `Measurments/background_workers.py`
+2. Extract thread management logic
+3. Test: Verify async measurements work
+
+**Step 3.3: Simplify Main File**
+
+1. Remove moved methods
+2. Add imports for new modules
+3. Replace method calls with delegation
+4. Test: Full end-to-end verification
 
 ---
 
@@ -1490,12 +1407,12 @@ Use this checklist when implementing the refactoring:
   - [ ] `create_status_box()`
   - [ ] `create_controller_selection()`
   - [ ] `create_sweep_parameters()`
-  - [x] `create_custom_measurement_section()`
-  - [x] `create_manual_endurance_retention()`
+  - [ ] `create_custom_measurement_section()`
+  - [ ] `create_manual_endurance_retention()`
   - [ ] `create_automated_tests_section()`
   - [ ] `temp_measurments_itc4()`
   - [ ] `signal_messaging()`
-  - [x] `sequential_measurments()`
+  - [ ] `sequential_measurments()`
   - [ ] `top_banner()`
 - [ ] Refactor to store widgets and variables
 - [ ] Provide `get_values()` method
@@ -1766,7 +1683,7 @@ results = self.executor.execute_measurement(params)
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| Lines per file | 5,899 | ~1,000 | 83% reduction |
+| Lines per file | 5,424 | ~1,000 | 81% reduction |
 | Methods in main class | ~60 | ~15 | 75% reduction |
 | Duplicate patterns | Many | Few | Uses Phase 1 utilities |
 | Testability | Low | High | Isolated modules |
@@ -1776,11 +1693,11 @@ results = self.executor.execute_measurement(params)
 
 | Task | Before | After |
 |------|--------|-------|
-| Find a method | Search 5,899 lines | Search ~800 lines (one file) |
+| Find a method | Search 5,424 lines | Search ~800 lines (one file) |
 | Add new measurement | Modify monolith | Add to executor |
 | Fix plotting bug | Risk breaking measurements | Only touch plot_panels.py |
 | Test a feature | Full integration test | Unit test module |
-| Onboard developer | Read 5,899 lines | Read 8 focused files |
+| Onboard developer | Read 5,424 lines | Read 8 focused files |
 
 ---
 
@@ -2048,7 +1965,7 @@ python -m py_compile Measurments/*.py
 
 ### Before
 ```
-Measurement_GUI.py (5,899 lines)
+Measurement_GUI.py (5,424 lines)
 ├── 12 GUI methods (1,200 lines)
 ├── 12 plotting methods (1,100 lines)
 ├── 8 measurement methods (2,500 lines)

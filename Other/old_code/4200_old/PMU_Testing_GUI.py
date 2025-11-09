@@ -65,12 +65,19 @@ class PMUTestingGUI(tk.Toplevel):
         # Context (sample/device) pulled from provider when available
         self.sample_name: str = "UnknownSample"
         self.device_label: str = "UnknownDevice"
+        self._env_custom_base: Optional[str] = os.environ.get("SWITCHBOX_CUSTOM_SAVE_PATH")
+        env_sample = os.environ.get("SWITCHBOX_SAMPLE_NAME")
+        if env_sample:
+            self.sample_name = env_sample
+        env_device = os.environ.get("SWITCHBOX_DEVICE_LABEL")
+        if env_device:
+            self.device_label = env_device
 
         # ---------------- Controls: PMU ----------------
         ctrl = tk.LabelFrame(self, text="PMU Controls", padx=5, pady=3)
         ctrl.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=5, pady=3)
 
-        self.context_var = tk.StringVar(value="Sample: -  |  Device: -")
+        self.context_var = tk.StringVar(value=f"Sample: {self.sample_name}  |  Device: {self.device_label}")
         tk.Label(ctrl, textvariable=self.context_var, font=("TkDefaultFont", 9, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0,4))
 
         # Connection section
@@ -2269,6 +2276,11 @@ class PMUTestingGUI(tk.Toplevel):
     
     def _load_custom_save_location(self) -> Optional[Path]:
         """Load custom save location from config file"""
+        if self._env_custom_base:
+            try:
+                return Path(self._env_custom_base)
+            except Exception:
+                pass
         config_file = Path("Json_Files/save_location_config.json")
         try:
             if config_file.exists():

@@ -1,40 +1,90 @@
+"""Main entry point for Switchbox GUI applications."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from typing import Optional, Sequence
+
 import tkinter as tk
+
 from Sample_GUI import SampleGUI
 
-# record data when checking for connection to see if the current increases over times
-# maybe cut off after a sharp increase is seen!
-#todo add non multiplexer device so that people can use it for just one device
 
-
-#ideas
-
-
-# move the plots around a little bgger specific ones 
-# clean up led and laser intergration 
-
-
-
-
-#build specific laser gui, this homes the laser you then just select the device and it will go to said device,we need to find a way to make sure its in the correct position for this 
-#
-
-# upon testing with the switchbox you can save the heat map and load it in such that it knows which deivces dont work so you can skip them or apply high voltage too them 
-# this will be saved somewhere and you can choose the device when you load the system, if this is done samplename and additional save location should be greyed out as we know know the sample
-# but additonal info will still be there and added onto the end of the file name.
-# specific testing for a new device to create the heat map, this heat map will then show when loaded onto the initial gui.
-
-#temp gui
-
-###
-# IMPORTANT:make look nicer,the graphs look hideous
-###
-
-# consider moving this into qt6
-
-""" Classes for the Gui"""
-
-if __name__ == "__main__":
-    import sys
+def _launch_tk(_sample_args: Sequence[str] | None = None) -> None:
+    """Start the legacy Tkinter GUI."""
     root = tk.Tk()
     app = SampleGUI(root)
     root.mainloop()
+
+
+def _launch_qt(sample_args: Sequence[str] | None = None) -> None:
+    """Start the experimental PyQt6 GUI."""
+    try:
+        from PyQt6 import QtWidgets
+    except Exception as exc:  # pragma: no cover - import guard
+        print("Failed to import PyQt6; falling back to Tkinter.", file=sys.stderr)
+        print(f"Import error: {exc}", file=sys.stderr)
+        _launch_tk(sample_args)
+        return
+
+    from qt.sample_window import QtSampleWindow
+
+    app = QtWidgets.QApplication(sys.argv)
+    window = QtSampleWindow()
+    window.show()
+    exit_code = app.exec()
+    sys.exit(exit_code)
+
+
+def main(
+    argv: Sequence[str] | None = None,
+    gui: Optional[str] = None,
+) -> None:
+    """Entry point for launching Tk or Qt GUI variants.
+
+    Args:
+        argv: Optional sequence of CLI-style arguments (defaults to sys.argv[1:]).
+        gui: Optional override for GUI selection: ``"tk"`` or ``"qt"``.
+             When provided, it takes precedence over command-line flags.
+    """
+    parser = argparse.ArgumentParser(description="Switchbox Measurement GUI launcher")
+    parser.add_argument(
+        "--qt",
+        action="store_true",
+        help="Launch the experimental PyQt6 interface instead of Tkinter.",
+    )
+    parser.add_argument(
+        "--gui",
+        choices=("tk", "qt"),
+        help="Explicitly choose which GUI to launch.",
+    )
+
+    args, sample_args = parser.parse_known_args(argv)
+
+    preferred_gui = None
+    if gui:
+        preferred_gui = gui.strip().lower()
+        if preferred_gui not in {"tk", "qt"}:
+            print(
+                f"Unknown gui selection '{gui}', defaulting to Tkinter.",
+                file=sys.stderr,
+            )
+            preferred_gui = "tk"
+    elif args.gui:
+        preferred_gui = args.gui
+    elif args.qt:
+        preferred_gui = "qt"
+    else:
+        preferred_gui = "tk"
+
+    if preferred_gui == "qt":
+        _launch_qt(sample_args)
+    else:
+        _launch_tk(sample_args)
+
+
+if __name__ == "__main__":
+    # Toggle this to "qt" to force the PyQt6 interface without command-line flags.
+    DEFAULT_GUI = "tk"  # choices: "tk" or "qt"
+    main(gui=DEFAULT_GUI)

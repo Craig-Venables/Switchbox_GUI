@@ -13,13 +13,11 @@ import threading
 import queue
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, TYPE_CHECKING
 
 from Measurement_GUI import MeasurementGUI
-from Equipment.Multiplexers.Multiplexer_10_OUT.Multiplexer_Class import MultiplexerController
-
-# Import new multiplexer manager
 from Equipment.multiplexer_manager import MultiplexerManager
+from sample import SampleController
 
 try:
     from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
@@ -88,66 +86,36 @@ class SampleGUI:
         self.root.title("Device Viewer")
         self.root.geometry("1000x650")
 
-        # Defaults
-        self.multiplexer_type: str = "Pyswitchbox"
-        self.current_device_map: str = "Cross_bar"
-        self.pyswitchbox: bool = True
-        self.Electronic_Mpx: bool = False
-
-        # Device label mappings
-        self.device_labels: List[str] = []
-        self.device_labels_by_key: Dict[str, str] = {}
-        self.device_keys_by_label: Dict[str, str] = {}
-        self.device_section_number_by_key: Dict[str, Tuple[str, Optional[int]]] = {}
-
-        self.update_device_type(self.current_device_map)
-        self.current_index: int = 0  # Index of currently selected device
-
-        # Selected devices tracking
-        self.selected_devices: Set[str] = set()  # Store selected device names
-        self.selected_indices: List[int] = []  # Store indices of selected devices
-        self.current_selected_index: int = 0  # Index within selected devices
-
-        # Flags
-        self.pyswitchbox = True
-        self.Electronic_Mpx = False
+        # Shared controller (also used by Qt front-end)
+        self.controller = SampleController(
+            sample_config=sample_config,
+            device_maps=device_maps,
+            pin_mapping=pin_mapping,
+            logger=lambda msg: print(msg),
+        )
         self.measurement_window: bool = False
-
-        # print(self.device_maps_list)
-        # print(self.device_list)
-
-        # initialise switchbox
-        # self.switchbox = pySwitchbox.Switchbox()
-        
-        # Initialize multiplexer manager (will be set properly in update_multiplexer)
-        self.mpx_manager = None
 
         # Multiplexer Type Dropdown
         tk.Label(root, text="Multiplexer").grid(row=0, column=0, sticky='w')
-        self.Multiplexer_type_var = tk.StringVar()
+        self.Multiplexer_type_var = tk.StringVar(value=self.controller.multiplexer_type)
         self.Multiplexer_dropdown = ttk.Combobox(root, textvariable=self.Multiplexer_type_var,
                                                  values=list(multiplexer_types.keys()))
         self.Multiplexer_dropdown.grid(row=0, column=1)
         self.Multiplexer_dropdown.bind("<<ComboboxSelected>>", self.update_multiplexer)
-        # Set default multiplexer selection
-        try:
-            self.Multiplexer_type_var.set("Pyswitchbox")
-            # Optionally initialise behavior for default
-            self.update_multiplexer(None)
-        except Exception:
-            pass
 
         # Sample Type Dropdown
         tk.Label(root, text="Sample type").grid(row=1, column=0, sticky='w')
-        self.sample_type_var = tk.StringVar()
-        self.sample_dropdown = ttk.Combobox(root, textvariable=self.sample_type_var, values=list(sample_config.keys()))
+        self.sample_type_var = tk.StringVar(value=self.controller.sample_type)
+        self.sample_dropdown = ttk.Combobox(
+            root, textvariable=self.sample_type_var, values=self.controller.get_sample_types()
+        )
         self.sample_dropdown.grid(row=1, column=1)
         self.sample_dropdown.bind("<<ComboboxSelected>>", self.update_dropdowns)
         
 
         # Section Dropdown
         tk.Label(root, text="Section").grid(row=2, column=0, sticky='w')
-        self.section_var = tk.StringVar()
+        self.section_var = tk.StringVar(value=self.controller.section)
         self.section_dropdown = ttk.Combobox(root, textvariable=self.section_var)
         self.section_dropdown.grid(row=2, column=1)
         # Section Entry
@@ -201,8 +169,11 @@ class SampleGUI:
         self.measure_button.grid(row=8, column=0, columnspan=2, pady=10)
 
         # Automated Tests controls moved to Measurement GUI
-        
-        
+
+        # Ensure controller logs go to UI after widgets are initialised
+        self.controller.set_logger(self.log_terminal)
+        self.controller.configure_multiplexer(self.controller.multiplexer_type)
+
         # Set default sample selection and apply
         try:
             # Use the key name as defined in sample_config
@@ -212,6 +183,73 @@ class SampleGUI:
             pass
         # Placeholder for clicked points
         # self.electrode_points = []
+
+    # ------------------------------------------------------------------
+    # Controller-backed state accessors for compatibility with legacy code
+    # ------------------------------------------------------------------
+    @property
+    def device_list(self) -> List[str]:
+        return self.controller.device_list
+
+    @device_list.setter
+    def device_list(self, value: Sequence[str]) -> None:
+        self.controller.device_list = list(value)
+
+    @property
+    def selected_devices(self) -> Set[str]:
+        return self.controller.selected_devices
+
+    @selected_devices.setter
+    def selected_devices(self, value: Sequence[str]) -> None:
+        self.controller.selected_devices = set(value)
+
+    @property
+    def selected_indices(self) -> List[int]:
+        return self.controller.selected_indices
+
+    @selected_indices.setter
+    def selected_indices(self, value: Sequence[int]) -> None:
+        self.controller.selected_indices = list(value)
+
+    @property
+    def current_index(self) -> int:
+        return self.controller.current_index
+
+    @current_index.setter
+    def current_index(self, value: int) -> None:
+        self.controller.current_index = int(value)
+
+    @property
+    def mpx_manager(self) -> Optional[MultiplexerManager]:
+        return self.controller.mpx_manager
+
+    @mpx_manager.setter
+    def mpx_manager(self, value: Optional[MultiplexerManager]) -> None:
+        self.controller.mpx_manager = value
+
+    @property
+    def device_mapping(self) -> Dict[str, Any]:
+        return self.controller.device_mapping
+
+    @device_mapping.setter
+    def device_mapping(self, value: Dict[str, Any]) -> None:
+        self.controller.device_mapping = value
+
+    @property
+    def current_map_name(self) -> str:
+        return self.controller.current_device_map
+
+    @current_map_name.setter
+    def current_map_name(self, value: str) -> None:
+        self.controller.current_device_map = value
+
+    @property
+    def multiplexer_type(self) -> str:
+        return self.controller.multiplexer_type
+
+    @multiplexer_type.setter
+    def multiplexer_type(self, value: str) -> None:
+        self.controller.multiplexer_type = value
 
     def create_device_selection_frame(self) -> None:
         """Create a frame with checkboxes for device selection."""
@@ -263,15 +301,13 @@ class SampleGUI:
 
         # Create new checkboxes
         for i, device in enumerate(self.device_list):
-            label = self.get_device_label(device)
-            var = tk.BooleanVar(value=True)  # Default to selected
-            cb = tk.Checkbutton(self.scrollable_frame, text=label, variable=var,
+            var = tk.BooleanVar(value=device in self.selected_devices or not self.selected_devices)
+            cb = tk.Checkbutton(self.scrollable_frame, text=device, variable=var,
                                 command=self.update_selected_devices)
             cb.grid(row=i, column=0, sticky='w')
 
             self.device_checkboxes[device] = cb
             self.checkbox_vars[device] = var
-            self.selected_devices.add(device)
 
         self.update_selected_devices()
 
@@ -317,9 +353,7 @@ class SampleGUI:
         self.update_canvas_selection_highlights()
 
         # Log selection
-        friendly_selected = [self.get_device_label(self.device_list[idx]) for idx in self.selected_indices]
-        selection_text = ", ".join(friendly_selected) if friendly_selected else "None"
-        self.log_terminal(f"Selected devices: {selection_text}")
+        self.log_terminal(f"Selected devices: {', '.join(sorted(self.selected_devices))}")
 
     def update_canvas_selection_highlights(self) -> None:
         """Update visual indicators on canvas for selected devices"""
@@ -366,36 +400,9 @@ class SampleGUI:
                     break
 
     def update_multiplexer(self, event: Optional[Any]) -> None:
-        self.multiplexer_type = self.Multiplexer_type_var.get()
-        print("Multiplexer set to:", self.multiplexer_type)
-        
-        # Use new MultiplexerManager to create appropriate adapter
-        try:
-            if self.multiplexer_type == "Pyswitchbox":
-                self.mpx_manager = MultiplexerManager.create(
-                    "Pyswitchbox",
-                    pin_mapping=pin_mapping
-                )
-                print("Initiated Pyswitchbox via MultiplexerManager")
-            elif self.multiplexer_type == "Electronic_Mpx":
-                # Try to create with real hardware, fall back to simulation if needed
-                try:
-                    self.mpx = MultiplexerController(simulation_mode=False)
-                    print("Initiated Electronic_Mpx with real hardware")
-                except Exception as e:
-                    print(f"Hardware not available, using simulation mode: {e}")
-                    self.mpx = MultiplexerController(simulation_mode=True)
-                    print("Initiated Electronic_Mpx in simulation mode")
-                
-                self.mpx_manager = MultiplexerManager.create(
-                    "Electronic_Mpx",
-                    controller=self.mpx
-                )
-                print("Initiated Electronic_Mpx via MultiplexerManager")
-            else:
-                print("Unknown multiplexer type")
-        except Exception as e:
-            print(f"Error initializing multiplexer: {e}")
+        mux_type = self.Multiplexer_type_var.get()
+        self.controller.configure_multiplexer(mux_type)
+        self.log_terminal(f"Multiplexer set to: {mux_type}")
 
     def load_image(self, sample: str) -> None:
         """ Load image into canvas set up to add others later simply """
@@ -417,91 +424,43 @@ class SampleGUI:
         self.update_canvas_selection_highlights()
 
     def update_device_type(self, current_device_map: str) -> None:
-        # all maps from dict
-        self.current_map_name = current_device_map
-        self.device_mapping = device_maps[current_device_map]
-        self.current_map_map = device_maps[current_device_map]
-        self.device_maps_list = list(device_maps.keys())
-        self.device_list = list(device_maps[current_device_map].keys())  # Dictionary of devices
-        self._build_device_name_mapping()
-        # Update device checkboxes when device type changes
+        """Sync controller/device list when sample type changes."""
+        self.controller.update_device_map(current_device_map)
+        self.device_var.set(self.controller.device_var.get())
         if hasattr(self, 'device_checkboxes'):
             self.update_device_checkboxes()
-
-    def _build_device_name_mapping(self) -> None:
-        """Build mapping between device keys and user-facing labels (e.g., A1)."""
-        self.device_labels = []
-        self.device_labels_by_key = {}
-        self.device_keys_by_label = {}
-        self.device_section_number_by_key = {}
-
-        section_counts: Dict[str, int] = {}
-        for device_key in self.device_list:
-            info = self.device_mapping.get(device_key, {})
-            section_raw = info.get("section", "")
-            section = str(section_raw) if section_raw is not None else ""
-
-            if section:
-                section_counts[section] = section_counts.get(section, 0) + 1
-                number = section_counts[section]
-                label = f"{section}{number}"
-            else:
-                number = None
-                section = ""
-                label = device_key
-
-            if label in self.device_keys_by_label:
-                suffix = len(self.device_labels) + 1
-                label = f"{label}_{suffix}"
-
-            self.device_labels.append(label)
-            self.device_labels_by_key[device_key] = label
-            self.device_keys_by_label[label] = device_key
-            self.device_section_number_by_key[device_key] = (section, number)
-
-    def get_device_label(self, device_key: str) -> str:
-        """Return the user-facing label for a device key."""
-        return self.device_labels_by_key.get(device_key, device_key)
-
-    def get_device_section_and_number(self, device_key: str) -> Tuple[str, Optional[int]]:
-        """Return the (section, number) tuple for a device key."""
-        return self.device_section_number_by_key.get(device_key, ("", None))
-
-    def get_device_key_from_label(self, label: str) -> Optional[str]:
-        """Resolve a user-facing label back to a device key."""
-        return self.device_keys_by_label.get(label)
-
-    def convert_to_name(self, identifier: Any) -> str:
-        """Provide Measurement GUI compatible label lookup by index or device key."""
-        if isinstance(identifier, str):
-            return self.get_device_label(identifier)
-        if isinstance(identifier, int):
-            if 0 <= identifier < len(self.device_list):
-                device_key = self.device_list[identifier]
-                return self.get_device_label(device_key)
-            return f"device_{identifier + 1}"
-        return str(identifier)
+        self.update_canvas_selection_highlights()
 
     def update_dropdowns(self, event: Optional[Any]) -> None:
         sample = self.sample_type_var.get()
         print("Sample chosen:", sample)
         self.update_device_type(sample)
 
-        if sample in sample_config:
-            sections = sample_config[sample]["sections"]
-            self.section_dropdown["values"] = list(sections.keys())
-            self.section_dropdown.set("")
+        if sample in self.controller.sample_config:
+            sections = self.controller.get_sections(sample)
+            self.section_dropdown["values"] = sections
+            if sections:
+                default_section = sections[0]
+                self.section_dropdown.set(default_section)
+                self.section_var.set(default_section)
+                self.controller.set_section(default_section)
 
-            # Disable certain sections (keeping them visible)
             self.section_dropdown["state"] = "readonly"
 
             # Update device numbers
-            self.device_dropdown["values"] = self.device_labels
-            self.device_dropdown.set("")
+            devices = self.controller.sample_config[sample]["devices"]
+            self.device_dropdown["values"] = devices
+            if devices:
+                default_device = devices[0]
+                self.device_dropdown.set(default_device)
+                self.device_var.set(default_device)
+                self.controller.set_current_device(default_device)
 
             # Call do_something when sample changes
             self.load_image(sample)
             self.device = self.device_var.get()
+        self.update_info_box()
+        self.update_canvas_selection_highlights()
 
     def prev_device(self) -> None:
         """Move to the previous device in the selected devices list"""
@@ -521,12 +480,11 @@ class SampleGUI:
             self.current_index = self.selected_indices[0] if self.selected_indices else 0
 
         new_device = self.device_list[self.current_index]
-        label = self.get_device_label(new_device)
-        self.log_terminal(f"Previous device: {label}")
+        self.log_terminal(f"Previous device: {new_device}")
 
         # Update the displayed device information
-        self.device_var.set(label)
-        self.info_box.config(text=f"Current Device: {label}")
+        self.device_var.set(new_device)
+        self.info_box.config(text=f"Current Device: {new_device}")
 
         # Update the highlight
         self.update_highlight(new_device)
@@ -549,12 +507,11 @@ class SampleGUI:
             self.current_index = self.selected_indices[0] if self.selected_indices else 0
 
         new_device = self.device_list[self.current_index]
-        label = self.get_device_label(new_device)
-        self.log_terminal(f"Next device: {label}")
+        self.log_terminal(f"Next device: {new_device}")
 
         # Update the displayed device information
-        self.device_var.set(label)
-        self.info_box.config(text=f"Current Device: {label}")
+        self.device_var.set(new_device)
+        self.info_box.config(text=f"Current Device: {new_device}")
 
         # Update the highlight
         self.update_highlight(new_device)
@@ -584,11 +541,10 @@ class SampleGUI:
                 # Update index
                 self.current_index = i  # Now it holds the current index of the device
 
-                label = self.get_device_label(device)
-                self.device_var.set(label)
+                self.device_var.set(device)
                 self.sample_type_var.set(bounds["sample"])
                 self.section_var.set(bounds["section"])
-                self.info_box.config(text=f"Current Device: {label}")
+                self.info_box.config(text=f"Current Device: {device}")
 
                 # Draw a rectangle around the clicked device
                 self.canvas.create_rectangle(
@@ -632,7 +588,7 @@ class SampleGUI:
             self.change_relays()
             print("")
             print("Selected devices:")
-            print([self.get_device_label(device) for device in selected_device_list])
+            print(selected_device_list)
             print("")
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
@@ -640,62 +596,36 @@ class SampleGUI:
             self.measuremnt_gui.bring_to_top()
 
     def update_info_box(self, event: Optional[Any] = None) -> None:
-        selected_device = self.device_var.get()
-        device_key = self.get_device_key_from_label(selected_device) if selected_device else None
-
-        if device_key and device_key in self.device_list:
-            idx = self.device_list.index(device_key)
-            if idx != self.current_index:
-                self.current_index = idx
-            device_meta = self.device_mapping.get(device_key, {})
-            section = device_meta.get("section")
-            sample = device_meta.get("sample")
-            if sample:
-                self.sample_type_var.set(sample)
-            if section:
-                self.section_var.set(section)
-            if hasattr(self, 'original_image'):
-                try:
-                    self.update_highlight(device_key)
-                except Exception:
-                    pass
-
         selected_sample = self.sample_type_var.get()
         selected_section = self.section_var.get()
+        selected_device = self.device_var.get()
         device_text = f"Current Device: {selected_sample} - {selected_section} - {selected_device}"
         self.info_box.config(text=device_text)
 
     def change_relays(self) -> None:
-        """Change relays for the current device using MultiplexerManager"""
-        current_device = self.device_list[self.current_index]
+        """Change relays for the current device using shared controller."""
+        current_device = self.controller.current_device_name
 
-        # Check if current device is in selected devices
-        label = self.get_device_label(current_device)
+        if not current_device:
+            self.log_terminal("No current device selected.")
+            return
 
         if current_device not in self.selected_devices:
-            self.log_terminal(f"Warning: Device {label} is not selected")
-            response = messagebox.askyesno("Device Not Selected",
-                                           f"Device {label} is not in the selected list. Continue anyway?")
+            self.log_terminal(f"Warning: Device {current_device} is not selected")
+            response = messagebox.askyesno(
+                "Device Not Selected",
+                f"Device {current_device} is not in the selected list. Continue anyway?",
+            )
             if not response:
                 return
 
-        # Use unified multiplexer manager interface
-        if self.mpx_manager is not None:
-            self.log_terminal(f"Routing to {label} via {self.multiplexer_type}")
-            success = self.mpx_manager.route_to_device(current_device, self.current_index)
-            
-            if success:
-                self.log_terminal(f"Successfully routed to {label}")
-            else:
-                self.log_terminal(f"Failed to route to {label}")
-            
-            # Update measurement window if open
-            if self.measurement_window:
-                self.measuremnt_gui.current_index = self.current_index
-                self.measuremnt_gui.update_variables()
-        else:
-            self.log_terminal("Multiplexer manager not initialized")
-            print("Error: Multiplexer manager is None")
+        success = self.controller.change_relays()
+        if not success and self.mpx_manager is None:
+            messagebox.showerror("Multiplexer", "Multiplexer manager not initialized.")
+
+        if self.measurement_window:
+            self.measuremnt_gui.current_index = self.current_index
+            self.measuremnt_gui.update_variables()
 
     def clear_canvas(self) -> None:
         self.canvas.delete("all")
@@ -769,7 +699,7 @@ class SampleGUI:
         if device_name in self.device_list:
             idx = self.device_list.index(device_name)
             self.current_index = idx
-            self.device_var.set(self.get_device_label(device_name))
+            self.device_var.set(device_name)
             self.update_highlight(device_name)
             self.change_relays()
 
@@ -907,10 +837,9 @@ class SampleGUI:
             for idx in self.selected_indices:
                 device = self.device_list[idx]
                 self.current_index = idx
-                label = self.get_device_label(device)
-                self.device_var.set(label)
-                self.info_box.config(text=f"Current Device: {label}")
-                self.info_box.config(text=f"Current Device: {label}")
+                self.device_var.set(device)
+                self.info_box.config(text=f"Current Device: {device}")
+                self.info_box.config(text=f"Current Device: {device}")
                 self.update_highlight(device)
                 self.change_relays()
                 yield device

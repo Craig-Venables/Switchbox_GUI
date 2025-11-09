@@ -347,6 +347,16 @@ class TSPTestingGUI(tk.Toplevel):
         # Context from provider
         self.sample_name = "UnknownSample"
         self.device_label = "A"
+        self._env_custom_base: Optional[str] = os.environ.get("SWITCHBOX_CUSTOM_SAVE_PATH")
+        env_sample = os.environ.get("SWITCHBOX_SAMPLE_NAME")
+        if env_sample:
+            self.sample_name = env_sample
+        env_device = os.environ.get("SWITCHBOX_DEVICE_LABEL")
+        if env_device:
+            self.device_label = env_device
+        env_address = os.environ.get("SWITCHBOX_KEITHLEY_ADDRESS")
+        if env_address:
+            self.device_address = env_address
         
         # Save location - load from config
         self.custom_base_path = self._load_custom_save_location()
@@ -359,6 +369,10 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Create UI
         self.create_ui()
+        try:
+            self.context_var.set(f"Sample: {self.sample_name}  |  Device: {self.device_label}")
+        except Exception:
+            pass
         
         # Attempt auto-connect
         self.after(500, self.auto_connect)
@@ -748,6 +762,11 @@ class TSPTestingGUI(tk.Toplevel):
     
     def _load_custom_save_location(self) -> Optional[Path]:
         """Load custom save location from config file"""
+        if self._env_custom_base:
+            try:
+                return Path(self._env_custom_base)
+            except Exception:
+                pass
         config_file = Path("Json_Files/save_location_config.json")
         try:
             if config_file.exists():
