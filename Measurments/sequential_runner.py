@@ -16,11 +16,99 @@ from __future__ import annotations
 
 import os
 import time
+import threading
 from typing import Any, Iterable
 
 import numpy as np
 
 from Measurments.measurement_services_smu import VoltageRangeMode
+
+
+class SequentialMeasurementRunner:
+    """Threaded wrapper around the legacy sequential measurement workflow."""
+
+    __slots__ = ("_gui", "_thread")
+
+    def __init__(self, gui: Any) -> None:
+        object.__setattr__(self, "_gui", gui)
+        object.__setattr__(self, "_thread", None)
+
+    # ------------------------------------------------------------------ #
+    # Proxy helpers
+    # ------------------------------------------------------------------ #
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._gui, item)
+
+    def __setattr__(self, key: str, value: Any) -> None:
+        if key in self.__slots__:
+            object.__setattr__(self, key, value)
+        else:
+            setattr(self._gui, key, value)
+
+    # ------------------------------------------------------------------ #
+    # Public API
+    # ------------------------------------------------------------------ #
+    def start(self) -> None:
+        """Spawn background thread to run sequential measurement."""
+        thread = object.__getattribute__(self, "_thread")
+        if thread is not None and thread.is_alive():
+            try:
+                self._gui.append_status("Sequential measurement already running.")
+            except Exception:
+                pass
+            return
+
+        button = getattr(self._gui, "run_custom_button", None)
+        if button is not None:
+            try:
+                button.config(state="disabled")
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=self.run, daemon=True)
+        object.__setattr__(self, "_thread", thread)
+        thread.start()
+
+    def run(self) -> None:
+        """Execute sequential measurement synchronously (used by start)."""
+        try:
+            run_sequential_measurement(self)
+        finally:
+            self._notify_finished()
+
+    def request_stop(self) -> None:
+        """Signal the underlying GUI to stop the sequential run."""
+        try:
+            setattr(self._gui, "stop_measurement_flag", True)
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers
+    # ------------------------------------------------------------------ #
+    def _notify_finished(self) -> None:
+        object.__setattr__(self, "_thread", None)
+
+        def _callback() -> None:
+            button = getattr(self._gui, "run_custom_button", None)
+            if button is not None:
+                try:
+                    button.config(state="normal")
+                except Exception:
+                    pass
+            try:
+                self._gui.sequential_run_finished()
+            except Exception:
+                pass
+
+        master = getattr(self._gui, "master", None)
+        if master is not None and hasattr(master, "after"):
+            try:
+                master.after(0, _callback)
+                return
+            except Exception:
+                pass
+        _callback()
 
 
 def run_sequential_measurement(gui: Any) -> None:
