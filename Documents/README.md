@@ -42,19 +42,31 @@ This directory contains documentation for the modular utilities and configuratio
 - `Measurments/single_measurement_runner.py` – Standard DC IV sweep orchestrator
 - `Measurments/pulsed_measurement_runner.py` – SMU/PMU pulsed and fast-pulse/hold flows
 - `Measurments/special_measurement_runner.py` – ISPP, pulse-width sweep, threshold search, transient capture
+- `Measurments/sequential_runner.py` – Batch IV/averaging loop controller for the sequential panel
 - `Measurments/telegram_coordinator.py` – Telegram post-measurement automation
 - `Measurments/background_workers.py` – Manual endurance/retention worker threads
+- `Measurments/data_saver.py` – Centralized save/plot helpers used by all runners
+
+#### GUI Helpers
+- `gui/layout_builder.py` – Builds all Tk panels (manual endurance, custom sweeps, sequential controls now included in the middle column)
+- `gui/plot_updaters.py` – Background worker threads that keep matplotlib panels in sync during live measurements
+- `Measurement_GUI.bring_to_top()` – Lightweight focus helper runners use to surface the main window
 
 ## Testing
 
 Run the automated test suite with:
 ```bash
-pytest tests
+python -m pytest tests
 ```
 
-The tests cover summary plot generation (`MeasurementDataSaver`) and directory utilities (e.g. `find_largest_number_in_folder`).  They run headlessly using `matplotlib`’s Agg backend, so no GUI is required.
+`tests/conftest.py` ensures the repo root is on `sys.path`, so `pytest tests` also works if you prefer. The suite covers summary plot generation (`MeasurementDataSaver`) and directory utilities (e.g. `find_largest_number_in_folder`).  Tests run headlessly using `matplotlib`’s Agg backend, so no GUI is required.
 
 Individual modules can still be smoke-tested with `python -m` if needed.
+
+### Optional Dependencies
+- **Instruments:** `pyvisa`, `pyvisa-py`, `gpib-ctypes` (for legacy GPIB). Without them the GUI falls back to simulation modes.
+- **Telegram Bot:** `python-telegram-bot` – required to enable messaging callbacks.
+- **Plotting:** `matplotlib` (Agg backend configured automatically for tests).
 
 ## Getting Started
 
@@ -65,3 +77,9 @@ Individual modules can still be smoke-tested with `python -m` if needed.
 ## Future Plans
 
 - **[Documents/GUI_REFACTORING_PLAN.md](Documents/GUI_REFACTORING_PLAN.md)** - Detailed plan for future GUI refactoring (reference only)
+- **[Documents/LAB_TEST_CHECKLIST.md](Documents/LAB_TEST_CHECKLIST.md)** - On-site guide for validating the GUI with real hardware
+- Clear remaining optional import warnings (`PMU_Testing_GUI`, `MeasurementDriver`, `TestRunner`, `MeasurementPlotter`) by lazy-loading or guarding them.
+- Exercise pulsed/special/custom measurement flows with hardware attached; log findings in the smoke-test checklist.
+- Extract plotting setup/update logic into dedicated modules (`gui/plot_panels.py`, `gui/plot_updaters.py`) to complete the architecture.
+- Expand automated coverage with instrument-mock tests for runner orchestration and background workers.
+- Verify Telegram and manual worker flows end-to-end once credentials/hardware are available.

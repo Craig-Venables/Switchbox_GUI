@@ -36,8 +36,8 @@ class MeasurementGUILayoutBuilder:
         self._build_temperature_panel(left_frame)
         self._build_signal_messaging(left_frame)
         self._build_manual_endurance_retention(left_frame)
-        self._build_sequential_controls(middle_frame)
         self._build_custom_measurement_section(middle_frame)
+        self.build_sequential_controls(middle_frame)
         if top_frame is not None:
             self._build_top_banner(top_frame)
 
@@ -293,10 +293,10 @@ class MeasurementGUILayoutBuilder:
 
     def _build_signal_messaging(self, parent: tk.Misc) -> None:
         gui = self.gui
-        frame = tk.LabelFrame(parent, text="Signal_Messaging", padx=5, pady=5)
-        frame.grid(row=5, column=0, rowspan=2, padx=10, pady=5, sticky="nsew")
+        frame = tk.LabelFrame(parent, text="Telegram Messaging", padx=5, pady=5)
+        frame.grid(row=8, column=0, padx=10, pady=5, sticky="ew")
 
-        tk.Label(frame, text="Do you want to use the bot?").grid(row=0, column=0, sticky="w")
+        tk.Label(frame, text="Enable Telegram Bot").grid(row=0, column=0, sticky="w")
         current_value = getattr(gui, "get_messaged_var", 0)
         if hasattr(current_value, "get"):
             get_value = int(current_value.get())
@@ -304,33 +304,26 @@ class MeasurementGUILayoutBuilder:
             get_value = int(bool(current_value))
         gui.get_messaged_var = tk.IntVar(value=get_value)
         gui.get_messaged_switch = ttk.Checkbutton(frame, variable=gui.get_messaged_var)
-        gui.get_messaged_switch.grid(row=0, column=1)
+        gui.get_messaged_switch.grid(row=0, column=1, padx=5, sticky="w")
 
-        tk.Label(frame, text="Who's Using this?").grid(row=2, column=0, sticky="w")
+        tk.Label(frame, text="Operator").grid(row=1, column=0, sticky="w")
         names = list(getattr(gui, "names", []))
         default_name = "Choose name" if names else "No_Name"
         gui.selected_user = tk.StringVar(value=default_name)
-        gui.custom_measurement_menu = ttk.Combobox(
+        gui.messaging_user_menu = ttk.Combobox(
             frame,
             textvariable=gui.selected_user,
             values=names,
             state="readonly" if names else "disabled",
         )
-        gui.custom_measurement_menu.grid(row=2, column=1, padx=5)
+        gui.messaging_user_menu.grid(row=1, column=1, padx=5, sticky="ew")
 
         update_cb = self.callbacks.get("update_messaging_info") or getattr(gui, "update_messaging_info", None)
         if update_cb:
-            gui.custom_measurement_menu.bind("<<ComboboxSelected>>", update_cb)
-
-        existing_token = getattr(gui, "token_var", "")
-        if hasattr(existing_token, "get"):
-            existing_token = existing_token.get()
-        gui.token_var = tk.StringVar(value=existing_token or "")
-
-        existing_chatid = getattr(gui, "chatid_var", "")
-        if hasattr(existing_chatid, "get"):
-            existing_chatid = existing_chatid.get()
-        gui.chatid_var = tk.StringVar(value=existing_chatid or "")
+            gui.messaging_user_menu.bind("<<ComboboxSelected>>", update_cb)
+            gui.get_messaged_switch.configure(command=lambda: update_cb(None))
+        else:
+            gui.get_messaged_switch.configure(state=tk.DISABLED)
 
         try:
             frame.lift()
@@ -468,10 +461,13 @@ class MeasurementGUILayoutBuilder:
         frame.columnconfigure(1, weight=1)
         self.widgets["manual_endurance_retention"] = frame
 
+    def build_sequential_controls(self, parent: tk.Misc) -> None:
+        self._build_sequential_controls(parent)
+
     def _build_sequential_controls(self, parent: tk.Misc) -> None:
         gui = self.gui
         frame = tk.LabelFrame(parent, text="Sequential Measurements", padx=5, pady=5)
-        frame.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        frame.grid(row=5, column=0, padx=10, pady=5, sticky="ew")
 
         existing_mode = getattr(gui, "Sequential_measurement_var", "Iv Sweep")
         if hasattr(existing_mode, "get"):

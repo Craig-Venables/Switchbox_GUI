@@ -15,6 +15,10 @@
             "defaults": { "channel": "380nm", "level": 10.0 }
         }
     },
+    "Simulation": {
+        "SMU_address": "SIM::KEITHLEY2450",
+        "SMU Type": "Keithley 2450 (Simulation)"
+    },
     "Lab_Laser-4200A": {
         "SMU_address": "192.168.0.10:8888",
         "SMU Type": "Keithley 4200A",

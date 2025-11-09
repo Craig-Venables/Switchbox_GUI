@@ -11,6 +11,7 @@ from .base_system import BaseMeasurementSystem
 
 # Import the actual implementation
 from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
+from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
 from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import (
     Keithley2450_TSP_Scripts,
     MIN_PULSE_WIDTH,
@@ -18,6 +19,9 @@ from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import (
     MAX_VOLTAGE,
     MIN_CURRENT_LIMIT,
     MAX_CURRENT_LIMIT,
+)
+from Equipment.SMU_AND_PMU.keithley2450_tsp_sim_scripts import (
+    Keithley2450_TSP_Sim_Scripts,
 )
 
 
@@ -196,4 +200,23 @@ class Keithley2450System(BaseMeasurementSystem):
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
         return self.test_scripts.relaxation_after_multi_pulse_with_pulse_measurement(**params)
+
+
+class Keithley2450SimSystem(Keithley2450System):
+    """Adapter that routes tests to the in-memory Keithley 2450 simulator."""
+
+    DEFAULT_ADDRESS = "SIM::KEITHLEY2450"
+
+    def get_system_name(self) -> str:
+        return 'keithley2450_sim'
+
+    def connect(self, address: str, terminals: str = 'front', timeout: int = 10000, **kwargs) -> bool:
+        try:
+            self.tsp_controller = Keithley2450_TSP_Sim(address, timeout=timeout, terminals=terminals)
+            self.test_scripts = Keithley2450_TSP_Sim_Scripts(self.tsp_controller)
+            self._connected = True
+            return True
+        except Exception as e:
+            self._connected = False
+            raise ConnectionError(f"Failed to initialize Keithley 2450 simulation: {e}") from e
 

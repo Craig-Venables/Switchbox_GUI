@@ -82,9 +82,29 @@ Measurement_GUI.py (1,000 lines) - Main orchestrator
 - ✅ SMU/PMU pulsed modes (`<1.5 V`, `>1.5 V`, fixed 20 V) plus fast pulse/hold routines moved into `Measurments/pulsed_measurement_runner.py`; `MeasurementGUI.start_measurement` now delegates via a dispatcher.
 - ✅ ISPP, pulse-width sweep, threshold search, and transient decay branches now live in `Measurments/special_measurement_runner.py`, keeping the GUI as a thin router.
 - ✅ Summary plot/log generation now funnels through `MeasurementDataSaver.save_summary_plots`; GUI runners use `_save_summary_artifacts` so Telegram and file exports stay consistent.
-- ✅ Sequential measurement UI *and* logic have been relocated (`gui/layout_builder.py` panel + `Measurments/sequential_runner.py` backend), so the main GUI now just delegates.
-- ⚠️ Matplotlib setup, synchronous measurement wrappers, data saving, and Telegram orchestration logic remain embedded inside `Measurement_GUI.py`. These are the next targets for extraction.
+- ✅ Sequential measurement UI *and* logic now live in `gui/layout_builder.py` (panel injected into the middle column) plus `Measurments/sequential_runner.py`, preserving the original layout location while trimming the GUI controller.
+- ✅ Real-time plot updater threads were extracted to `gui/plot_updaters.py`; `MeasurementGUI` now delegates start/stop hooks to the helper instead of managing threads directly.
+- ✅ `MeasurementGUI` gained a reusable `bring_to_top()` helper so runner modules can surface the main window without tightly coupling to Tk internals.
+- ✅ Added `tests/conftest.py` to place the repo root on `sys.path`, unblocking pytest runs without `python -m`.
+- ⚠️ Synchronous measurement wrappers, data saving helpers, and Telegram orchestration logic remain embedded inside `Measurement_GUI.py`. These are the next targets for extraction.
 - ⚠️ No `GUI/` subpackage exists yet. Creating it will make the separation explicit and keep PEP 8–style module names (lowercase with underscores).
+
+---
+
+## ✅ 2025-11-09 Smoke-Test Checklist (Initial Pass)
+
+| Flow | Status | Notes |
+|------|--------|-------|
+| Standard IV (single_runner) | ⚠️ Partial | Runs through main path; uses simulated Keithley 2450. Requires hardware or full simulator for end-to-end validation. |
+| Sequential measurements | ⚠️ Partial | UI renders in middle column; runner invoked but still depends on hardware for verification. |
+| Custom measurement plans | ⚠️ Partial | Executes JSON-driven IV branch; relies on `MeasurementService.compute_voltage_range`. Needs hardware to complete sweep. |
+| Pulsed / Special modes | ⚠️ Pending | Not yet exercised after refactor; schedule targeted pass once optional libs (`pyvisa`, gpib bindings) available. |
+| Manual endurance/retention workers | ⚠️ Pending | Background threads extracted; require manual trigger during next hardware session. |
+| Telegram messaging | ⚠️ Pending | `TelegramCoordinator` instantiated; needs token/chat setup to verify post-measurement worker. |
+| Data/plot saving | ✅ | `tests/test_summary_artifacts.py` covers summary plots/log creation; manual run saved `Combined_summary.png` artifacts under simulated path. |
+| Pytest regression suite | ✅ | `py -3 -m pytest tests` passes (3 tests). |
+
+**Next smoke pass:** repeat once lab instruments or fully mocked drivers are connected; record failures and regressions here.
 
 ---
 
@@ -763,6 +783,16 @@ class MeasurementBackgroundWorkers:
 **Implementation notes:**
 - Keep worker functions small and document the steps they perform (set stop flag, call executor, trigger callbacks). This guidance helps newer developers trace control flow.
 - Use `threading.Thread(daemon=True)` consistently and provide a clear `stop_measurement` method to request shutdown.
+
+---
+
+## 🚀 Next Improvement Ideas (Post-Refactor)
+
+- Finalize a `gui/` package layout with `__init__.py` so the layout/plot modules share a consistent namespace.
+- Add instrument abstraction interfaces (mockable drivers) to unblock richer unit tests and simplify CI.
+- Expand automated coverage with instrument mocks so runners can be validated without hardware. Target sequential, pulsed/special runners, and data saver integration.
+- Explore migrating background threads to a centralized job queue or `asyncio` for easier shutdown and coordination.
+- Introduce structured logging/telemetry so console, file, and Telegram outputs all reuse a common event schema.
 
 ---
 
