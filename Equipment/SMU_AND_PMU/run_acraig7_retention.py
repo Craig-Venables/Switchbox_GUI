@@ -1,40 +1,10 @@
-"""PMU retention waveform generator and runner.
+"""Single-channel PMU retention runner with optional auxiliary pulse.
 
-This script builds the `EX ACraig2 ACraig1_PMU_retention(...)` command based on the
-parameter limits defined in `ACraig1_PMU_retention.c`, optionally executes the
-command on a connected Keithley 4200A via KXCI, and prints the returned data.
-
-Parameter Limits (from the C module):
-
-    riseTime       : 2e-8  ≤ value ≤ 1
-    resetV         : -20   ≤ value ≤ 20
-    resetWidth     : 2e-8  ≤ value ≤ 1
-    resetDelay     : 2e-8  ≤ value ≤ 1
-    measV          : -20   ≤ value ≤ 20
-    measWidth      : 2e-8  ≤ value ≤ 1
-    measDelay      : 2e-8  ≤ value ≤ 1
-    setWidth       : 2e-8  ≤ value ≤ 1
-    setFallTime    : 2e-8  ≤ value ≤ 1
-    setDelay       : 2e-8  ≤ value ≤ 1
-    setStartV      : -20   ≤ value ≤ 20
-    setStopV       : -20   ≤ value ≤ 20
-    steps          : ≥ 0  (retention uses 0 or 1; waveform builder forces 1)
-    IRange         : 100e-9 ≤ value ≤ 0.8
-    max_points     : 12 ≤ value ≤ 30000
-    NumbMeasPulses : 8 ≤ value ≤ 100 (instrument manual guidance)
-    ClariusDebug   : 0 or 1
-
-The routine automatically records the initial baseline probe and a final
-trailing probe in addition to the user requested `NumbMeasPulses`. Therefore the
-output arrays must be sized to `NumbMeasPulses + 2` entries.
-
-Usage example:
-
-    python run_pmu_retention.py --gpib-address GPIB0::17::INSTR \
-        --num-pulses 12 --reset-v 4.0 --meas-v 0.3
-
-Pass `--dry-run` to print the generated EX command without contacting the
-instrument.
+This script sends the `EX ACraig7 PMU_retention_single_channel(...)` command
+over KXCI, waits for completion, and then fetches the returned waveform data.
+It mirrors the structure of the other retention runners but adds controls for
+driving a second PMU channel with a simple seg_arb pulse while the primary
+channel performs the retention read train.
 """
 
 from __future__ import annotations
@@ -47,7 +17,7 @@ from typing import Dict, List, Optional
 
 
 class KXCIClient:
-    """Minimal KXCI helper for sending EX/GP commands over GPIB."""
+    """Minimal KXCI helper for sending EX/GP commands."""
 
     def __init__(self, gpib_address: str, timeout: float) -> None:
         self.gpib_address = gpib_address
@@ -69,10 +39,10 @@ class KXCIClient:
             self.inst.write_termination = "\n"
             self.inst.read_termination = "\n"
             idn = self.inst.query("*IDN?").strip()
-            print(f"✓ Connected to: {idn}")
+            print(f"[OK] Connected to: {idn}")
             return True
         except Exception as exc:  # noqa: BLE001
-            print(f"❌ Connection failed: {exc}")
+            print(f"[ERR] Connection failed: {exc}")
             return False
 
     def disconnect(self) -> None:
@@ -113,7 +83,6 @@ class KXCIClient:
             self.inst.write(command)
             time.sleep(0.03)
             time.sleep(2.0)
-
             response = self._safe_read()
             return self._parse_return_value(response), None
         except Exception as exc:  # noqa: BLE001
@@ -142,7 +111,6 @@ class KXCIClient:
     def _query_gp(self, param_position: int, num_values: int) -> List[float]:
         if self.inst is None:
             raise RuntimeError("Instrument not connected")
-
         command = f"GP {param_position} {num_values}"
         self.inst.write(command)
         time.sleep(0.03)
@@ -180,9 +148,8 @@ class KXCIClient:
                 pass
         return values
 
-def format_param(value: float | int | str) -> str:
-    """Format a parameter exactly as expected by KXCI EX commands."""
 
+def format_param(value: float | int | str) -> str:
     if isinstance(value, float):
         if value == 0.0:
             return "0"
@@ -194,154 +161,176 @@ def format_param(value: float | int | str) -> str:
 @dataclass
 class RetentionConfig:
     rise_time: float = 1e-7
-    reset_v: float = 1.0
-    reset_width: float = 1e-6
-    reset_delay: float = 5e-7
-    meas_v: float = 0.3
+    meas_v: float = 1.5
     meas_width: float = 1e-6
     meas_delay: float = 2e-6
-    set_width: float = 1e-6
-    set_fall_time: float = 1e-7
-    set_delay: float = 1e-6
-    set_start_v: float = 0.3
-    set_stop_v: float = 0.3
-    steps: int = 0
-    i_range: float = 1e-4
+    num_pulses: int = 50
+    i_range: float = 1e-6
     max_points: int = 10000
-    iteration: int = 1
     out1_name: str = "VF"
-    out2_name: str = "T"
-    out2_size: int = 200
-    num_pulses: int = 150
-    clarius_debug: int = 0
+    iteration: int = 1
+    clarius_debug: int = 1
+    aux_channel: int = 2
+    aux_vrange: float = 10.0
+    aux_i_limit: float = 0.0
+    aux_vlow: float = 0.0
+    aux_vhigh: float = 1.5
+    aux_rise_time: float = 3e-8
+    aux_fall_time: float = 3e-8
+    aux_pulse_width: float = 1e-6
+    aux_pre_delay: float = 0.0
+    aux_post_delay: float = 0.0
 
-    def total_probe_count(self) -> int:
-        return self.num_pulses + 1
+    def probe_capacity(self) -> int:
+        return self.num_pulses + 2
 
     def validate(self) -> None:
         limits: Dict[str, tuple[float, float]] = {
             "rise_time": (2e-8, 1.0),
-            "reset_v": (-20.0, 20.0),
-            "reset_width": (2e-8, 1.0),
-            "reset_delay": (2e-8, 1.0),
             "meas_v": (-20.0, 20.0),
             "meas_width": (2e-8, 1.0),
             "meas_delay": (2e-8, 1.0),
-            "set_width": (2e-8, 1.0),
-            "set_fall_time": (2e-8, 1.0),
-            "set_delay": (2e-8, 1.0),
-            "set_start_v": (-20.0, 20.0),
-            "set_stop_v": (-20.0, 20.0),
             "i_range": (100e-9, 0.8),
             "max_points": (12, 30000),
         }
-
-        for field_name, (lo, hi) in limits.items():
-            value = getattr(self, field_name)
+        for field, (lo, hi) in limits.items():
+            value = getattr(self, field)
             if value < lo or value > hi:
-                raise ValueError(f"{field_name}={value} outside [{lo}, {hi}]")
-
-        if not (8 <= self.num_pulses <= 1000):
-            raise ValueError("num_pulses must be within [8, 100]")
+                raise ValueError(f"{field}={value} outside [{lo}, {hi}]")
+        if self.num_pulses < 2 or self.num_pulses > 1000:
+            raise ValueError("num_pulses must be within [2, 1000]")
         if self.clarius_debug not in (0, 1):
             raise ValueError("clarius_debug must be 0 or 1")
-        if self.out2_size < 1:
-            raise ValueError("out2_size must be positive")
-        if self.steps < 0:
-            raise ValueError("steps must be >= 0")
+        if self.aux_channel not in (0, 1, 2):
+            raise ValueError("aux_channel must be 0 (disabled), 1, or 2")
+        if self.aux_channel:
+            aux_limits: Dict[str, tuple[float, float]] = {
+                "aux_vrange": (0.2, 40.0),
+                "aux_i_limit": (0.0, 1.0),
+                "aux_vlow": (-20.0, 20.0),
+                "aux_vhigh": (-20.0, 20.0),
+                "aux_rise_time": (2e-8, 1.0),
+                "aux_fall_time": (2e-8, 1.0),
+                "aux_pulse_width": (2e-8, 1.0),
+                "aux_pre_delay": (0.0, 1.0),
+                "aux_post_delay": (0.0, 1.0),
+            }
+            for field, (lo, hi) in aux_limits.items():
+                value = getattr(self, field)
+                if value < lo or value > hi:
+                    raise ValueError(f"{field}={value} outside [{lo}, {hi}]")
+            if self.aux_pulse_width <= 0.0:
+                raise ValueError("aux_pulse_width must be > 0 when aux_channel is enabled")
 
 
 def build_ex_command(cfg: RetentionConfig) -> str:
-    total_probes = cfg.total_probe_count()
-    common_size = total_probes
+    probe_capacity = cfg.probe_capacity()
+    reset_v = cfg.meas_v
+    reset_width = cfg.meas_width
+    reset_delay = cfg.meas_delay
+    set_width = cfg.meas_width
+    set_fall_time = cfg.rise_time
+    set_delay = cfg.meas_delay
+    set_start_v = cfg.meas_v
+    set_stop_v = cfg.meas_v
+    steps = 1
+
+    aux_channel = cfg.aux_channel
+    if aux_channel == 1:
+        print("[WARN] Aux channel 1 conflicts with the primary force/measure channel; auxiliary pulse disabled.")
+        aux_channel = 0
 
     params = [
         format_param(cfg.rise_time),
-        format_param(cfg.reset_v),
-        format_param(cfg.reset_width),
-        format_param(cfg.reset_delay),
+        format_param(reset_v),
+        format_param(reset_width),
+        format_param(reset_delay),
         format_param(cfg.meas_v),
         format_param(cfg.meas_width),
         format_param(cfg.meas_delay),
-        format_param(cfg.set_width),
-        format_param(cfg.set_fall_time),
-        format_param(cfg.set_delay),
-        format_param(cfg.set_start_v),
-        format_param(cfg.set_stop_v),
-        format_param(cfg.steps),
+        format_param(set_width),
+        format_param(set_fall_time),
+        format_param(set_delay),
+        format_param(set_start_v),
+        format_param(set_stop_v),
+        format_param(steps),
         format_param(cfg.i_range),
         format_param(cfg.max_points),
         "",
-        format_param(common_size),
+        format_param(probe_capacity),
         "",
-        format_param(common_size),
+        format_param(probe_capacity),
         "",
-        format_param(common_size),
+        format_param(probe_capacity),
         "",
-        format_param(common_size),
+        format_param(probe_capacity),
         format_param(cfg.iteration),
         "",
-        format_param(common_size),
+        format_param(probe_capacity),
         cfg.out1_name,
         "",
-        format_param(cfg.out2_size),
-        cfg.out2_name,
+        format_param(probe_capacity),
+        "IM",
         "",
-        format_param(common_size),
+        format_param(probe_capacity),
         format_param(cfg.num_pulses),
+        format_param(aux_channel),
+        format_param(cfg.aux_vrange),
+        format_param(cfg.aux_i_limit),
+        format_param(cfg.aux_vlow),
+        format_param(cfg.aux_vhigh),
+        format_param(cfg.aux_rise_time),
+        format_param(cfg.aux_fall_time),
+        format_param(cfg.aux_pulse_width),
+        format_param(cfg.aux_pre_delay),
+        format_param(cfg.aux_post_delay),
         format_param(cfg.clarius_debug),
     ]
 
-    return f"EX ACraig2 ACraig1_PMU_retention({','.join(params)})"
+    return f"EX ACraig7 PMU_retention_single_channel({','.join(params)})"
 
 
 def _compute_probe_times(cfg: RetentionConfig) -> List[float]:
-    """Recreate the probe timing centres used in the C implementation."""
-
     ratio = 0.4
     ttime = 0.0
     centres: List[float] = []
 
-    def add_measurement(start_time: float) -> None:
-        centres.append(start_time + cfg.meas_width * (ratio + 0.9) / 2.0)
+    def add_probe(current_t: float) -> None:
+        centres.append(current_t + cfg.meas_width * (ratio + 0.9) / 2.0)
 
-    # Initial baseline measurement pulse
-    ttime += cfg.reset_delay
+    ttime += cfg.meas_delay
     ttime += cfg.rise_time
-    add_measurement(ttime)
+    add_probe(ttime)
     ttime += cfg.meas_width
     ttime += cfg.rise_time
     ttime += cfg.meas_delay
     ttime += cfg.rise_time
     ttime += cfg.rise_time
 
-    # Reset pulse segments
-    ttime += cfg.reset_width
-    ttime += cfg.reset_delay
-    ttime += cfg.reset_delay
-    ttime += cfg.meas_delay
     ttime += cfg.rise_time
-
-    # SET measurement pulse
-    ttime += cfg.rise_time
-    add_measurement(ttime)
+    add_probe(ttime)
     ttime += cfg.meas_width
-    ttime += cfg.set_fall_time
-    ttime += cfg.meas_delay
-
-    # First post-set measurement pulse
     ttime += cfg.rise_time
-    add_measurement(ttime)
+    ttime += cfg.meas_delay
+    ttime += cfg.rise_time
+
+    ttime += cfg.rise_time
+    add_probe(ttime)
     ttime += cfg.meas_width
-    ttime += cfg.set_fall_time
+    ttime += cfg.rise_time
     ttime += cfg.meas_delay
 
-    # Remaining measurement probes
-    for _ in range(cfg.num_pulses - 2):
+    ttime += cfg.rise_time
+    add_probe(ttime)
+    ttime += cfg.meas_width
+    ttime += cfg.rise_time
+    ttime += cfg.meas_delay
+
+    for _ in range(max(cfg.num_pulses - 2, 0)):
         ttime += cfg.rise_time
-        add_measurement(ttime)
+        add_probe(ttime)
         ttime += cfg.meas_width
-        ttime += cfg.set_fall_time
+        ttime += cfg.rise_time
         ttime += cfg.meas_delay
 
     return centres
@@ -349,7 +338,7 @@ def _compute_probe_times(cfg: RetentionConfig) -> List[float]:
 
 def run_measurement(cfg: RetentionConfig, address: str, timeout: float, enable_plot: bool) -> None:
     command = build_ex_command(cfg)
-    total_probes = cfg.total_probe_count()
+    probe_capacity = cfg.probe_capacity()
 
     controller = KXCIClient(gpib_address=address, timeout=timeout)
 
@@ -360,54 +349,84 @@ def run_measurement(cfg: RetentionConfig, address: str, timeout: float, enable_p
         print("\n[KXCI] Generated EX command:")
         print(command)
 
+        aux_effective = cfg.aux_channel if cfg.aux_channel != 1 else 0
+        if aux_effective:
+            print(
+                "[KXCI] Auxiliary pulse: "
+                f"channel={aux_effective}, "
+                f"Vlow={cfg.aux_vlow} V, "
+                f"Vhigh={cfg.aux_vhigh} V, "
+                f"width={cfg.aux_pulse_width} s"
+            )
+
         if not controller._enter_ul_mode():  # pylint: disable=protected-access
             raise RuntimeError("Failed to enter UL mode")
 
         return_value, error = controller._execute_ex_command(command)  # pylint: disable=protected-access
         if error:
             raise RuntimeError(error)
-
         if return_value is not None:
             print(f"Return value: {return_value}")
 
         print("\n[KXCI] Retrieving data...")
 
         def safe_query(param: int, count: int) -> List[float]:
-            return controller._query_gp(param, count)  # pylint: disable=protected-access
+            data = controller._query_gp(param, count)  # pylint: disable=protected-access
+            print(f"GP {param}: {len(data)} values (first 5: {data[:5]})")
+            return data
 
-        param18 = safe_query(18, 1)
-        if param18:
-            print(f"Param 18 value: {param18[0]}")
-
-        set_v = safe_query(20, total_probes)
-        set_i = safe_query(22, total_probes)
-        pulse_times = safe_query(30, total_probes)
-        out1 = safe_query(31, total_probes)
+        read_v = safe_query(20, probe_capacity)
+        read_i = safe_query(22, probe_capacity)
+        pulse_times = safe_query(31, probe_capacity)
 
         if not pulse_times:
             pulse_times = _compute_probe_times(cfg)
 
-        if len(pulse_times) != total_probes:
-            pulse_times = [float(index) for index in range(total_probes)]
+        if len(pulse_times) < len(read_v):
+            fallback = _compute_probe_times(cfg)
+            if fallback:
+                pulse_times = (pulse_times + fallback)[: len(read_v)]
+
+        def trim_records(times: List[float], voltages: List[float], currents: List[float]) -> tuple[List[float], List[float], List[float]]:
+            usable = min(len(times), len(voltages), len(currents))
+            last_valid = usable
+            for idx in range(usable - 1, -1, -1):
+                if times[idx] > 0.0 or abs(voltages[idx]) > 1e-15 or abs(currents[idx]) > 1e-15:
+                    last_valid = idx + 1
+                    break
+            return times[:last_valid], voltages[:last_valid], currents[:last_valid]
+
+        pulse_times, read_v, read_i = trim_records(pulse_times, read_v, read_i)
+
+        if not pulse_times:
+            pulse_times = _compute_probe_times(cfg)
+            pulse_times, read_v, read_i = trim_records(pulse_times, read_v, read_i)
 
         resistance: List[float] = []
-        for voltage, current in zip(set_v, set_i):
-            if abs(current) < 1e-12:
+        for v, i_cur in zip(read_v, read_i):
+            if abs(i_cur) < 1e-12:
                 resistance.append(float("inf"))
             else:
-                resistance.append(voltage / current)
+                resistance.append(v / i_cur)
+
+        valid_count = min(len(pulse_times), len(read_v), len(read_i), len(resistance))
+        pulse_times = pulse_times[:valid_count]
+        read_v = read_v[:valid_count]
+        read_i = read_i[:valid_count]
+        resistance = resistance[:valid_count]
+
+        print(f"\n[KXCI] Collected {valid_count} probe windows.")
 
         try:
             import pandas as pd  # type: ignore
 
             df = pd.DataFrame(
                 {
-                    "probe": range(total_probes),
+                    "pulse": range(1, len(pulse_times) + 1),
                     "time_s": pulse_times,
-                    "voltage_V": set_v,
-                    "current_A": set_i,
+                    "voltage_V": read_v,
+                    "current_A": read_i,
                     "resistance_ohm": resistance,
-                    cfg.out1_name: out1,
                 }
             )
 
@@ -422,25 +441,24 @@ def run_measurement(cfg: RetentionConfig, address: str, timeout: float, enable_p
                     plt.plot(df["time_s"], df["resistance_ohm"], marker="o")
                     plt.xlabel("Time (s)")
                     plt.ylabel("Resistance (Ohm)")
-                    plt.title("PMU Retention Resistance vs Time")
+                    plt.title("ACraig7 retention resistance vs time")
                     plt.grid(True)
                     plt.tight_layout()
                     plt.show()
                 except Exception as exc:  # noqa: BLE001
-                    print(f"\n⚠️ Unable to display plot: {exc}")
+                    print(f"\n[WARN] Unable to display plot: {exc}")
         except ImportError:
             print("\nPandas not available; printing raw arrays.")
             for label, values in (
-                ("probe", list(range(total_probes))),
+                ("pulse", list(range(1, len(pulse_times) + 1))),
                 ("time_s", pulse_times),
-                ("voltage_V", set_v),
-                ("current_A", set_i),
+                ("voltage_V", read_v),
+                ("current_A", read_i),
                 ("resistance_ohm", resistance),
-                (cfg.out1_name, out1),
             ):
                 print(f"\n{label}:")
                 for idx, val in enumerate(values):
-                    print(f"  {idx:02d}: {val}")
+                    print(f"  {idx + 1:02d}: {val}")
 
     finally:
         try:
@@ -451,34 +469,33 @@ def run_measurement(cfg: RetentionConfig, address: str, timeout: float, enable_p
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate and optionally run PMU retention command")
+    parser = argparse.ArgumentParser(description="Generate/run PMU_retention_single_channel with optional auxiliary pulse")
 
     parser.add_argument("--gpib-address", default="GPIB0::17::INSTR", help="VISA resource string")
     parser.add_argument("--timeout", type=float, default=30.0, help="Visa timeout in seconds")
-    parser.add_argument("--dry-run", action="store_true", help="Only print the command")
-    parser.add_argument("--no-plot", action="store_true", help="Disable resistance plot even if matplotlib is available")
+    parser.add_argument("--dry-run", action="store_true", help="Only print the EX command")
+    parser.add_argument("--no-plot", action="store_true", help="Disable plotting even if matplotlib is present")
 
     parser.add_argument("--rise-time", type=float, default=1e-7)
-    parser.add_argument("--reset-v", type=float, default=1.0)
-    parser.add_argument("--reset-width", type=float, default=1e-6)
-    parser.add_argument("--reset-delay", type=float, default=5e-7)
-    parser.add_argument("--meas-v", type=float, default=0.3)
+    parser.add_argument("--meas-v", type=float, default=1.5)
     parser.add_argument("--meas-width", type=float, default=1e-6)
     parser.add_argument("--meas-delay", type=float, default=2e-6)
-    parser.add_argument("--set-width", type=float, default=1e-6)
-    parser.add_argument("--set-fall-time", type=float, default=1e-7)
-    parser.add_argument("--set-delay", type=float, default=1e-6)
-    parser.add_argument("--set-start-v", type=float, default=0.3)
-    parser.add_argument("--set-stop-v", type=float, default=0.3)
-    parser.add_argument("--steps", type=int, default=0)
+    parser.add_argument("--num-pulses", type=int, default=50)
     parser.add_argument("--i-range", type=float, default=1e-4)
     parser.add_argument("--max-points", type=int, default=10000)
-    parser.add_argument("--iteration", type=int, default=1)
     parser.add_argument("--out1-name", default="VF")
-    parser.add_argument("--out2-name", default="T")
-    parser.add_argument("--out2-size", type=int, default=200)
-    parser.add_argument("--num-pulses", type=int, default=50)
+    parser.add_argument("--iteration", type=int, default=1)
     parser.add_argument("--clarius-debug", type=int, choices=[0, 1], default=1)
+    parser.add_argument("--aux-channel", type=int, default=2, choices=[0, 1, 2], help="Auxiliary channel to pulse (0 disables)")
+    parser.add_argument("--aux-vrange", type=float, default=10.0, help="Voltage range for auxiliary channel")
+    parser.add_argument("--aux-i-limit", type=float, default=0.0, help="Current limit for auxiliary channel (0 disables)")
+    parser.add_argument("--aux-vlow", type=float, default=0.0, help="Auxiliary pulse low level")
+    parser.add_argument("--aux-vhigh", type=float, default=1.5, help="Auxiliary pulse high level")
+    parser.add_argument("--aux-rise-time", type=float, default=3e-8, help="Auxiliary pulse rise time")
+    parser.add_argument("--aux-fall-time", type=float, default=3e-8, help="Auxiliary pulse fall time")
+    parser.add_argument("--aux-pulse-width", type=float, default=1e-6, help="Auxiliary pulse width")
+    parser.add_argument("--aux-pre-delay", type=float, default=0.0, help="Delay before auxiliary pulse rises")
+    parser.add_argument("--aux-post-delay", type=float, default=0.0, help="Delay after auxiliary pulse falls")
 
     return parser.parse_args()
 
@@ -488,26 +505,25 @@ def main() -> None:
 
     cfg = RetentionConfig(
         rise_time=args.rise_time,
-        reset_v=args.reset_v,
-        reset_width=args.reset_width,
-        reset_delay=args.reset_delay,
         meas_v=args.meas_v,
         meas_width=args.meas_width,
         meas_delay=args.meas_delay,
-        set_width=args.set_width,
-        set_fall_time=args.set_fall_time,
-        set_delay=args.set_delay,
-        set_start_v=args.set_start_v,
-        set_stop_v=args.set_stop_v,
-        steps=args.steps,
+        num_pulses=args.num_pulses,
         i_range=args.i_range,
         max_points=args.max_points,
-        iteration=args.iteration,
         out1_name=args.out1_name,
-        out2_name=args.out2_name,
-        out2_size=args.out2_size,
-        num_pulses=args.num_pulses,
+        iteration=args.iteration,
         clarius_debug=args.clarius_debug,
+        aux_channel=args.aux_channel,
+        aux_vrange=args.aux_vrange,
+        aux_i_limit=args.aux_i_limit,
+        aux_vlow=args.aux_vlow,
+        aux_vhigh=args.aux_vhigh,
+        aux_rise_time=args.aux_rise_time,
+        aux_fall_time=args.aux_fall_time,
+        aux_pulse_width=args.aux_pulse_width,
+        aux_pre_delay=args.aux_pre_delay,
+        aux_post_delay=args.aux_post_delay,
     )
 
     cfg.validate()
@@ -518,9 +534,13 @@ def main() -> None:
     if args.dry_run:
         return
 
-    run_measurement(cfg, address=args.gpib_address, timeout=args.timeout, enable_plot=not args.no_plot)
+    run_measurement(
+        cfg,
+        address=args.gpib_address,
+        timeout=args.timeout,
+        enable_plot=not args.no_plot,
+    )
 
 
 if __name__ == "__main__":
     main()
-

@@ -26,7 +26,7 @@ from Sample_GUI import SampleGUI
 #temp gui
 
 ###
-# IMPORTANT:make look nicer,the graphs look hideous
+# IMPORTANT:make look nicer,the graphs look hideousREA
 ###
 
 # consider moving this into qt6

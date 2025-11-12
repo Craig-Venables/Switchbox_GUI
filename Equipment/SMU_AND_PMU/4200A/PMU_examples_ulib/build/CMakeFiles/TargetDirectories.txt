@@ -1,4 +1,0 @@
-C:/s4200/kiuser/usrlib/PMU_examples_ulib/build/CMakeFiles/edit_cache.dir
-C:/s4200/kiuser/usrlib/PMU_examples_ulib/build/CMakeFiles/PMU_examples_ulib.dir
-C:/s4200/kiuser/usrlib/PMU_examples_ulib/build/CMakeFiles/clean-module.dir
-C:/s4200/kiuser/usrlib/PMU_examples_ulib/build/CMakeFiles/rebuild_cache.dir

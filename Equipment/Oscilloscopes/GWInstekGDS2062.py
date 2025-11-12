@@ -467,14 +467,42 @@ class GWInstekGDS2062:
         
         return preamble
     
-    def acquire_waveform(self, channel: int, format: str = "ASCII", num_points: int = 10000) -> Tuple[np.ndarray, np.ndarray]:
+    def _extract_record_length(self, preamble: Dict[str, Any]) -> int:
+        """
+        Extract the record length (number of available data points) from a waveform preamble.
+
+        Args:
+            preamble: Dictionary returned by WFMO? query.
+
+        Returns:
+            int: Number of points reported by the oscilloscope or a sensible default.
+        """
+        if not preamble:
+            return 10000
+
+        normalised = {}
+        for key, value in preamble.items():
+            normalised[(str(key)).upper()] = value
+
+        for candidate in ("NR_PT", "NRPT", "POINTS", "WFMPTS", "WAVEFORM_POINTS", "RECORDLENGTH"):
+            if candidate in normalised:
+                try:
+                    return max(1, int(normalised[candidate]))
+                except (TypeError, ValueError):
+                    continue
+
+        return 10000
+
+    def acquire_waveform(self, channel: int, format: str = "ASCII",
+                         num_points: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Acquire waveform data from a channel.
         
         Args:
             channel: Channel number (1, 2, 3, or 4)
             format: Data format - 'ASCII' or 'BINARY' (default: 'ASCII')
-            num_points: Number of points to acquire (default: 10000)
+            num_points: Optional number of points to acquire. If None, use the
+                full record length reported by the oscilloscope.
             
         Returns:
             tuple: (time_array, voltage_array) both as numpy arrays
@@ -489,11 +517,13 @@ class GWInstekGDS2062:
         
         # Get preamble for scaling
         preamble = self.get_waveform_preamble(channel)
+        record_length = self._extract_record_length(preamble)
+        target_points = record_length if num_points is None else max(1, min(int(num_points), record_length))
         
         # Read waveform data
         if format == "ASCII":
             self.write(f"DATA:START 1")
-            self.write(f"DATA:STOP {num_points}")
+            self.write(f"DATA:STOP {target_points}")
             data_str = self.query("CURV?")
             
             # Parse ASCII data
@@ -506,7 +536,7 @@ class GWInstekGDS2062:
         else:
             # Binary format
             self.write(f"DATA:START 1")
-            self.write(f"DATA:STOP {num_points}")
+            self.write(f"DATA:STOP {target_points}")
             
             # Configure for binary read
             self.inst.chunk_size = 1024000  # Increase chunk size for binary
@@ -802,6 +832,7 @@ if __name__ == "__main__":
     finally:
         scope.disconnect()
         print("\nDisconnected from oscilloscope")
+
 
 
 

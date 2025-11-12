@@ -470,13 +470,43 @@ class TektronixTBS1000C:
         
         return preamble
     
-    def acquire_waveform(self, channel: int, format: str = "ASCII") -> Tuple[np.ndarray, np.ndarray]:
+    def _extract_record_length(self, preamble: Dict[str, Any]) -> int:
+        """
+        Extract the record length (number of available data points) from a waveform preamble.
+
+        Args:
+            preamble: Dictionary returned by WFMO? query.
+
+        Returns:
+            int: Number of points reported by the oscilloscope or a sensible default.
+        """
+        if not preamble:
+            return 10000
+
+        # Normalise keys because Tektronix sometimes mixes cases.
+        normalised = {}
+        for key, value in preamble.items():
+            normalised[(str(key)).upper()] = value
+
+        for candidate in ("NR_PT", "NRPT", "POINTS", "WFMPTS", "WAVEFORM_POINTS"):
+            if candidate in normalised:
+                try:
+                    return max(1, int(normalised[candidate]))
+                except (TypeError, ValueError):
+                    continue
+
+        return 10000
+
+    def acquire_waveform(self, channel: int, format: str = "ASCII",
+                         num_points: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         Acquire waveform data from a channel.
         
         Args:
             channel: Channel number (1 or 2)
             format: Data format - 'ASCII', 'RIBINARY', or 'WORD' (default: 'ASCII')
+            num_points: Optional number of points to request. If None, uses full
+                record length reported by the oscilloscope.
             
         Returns:
             tuple: (time_array, voltage_array) both as numpy arrays
@@ -491,11 +521,15 @@ class TektronixTBS1000C:
         
         # Get preamble for scaling
         preamble = self.get_waveform_preamble(channel)
+
+        # Work out how many points we should request.
+        record_length = self._extract_record_length(preamble)
+        target_points = record_length if num_points is None else max(1, min(int(num_points), record_length))
         
         # Read waveform data
         if format == "ASCII":
             self.write("DAT:STAR 1")
-            self.write("DAT:STOP 10000")  # Adjust if needed
+            self.write(f"DAT:STOP {target_points}")
             data_str = self.query("CURV?")
             
             # Parse ASCII data
@@ -508,7 +542,7 @@ class TektronixTBS1000C:
         else:
             # Binary format
             self.write("DAT:STAR 1")
-            self.write("DAT:STOP 10000")
+            self.write(f"DAT:STOP {target_points}")
             
             # Configure for binary read
             self.inst.chunk_size = 1024000  # Increase chunk size for binary

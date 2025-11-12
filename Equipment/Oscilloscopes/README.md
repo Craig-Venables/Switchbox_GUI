@@ -6,6 +6,7 @@ This directory contains oscilloscope control modules for the Switchbox_GUI proje
 
 - **TektronixTBS1000C.py**: Driver for Tektronix TBS1000C series oscilloscopes
 - **GWInstekGDS2062.py**: Driver for GW Instek GDS-2062 series oscilloscopes
+- **capture_high_resolution.py**: Script for capturing full-resolution waveforms and saving CSV/metadata artifacts
 - **README.md**: This file
 
 ## Usage
@@ -82,6 +83,14 @@ if scope_mgr.is_connected():
     
     # Clean up
     scope_mgr.close()
+
+### High-Resolution Capture Script
+
+Capture full-record waveform data and store CSV/metadata artefacts:
+
+```bash
+python -m Equipment.Oscilloscopes.capture_high_resolution --output-dir ./oscilloscope_captures
+```
 ```
 
 ## Requirements
@@ -115,7 +124,7 @@ Waveform acquisition and basic controls work well. Use waveform data analysis as
 Run the test suite:
 
 ```bash
-python tests/test_oscilloscope.py
+python -m pytest tests/test_capture_high_resolution.py
 ```
 
 ## Documentation
