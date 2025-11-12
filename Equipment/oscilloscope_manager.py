@@ -84,9 +84,11 @@ class OscilloscopeManager:
         # Waveform cache
         self.last_waveform = {
             'channel': None,
+            'format': None,
             'time_array': None,
             'voltage_array': None,
-            'timestamp': 0
+            'timestamp': 0,
+            'kwargs': {}
         }
         self.cache_duration = 1.0  # Cache for 1 second
         
@@ -205,7 +207,7 @@ class OscilloscopeManager:
     # ==================== Unified API Methods ====================
     
     def acquire_waveform(self, channel: int = 1, format: str = 'ASCII',
-                        use_cache: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+                         use_cache: bool = True, **kwargs) -> Tuple[np.ndarray, np.ndarray]:
         """
         Acquire waveform data from a channel.
         
@@ -213,26 +215,31 @@ class OscilloscopeManager:
             channel: Channel number (1 or 2)
             format: Data format - 'ASCII', 'RIBINARY', or 'WORD'
             use_cache: If True, use cached waveform if recent
+            **kwargs: Additional keyword arguments forwarded to the underlying
+                oscilloscope driver implementation (e.g., num_points).
             
         Returns:
             tuple: (time_array, voltage_array) both as numpy arrays
         """
-        # Check cache
-        if use_cache:
+        # Check cache (only when no additional kwargs are passed to avoid mismatched results)
+        if use_cache and not kwargs:
             if (self.last_waveform['channel'] == channel and
                 self.last_waveform['time_array'] is not None and
+                self.last_waveform.get('format') == format and
                 (time.time() - self.last_waveform['timestamp']) < self.cache_duration):
                 return self.last_waveform['time_array'], self.last_waveform['voltage_array']
         
         if self.scope:
             try:
-                time_array, voltage_array = self.scope.acquire_waveform(channel, format)
+                time_array, voltage_array = self.scope.acquire_waveform(channel, format=format, **kwargs)
                 # Update cache
                 self.last_waveform = {
                     'channel': channel,
+                    'format': format,
                     'time_array': time_array,
                     'voltage_array': voltage_array,
-                    'timestamp': time.time()
+                    'timestamp': time.time(),
+                    'kwargs': dict(kwargs)
                 }
                 return time_array, voltage_array
             except Exception as e:
@@ -323,9 +330,11 @@ class OscilloscopeManager:
                 # Clear cache after autoscale
                 self.last_waveform = {
                     'channel': None,
+                    'format': None,
                     'time_array': None,
                     'voltage_array': None,
-                    'timestamp': 0
+                    'timestamp': 0,
+                    'kwargs': {}
                 }
             except Exception as e:
                 print(f"Error during autoscale: {e}")
@@ -476,9 +485,11 @@ class OscilloscopeManager:
         """Clear waveform cache."""
         self.last_waveform = {
             'channel': None,
+            'format': None,
             'time_array': None,
             'voltage_array': None,
-            'timestamp': 0
+            'timestamp': 0,
+            'kwargs': {}
         }
     
     def close(self):

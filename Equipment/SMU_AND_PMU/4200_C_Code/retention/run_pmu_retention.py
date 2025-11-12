@@ -1,40 +1,99 @@
-"""PMU retention waveform generator and runner.
+"""PMU Retention Measurement Script for Keithley 4200A-SCS.
 
-This script builds the `EX ACraig2 ACraig1_PMU_retention(...)` command based on the
-parameter limits defined in `ACraig1_PMU_retention.c`, optionally executes the
-command on a connected Keithley 4200A via KXCI, and prints the returned data.
+Purpose:
+--------
+This script configures and executes retention measurements on memristor devices
+using the Keithley 4200A-SCS Programmable Measurement Unit (PMU). It generates
+a complex waveform sequence that:
+1. Takes initial baseline resistance measurements
+2. Applies a sequence of programming pulses with user-defined parameters
+3. Performs retention measurements over time to track resistance degradation
 
-Parameter Limits (from the C module):
+Waveform Structure:
+------------------
+The generated waveform consists of three main sections:
 
-    riseTime       : 2e-8  ≤ value ≤ 1
-    resetV         : -20   ≤ value ≤ 20
-    resetWidth     : 2e-8  ≤ value ≤ 1
-    resetDelay     : 2e-8  ≤ value ≤ 1
-    measV          : -20   ≤ value ≤ 20
-    measWidth      : 2e-8  ≤ value ≤ 1
-    measDelay      : 2e-8  ≤ value ≤ 1
-    setWidth       : 2e-8  ≤ value ≤ 1
-    setFallTime    : 2e-8  ≤ value ≤ 1
-    setDelay       : 2e-8  ≤ value ≤ 1
-    setStartV      : -20   ≤ value ≤ 20
-    setStopV       : -20   ≤ value ≤ 20
-    steps          : ≥ 0  (retention uses 0 or 1; waveform builder forces 1)
-    IRange         : 100e-9 ≤ value ≤ 0.8
-    max_points     : 12 ≤ value ≤ 30000
-    NumbMeasPulses : 8 ≤ value ≤ 100 (instrument manual guidance)
-    ClariusDebug   : 0 or 1
+1. Initial Measurement Pulses (NumInitialMeasPulses):
+   - Baseline resistance reads before pulse programming
+   - Each pulse: rise to measV → hold at measV (measWidth) → fall to 0V → delay
+   - Used to establish the initial device state
 
-The routine automatically records the initial baseline probe and a final
-trailing probe in addition to the user requested `NumbMeasPulses`. Therefore the
-output arrays must be sized to `NumbMeasPulses + 2` entries.
+2. Pulse Sequence (NumPulses):
+   - Multiple programming pulses with clean square waveform
+   - Each pulse consists of 4 segments:
+     * RISE: Fast transition from 0V to PulseV (PulseRiseTime)
+     * TOP:  Flat top at PulseV for duration PulseWidth
+     * FALL: Fast transition from PulseV to 0V (PulseFallTime)
+     * WAIT: Delay at 0V before next pulse (PulseDelay)
+   - All pulses are identical with independent control over rise/fall times
+   - Designed to program the device state (e.g., SET operation)
 
-Usage example:
+3. Retention Measurement Pulses (NumbMeasPulses):
+   - Periodic resistance reads after pulse programming
+   - Same structure as initial measurements
+   - Used to track resistance changes over time (retention degradation)
+   - Typically 8-1000 measurements spaced over time
+
+Output Data:
+-----------
+The script returns arrays containing:
+- Resistance values at each measurement point
+- Voltage and current values at measurement windows
+- Timestamps for each measurement
+
+The output arrays must be sized to accommodate:
+  Total measurements = NumInitialMeasPulses + NumbMeasPulses
+
+Key Parameters:
+--------------
+Pulse Parameters:
+  --num-pulses-seq: Number of programming pulses (1-100)
+  --pulse-v: Pulse voltage amplitude (-20 to 20V)
+  --pulse-width: Flat top duration of pulse (2e-8 to 1s)
+  --pulse-rise-time: Rise time for pulse edge (2e-8 to 1s, typically 1e-7s)
+  --pulse-fall-time: Fall time for pulse edge (2e-8 to 1s, typically 1e-7s)
+  --pulse-delay: Delay between pulses (2e-8 to 1s)
+
+Measurement Parameters:
+  --num-initial-meas-pulses: Number of baseline reads (1-100)
+  --num-pulses: Number of retention measurement reads (8-1000)
+  --meas-v: Measurement voltage (-20 to 20V, typically 0.3-0.5V)
+  --meas-width: Measurement pulse width (2e-8 to 1s)
+
+Usage Example:
+-------------
+Basic retention measurement with 5 programming pulses:
 
     python run_pmu_retention.py --gpib-address GPIB0::17::INSTR \
-        --num-pulses 12 --reset-v 4.0 --meas-v 0.3
+        --num-initial-meas-pulses 2 \
+        --num-pulses-seq 5 \
+        --pulse-v 4.0 \
+        --pulse-width 1e-6 \
+        --pulse-rise-time 1e-7 \
+        --pulse-fall-time 1e-7 \
+        --pulse-delay 1e-6 \
+        --num-pulses 50 \
+        --meas-v 0.3 \
+        --meas-width 2e-6
 
-Pass `--dry-run` to print the generated EX command without contacting the
-instrument.
+Dry Run (print command without executing):
+
+    python run_pmu_retention.py --dry-run --num-pulses-seq 5
+
+Technical Details:
+-----------------
+- The script builds an `EX` command that calls the C module `pmu_retention_dual_channel`
+- Communication is via KXCI (Keithley eXternal Control Interface) over GPIB
+- The C module uses `seg_arb_sequence` to generate the waveform segments
+- Each pulse is defined with explicit START and END voltage points to ensure
+  clean square waveforms with flat tops
+- The waveform is executed on PMU channel 1 (force) and channel 2 (measure)
+  for dual-channel measurements
+
+See Also:
+---------
+- pmu_retention_dual_channel.c: C module implementing the waveform generation
+- retention_pulse_ilimit_dual_channel.c: Low-level PMU control functions
 """
 
 from __future__ import annotations
@@ -208,15 +267,22 @@ class RetentionConfig:
     steps: int = 0
     i_range: float = 1e-4
     max_points: int = 10000
-    iteration: int = 1
+    iteration: int = 2
     out1_name: str = "VF"
     out2_name: str = "T"
     out2_size: int = 200
-    num_pulses: int = 150
-    clarius_debug: int = 0
+    num_pulses: int = 50  # retention measurement pulses
+    num_initial_meas_pulses: int = 2
+    num_pulses_seq: int = 5  # number of pulses in sequence
+    pulse_width: float = 1e-6
+    pulse_v: float = 4.0
+    pulse_rise_time: float = 1e-7  # rise time for pulses
+    pulse_fall_time: float = 1e-7  # fall time for pulses (should match rise for clean box)
+    pulse_delay: float = 1e-6
+    clarius_debug: int = 1
 
     def total_probe_count(self) -> int:
-        return self.num_pulses + 1
+        return self.num_initial_meas_pulses + self.num_pulses
 
     def validate(self) -> None:
         limits: Dict[str, tuple[float, float]] = {
@@ -242,7 +308,21 @@ class RetentionConfig:
                 raise ValueError(f"{field_name}={value} outside [{lo}, {hi}]")
 
         if not (8 <= self.num_pulses <= 1000):
-            raise ValueError("num_pulses must be within [8, 100]")
+            raise ValueError("num_pulses must be within [8, 1000]")
+        if not (1 <= self.num_initial_meas_pulses <= 100):
+            raise ValueError("num_initial_meas_pulses must be within [1, 100]")
+        if not (1 <= self.num_pulses_seq <= 100):
+            raise ValueError("num_pulses_seq must be within [1, 100]")
+        if not (2e-8 <= self.pulse_width <= 1.0):
+            raise ValueError("pulse_width must be within [2e-8, 1.0]")
+        if not (-20.0 <= self.pulse_v <= 20.0):
+            raise ValueError("pulse_v must be within [-20.0, 20.0]")
+        if not (2e-8 <= self.pulse_rise_time <= 1.0):
+            raise ValueError("pulse_rise_time must be within [2e-8, 1.0]")
+        if not (2e-8 <= self.pulse_fall_time <= 1.0):
+            raise ValueError("pulse_fall_time must be within [2e-8, 1.0]")
+        if not (2e-8 <= self.pulse_delay <= 1.0):
+            raise ValueError("pulse_delay must be within [2e-8, 1.0]")
         if self.clarius_debug not in (0, 1):
             raise ValueError("clarius_debug must be 0 or 1")
         if self.out2_size < 1:
@@ -289,10 +369,17 @@ def build_ex_command(cfg: RetentionConfig) -> str:
         "",
         format_param(common_size),
         format_param(cfg.num_pulses),
+        format_param(cfg.num_initial_meas_pulses),
+        format_param(cfg.num_pulses_seq),
+        format_param(cfg.pulse_width),
+        format_param(cfg.pulse_v),
+        format_param(cfg.pulse_rise_time),
+        format_param(cfg.pulse_fall_time),
+        format_param(cfg.pulse_delay),
         format_param(cfg.clarius_debug),
     ]
 
-    return f"EX ACraig2 ACraig1_PMU_retention({','.join(params)})"
+    return f"EX A_Retention pmu_retention_dual_channel({','.join(params)})"
 
 
 def _compute_probe_times(cfg: RetentionConfig) -> List[float]:
@@ -305,39 +392,30 @@ def _compute_probe_times(cfg: RetentionConfig) -> List[float]:
     def add_measurement(start_time: float) -> None:
         centres.append(start_time + cfg.meas_width * (ratio + 0.9) / 2.0)
 
-    # Initial baseline measurement pulse
+    # Initial delay and rise time
     ttime += cfg.reset_delay
     ttime += cfg.rise_time
-    add_measurement(ttime)
-    ttime += cfg.meas_width
-    ttime += cfg.rise_time
-    ttime += cfg.meas_delay
-    ttime += cfg.rise_time
+
+    # Initial measurement pulses
+    for _ in range(cfg.num_initial_meas_pulses):
+        add_measurement(ttime)
+        ttime += cfg.meas_width
+        ttime += cfg.rise_time
+        ttime += cfg.meas_delay
+        ttime += cfg.rise_time
+
+    # Small delay before pulse sequence
     ttime += cfg.rise_time
 
-    # Reset pulse segments
-    ttime += cfg.reset_width
-    ttime += cfg.reset_delay
-    ttime += cfg.reset_delay
-    ttime += cfg.meas_delay
-    ttime += cfg.rise_time
+    # Pulse sequence: Multiple pulses in a row
+    for _ in range(cfg.num_pulses_seq):
+        ttime += cfg.pulse_rise_time  # Rise to pulse
+        ttime += cfg.pulse_width  # Pulse width (flat top)
+        ttime += cfg.pulse_fall_time  # Fall from pulse
+        ttime += cfg.pulse_delay  # Delay before next pulse
 
-    # SET measurement pulse
-    ttime += cfg.rise_time
-    add_measurement(ttime)
-    ttime += cfg.meas_width
-    ttime += cfg.set_fall_time
-    ttime += cfg.meas_delay
-
-    # First post-set measurement pulse
-    ttime += cfg.rise_time
-    add_measurement(ttime)
-    ttime += cfg.meas_width
-    ttime += cfg.set_fall_time
-    ttime += cfg.meas_delay
-
-    # Remaining measurement probes
-    for _ in range(cfg.num_pulses - 2):
+    # Retention measurement pulses
+    for _ in range(cfg.num_pulses):
         ttime += cfg.rise_time
         add_measurement(ttime)
         ttime += cfg.meas_width
@@ -477,7 +555,14 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--out1-name", default="VF")
     parser.add_argument("--out2-name", default="T")
     parser.add_argument("--out2-size", type=int, default=200)
-    parser.add_argument("--num-pulses", type=int, default=50)
+    parser.add_argument("--num-pulses", type=int, default=50, help="Number of retention measurement pulses")
+    parser.add_argument("--num-initial-meas-pulses", type=int, default=2, help="Number of initial measurement pulses")
+    parser.add_argument("--num-pulses-seq", type=int, default=5, help="Number of pulses in sequence")
+    parser.add_argument("--pulse-width", type=float, default=1e-6, help="Width of each pulse (seconds)")
+    parser.add_argument("--pulse-v", type=float, default=2.0, help="Voltage of each pulse (volts)")
+    parser.add_argument("--pulse-rise-time", type=float, default=1e-7, help="Rise time for each pulse (seconds)")
+    parser.add_argument("--pulse-fall-time", type=float, default=1e-7, help="Fall time for each pulse (seconds)")
+    parser.add_argument("--pulse-delay", type=float, default=1e-6, help="Delay between pulses (seconds)")
     parser.add_argument("--clarius-debug", type=int, choices=[0, 1], default=1)
 
     return parser.parse_args()
@@ -507,6 +592,13 @@ def main() -> None:
         out2_name=args.out2_name,
         out2_size=args.out2_size,
         num_pulses=args.num_pulses,
+        num_initial_meas_pulses=args.num_initial_meas_pulses,
+        num_pulses_seq=args.num_pulses_seq,
+        pulse_width=args.pulse_width,
+        pulse_v=args.pulse_v,
+        pulse_rise_time=args.pulse_rise_time,
+        pulse_fall_time=args.pulse_fall_time,
+        pulse_delay=args.pulse_delay,
         clarius_debug=args.clarius_debug,
     )
 
