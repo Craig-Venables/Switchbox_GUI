@@ -538,10 +538,10 @@ def parse_arguments() -> argparse.Namespace:
 
     parser.add_argument("--rise-time", type=float, default=1e-7)
     parser.add_argument("--reset-v", type=float, default=1.0)
-    parser.add_argument("--reset-width", type=float, default=1e-6)
+    parser.add_argument("--reset-width", type=float, default=0.1e-6)
     parser.add_argument("--reset-delay", type=float, default=5e-7)
     parser.add_argument("--meas-v", type=float, default=0.3)
-    parser.add_argument("--meas-width", type=float, default=1e-6)
+    parser.add_argument("--meas-width", type=float, default=0.1e-6)
     parser.add_argument("--meas-delay", type=float, default=2e-6)
     parser.add_argument("--set-width", type=float, default=1e-6)
     parser.add_argument("--set-fall-time", type=float, default=1e-7)

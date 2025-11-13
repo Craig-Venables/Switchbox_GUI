@@ -462,12 +462,12 @@ Examples:
     # Timing parameters
     parser.add_argument("--rise-time", type=float, default=3e-8, help="Rise/fall time (s). Default 30ns")
     parser.add_argument("--reset-v", type=float, default=4.0, help="Reset voltage (V). Default 4V")
-    parser.add_argument("--reset-width", type=float, default=1e-6, help="Reset pulse width (s). Default 1µs")
+    parser.add_argument("--reset-width", type=float, default=0.5e-6, help="Reset pulse width (s). Default 1µs")
     parser.add_argument("--reset-delay", type=float, default=1e-6, help="Reset delay (s). Default 1µs")
     parser.add_argument("--meas-v", type=float, default=1.5, help="Measurement voltage (V). Default 0.5V")
-    parser.add_argument("--meas-width", type=float, default=2e-6, help="Measurement pulse width (s). Default 2µs")
+    parser.add_argument("--meas-width", type=float, default=0.5e-6, help="Measurement pulse width (s). Default 2µs")
     parser.add_argument("--meas-delay", type=float, default=1e-6, help="Measurement delay (s). Default 1µs")
-    parser.add_argument("--set-width", type=float, default=1e-6, help="Set pulse width (s). Default 1µs")
+    parser.add_argument("--set-width", type=float, default=0.5e-6, help="Set pulse width (s). Default 1µs")
     parser.add_argument("--set-fall-time", type=float, default=3e-8, help="Set fall time (s). Default 30ns")
     parser.add_argument("--set-delay", type=float, default=1e-6, help="Set delay (s). Default 1µs")
 
