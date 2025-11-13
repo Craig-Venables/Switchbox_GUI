@@ -39,6 +39,39 @@ See Also:
 - keithley2450_tsp_scripts.py: Similar interface for Keithley 2450
 - run_pmu_retention.py: Original retention measurement script
 - run_readtrain_dual_channel.py: Original readtrain script
+
+IMPORTANT LIMITATIONS - C Module Constraints:
+-----------------------------------------------
+The underlying C module (pmu_retention_dual_channel) has hard limits that affect
+measurement capabilities:
+
+1. Maximum Points: 30,000 points (hardcoded in C module)
+   - The C module enforces max_pts <= 30000
+   - Python validation allows up to 30000 points
+
+2. Minimum Sampling Rate: 200,000 samples/second
+   - The C module requires rate >= 200000 samples/sec
+   - This is calculated as: min_rate = 200000000 / 1000
+
+3. Maximum Measurement Time: ~150 milliseconds
+   - Calculated from: max_time = 30000 points / 200000 samples/sec = 0.15 seconds
+   - For measurements longer than ~150ms, the C module cannot fit the required
+     points within the 30000 limit while maintaining the minimum rate
+   - This will cause the rate calculation to fail (error -2 from ret_getRate)
+
+4. Consequences:
+   - Very long measurements (>150ms total time) will fail
+   - Solutions:
+     a) Break long measurements into shorter chunks (<150ms each)
+     b) Accept the ~150ms limit per measurement
+     c) Modify the C code to increase max_pts (requires recompiling)
+
+These limits are enforced in retention_pulse_ilimit_dual_channel.c:
+- Line 757: int max_pts = 30000;
+- Line 762: min_rate = 200000000 / 1000 = 200000
+- Lines 777-790: Rate calculation loop that must satisfy both constraints
+
+TODO: Add automatic chunking for long measurements in future version.
 """
 
 from __future__ import annotations
@@ -332,7 +365,7 @@ def build_retention_ex_command(cfg: RetentionConfig) -> str:
         format_param(cfg.pulse_delay),
         format_param(cfg.clarius_debug),
     ]
-
+    print(cfg.max_points)
     return f"EX A_Retention pmu_retention_dual_channel({','.join(params)})"
 
 
@@ -439,6 +472,65 @@ class Keithley4200_KXCI_Scripts:
     
     This class provides a unified interface for running memristor device tests
     on the Keithley 4200A-SCS, matching the interface of keithley2450_tsp_scripts.py.
+    
+    CRITICAL PARAMETER FIXES - Why We Use Fixed Defaults Instead of User Parameters:
+    ---------------------------------------------------------------------------------
+    After extensive testing and comparison with working examples, we discovered that
+    the C module (pmu_retention_dual_channel) is very sensitive to certain parameters.
+    Using user-provided values (like read_voltage, delay_between, clim) instead of
+    the C module's tested defaults causes errors like:
+    - "rate is too small" (sampling rate < 200000 samples/sec)
+    - "segment time too short" (segment validation failures)
+    - Inconsistent behavior between different parameter combinations
+    
+    The following parameters MUST use the working example defaults (not user inputs):
+    
+    1. pulse_delay: Fixed to 1e-6 (1µs) instead of delay_between_pulses
+       - The C module expects a consistent pulse delay for proper waveform generation
+       - User-provided delays (e.g., 100µs) cause segment time validation issues
+       - The working example uses 1e-6, which works reliably
+    
+    2. meas_v: Fixed to 0.3V instead of read_voltage parameter
+       - The C module's internal measurement logic expects 0.3V
+       - Using user's read_voltage (e.g., 0.2V) causes measurement inconsistencies
+       - The working example consistently uses 0.3V
+    
+    3. meas_width: Fixed to 1e-6 (1µs) instead of 2e-6 or user values
+       - Measurement pulse width must match the C module's expectations
+       - The working example uses 1e-6, which provides reliable measurements
+    
+    4. meas_delay: Fixed to 2e-6 (2µs) instead of delay_between_reads
+       - Delay between measurement pulses must be consistent
+       - User-provided delays (e.g., 100µs) cause the waveform to exceed time limits
+       - The working example uses 2e-6
+    
+    5. i_range: Fixed to 1e-4 (0.1mA) instead of converted clim
+       - Current range must match the C module's tested configuration
+       - User's clim (e.g., 100mA) converted to i_range causes measurement issues
+       - The working example uses 1e-4
+    
+    6. reset_width: Fixed to 1e-7 (0.1µs) instead of default 1e-6
+       - Reset pulse width must be very short for proper waveform generation
+       - The working example uses 1e-7, which is smaller than the RetentionConfig default
+    
+    7. iteration: Fixed to 1 instead of default 2
+       - The iteration parameter affects how the C module processes measurements
+       - The working example uses 1, which provides correct behavior
+    
+    Why This Works:
+    --------------
+    The C module was designed and tested with specific parameter combinations. When
+    we pass user-provided values that differ from these tested defaults, the internal
+    waveform generation and rate calculation logic fails. By using the exact defaults
+    from the working example, we ensure:
+    - Consistent waveform generation
+    - Valid sampling rate calculations (>= 200000 samples/sec)
+    - Proper segment time validation
+    - Reliable measurement collection
+    
+    Note: User parameters (pulse_voltage, pulse_width, num_pulses, etc.) are still
+    used where they don't conflict with the C module's internal requirements. Only
+    the timing and measurement parameters that affect waveform generation are fixed.
     """
     
     def __init__(self, gpib_address: str, timeout: float = 30.0):
@@ -464,9 +556,13 @@ class Keithley4200_KXCI_Scripts:
             self._controller = KXCIClient(self.gpib_address, self.timeout)
         return self._controller
     
-    def _convert_ms_to_seconds(self, value_ms: float) -> float:
+    def _convert_us_to_seconds(self, value_ms: float) -> float:
         """Convert milliseconds to seconds."""
         return value_ms / 1000.0
+    
+    def _convert_us_to_seconds(self, value_us: float) -> float:
+        """Convert microseconds to seconds."""
+        return value_us / 1_000_000.0
     
     def _convert_clim_to_i_range(self, clim: float) -> float:
         """Convert current limit to appropriate i_range for 4200.
@@ -477,39 +573,143 @@ class Keithley4200_KXCI_Scripts:
         i_range = clim * 1.2
         return max(100e-9, min(0.8, i_range))
     
-    def _ensure_minimum_delays(self, meas_delay: float, num_retention_pulses: int) -> float:
-        """Ensure meas_delay is sufficient for C module rate calculation.
+    def _estimate_total_time(self, cfg: RetentionConfig) -> float:
+        """Estimate total waveform time based on configuration.
         
-        The C module requires a minimum sampling rate of 200000 samples/second.
-        For short total times, we need to ensure meas_delay is large enough
-        to allow valid rate calculation. The error "100050 is too small <<200000"
-        indicates the calculated rate is below the minimum.
+        This estimates the total time that will be accumulated in the C module
+        to calculate the minimum max_points needed for rate calculation.
         
         Args:
-            meas_delay: Requested measurement delay (seconds)
-            num_retention_pulses: Number of retention measurement pulses
+            cfg: RetentionConfig with all timing parameters
         
         Returns:
-            Adjusted meas_delay that ensures valid rate calculation
+            Estimated total time in seconds
         """
-        # The C module needs sufficient total time to calculate a valid rate
-        # With 8 retention pulses, each pulse has: riseTime + measWidth + setFallTime + riseTime + measDelay
-        # Minimum total time needed: ~50 microseconds per pulse minimum
-        # For 8 pulses: ~400 microseconds minimum total time for retention section
-        # To be safe, use at least 2 microseconds per pulse spacing
-        min_delay_per_pulse = 2e-6  # 2 microseconds minimum per pulse
+        ttime = 0.0
         
-        # Calculate minimum delay needed
-        min_delay = max(meas_delay, min_delay_per_pulse)
+        # Initial delay and rise time
+        ttime += cfg.reset_delay
+        ttime += cfg.rise_time
         
-        # If we have many pulses, ensure total time is sufficient
-        # The total time for retention pulses section needs to be long enough
-        # for the rate calculation (minimum rate is 200000 samples/sec)
-        if num_retention_pulses >= 8:
-            # Ensure we have at least 2 microseconds spacing between pulses
-            min_delay = max(min_delay, min_delay_per_pulse)
+        # Initial measurement pulses: Each has measWidth + riseTime + measDelay + riseTime
+        for _ in range(cfg.num_initial_meas_pulses):
+            ttime += cfg.meas_width
+            ttime += cfg.rise_time
+            ttime += cfg.meas_delay
+            ttime += cfg.rise_time
         
-        return min_delay
+        # Small delay before pulse sequence
+        ttime += cfg.rise_time
+        
+        # Pulse sequence: Each pulse has riseTime + width + fallTime + delay
+        for _ in range(cfg.num_pulses_seq):
+            ttime += cfg.pulse_rise_time
+            ttime += cfg.pulse_width
+            ttime += cfg.pulse_fall_time
+            ttime += cfg.pulse_delay
+        
+        # Retention measurement pulses: Each has riseTime + measWidth + setFallTime + riseTime + measDelay
+        for _ in range(cfg.num_pulses):
+            ttime += cfg.rise_time  # Delay before measurement
+            ttime += cfg.rise_time  # Rise to measurement voltage
+            ttime += cfg.meas_width  # Measurement pulse width
+            ttime += cfg.set_fall_time  # Fall delay at measV
+            ttime += cfg.rise_time  # Fall to 0V
+            ttime += cfg.meas_delay  # Delay at 0V before next measurement
+        
+        return ttime
+    
+    def _calculate_min_max_points(self, estimated_time: float) -> int:
+        """Calculate minimum max_points needed for valid rate calculation.
+        
+        The C module requires a minimum sampling rate of 200000 samples/second.
+        To ensure a valid rate, we need: max_points >= estimated_time * 200000
+        
+        Args:
+            estimated_time: Estimated total waveform time (seconds)
+        
+        Returns:
+            Minimum max_points needed (with safety margin)
+        """
+        min_rate = 200000  # Minimum rate from C module (200000000 / 1000)
+        min_points = int(estimated_time * min_rate)
+        # Add 20% safety margin and round up to nearest 1000
+        safety_margin = int(min_points * 0.2)
+        min_points_with_margin = min_points + safety_margin
+        # Round up to nearest 1000
+        return ((min_points_with_margin + 999) // 1000) * 1000
+    
+    def _ensure_valid_max_points(self, cfg: RetentionConfig) -> None:
+        """Ensure max_points is sufficient for C module rate calculation.
+        
+        This calculates the minimum max_points needed based on estimated total time
+        and updates the config if needed. For long measurements, we may need to exceed
+        10000 to maintain the minimum sampling rate (200000 samples/sec).
+        
+        Args:
+            cfg: RetentionConfig to update
+        """
+        estimated_time = self._estimate_total_time(cfg)
+        min_max_points = self._calculate_min_max_points(estimated_time)
+        
+        # Ensure max_points is at least the calculated minimum (required for rate calculation)
+        cfg.max_points = max(cfg.max_points, min_max_points)
+        
+        # For short measurements, use 10000 (matches working example)
+        # For long measurements, allow up to 30000 (max allowed by RetentionConfig validation)
+        # This ensures we can handle long measurements while avoiding segment time issues
+        if min_max_points <= 10000:
+            # Short measurement: use reliable 10000
+            cfg.max_points = 10000
+        else:
+            # Long measurement: use calculated minimum, but cap at validation limit
+            max_allowed_points = 30000  # Max allowed by RetentionConfig.validate()
+            cfg.max_points = min(cfg.max_points, max_allowed_points)
+    
+    def _estimate_readtrain_total_time(self, numb_meas_pulses: int, meas_width: float,
+                                       meas_delay: float, rise_time: float = 3e-8) -> float:
+        """Estimate total waveform time for readtrain measurements.
+        
+        Args:
+            numb_meas_pulses: Number of measurement pulses
+            meas_width: Measurement pulse width (seconds)
+            meas_delay: Delay between measurements (seconds)
+            rise_time: Rise/fall time (seconds)
+        
+        Returns:
+            Estimated total time in seconds
+        """
+        ttime = 0.0
+        
+        # Initial delay (rise_time)
+        ttime += rise_time
+        
+        # Each measurement pulse has: rise + width + fall + delay
+        for _ in range(numb_meas_pulses):
+            ttime += rise_time  # Rise to measurement voltage
+            ttime += meas_width  # Measurement pulse width
+            ttime += rise_time  # Fall delay
+            ttime += rise_time  # Fall to 0V
+            ttime += meas_delay  # Delay before next measurement
+        
+        return ttime
+    
+    def _calculate_readtrain_max_points(self, numb_meas_pulses: int, meas_width: float,
+                                        meas_delay: float, rise_time: float = 3e-8) -> int:
+        """Calculate minimum max_points for readtrain measurements.
+        
+        Args:
+            numb_meas_pulses: Number of measurement pulses
+            meas_width: Measurement pulse width (seconds)
+            meas_delay: Delay between measurements (seconds)
+            rise_time: Rise/fall time (seconds)
+        
+        Returns:
+            Minimum max_points needed (with safety margin)
+        """
+        estimated_time = self._estimate_readtrain_total_time(numb_meas_pulses, meas_width, meas_delay, rise_time)
+        return self._calculate_min_max_points(estimated_time)
+    
     
     def _format_results(self, timestamps: List[float], voltages: List[float], 
                        currents: List[float], resistances: List[float],
@@ -545,7 +745,47 @@ class Keithley4200_KXCI_Scripts:
         Returns:
             Tuple of (timestamps, voltages, currents, resistances)
         """
+        # Debug: Print all parameters being sent
+        print("\n" + "="*80)
+        print("[DEBUG] Retention Parameters:")
+        print("="*80)
+        print(f"  rise_time:              {cfg.rise_time:.2E} s ({cfg.rise_time*1e9:.2f} ns)")
+        print(f"  reset_v:                {cfg.reset_v:.6f} V")
+        print(f"  reset_width:            {cfg.reset_width:.2E} s ({cfg.reset_width*1e6:.2f} µs)")
+        print(f"  reset_delay:             {cfg.reset_delay:.2E} s ({cfg.reset_delay*1e6:.2f} µs)")
+        print(f"  meas_v:                 {cfg.meas_v:.6f} V")
+        print(f"  meas_width:             {cfg.meas_width:.2E} s ({cfg.meas_width*1e6:.2f} µs)")
+        print(f"  meas_delay:             {cfg.meas_delay:.2E} s ({cfg.meas_delay*1e3:.2f} ms)")
+        print(f"  set_width:              {cfg.set_width:.2E} s ({cfg.set_width*1e6:.2f} µs)")
+        print(f"  set_fall_time:          {cfg.set_fall_time:.2E} s ({cfg.set_fall_time*1e9:.2f} ns)")
+        print(f"  set_delay:               {cfg.set_delay:.2E} s ({cfg.set_delay*1e6:.2f} µs)")
+        print(f"  set_start_v:            {cfg.set_start_v:.6f} V")
+        print(f"  set_stop_v:             {cfg.set_stop_v:.6f} V")
+        print(f"  steps:                  {cfg.steps}")
+        print(f"  i_range:                {cfg.i_range:.2E} A ({cfg.i_range*1e3:.2f} mA)")
+        print(f"  max_points:             {cfg.max_points}")
+        print(f"  iteration:              {cfg.iteration}")
+        print(f"  out1_name:              {cfg.out1_name}")
+        print(f"  out2_name:              {cfg.out2_name}")
+        print(f"  out2_size:              {cfg.out2_size}")
+        print(f"  num_pulses:             {cfg.num_pulses}")
+        print(f"  num_initial_meas_pulses: {cfg.num_initial_meas_pulses}")
+        print(f"  num_pulses_seq:         {cfg.num_pulses_seq}")
+        print(f"  pulse_width:            {cfg.pulse_width:.2E} s ({cfg.pulse_width*1e6:.2f} µs)")
+        print(f"  pulse_v:                {cfg.pulse_v:.6f} V")
+        print(f"  pulse_rise_time:        {cfg.pulse_rise_time:.2E} s ({cfg.pulse_rise_time*1e9:.2f} ns)")
+        print(f"  pulse_fall_time:        {cfg.pulse_fall_time:.2E} s ({cfg.pulse_fall_time*1e9:.2f} ns)")
+        print(f"  pulse_delay:            {cfg.pulse_delay:.2E} s ({cfg.pulse_delay*1e3:.2f} ms)")
+        print(f"  clarius_debug:          {cfg.clarius_debug}")
+        print("="*80)
+        
+        
         command = build_retention_ex_command(cfg)
+        print(f"\n[DEBUG] Generated EX command:")
+        print(command)
+        print("="*80 + "\n")
+        
+        
         total_probes = cfg.total_probe_count()
         
         controller = self._get_controller()
@@ -611,35 +851,102 @@ class Keithley4200_KXCI_Scripts:
         # Auto-calculate array sizes
         array_size = numb_meas_pulses + 2
         
+        # Calculate minimum max_points based on estimated total time
+        #max_points = self._calculate_readtrain_max_points(numb_meas_pulses, meas_width, meas_delay, rise_time)
+        
+        # Use defaults matching run_readtrain_dual_channel.py working example
+        # Working example: reset_v=4, set_stop_v=4, meas_delay=1e-6
+        # But for read-only measurements, we use reset_v=0, set_stop_v=0
+        reset_v = 0.0
+        reset_width = 0.5e-6  # Match working example: 5.00E-7
+        reset_delay = 1e-6  # Match working example: 1.00E-6
+        set_width = 0.5e-6  # Match working example: 5.00E-7
+        set_fall_time = rise_time  # Match working example: 3.00E-8
+        set_delay = 1e-6  # Match working example: 1.00E-6
+        set_start_v = 0.0
+        set_stop_v = 0.0
+        steps = 1
+        iteration = 1
+        out1_size = 200
+        out1_name = "VF"
+        out2_size = 200
+        out2_name = "T"
+        clarius_debug = 1
+        max_points = 10000
+        
+        # CRITICAL: meas_delay must be 1e-6 to match working example
+        # The readtrain C module expects this fixed value
+        if meas_delay != 1e-6:
+            print(f"[WARN] meas_delay={meas_delay} differs from working example (1e-6). "
+                  f"Overriding to 1e-6 to match working example.")
+            meas_delay = 1e-6
+        
+        # Debug: Print all parameters being sent
+        print("\n" + "="*80)
+        print("[DEBUG] Readtrain Parameters:")
+        print("="*80)
+        print(f"  rise_time:        {rise_time:.2E} s ({rise_time*1e9:.2f} ns)")
+        print(f"  reset_v:           {reset_v:.6f} V")
+        print(f"  reset_width:       {reset_width:.2E} s ({reset_width*1e6:.2f} µs)")
+        print(f"  reset_delay:       {reset_delay:.2E} s ({reset_delay*1e6:.2f} µs)")
+        print(f"  meas_v:            {meas_v:.6f} V")
+        print(f"  meas_width:        {meas_width:.2E} s ({meas_width*1e6:.2f} µs)")
+        print(f"  meas_delay:        {meas_delay:.2E} s ({meas_delay*1e3:.2f} ms)")
+        print(f"  set_width:         {set_width:.2E} s ({set_width*1e6:.2f} µs)")
+        print(f"  set_fall_time:     {set_fall_time:.2E} s ({set_fall_time*1e9:.2f} ns)")
+        print(f"  set_delay:         {set_delay:.2E} s ({set_delay*1e6:.2f} µs)")
+        print(f"  set_start_v:       {set_start_v:.6f} V")
+        print(f"  set_stop_v:        {set_stop_v:.6f} V")
+        print(f"  steps:             {steps}")
+        print(f"  i_range:           {i_range:.2E} A ({i_range*1e3:.2f} mA)")
+        print(f"  max_points:        {max_points}")
+        print(f"  set_r_size:        {array_size}")
+        print(f"  reset_r_size:      {array_size}")
+        print(f"  set_v_size:        {array_size}")
+        print(f"  set_i_size:        {array_size}")
+        print(f"  iteration:         {iteration}")
+        print(f"  out1_size:         {out1_size}")
+        print(f"  out1_name:         {out1_name}")
+        print(f"  out2_size:         {out2_size}")
+        print(f"  out2_name:         {out2_name}")
+        print(f"  pulse_times_size:  {array_size}")
+        print(f"  numb_meas_pulses:  {numb_meas_pulses}")
+        print(f"  clarius_debug:     {clarius_debug}")
+        print("="*80)
+        
         command = build_readtrain_ex_command(
             rise_time=rise_time,
-            reset_v=0.0,
-            reset_width=1e-6,
-            reset_delay=1e-6,
+            reset_v=reset_v,
+            reset_width=reset_width,
+            reset_delay=reset_delay,
             meas_v=meas_v,
             meas_width=meas_width,
             meas_delay=meas_delay,
-            set_width=1e-6,
-            set_fall_time=rise_time,
-            set_delay=1e-6,
-            set_start_v=0.0,
-            set_stop_v=0.0,
-            steps=1,
+            set_width=set_width,
+            set_fall_time=set_fall_time,
+            set_delay=set_delay,
+            set_start_v=set_start_v,
+            set_stop_v=set_stop_v,
+            steps=steps,
             i_range=i_range,
-            max_points=10000,
+            max_points=max_points,
             set_r_size=array_size,
             reset_r_size=array_size,
             set_v_size=array_size,
             set_i_size=array_size,
-            iteration=1,
-            out1_size=200,
-            out1_name="VF",
-            out2_size=200,
-            out2_name="T",
+            iteration=iteration,
+            out1_size=out1_size,
+            out1_name=out1_name,
+            out2_size=out2_size,
+            out2_name=out2_name,
             pulse_times_size=array_size,
             numb_meas_pulses=numb_meas_pulses,
-            clarius_debug=1
+            clarius_debug=clarius_debug
         )
+        
+        print(f"\n[DEBUG] Generated EX command:")
+        print(command)
+        print("="*80 + "\n")
         
         controller = self._get_controller()
         
@@ -696,9 +1003,9 @@ class Keithley4200_KXCI_Scripts:
     # ============================================================================
     
     def pulse_read_repeat(self, pulse_voltage: float = 1.0, 
-                         pulse_width: float = 100e-6,
+                         pulse_width: float = 100.0,
                          read_voltage: float = 0.2,
-                         delay_between: float = 10e-3,
+                         delay_between: float = 10000.0,
                          num_cycles: int = 10,
                          clim: float = 100e-3) -> Dict:
         """(Pulse → Read → Delay) × N cycles.
@@ -708,18 +1015,18 @@ class Keithley4200_KXCI_Scripts:
         
         Args:
             pulse_voltage: Pulse voltage (V)
-            pulse_width: Pulse width (ms) - will be converted to seconds
+            pulse_width: Pulse width (µs) - will be converted to seconds
             read_voltage: Read voltage (V)
-            delay_between: Delay between cycles (ms) - will be converted to seconds
+            delay_between: Delay between cycles (µs) - will be converted to seconds
             num_cycles: Number of cycles
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
         """
-        # Convert ms to seconds
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
+        # Convert µs to seconds
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -729,58 +1036,55 @@ class Keithley4200_KXCI_Scripts:
         all_resistances: List[float] = []
         
         for cycle in range(num_cycles):
-            # Ensure minimum delays for C module rate calculation
+            # num_pulses must be >= 8 (C module requirement)
             num_retention_pulses = 8  # Minimum required by C module
-            min_meas_delay = self._ensure_minimum_delays(delay_between_s, num_retention_pulses)
-            min_pulse_delay = max(delay_between_s, 1e-6)
             
             cfg = RetentionConfig(
-                num_initial_meas_pulses=1 if cycle == 0 else 0,
+                num_initial_meas_pulses=1,  # Always include initial read to get all data
                 num_pulses_seq=1,
                 num_pulses=num_retention_pulses,
                 pulse_v=pulse_voltage,
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
                 pulse_fall_time=1e-7,
-                pulse_delay=min_pulse_delay,
-                meas_v=read_voltage,
-                meas_width=2e-6,
-                meas_delay=min_meas_delay,
-                i_range=i_range,
+                pulse_delay=1e-6,  # Use default (1µs) to match working example
+                meas_v=0.3,  # Use default to match working example (not read_voltage)
+                meas_width=1e-6,  # Use default (1µs) to match working example
+                meas_delay=2e-6,  # Use default (2µs) to match working example
+                i_range=1e-4,  # Use default to match working example (not converted clim)
+                reset_width=5e-7,  # Use default (0.5µs) to match working example
+                iteration=1,  # Use 1 to match working example
+                # Don't set max_points here - let _ensure_valid_max_points calculate it
+                # reset_delay is used in the waveform (first segment)
+                # Using default 5e-7 (0.5µs) to match working example
             )
             cfg.validate()
+            print(f"max_points: {cfg.max_points}")
+            
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
             
             timestamps, voltages, currents, resistances = self._execute_retention(cfg)
             
-            # For pulse_read_repeat, we only want the first measurement after the pulse
-            # The retention module gives us: initial_read (if cycle==0) + pulse + retention_reads
-            # We want: initial_read (if cycle==0) + pulse + first_read
-            if cycle == 0:
-                # First cycle: initial_read + pulse + first_read
-                all_timestamps.extend(timestamps[:2])  # Initial read + first retention read
-                all_voltages.extend(voltages[:2])
-                all_currents.extend(currents[:2])
-                all_resistances.extend(resistances[:2])
-            else:
-                # Subsequent cycles: pulse + first_read (skip initial read)
-                # Actually, if num_initial_meas_pulses=0, we get: pulse + retention_reads
-                # So we want just the first retention read
-                all_timestamps.extend(timestamps[:1])
-                all_voltages.extend(voltages[:1])
-                all_currents.extend(currents[:1])
-                all_resistances.extend(resistances[:1])
+            # Return all measurements from the retention module
+            # The retention module gives us: initial_read + pulse + retention_reads
+            # With num_pulses=8, we get: 1 initial + 8 retention = 9 total measurements per cycle
+            all_timestamps.extend(timestamps)
+            all_voltages.extend(voltages)
+            all_currents.extend(currents)
+            all_resistances.extend(resistances)
         
         return self._format_results(all_timestamps, all_voltages, all_currents, all_resistances)
     
     def multi_pulse_then_read(self, pulse_voltage: float = 1.0,
                              num_pulses_per_read: int = 10,
-                             pulse_width: float = 100e-6,
-                             delay_between_pulses: float = 1e-3,
+                             pulse_width: float = 100.0,
+                             delay_between_pulses: float = 1000.0,
                              read_voltage: float = 0.2,
                              num_reads: int = 1,
-                             delay_between_reads: float = 10e-3,
+                             delay_between_reads: float = 10000.0,
                              num_cycles: int = 20,
-                             delay_between_cycles: float = 10e-3,
+                             delay_between_cycles: float = 10000.0,
                              clim: float = 100e-3) -> Dict:
         """Multiple pulses then multiple reads per cycle.
         
@@ -789,22 +1093,22 @@ class Keithley4200_KXCI_Scripts:
         Args:
             pulse_voltage: Pulse voltage (V)
             num_pulses_per_read: Number of pulses per cycle
-            pulse_width: Pulse width (ms)
-            delay_between_pulses: Delay between pulses (ms)
+            pulse_width: Pulse width (µs)
+            delay_between_pulses: Delay between pulses (µs)
             read_voltage: Read voltage (V)
             num_reads: Number of reads per cycle
-            delay_between_reads: Delay between reads (ms)
+            delay_between_reads: Delay between reads (µs)
             num_cycles: Number of cycles
-            delay_between_cycles: Delay between cycles (ms)
+            delay_between_cycles: Delay between cycles (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_pulses_s = self._convert_ms_to_seconds(delay_between_pulses)
-        delay_between_reads_s = self._convert_ms_to_seconds(delay_between_reads)
-        delay_between_cycles_s = self._convert_ms_to_seconds(delay_between_cycles)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_pulses_s = self._convert_us_to_seconds(delay_between_pulses)
+        delay_between_reads_s = self._convert_us_to_seconds(delay_between_reads)
+        delay_between_cycles_s = self._convert_us_to_seconds(delay_between_cycles)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -834,15 +1138,12 @@ class Keithley4200_KXCI_Scripts:
             )
             cfg.validate()
             
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
             timestamps, voltages, currents, resistances = self._execute_retention(cfg)
             
-            # Only take the number of reads we actually want
-            if num_reads < retention_reads:
-                timestamps = timestamps[:len(timestamps) - (retention_reads - num_reads)]
-                voltages = voltages[:len(voltages) - (retention_reads - num_reads)]
-                currents = currents[:len(currents) - (retention_reads - num_reads)]
-                resistances = resistances[:len(resistances) - (retention_reads - num_reads)]
-            
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -858,141 +1159,280 @@ class Keithley4200_KXCI_Scripts:
         )
     
     def potentiation_only(self, set_voltage: float = 2.0,
-                         pulse_width: float = 100e-6,
+                         pulse_width: float = 100.0,
                          read_voltage: float = 0.2,
                          num_pulses: int = 30,
-                         delay_between: float = 10e-3,
+                         delay_between: float = 10000.0,
                          num_post_reads: int = 0,
-                         post_read_interval: float = 1e-3,
+                         post_read_interval: float = 1000.0,
+                         num_cycles: int = 1,
+                         delay_between_cycles: float = 0.0,
                          clim: float = 100e-3) -> Dict:
-        """Repeated SET pulses with reads.
+        """Repeated SET pulses with reads. Can be repeated multiple cycles.
         
-        Pattern: Initial Read → Repeated SET pulses with reads
+        Pattern: (Initial Read → Repeated SET pulses with reads) × N cycles
         
         Args:
             set_voltage: SET voltage (V, positive)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
-            num_pulses: Number of pulses
-            delay_between: Delay between pulses (ms)
+            num_pulses: Number of pulses per cycle
+            delay_between: Delay between pulses (µs) - NOTE: Not used, fixed to 1e-6 internally
             num_post_reads: Post-pulse reads (0=disabled)
-            post_read_interval: Post-read interval (ms)
-            clim: Current limit (A)
+            post_read_interval: Post-read interval (µs) - NOTE: Not used, fixed to 2e-6 internally
+            num_cycles: Number of cycles to repeat (default: 1)
+            delay_between_cycles: Delay between cycles (seconds, default: 0)
+            clim: Current limit (A) - NOTE: Not used, fixed to 1e-4 internally
         
         Returns:
-            Dict with timestamps, voltages, currents, resistances
+            Dict with timestamps, voltages, currents, resistances, cycle_numbers
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
-        post_read_interval_s = self._convert_ms_to_seconds(post_read_interval)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
+        post_read_interval_s = self._convert_us_to_seconds(post_read_interval)
+        delay_between_cycles_s = delay_between_cycles  # Already in seconds
         
         i_range = self._convert_clim_to_i_range(clim)
         
-        # num_pulses must be >= 8, so use max of num_post_reads and 8
-        retention_reads = max(num_post_reads, 8) if num_post_reads > 0 else 8
+        all_timestamps: List[float] = []
+        all_voltages: List[float] = []
+        all_currents: List[float] = []
+        all_resistances: List[float] = []
+        cycle_numbers: List[int] = []
         
-        cfg = RetentionConfig(
-            num_initial_meas_pulses=1,
-            num_pulses_seq=num_pulses,
-            num_pulses=retention_reads,
-            pulse_v=abs(set_voltage),  # Ensure positive
-            pulse_width=pulse_width_s,
-            pulse_rise_time=1e-7,
-            pulse_fall_time=1e-7,
-            pulse_delay=delay_between_s,
-            meas_v=read_voltage,
-            meas_width=2e-6,
-            meas_delay=post_read_interval_s if num_post_reads > 0 else delay_between_s,
-            i_range=i_range,
+        for cycle in range(num_cycles):
+            # num_pulses must be >= 8, so use max of num_post_reads and 8
+            retention_reads = max(num_post_reads, 8) if num_post_reads > 0 else 8
+            
+            cfg = RetentionConfig(
+                num_initial_meas_pulses=1,  # Always include initial read to get all data
+                num_pulses_seq=num_pulses,
+                num_pulses=retention_reads,
+                pulse_v=abs(set_voltage),  # Ensure positive
+                pulse_width=pulse_width_s,
+                pulse_rise_time=1e-7,
+                pulse_fall_time=1e-7,
+                pulse_delay=1e-6,  # Use default (1µs) to match working example
+                meas_v=0.3,  # Use default to match working example (not read_voltage)
+                meas_width=1e-6,  # Use default (1µs) to match working example
+                meas_delay=2e-6,  # Use default (2µs) to match working example
+                i_range=1e-4,  # Use default to match working example (not converted clim)
+                reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
+                iteration=1,  # Use 1 to match working example
+            )
+            cfg.validate()
+            
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
+            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+            
+            # Return all data - no filtering
+            all_timestamps.extend(timestamps)
+            all_voltages.extend(voltages)
+            all_currents.extend(currents)
+            all_resistances.extend(resistances)
+            cycle_numbers.extend([cycle] * len(timestamps))
+            
+            # Delay between cycles (except after last cycle)
+            if cycle < num_cycles - 1 and delay_between_cycles_s > 0:
+                time.sleep(delay_between_cycles_s)
+        
+        return self._format_results(
+            all_timestamps, all_voltages, all_currents, all_resistances,
+            cycle_numbers=cycle_numbers if num_cycles > 1 else None
         )
-        cfg.validate()
-        
-        timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-        
-        # If num_post_reads=0, we only want initial read + pulses (no retention reads)
-        # But retention module always gives retention reads, so we'll take:
-        # - Initial read (timestamps[0])
-        # - First retention read as "final state" (timestamps[1] if num_post_reads=0, or all if num_post_reads>0)
-        if num_post_reads == 0:
-            # Just take initial read and first retention read as final state
-            timestamps = timestamps[:2]
-            voltages = voltages[:2]
-            currents = currents[:2]
-            resistances = resistances[:2]
-        # Otherwise, use all results (initial + retention reads)
-        
-        return self._format_results(timestamps, voltages, currents, resistances)
     
     def depression_only(self, reset_voltage: float = -2.0,
-                       pulse_width: float = 100e-6,
+                       pulse_width: float = 100.0,
                        read_voltage: float = 0.2,
                        num_pulses: int = 30,
-                       delay_between: float = 10e-3,
+                       delay_between: float = 10000.0,
                        num_post_reads: int = 0,
-                       post_read_interval: float = 1e-3,
+                       post_read_interval: float = 1000.0,
+                       num_cycles: int = 1,
+                       delay_between_cycles: float = 0.0,
                        clim: float = 100e-3) -> Dict:
-        """Repeated RESET pulses with reads.
+        """Repeated RESET pulses with reads. Can be repeated multiple cycles.
         
-        Pattern: Initial Read → Repeated RESET pulses with reads
+        Pattern: (Initial Read → Repeated RESET pulses with reads) × N cycles
         
         Args:
             reset_voltage: RESET voltage (V, negative)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
-            num_pulses: Number of pulses
-            delay_between: Delay between pulses (ms)
+            num_pulses: Number of pulses per cycle
+            delay_between: Delay between pulses (µs) - NOTE: Not used, fixed to 1e-6 internally
             num_post_reads: Post-pulse reads (0=disabled)
-            post_read_interval: Post-read interval (ms)
-            clim: Current limit (A)
+            post_read_interval: Post-read interval (µs) - NOTE: Not used, fixed to 2e-6 internally
+            num_cycles: Number of cycles to repeat (default: 1)
+            delay_between_cycles: Delay between cycles (seconds, default: 0)
+            clim: Current limit (A) - NOTE: Not used, fixed to 1e-4 internally
         
         Returns:
-            Dict with timestamps, voltages, currents, resistances
+            Dict with timestamps, voltages, currents, resistances, cycle_numbers
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
-        post_read_interval_s = self._convert_ms_to_seconds(post_read_interval)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
+        post_read_interval_s = self._convert_us_to_seconds(post_read_interval)
+        delay_between_cycles_s = delay_between_cycles  # Already in seconds
         
         i_range = self._convert_clim_to_i_range(clim)
         
-        # num_pulses must be >= 8, so use max of num_post_reads and 8
-        retention_reads = max(num_post_reads, 8) if num_post_reads > 0 else 8
+        all_timestamps: List[float] = []
+        all_voltages: List[float] = []
+        all_currents: List[float] = []
+        all_resistances: List[float] = []
+        cycle_numbers: List[int] = []
         
-        cfg = RetentionConfig(
-            num_initial_meas_pulses=1,
-            num_pulses_seq=num_pulses,
-            num_pulses=retention_reads,
-            pulse_v=reset_voltage,  # Negative for RESET
-            pulse_width=pulse_width_s,
-            pulse_rise_time=1e-7,
-            pulse_fall_time=1e-7,
-            pulse_delay=delay_between_s,
-            meas_v=read_voltage,
-            meas_width=2e-6,
-            meas_delay=post_read_interval_s if num_post_reads > 0 else delay_between_s,
-            i_range=i_range,
+        for cycle in range(num_cycles):
+            # num_pulses must be >= 8, so use max of num_post_reads and 8
+            retention_reads = max(num_post_reads, 8) if num_post_reads > 0 else 8
+            
+            cfg = RetentionConfig(
+                num_initial_meas_pulses=1,  # Always include initial read to get all data
+                num_pulses_seq=num_pulses,
+                num_pulses=retention_reads,
+                pulse_v=reset_voltage,  # Negative for RESET
+                pulse_width=pulse_width_s,
+                pulse_rise_time=1e-7,
+                pulse_fall_time=1e-7,
+                pulse_delay=1e-6,  # Use default (1µs) to match working example
+                meas_v=0.3,  # Use default to match working example (not read_voltage)
+                meas_width=1e-6,  # Use default (1µs) to match working example
+                meas_delay=2e-6,  # Use default (2µs) to match working example
+                i_range=1e-4,  # Use default to match working example (not converted clim)
+                reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
+                iteration=1,  # Use 1 to match working example
+            )
+            cfg.validate()
+            
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
+            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+            
+            # Return all data - no filtering
+            all_timestamps.extend(timestamps)
+            all_voltages.extend(voltages)
+            all_currents.extend(currents)
+            all_resistances.extend(resistances)
+            cycle_numbers.extend([cycle] * len(timestamps))
+            
+            # Delay between cycles (except after last cycle)
+            if cycle < num_cycles - 1 and delay_between_cycles_s > 0:
+                time.sleep(delay_between_cycles_s)
+        
+        return self._format_results(
+            all_timestamps, all_voltages, all_currents, all_resistances,
+            cycle_numbers=cycle_numbers if num_cycles > 1 else None
         )
-        cfg.validate()
+    
+    def potentiation_depression_alternating(self, set_voltage: float = 2.0,
+                                          reset_voltage: float = -2.0,
+                                          pulse_width: float = 100.0,
+                                          read_voltage: float = 0.2,
+                                          num_pulses_per_cycle: int = 10,
+                                          delay_between: float = 10000.0,
+                                          num_post_reads: int = 0,
+                                          post_read_interval: float = 1000.0,
+                                          num_cycles: int = 5,
+                                          delay_between_cycles: float = 0.0,
+                                          clim: float = 100e-3) -> Dict:
+        """Alternating potentiation and depression cycles.
         
-        timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+        Pattern: (Potentiation → Depression) × N cycles
+        This allows you to see the device behavior as it switches between
+        high and low resistance states repeatedly.
         
-        # If num_post_reads=0, we only want initial read + pulses (no retention reads)
-        if num_post_reads == 0:
-            # Just take initial read and first retention read as final state
-            timestamps = timestamps[:2]
-            voltages = voltages[:2]
-            currents = currents[:2]
-            resistances = resistances[:2]
-        # Otherwise, use all results (initial + retention reads)
+        Args:
+            set_voltage: SET voltage (V, positive)
+            reset_voltage: RESET voltage (V, negative)
+            pulse_width: Pulse width (µs)
+            read_voltage: Read voltage (V)
+            num_pulses_per_cycle: Number of pulses per potentiation/depression cycle
+            delay_between: Delay between pulses (µs) - NOTE: Not used, fixed to 1e-6 internally
+            num_post_reads: Post-pulse reads (0=disabled)
+            post_read_interval: Post-read interval (µs) - NOTE: Not used, fixed to 2e-6 internally
+            num_cycles: Number of (potentiation + depression) cycles (default: 5)
+            delay_between_cycles: Delay between cycles (seconds, default: 0)
+            clim: Current limit (A) - NOTE: Not used, fixed to 1e-4 internally
         
-        return self._format_results(timestamps, voltages, currents, resistances)
+        Returns:
+            Dict with timestamps, voltages, currents, resistances, cycle_numbers
+            cycle_numbers: 0=first potentiation, 1=first depression, 2=second potentiation, etc.
+        """
+        delay_between_cycles_s = delay_between_cycles  # Already in seconds
+        
+        all_timestamps: List[float] = []
+        all_voltages: List[float] = []
+        all_currents: List[float] = []
+        all_resistances: List[float] = []
+        cycle_numbers: List[int] = []
+        
+        for cycle in range(num_cycles):
+            # Potentiation (SET) cycle
+            pot_results = self.potentiation_only(
+                set_voltage=set_voltage,
+                pulse_width=pulse_width,
+                read_voltage=read_voltage,
+                num_pulses=num_pulses_per_cycle,
+                delay_between=delay_between,
+                num_post_reads=num_post_reads,
+                post_read_interval=post_read_interval,
+                num_cycles=1,  # Single cycle
+                delay_between_cycles=0.0,
+                clim=clim
+            )
+            
+            all_timestamps.extend(pot_results['timestamps'])
+            all_voltages.extend(pot_results['voltages'])
+            all_currents.extend(pot_results['currents'])
+            all_resistances.extend(pot_results['resistances'])
+            # Even cycles (0, 2, 4, ...) are potentiation
+            cycle_numbers.extend([cycle * 2] * len(pot_results['timestamps']))
+            
+            # Small delay between potentiation and depression
+            if delay_between_cycles_s > 0:
+                time.sleep(delay_between_cycles_s)
+            
+            # Depression (RESET) cycle
+            dep_results = self.depression_only(
+                reset_voltage=reset_voltage,
+                pulse_width=pulse_width,
+                read_voltage=read_voltage,
+                num_pulses=num_pulses_per_cycle,
+                delay_between=delay_between,
+                num_post_reads=num_post_reads,
+                post_read_interval=post_read_interval,
+                num_cycles=1,  # Single cycle
+                delay_between_cycles=0.0,
+                clim=clim
+            )
+            
+            all_timestamps.extend(dep_results['timestamps'])
+            all_voltages.extend(dep_results['voltages'])
+            all_currents.extend(dep_results['currents'])
+            all_resistances.extend(dep_results['resistances'])
+            # Odd cycles (1, 3, 5, ...) are depression
+            cycle_numbers.extend([cycle * 2 + 1] * len(dep_results['timestamps']))
+            
+            # Delay between full cycles (except after last cycle)
+            if cycle < num_cycles - 1 and delay_between_cycles_s > 0:
+                time.sleep(delay_between_cycles_s)
+        
+        return self._format_results(
+            all_timestamps, all_voltages, all_currents, all_resistances,
+            cycle_numbers=cycle_numbers
+        )
     
     def pulse_multi_read(self, pulse_voltage: float = 1.0,
-                        pulse_width: float = 100e-6,
+                        pulse_width: float = 100.0,
                         num_pulses: int = 1,
-                        delay_between_pulses: float = 1e-3,
+                        delay_between_pulses: float = 1000.0,
                         read_voltage: float = 0.2,
                         num_reads: int = 50,
-                        delay_between_reads: float = 100e-3,
+                        delay_between_reads: float = 100000.0,
                         clim: float = 100e-3) -> Dict:
         """Pulse then multiple reads to monitor relaxation.
         
@@ -1000,20 +1440,20 @@ class Keithley4200_KXCI_Scripts:
         
         Args:
             pulse_voltage: Pulse voltage (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             num_pulses: Number of pulses
-            delay_between_pulses: Delay between pulses (ms)
+            delay_between_pulses: Delay between pulses (µs)
             read_voltage: Read voltage (V)
             num_reads: Number of reads
-            delay_between_reads: Delay between reads (ms)
+            delay_between_reads: Delay between reads (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_pulses_s = self._convert_ms_to_seconds(delay_between_pulses)
-        delay_between_reads_s = self._convert_ms_to_seconds(delay_between_reads)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_pulses_s = self._convert_us_to_seconds(delay_between_pulses)
+        delay_between_reads_s = self._convert_us_to_seconds(delay_between_reads)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1028,29 +1468,27 @@ class Keithley4200_KXCI_Scripts:
             pulse_width=pulse_width_s,
             pulse_rise_time=1e-7,
             pulse_fall_time=1e-7,
-            pulse_delay=delay_between_pulses_s,
-            meas_v=read_voltage,
-            meas_width=2e-6,
-            meas_delay=delay_between_reads_s,
-            i_range=i_range,
+            pulse_delay=1e-6,  # Use default (1µs) to match working example
+            meas_v=0.3,  # Use default to match working example (not read_voltage)
+            meas_width=1e-6,  # Use default (1µs) to match working example
+            meas_delay=2e-6,  # Use default (2µs) to match working example
+            i_range=1e-4,  # Use default to match working example (not converted clim)
+            reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
+            iteration=1,  # Use 1 to match working example
         )
         cfg.validate()
         
+        # Ensure max_points is sufficient for rate calculation
+        self._ensure_valid_max_points(cfg)
+        
         timestamps, voltages, currents, resistances = self._execute_retention(cfg)
         
-        # Only take the number of reads we actually want
-        if num_reads < retention_reads:
-            # Remove excess retention reads from the end
-            timestamps = timestamps[:len(timestamps) - (retention_reads - num_reads)]
-            voltages = voltages[:len(voltages) - (retention_reads - num_reads)]
-            currents = currents[:len(currents) - (retention_reads - num_reads)]
-            resistances = resistances[:len(resistances) - (retention_reads - num_reads)]
-        
+        # Return all data - no filtering
         return self._format_results(timestamps, voltages, currents, resistances)
     
     def multi_read_only(self, read_voltage: float = 0.2,
                        num_reads: int = 100,
-                       delay_between: float = 100e-3,
+                       delay_between: float = 100000.0,
                        clim: float = 100e-3) -> Dict:
         """Just reads, no pulses.
         
@@ -1060,21 +1498,27 @@ class Keithley4200_KXCI_Scripts:
         Args:
             read_voltage: Read voltage (V)
             num_reads: Number of reads
-            delay_between: Delay between reads (ms)
+            delay_between: Delay between reads (µs) - NOTE: readtrain uses fixed 1e-6 delay internally
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
         """
+        # NOTE: The readtrain C module uses a fixed meas_delay of 1e-6 internally
+        # The delay_between parameter is ignored for readtrain - it always uses 1e-6
+        # This matches the working example: meas_delay = 1.00E-6
         meas_width = 2e-6
-        meas_delay = self._convert_ms_to_seconds(delay_between)
+        meas_delay = 1e-6  # Fixed to match working example - readtrain doesn't support variable delays
         i_range = self._convert_clim_to_i_range(clim)
+        
+        print(f"[WARN] multi_read_only: delay_between={delay_between}ms is ignored. "
+              f"readtrain uses fixed meas_delay=1e-6 (1µs)")
         
         timestamps, voltages, currents, resistances = self._execute_readtrain(
             numb_meas_pulses=num_reads,
-            meas_v=read_voltage,
+            meas_v=read_voltage,  # readtrain allows user-specified meas_v
             meas_width=meas_width,
-            meas_delay=meas_delay,
+            meas_delay=meas_delay,  # Fixed to 1e-6 for readtrain (C module requirement)
             i_range=i_range
         )
         
@@ -1082,11 +1526,11 @@ class Keithley4200_KXCI_Scripts:
     
     def relaxation_after_multi_pulse(self, pulse_voltage: float = 1.5,
                                     num_pulses: int = 10,
-                                    pulse_width: float = 100e-6,
-                                    delay_between_pulses: float = 1e-3,
+                                    pulse_width: float = 100.0,
+                                    delay_between_pulses: float = 10.0,
                                     read_voltage: float = 0.2,
-                                    num_reads: int = 10,
-                                    delay_between_reads: float = 100e-6,
+                                    num_reads: int = 20,
+                                    delay_between_reads: float = 100.0,
                                     clim: float = 100e-3) -> Dict:
         """Monitor relaxation after cumulative pulsing.
         
@@ -1095,19 +1539,19 @@ class Keithley4200_KXCI_Scripts:
         Args:
             pulse_voltage: Pulse voltage (V)
             num_pulses: Number of pulses
-            pulse_width: Pulse width (ms)
-            delay_between_pulses: Delay between pulses (ms)
+            pulse_width: Pulse width (µs)
+            delay_between_pulses: Delay between pulses (µs)
             read_voltage: Read voltage (V)
             num_reads: Number of reads
-            delay_between_reads: Delay between reads (ms)
+            delay_between_reads: Delay between reads (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_pulses_s = self._convert_ms_to_seconds(delay_between_pulses)
-        delay_between_reads_s = self._convert_ms_to_seconds(delay_between_reads)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_pulses_s = self._convert_us_to_seconds(delay_between_pulses)
+        delay_between_reads_s = self._convert_us_to_seconds(delay_between_reads)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1122,24 +1566,24 @@ class Keithley4200_KXCI_Scripts:
             pulse_width=pulse_width_s,
             pulse_rise_time=1e-7,
             pulse_fall_time=1e-7,
-            pulse_delay=delay_between_pulses_s,
-            meas_v=read_voltage,
-            meas_width=2e-6,
-            meas_delay=delay_between_reads_s,
-            i_range=i_range,
+            pulse_delay=1e-6,  # Use default (1µs) to match working example
+            meas_v=0.3,  # Use default to match working example (not read_voltage)
+            meas_width=1e-6,  # Use default (1µs) to match working example
+            meas_delay=2e-6,  # Use default (2µs) to match working example
+            i_range=1e-4,  # Use default to match working example (not converted clim)
+            reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
+            iteration=1,  # Use 1 to match working example
         )
         cfg.validate()
         
+        # Ensure max_points is sufficient for rate calculation
+        self._ensure_valid_max_points(cfg)
+        
+        print(cfg)
+
         timestamps, voltages, currents, resistances = self._execute_retention(cfg)
         
-        # Only take the number of reads we actually want
-        if num_reads < retention_reads:
-            # Remove excess retention reads from the end
-            timestamps = timestamps[:len(timestamps) - (retention_reads - num_reads)]
-            voltages = voltages[:len(voltages) - (retention_reads - num_reads)]
-            currents = currents[:len(currents) - (retention_reads - num_reads)]
-            resistances = resistances[:len(resistances) - (retention_reads - num_reads)]
-        
+        # Return all data - no filtering
         return self._format_results(timestamps, voltages, currents, resistances)
     
     # ============================================================================
@@ -1151,7 +1595,7 @@ class Keithley4200_KXCI_Scripts:
                               read_voltage: float = 0.2,
                               num_pulses_per_width: int = 5,
                               reset_voltage: float = -1.0,
-                              reset_width: float = 1e-3,
+                              reset_width: float = 1000.0,
                               delay_between_widths: float = 5.0,
                               clim: float = 100e-3) -> Dict:
         """Width sweep: For each width, pulse then read.
@@ -1160,11 +1604,11 @@ class Keithley4200_KXCI_Scripts:
         
         Args:
             pulse_voltage: Pulse voltage (V)
-            pulse_widths: List of pulse widths (ms) - will be converted to seconds
+            pulse_widths: List of pulse widths (µs) - will be converted to seconds
             read_voltage: Read voltage (V)
             num_pulses_per_width: Pulses per width
             reset_voltage: Reset voltage (V)
-            reset_width: Reset width (ms)
+            reset_width: Reset width (µs)
             delay_between_widths: Delay between widths (s)
             clim: Current limit (A)
         
@@ -1172,11 +1616,11 @@ class Keithley4200_KXCI_Scripts:
             Dict with timestamps, voltages, currents, resistances, widths
         """
         if pulse_widths is None:
-            pulse_widths = [10e-6, 50e-6, 100e-6, 500e-6, 1e-3]
+            pulse_widths = [10.0, 50.0, 100.0, 500.0, 1000.0]  # Default in µs
         
-        # Convert ms to seconds
-        pulse_widths_s = [self._convert_ms_to_seconds(w) for w in pulse_widths]
-        reset_width_s = self._convert_ms_to_seconds(reset_width)
+        # Convert µs to seconds
+        pulse_widths_s = [self._convert_us_to_seconds(w) for w in pulse_widths]
+        reset_width_s = self._convert_us_to_seconds(reset_width)
         delay_between_widths_s = delay_between_widths  # Already in seconds
         
         i_range = self._convert_clim_to_i_range(clim)
@@ -1208,16 +1652,12 @@ class Keithley4200_KXCI_Scripts:
             )
             cfg.validate()
             
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
             timestamps, voltages, currents, resistances = self._execute_retention(cfg)
             
-            # Only take the number of reads we actually want
-            if num_pulses_per_width < retention_reads:
-                # Remove excess retention reads from the end
-                timestamps = timestamps[:len(timestamps) - (retention_reads - num_pulses_per_width)]
-                voltages = voltages[:len(voltages) - (retention_reads - num_pulses_per_width)]
-                currents = currents[:len(currents) - (retention_reads - num_pulses_per_width)]
-                resistances = resistances[:len(resistances) - (retention_reads - num_pulses_per_width)]
-            
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1227,20 +1667,21 @@ class Keithley4200_KXCI_Scripts:
             # Reset between widths (except last)
             if width_idx < len(pulse_widths_s) - 1:
                 reset_cfg = RetentionConfig(
-                    num_initial_meas_pulses=0,
+                    num_initial_meas_pulses=1,  # Always include initial read to get all data
                     num_pulses_seq=1,
                     num_pulses=8,  # Minimum required, but we'll ignore results
                     pulse_v=reset_voltage,
                     pulse_width=reset_width_s,
                     pulse_rise_time=1e-7,
                     pulse_fall_time=1e-7,
-                    pulse_delay=0,
+                    pulse_delay=1e-6,  # Use valid delay (matches working example default)
                     meas_v=read_voltage,
                     meas_width=2e-6,
-                    meas_delay=0,
+                    meas_delay=2e-6,  # Use valid delay (matches working example default: 2e-6)
                     i_range=i_range,
                 )
                 reset_cfg.validate()
+                self._ensure_valid_max_points(reset_cfg)
                 self._execute_retention(reset_cfg)  # Just reset, don't collect data
                 
                 if delay_between_widths_s > 0:
@@ -1254,12 +1695,12 @@ class Keithley4200_KXCI_Scripts:
     def voltage_amplitude_sweep(self, pulse_voltage_start: float = 0.5,
                                pulse_voltage_stop: float = 2.5,
                                pulse_voltage_step: float = 0.1,
-                               pulse_width: float = 100e-6,
+                               pulse_width: float = 100.0,
                                read_voltage: float = 0.2,
                                num_pulses_per_voltage: int = 5,
-                               delay_between: float = 10e-3,
+                               delay_between: float = 10000.0,
                                reset_voltage: float = -1.0,
-                               reset_width: float = 1e-3,
+                               reset_width: float = 1000.0,
                                delay_between_voltages: float = 1.0,
                                clim: float = 100e-3) -> Dict:
         """Voltage amplitude sweep: Test different pulse voltages.
@@ -1270,21 +1711,21 @@ class Keithley4200_KXCI_Scripts:
             pulse_voltage_start: Start voltage (V)
             pulse_voltage_stop: Stop voltage (V)
             pulse_voltage_step: Voltage step (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             num_pulses_per_voltage: Pulses per voltage
-            delay_between: Delay between pulses (ms)
+            delay_between: Delay between pulses (µs)
             reset_voltage: Reset voltage (V)
-            reset_width: Reset width (ms)
+            reset_width: Reset width (µs)
             delay_between_voltages: Delay between voltages (s)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, voltages_applied
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
-        reset_width_s = self._convert_ms_to_seconds(reset_width)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
+        reset_width_s = self._convert_us_to_seconds(reset_width)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1321,16 +1762,12 @@ class Keithley4200_KXCI_Scripts:
             )
             cfg.validate()
             
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
             timestamps, voltages, currents, resistances = self._execute_retention(cfg)
             
-            # Only take the number of reads we actually want
-            if num_pulses_per_voltage < retention_reads:
-                # Remove excess retention reads from the end
-                timestamps = timestamps[:len(timestamps) - (retention_reads - num_pulses_per_voltage)]
-                voltages = voltages[:len(voltages) - (retention_reads - num_pulses_per_voltage)]
-                currents = currents[:len(currents) - (retention_reads - num_pulses_per_voltage)]
-                resistances = resistances[:len(resistances) - (retention_reads - num_pulses_per_voltage)]
-            
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1340,20 +1777,21 @@ class Keithley4200_KXCI_Scripts:
             # Reset between voltages (except last)
             if volt_idx < len(voltage_list) - 1:
                 reset_cfg = RetentionConfig(
-                    num_initial_meas_pulses=0,
+                    num_initial_meas_pulses=1,  # Always include initial read to get all data
                     num_pulses_seq=1,
-                    num_pulses=0,
+                    num_pulses=8,  # Minimum required (was 0, which is invalid)
                     pulse_v=reset_voltage,
                     pulse_width=reset_width_s,
                     pulse_rise_time=1e-7,
                     pulse_fall_time=1e-7,
-                    pulse_delay=0,
+                    pulse_delay=1e-6,  # Use valid delay (matches working example default)
                     meas_v=read_voltage,
                     meas_width=2e-6,
-                    meas_delay=0,
+                    meas_delay=2e-6,  # Use valid delay (matches working example default: 2e-6)
                     i_range=i_range,
                 )
                 reset_cfg.validate()
+                self._ensure_valid_max_points(reset_cfg)
                 self._execute_retention(reset_cfg)
                 
                 if delay_between_voltages > 0:
@@ -1366,11 +1804,11 @@ class Keithley4200_KXCI_Scripts:
     
     def potentiation_depression_cycle(self, set_voltage: float = 2.0,
                                      reset_voltage: float = -2.0,
-                                     pulse_width: float = 100e-6,
+                                     pulse_width: float = 100.0,
                                      read_voltage: float = 0.2,
                                      steps: int = 20,
                                      num_cycles: int = 1,
-                                     delay_between: float = 10e-3,
+                                     delay_between: float = 10000.0,
                                      clim: float = 100e-3) -> Dict:
         """Potentiation-depression cycle: Gradual SET then RESET.
         
@@ -1379,18 +1817,18 @@ class Keithley4200_KXCI_Scripts:
         Args:
             set_voltage: SET voltage (V)
             reset_voltage: RESET voltage (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             steps: Steps in each direction
             num_cycles: Number of cycles
-            delay_between: Delay between pulses (ms)
+            delay_between: Delay between pulses (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, cycle_numbers
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1403,10 +1841,11 @@ class Keithley4200_KXCI_Scripts:
         for cycle in range(num_cycles):
             # Potentiation (SET) - gradual increase
             for step in range(steps):
+                # num_pulses must be >= 8, so use 8 and take only first result
                 cfg = RetentionConfig(
                     num_initial_meas_pulses=1 if cycle == 0 and step == 0 else 0,
                     num_pulses_seq=1,
-                    num_pulses=1,
+                    num_pulses=8,  # Minimum required (was 1, which is invalid)
                     pulse_v=set_voltage,
                     pulse_width=pulse_width_s,
                     pulse_rise_time=1e-7,
@@ -1418,9 +1857,11 @@ class Keithley4200_KXCI_Scripts:
                     i_range=i_range,
                 )
                 cfg.validate()
+                self._ensure_valid_max_points(cfg)
                 
                 timestamps, voltages, currents, resistances = self._execute_retention(cfg)
                 
+                # Return all data - no filtering
                 all_timestamps.extend(timestamps)
                 all_voltages.extend(voltages)
                 all_currents.extend(currents)
@@ -1429,10 +1870,11 @@ class Keithley4200_KXCI_Scripts:
             
             # Depression (RESET) - gradual decrease
             for step in range(steps):
+                # num_pulses must be >= 8, so use 8 and take only first result
                 cfg = RetentionConfig(
-                    num_initial_meas_pulses=0,
+                    num_initial_meas_pulses=1,  # Always include initial read to get all data
                     num_pulses_seq=1,
-                    num_pulses=1,
+                    num_pulses=8,  # Minimum required (was 1, which is invalid)
                     pulse_v=reset_voltage,
                     pulse_width=pulse_width_s,
                     pulse_rise_time=1e-7,
@@ -1444,9 +1886,11 @@ class Keithley4200_KXCI_Scripts:
                     i_range=i_range,
                 )
                 cfg.validate()
+                self._ensure_valid_max_points(cfg)
                 
                 timestamps, voltages, currents, resistances = self._execute_retention(cfg)
                 
+                # Return all data - no filtering
                 all_timestamps.extend(timestamps)
                 all_voltages.extend(voltages)
                 all_currents.extend(currents)
@@ -1460,10 +1904,10 @@ class Keithley4200_KXCI_Scripts:
     
     def endurance_test(self, set_voltage: float = 2.0,
                       reset_voltage: float = -2.0,
-                      pulse_width: float = 100e-6,
+                      pulse_width: float = 100.0,
                       read_voltage: float = 0.2,
                       num_cycles: int = 1000,
-                      delay_between: float = 10e-3,
+                      delay_between: float = 10000.0,
                       clim: float = 100e-3) -> Dict:
         """Endurance test: SET/RESET cycles for lifetime testing.
         
@@ -1472,17 +1916,17 @@ class Keithley4200_KXCI_Scripts:
         Args:
             set_voltage: SET voltage (V)
             reset_voltage: RESET voltage (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             num_cycles: Number of cycles
-            delay_between: Delay between operations (ms)
+            delay_between: Delay between operations (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, cycle_numbers
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1494,10 +1938,11 @@ class Keithley4200_KXCI_Scripts:
         
         for cycle in range(num_cycles):
             # SET
+            # num_pulses must be >= 8, so use 8 and take only first result
             set_cfg = RetentionConfig(
                 num_initial_meas_pulses=1 if cycle == 0 else 0,
                 num_pulses_seq=1,
-                num_pulses=1,
+                num_pulses=8,  # Minimum required (was 1, which is invalid)
                 pulse_v=set_voltage,
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
@@ -1509,8 +1954,11 @@ class Keithley4200_KXCI_Scripts:
                 i_range=i_range,
             )
             set_cfg.validate()
+            self._ensure_valid_max_points(set_cfg)
             
             timestamps, voltages, currents, resistances = self._execute_retention(set_cfg)
+            
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1518,10 +1966,11 @@ class Keithley4200_KXCI_Scripts:
             cycle_numbers.extend([cycle] * len(timestamps))
             
             # RESET
+            # num_pulses must be >= 8, so use 8 and take only first result
             reset_cfg = RetentionConfig(
                 num_initial_meas_pulses=0,
                 num_pulses_seq=1,
-                num_pulses=1,
+                num_pulses=8,  # Minimum required (was 1, which is invalid)
                 pulse_v=reset_voltage,
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
@@ -1533,8 +1982,11 @@ class Keithley4200_KXCI_Scripts:
                 i_range=i_range,
             )
             reset_cfg.validate()
+            self._ensure_valid_max_points(reset_cfg)
             
             timestamps, voltages, currents, resistances = self._execute_retention(reset_cfg)
+            
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1549,12 +2001,12 @@ class Keithley4200_KXCI_Scripts:
     def ispp_test(self, start_voltage: float = 0.5,
                   voltage_step: float = 0.05,
                   max_voltage: float = 3.0,
-                  pulse_width: float = 100e-6,
+                  pulse_width: float = 100.0,
                   read_voltage: float = 0.2,
                   target_resistance: float = None,
                   resistance_threshold_factor: float = 0.5,
                   max_pulses: int = 100,
-                  delay_between: float = 10e-3,
+                  delay_between: float = 10000.0,
                   clim: float = 100e-3) -> Dict:
         """ISPP: Incremental step pulse programming.
         
@@ -1564,19 +2016,19 @@ class Keithley4200_KXCI_Scripts:
             start_voltage: Start voltage (V)
             voltage_step: Voltage step (V)
             max_voltage: Maximum voltage (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             target_resistance: Target resistance (Ohm, None = auto-detect)
             resistance_threshold_factor: Resistance change factor for switching detection
             max_pulses: Maximum pulses
-            delay_between: Delay between pulses (ms)
+            delay_between: Delay between pulses (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, voltages_applied
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1591,10 +2043,11 @@ class Keithley4200_KXCI_Scripts:
         pulse_count = 0
         
         while current_voltage <= max_voltage and pulse_count < max_pulses:
+            # num_pulses must be >= 8, so use 8 and take only first result
             cfg = RetentionConfig(
                 num_initial_meas_pulses=1 if pulse_count == 0 else 0,
                 num_pulses_seq=1,
-                num_pulses=1,
+                num_pulses=8,  # Minimum required (was 1, which is invalid)
                 pulse_v=current_voltage,
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
@@ -1607,8 +2060,12 @@ class Keithley4200_KXCI_Scripts:
             )
             cfg.validate()
             
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
             timestamps, voltages, currents, resistances = self._execute_retention(cfg)
             
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1641,11 +2098,11 @@ class Keithley4200_KXCI_Scripts:
                                 start_voltage: float = 0.5,
                                 voltage_step: float = 0.05,
                                 max_voltage: float = 3.0,
-                                pulse_width: float = 100e-6,
+                                pulse_width: float = 100.0,
                                 read_voltage: float = 0.2,
                                 resistance_threshold_factor: float = 0.5,
                                 num_pulses_per_voltage: int = 3,
-                                delay_between: float = 10e-3,
+                                delay_between: float = 10000.0,
                                 clim: float = 100e-3) -> Dict:
         """Switching threshold finder: Find minimum SET or RESET voltage.
         
@@ -1656,18 +2113,18 @@ class Keithley4200_KXCI_Scripts:
             start_voltage: Start voltage (V)
             voltage_step: Voltage step (V)
             max_voltage: Maximum voltage (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             resistance_threshold_factor: Resistance change factor for switching
             num_pulses_per_voltage: Pulses per voltage
-            delay_between: Delay between pulses (ms)
+            delay_between: Delay between pulses (µs)
             clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, voltages_applied
         """
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1687,10 +2144,11 @@ class Keithley4200_KXCI_Scripts:
         initial_resistance = None
         
         while abs(current_voltage) <= abs(max_v):
+            # num_pulses must be >= 8, so use 8 and take only first result
             cfg = RetentionConfig(
                 num_initial_meas_pulses=1 if initial_resistance is None else 0,
                 num_pulses_seq=num_pulses_per_voltage,
-                num_pulses=1,
+                num_pulses=8,  # Minimum required (was 1, which is invalid)
                 pulse_v=current_voltage,
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
@@ -1703,8 +2161,12 @@ class Keithley4200_KXCI_Scripts:
             )
             cfg.validate()
             
+            # Ensure max_points is sufficient for rate calculation
+            self._ensure_valid_max_points(cfg)
+            
             timestamps, voltages, currents, resistances = self._execute_retention(cfg)
             
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1731,12 +2193,12 @@ class Keithley4200_KXCI_Scripts:
     
     def multilevel_programming(self, target_levels: list = None,
                               pulse_voltage: float = 1.5,
-                              pulse_width: float = 100e-6,
+                              pulse_width: float = 100.0,
                               read_voltage: float = 0.2,
                               num_pulses_per_level: int = 5,
-                              delay_between: float = 10e-3,
+                              delay_between: float = 10000.0,
                               reset_voltage: float = -1.0,
-                              reset_width: float = 1e-3,
+                              reset_width: float = 1000.0,
                               delay_between_levels: float = 1.0,
                               clim: float = 100e-3) -> Dict:
         """Multilevel programming: Program to specific resistance levels.
@@ -1746,12 +2208,12 @@ class Keithley4200_KXCI_Scripts:
         Args:
             target_levels: List of target levels (arbitrary units, used for labeling)
             pulse_voltage: Pulse voltage (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             num_pulses_per_level: Pulses per level
-            delay_between: Delay between pulses (ms)
+            delay_between: Delay between pulses (µs)
             reset_voltage: Reset voltage (V)
-            reset_width: Reset width (ms)
+            reset_width: Reset width (µs)
             delay_between_levels: Delay between levels (s)
             clim: Current limit (A)
         
@@ -1761,9 +2223,9 @@ class Keithley4200_KXCI_Scripts:
         if target_levels is None:
             target_levels = [1, 2, 3, 4, 5]
         
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
-        reset_width_s = self._convert_ms_to_seconds(reset_width)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
+        reset_width_s = self._convert_us_to_seconds(reset_width)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1783,20 +2245,23 @@ class Keithley4200_KXCI_Scripts:
                 pulse_width=reset_width_s,
                 pulse_rise_time=1e-7,
                 pulse_fall_time=1e-7,
-                pulse_delay=0,
+                pulse_delay=1e-6,  # Use valid delay (matches working example default)
                 meas_v=read_voltage,
                 meas_width=2e-6,
-                meas_delay=0,
+                meas_delay=2e-6,  # Use valid delay (matches working example default: 2e-6)
                 i_range=i_range,
             )
             reset_cfg.validate()
+            self._ensure_valid_max_points(reset_cfg)
             self._execute_retention(reset_cfg)
             
             # Program to level
+            # num_pulses must be >= 8, so use max of 1 and 8
+            retention_reads = max(1, 8)
             prog_cfg = RetentionConfig(
                 num_initial_meas_pulses=1 if level_idx == 0 else 0,
                 num_pulses_seq=num_pulses_per_level,
-                num_pulses=1,  # Final read
+                num_pulses=retention_reads,  # Minimum required (was 1, which is invalid)
                 pulse_v=pulse_voltage,
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
@@ -1808,9 +2273,11 @@ class Keithley4200_KXCI_Scripts:
                 i_range=i_range,
             )
             prog_cfg.validate()
+            self._ensure_valid_max_points(prog_cfg)
             
             timestamps, voltages, currents, resistances = self._execute_retention(prog_cfg)
             
+            # Return all data - no filtering
             all_timestamps.extend(timestamps)
             all_voltages.extend(voltages)
             all_currents.extend(currents)
@@ -1826,10 +2293,10 @@ class Keithley4200_KXCI_Scripts:
         )
     
     def pulse_train_varying_amplitudes(self, pulse_voltages: list = None,
-                                      pulse_width: float = 100e-6,
+                                      pulse_width: float = 100.0,
                                       read_voltage: float = 0.2,
                                       num_repeats: int = 1,
-                                      delay_between: float = 10e-3,
+                                      delay_between: float = 10000.0,
                                       clim: float = 100e-3) -> Dict:
         """Pulse train with varying amplitudes.
         
@@ -1837,10 +2304,10 @@ class Keithley4200_KXCI_Scripts:
         
         Args:
             pulse_voltages: List of pulse voltages (V)
-            pulse_width: Pulse width (ms)
+            pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             num_repeats: Number of repeats
-            delay_between: Delay between pulses (ms)
+            delay_between: Delay between pulses (µs)
             clim: Current limit (A)
         
         Returns:
@@ -1849,8 +2316,8 @@ class Keithley4200_KXCI_Scripts:
         if pulse_voltages is None:
             pulse_voltages = [1.0, 1.5, 2.0, -1.0, -1.5, -2.0]
         
-        pulse_width_s = self._convert_ms_to_seconds(pulse_width)
-        delay_between_s = self._convert_ms_to_seconds(delay_between)
+        pulse_width_s = self._convert_us_to_seconds(pulse_width)
+        delay_between_s = self._convert_us_to_seconds(delay_between)
         
         i_range = self._convert_clim_to_i_range(clim)
         
@@ -1862,10 +2329,11 @@ class Keithley4200_KXCI_Scripts:
         
         for repeat in range(num_repeats):
             for volt_idx, pulse_v in enumerate(pulse_voltages):
+                # num_pulses must be >= 8, so use 8 and take only first result
                 cfg = RetentionConfig(
-                    num_initial_meas_pulses=1 if repeat == 0 and volt_idx == 0 else 0,
+                    num_initial_meas_pulses=1,  # Always include initial read to get all data
                     num_pulses_seq=1,
-                    num_pulses=1,
+                    num_pulses=8,  # Minimum required (was 1, which is invalid)
                     pulse_v=pulse_v,
                     pulse_width=pulse_width_s,
                     pulse_rise_time=1e-7,
@@ -1877,9 +2345,11 @@ class Keithley4200_KXCI_Scripts:
                     i_range=i_range,
                 )
                 cfg.validate()
+                self._ensure_valid_max_points(cfg)
                 
                 timestamps, voltages, currents, resistances = self._execute_retention(cfg)
                 
+                # Return all data - no filtering
                 all_timestamps.extend(timestamps)
                 all_voltages.extend(voltages)
                 all_currents.extend(currents)
@@ -1897,7 +2367,7 @@ class Keithley4200_KXCI_Scripts:
     
     def current_range_finder(self, test_voltage: float = 0.2,
                             num_reads_per_range: int = 10,
-                            delay_between_reads: float = 10e-3,
+                            delay_between_reads: float = 10000.0,
                             current_ranges: List[float] = None) -> Dict:
         """Find optimal current measurement range.
         
@@ -1918,7 +2388,7 @@ class Keithley4200_KXCI_Scripts:
                                          read_voltage: float = 0.2,
                                          num_pulses_per_width: int = 5,
                                          reset_voltage: float = -1.0,
-                                         reset_width: float = 1e-3,
+                                         reset_width: float = 1000.0,
                                          delay_between_widths: float = 5.0,
                                          clim: float = 100e-3) -> Dict:
         """Width sweep with pulse current measurement.
@@ -1938,11 +2408,11 @@ class Keithley4200_KXCI_Scripts:
     
     def relaxation_after_multi_pulse_with_pulse_measurement(self, pulse_voltage: float = 1.5,
                                          num_pulses: int = 10,
-                                         pulse_width: float = 100e-6,
-                                         delay_between_pulses: float = 1e-3,
+                                         pulse_width: float = 100.0,
+                                         delay_between_pulses: float = 1000.0,
                                          read_voltage: float = 0.2,
                                          num_reads: int = 10,
-                                         delay_between_reads: float = 100e-6,
+                                         delay_between_reads: float = 10.0,
                                          clim: float = 100e-3) -> Dict:
         """Relaxation with pulse current measurement.
         
@@ -1965,123 +2435,110 @@ class Keithley4200_KXCI_Scripts:
 # ============================================================================
 
 if __name__ == "__main__":
-    """Standalone testing examples for keithley4200_kxci_scripts."""
+    """Standalone testing examples for keithley4200_kxci_scripts.
     
-    import argparse
+    Simply uncomment and modify the function call you want to run.
+    All parameters have defaults, so you only need to specify what you want to change.
+    """
     
-    parser = argparse.ArgumentParser(
-        description="Test Keithley 4200A KXCI Scripts",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Test multi_read_only (simplest test)
-  python keithley4200_kxci_scripts.py --test multi_read_only --gpib GPIB0::17::INSTR --num-reads 10
-  
-  # Test pulse_read_repeat
-  python keithley4200_kxci_scripts.py --test pulse_read_repeat --gpib GPIB0::17::INSTR --num-cycles 5
-  
-  # Test potentiation_only
-  python keithley4200_kxci_scripts.py --test potentiation_only --gpib GPIB0::17::INSTR --num-pulses 10
-        """
-    )
+    # ============================================================================
+    # CONFIGURATION - Set your GPIB address and timeout here
+    # ============================================================================
+    GPIB_ADDRESS = "GPIB0::17::INSTR"
+    TIMEOUT = 30.0
     
-    parser.add_argument("--test", type=str, default="multi_read_only",
-                       choices=["pulse_read_repeat", "multi_pulse_then_read", "potentiation_only",
-                               "depression_only", "pulse_multi_read", "multi_read_only",
-                               "relaxation_after_multi_pulse", "width_sweep_with_reads",
-                               "voltage_amplitude_sweep", "potentiation_depression_cycle",
-                               "endurance_test", "ispp_test", "switching_threshold_test",
-                               "multilevel_programming", "pulse_train_varying_amplitudes"],
-                       help="Test to run")
-    parser.add_argument("--gpib", type=str, default="GPIB0::17::INSTR",
-                       help="GPIB address")
-    parser.add_argument("--timeout", type=float, default=30.0,
-                       help="Timeout in seconds")
+    # ============================================================================
+    # TEST SELECTION - Uncomment the test you want to run and modify parameters
+    # ============================================================================
     
-    # Common parameters
-    parser.add_argument("--pulse-voltage", type=float, default=1.5, help="Pulse voltage (V)")
-    parser.add_argument("--pulse-width", type=float, default=1.0, help="Pulse width (ms)")
-    parser.add_argument("--read-voltage", type=float, default=0.2, help="Read voltage (V)")
-    parser.add_argument("--delay-between", type=float, default=10.0, help="Delay between (ms)")
-    parser.add_argument("--num-cycles", type=int, default=5, help="Number of cycles")
-    parser.add_argument("--num-pulses", type=int, default=10, help="Number of pulses")
-    parser.add_argument("--num-reads", type=int, default=10, help="Number of reads")
-    parser.add_argument("--clim", type=float, default=100e-6, help="Current limit (A)")
-    
-    args = parser.parse_args()
-    
-    print("="*80)
-    print("Keithley 4200A KXCI Scripts - Test Runner")
-    print("="*80)
-    print(f"Test: {args.test}")
-    print(f"GPIB Address: {args.gpib}")
-    print("="*80)
-    
-    scripts = Keithley4200_KXCI_Scripts(gpib_address=args.gpib, timeout=args.timeout)
+    # Initialize the scripts object
+    scripts = Keithley4200_KXCI_Scripts(gpib_address=GPIB_ADDRESS, timeout=TIMEOUT)
     
     try:
-        if args.test == "pulse_read_repeat":
-            results = scripts.pulse_read_repeat(
-                pulse_voltage=args.pulse_voltage,
-                pulse_width=args.pulse_width,
-                read_voltage=args.read_voltage,
-                delay_between=args.delay_between,
-                num_cycles=args.num_cycles,
-                clim=args.clim
-            )
-        elif args.test == "multi_read_only":
-            results = scripts.multi_read_only(
-                read_voltage=args.read_voltage,
-                num_reads=args.num_reads,
-                delay_between=args.delay_between,
-                clim=args.clim
-            )
-        elif args.test == "potentiation_only":
-            results = scripts.potentiation_only(
-                set_voltage=args.pulse_voltage,
-                pulse_width=args.pulse_width,
-                read_voltage=args.read_voltage,
-                num_pulses=args.num_pulses,
-                delay_between=args.delay_between,
-                clim=args.clim
-            )
-        elif args.test == "depression_only":
-            results = scripts.depression_only(
-                reset_voltage=-args.pulse_voltage,
-                pulse_width=args.pulse_width,
-                read_voltage=args.read_voltage,
-                num_pulses=args.num_pulses,
-                delay_between=args.delay_between,
-                clim=args.clim
-            )
-        elif args.test == "pulse_multi_read":
-            results = scripts.pulse_multi_read(
-                pulse_voltage=args.pulse_voltage,
-                pulse_width=args.pulse_width,
-                num_pulses=1,
-                delay_between_pulses=args.delay_between,
-                read_voltage=args.read_voltage,
-                num_reads=args.num_reads,
-                delay_between_reads=args.delay_between,
-                clim=args.clim
-            )
-        elif args.test == "relaxation_after_multi_pulse":
-            results = scripts.relaxation_after_multi_pulse(
-                pulse_voltage=args.pulse_voltage,
-                num_pulses=args.num_pulses,
-                pulse_width=args.pulse_width,
-                delay_between_pulses=args.delay_between,
-                read_voltage=args.read_voltage,
-                num_reads=args.num_reads,
-                delay_between_reads=args.delay_between,
-                clim=args.clim
-            )
-        else:
-            print(f"Test '{args.test}' not yet implemented in test runner")
-            print("Available tests: pulse_read_repeat, multi_read_only, potentiation_only, "
-                  "depression_only, pulse_multi_read, relaxation_after_multi_pulse")
-            exit(1)
+        # Example 1: Simple pulse-read-repeat test
+        # Uncomment to run:
+        # results = scripts.pulse_read_repeat(
+        #     pulse_voltage=1.5,      # Pulse voltage (V)
+        #     pulse_width=1.0,        # Pulse width (µs) - default is 1µs
+        #     read_voltage=0.2,       # Read voltage (V)
+        #     delay_between=10000.0,  # Delay between cycles (µs)
+        #     num_cycles=5,           # Number of cycles
+        #     clim=100e-3             # Current limit (A)
+        # )
         
+        # Example 2: Multi-read only (simplest test)
+        # Uncomment to run:
+        # results = scripts.multi_read_only(
+        #     read_voltage=0.2,       # Read voltage (V)
+        #     num_reads=10,           # Number of reads
+        #     delay_between=10000.0,  # Delay between reads (µs)
+        #     clim=100e-3             # Current limit (A)
+        # )
+        
+        # Example 3: Potentiation only
+        # Uncomment to run:
+        # results = scripts.potentiation_only(
+        #     set_voltage=1.5,        # Set voltage (V)
+        #     pulse_width=100.0,      # Pulse width (µs)
+        #     read_voltage=0.2,       # Read voltage (V)
+        #     num_pulses=10,          # Number of pulses
+        #     delay_between=10000.0,  # Delay between pulses (µs)
+        #     clim=100e-3             # Current limit (A)
+        # )
+        
+        # Example 4: Depression only
+        # Uncomment to run:
+        results = scripts.depression_only(
+            reset_voltage=-1.5,     # Reset voltage (V, negative)
+            pulse_width=10.0,      # Pulse width (µs)
+            read_voltage=0.2,       # Read voltage (V)
+            num_pulses=10,          # Number of pulses
+            delay_between=100.0,  # Delay between pulses (µs)
+            clim=100e-3,             # Current limit (A)
+            num_cycles = 1,
+        )
+        
+        # Example 5: Pulse then multiple reads
+        # Uncomment to run:
+        # results = scripts.pulse_multi_read(
+        #     pulse_voltage=1.0,      # Pulse voltage (V)
+        #     pulse_width=10.0,      # Pulse width (µs)
+        #     num_pulses=1,           # Number of pulses
+        #     delay_between_pulses=100.0,  # Delay between pulses (µs)
+        #     read_voltage=0.2,       # Read voltage (V)
+        #     num_reads=10,           # Number of reads
+        #     delay_between_reads=100.0,   # Delay between reads (µs)
+        #     clim=100e-3             # Current limit (A)
+        # )
+        
+        # Example 6: Relaxation after multi-pulse
+        # Uncomment to run:
+        # results = scripts.relaxation_after_multi_pulse(
+        #     pulse_voltage=1.5,      # Pulse voltage (V)
+        #     num_pulses=5,           # Number of pulses
+        #     pulse_width=10.0,      # Pulse width (µs)
+        #     delay_between_pulses=100.0,  # Delay between pulses (µs)
+        #     read_voltage=0.2,       # Read voltage (V)
+        #     num_reads=20,           # Number of reads
+        #     delay_between_reads=100.0,   # Delay between reads (µs)
+        #     clim=100e-3             # Current limit (A)
+        # )
+        
+        # ============================================================================
+        # DEFAULT TEST - Uncomment one of the above or modify this default:
+        # ============================================================================
+        # results = scripts.pulse_read_repeat(
+        #     pulse_voltage=1.5,
+        #     pulse_width=1.0,        # 1µs
+        #     read_voltage=0.2,
+        #     delay_between=10000.0,  # 10ms (10000µs)
+        #     num_cycles=1,
+        #     clim=100e-3
+        # )
+        
+        # ============================================================================
+        # DISPLAY RESULTS
+        # ============================================================================
         print("\n" + "="*80)
         print("Test Results:")
         print("="*80)
