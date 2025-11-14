@@ -3,10 +3,12 @@
 Tkinter-based interface to browse/select devices on an image map, manage
 device selections, control multiplexer routing, and launch the
 `MeasurementGUI` for measurements on the selected subset.
+
+Enhanced with device status tracking, improved layout, and data persistence.
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from PIL import Image, ImageTk
 import json
 import math
@@ -17,6 +19,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 import time
 import random
+import os
+import csv
 
 from Measurement_GUI import MeasurementGUI
 from Equipment.Multiplexers.Multiplexer_10_OUT.Multiplexer_Class import MultiplexerController
@@ -84,33 +88,57 @@ with (BASE_DIR / "Json_Files" / "mapping.json").open("r", encoding="utf-8") as f
     device_maps: Dict[str, Any] = json.load(f)
 
 
+def resolve_default_save_root() -> Path:
+    """
+    Determine the default base directory for measurement data.
+    
+    Preference order:
+    1. OneDrive commercial root (environment-provided) → Documents → Data_folder
+    2. Explicit %USERPROFILE%/OneDrive - The University of Nottingham/Documents/Data_folder
+    3. Local %USERPROFILE%/Documents/Data_folder
+    
+    The folder is created on demand.
+    """
+    home = Path.home()
+    candidates: List[Path] = []
+    
+    for env_key in ("OneDriveCommercial", "OneDrive"):
+        env_path = os.environ.get(env_key)
+        if env_path:
+            root = Path(env_path)
+            candidates.append(root / "Documents")
+    
+    candidates.append(home / "OneDrive - The University of Nottingham" / "Documents")
+    candidates.append(home / "Documents")
+    
+    for documents_path in candidates:
+        try:
+            root_exists = documents_path.parent.exists()
+            if not root_exists:
+                continue
+            documents_path.mkdir(parents=True, exist_ok=True)
+            target = documents_path / "Data_folder"
+            target.mkdir(parents=True, exist_ok=True)
+            return target
+        except Exception:
+            continue
+    
+    # Fallback to local Documents if all else fails
+    fallback = home / "Documents" / "Data_folder"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback
+
+
 class SampleGUI:
-    """Device selection and routing GUI."""
+    """Device selection and routing GUI with enhanced status tracking."""
     def __init__(self, root: tk.Misc) -> None:
         self.root = root
-        self.root.title("Device Viewer")
-        self.root.geometry("1200x700")
+        self.root.title("Device Selection & Quick Scan")
+        self.root.geometry("1000x850")
         self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-
-        # Primary notebook layout
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.grid(row=0, column=0, sticky="nsew")
-
-        self.device_manager_frame = ttk.Frame(self.notebook)
-        self.device_manager_frame.grid_columnconfigure(0, weight=0)
-        self.device_manager_frame.grid_columnconfigure(1, weight=0)
-        self.device_manager_frame.grid_columnconfigure(2, weight=0)
-        self.device_manager_frame.grid_columnconfigure(3, weight=1)
-        self.device_manager_frame.grid_rowconfigure(7, weight=1)
-        self.device_manager_frame.grid_rowconfigure(8, weight=0)
-
-        self.quick_scan_frame = ttk.Frame(self.notebook)
-        self.quick_scan_frame.grid_columnconfigure(0, weight=1)
-        self.quick_scan_frame.grid_rowconfigure(0, weight=1)
-
-        self.notebook.add(self.device_manager_frame, text="Device Manager")
-        self.notebook.add(self.quick_scan_frame, text="Quick Scan")
+        self.root.rowconfigure(0, weight=0)  # Top bar
+        self.root.rowconfigure(1, weight=1)  # Notebook
+        self.root.rowconfigure(2, weight=0)  # Status bar
 
         # Defaults
         self.multiplexer_type: str = "Pyswitchbox"
@@ -132,127 +160,614 @@ class SampleGUI:
         self.selected_indices: List[int] = []  # Store indices of selected devices
         self.current_selected_index: int = 0  # Index within selected devices
 
+        # Device status tracking (new)
+        self.device_status: Dict[str, Dict[str, Any]] = {}  # Device status database
+        self.status_icons = {"working": "✓", "broken": "✗", "undefined": "?"}
+        
+        # Current device name (e.g., "D104")
+        self.current_device_name: Optional[str] = None
+        self.device_info: Dict[str, Any] = {}  # Device metadata
+        
         # Flags
-        self.pyswitchbox = True
-        self.Electronic_Mpx = False
         self.measurement_window: bool = False
 
-        # print(self.device_maps_list)
-        # print(self.device_list)
-
-        # initialise switchbox
-        # self.switchbox = pySwitchbox.Switchbox()
-        
         # Initialize multiplexer manager (will be set properly in update_multiplexer)
         self.mpx_manager = None
-
-        # Multiplexer Type Dropdown
-        tk.Label(self.device_manager_frame, text="Multiplexer").grid(row=0, column=0, sticky='w')
-        self.Multiplexer_type_var = tk.StringVar()
-        self.Multiplexer_dropdown = ttk.Combobox(self.device_manager_frame, textvariable=self.Multiplexer_type_var,
-                                                 values=list(multiplexer_types.keys()))
-        self.Multiplexer_dropdown.grid(row=0, column=1)
-        self.Multiplexer_dropdown.bind("<<ComboboxSelected>>", self.update_multiplexer)
-        # Set default multiplexer selection
-        try:
-            self.Multiplexer_type_var.set("Pyswitchbox")
-            # Optionally initialise behavior for default
-            self.update_multiplexer(None)
-        except Exception:
-            pass
-
-        # Sample Type Dropdown
-        tk.Label(self.device_manager_frame, text="Sample type").grid(row=1, column=0, sticky='w')
-        self.sample_type_var = tk.StringVar()
-        self.sample_dropdown = ttk.Combobox(self.device_manager_frame, textvariable=self.sample_type_var, values=list(sample_config.keys()))
-        self.sample_dropdown.grid(row=1, column=1)
-        self.sample_dropdown.bind("<<ComboboxSelected>>", self.update_dropdowns)
         
-
-        # Section Dropdown
-        tk.Label(self.device_manager_frame, text="Section").grid(row=2, column=0, sticky='w')
-        self.section_var = tk.StringVar()
-        self.section_dropdown = ttk.Combobox(self.device_manager_frame, textvariable=self.section_var)
-        self.section_dropdown.grid(row=2, column=1)
-        # Section Entry
-        # tk.Label(root, text="Section").grid(row=2, column=0, sticky='w')
-        # self.section_var = tk.StringVar()
-        # self.section_entry = tk.Entry(root, textvariable=self.section_var)
-        # self.section_entry.grid(row=2, column=1)
-
-        # Device Number Dropdown
-        tk.Label(self.device_manager_frame, text="Device Number").grid(row=3, column=0, sticky='w')
-        self.device_var = tk.StringVar()
-        self.device_dropdown = ttk.Combobox(self.device_manager_frame, textvariable=self.device_var)
-        self.device_dropdown.grid(row=3, column=1)
-
-        # Information Box
-        self.info_box = tk.Label(self.device_manager_frame, text="Current Device: None", relief=tk.SUNKEN, width=30)
-        self.info_box.grid(row=4, column=0, columnspan=2, pady=10)
-
-        # Navigation Buttons
-        self.prev_button = tk.Button(self.device_manager_frame, text="<", command=self.prev_device)
-        self.prev_button.grid(row=5, column=0, pady=2)
-
-        self.clear_button = tk.Button(self.device_manager_frame, text="Clear", command=self.clear_canvas)
-        self.clear_button.grid(row=6, column=1, pady=2)
-
-        self.change_button = tk.Button(self.device_manager_frame, text="Go", command=self.change_relays)
-        self.change_button.grid(row=6, column=0, pady=2)
-
-        self.next_button = tk.Button(self.device_manager_frame, text=">", command=self.next_device)
-        self.next_button.grid(row=5, column=1, pady=2)
-
-        # Canvas for Image
-        self.canvas = tk.Canvas(self.device_manager_frame, width=400, height=400, bg="white", highlightbackground="black")
-        self.canvas.grid(row=0, column=2, rowspan=5, padx=10)
-        self.canvas.bind("<Button-1>", self.canvas_click)
-        self.canvas.bind("<Control-Button-1>", self.canvas_ctrl_click)  # Ctrl+Click for selection
-
-        # Device Selection Frame
-        self.create_device_selection_frame()
-
-        # Terminal Output
-        self.terminal_output = tk.Text(self.device_manager_frame, height=5, width=80, state=tk.DISABLED)
-        self.terminal_output.grid(row=7, column=0, columnspan=4, pady=10, sticky="nsew")
-
-        # Measurement Button
-        self.measure_button = tk.Button(self.device_manager_frame, text="Measure Devices", command=self.open_measurement_window)
-        self.measure_button.grid(row=8, column=0, columnspan=2, pady=10)
-
         # Quick scan configuration defaults
         self.quick_scan_min_current = 1e-10
         self.quick_scan_max_current = 1e-6
+        self.quick_scan_threshold = 1e-7  # Threshold for auto classification
         self.quick_scan_running = False
         self.quick_scan_abort = threading.Event()
         self.quick_scan_thread: Optional[threading.Thread] = None
         self.quick_scan_metadata: Dict[str, Any] = {}
+        self.quick_scan_results: Dict[str, float] = {}
+        
+        # Overlay toggles
+        self.show_quick_scan_overlay = tk.BooleanVar(value=True)
+        self.show_status_overlay = tk.BooleanVar(value=False)
+        
+        # Terminal filter
+        self.terminal_filter = tk.StringVar(value="All")
 
-        # Initialize quick scan tab UI
+        # =========================
+        # TOP CONTROL BAR
+        # =========================
+        self._create_top_control_bar()
+
+        # =========================
+        # NOTEBOOK TABS
+        # =========================
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+
+        # Device Selection Tab
+        self.device_selection_frame = ttk.Frame(self.notebook)
+        self.device_selection_frame.grid_columnconfigure(0, weight=3)  # Canvas area
+        self.device_selection_frame.grid_columnconfigure(1, weight=1)  # Device selection
+        self.device_selection_frame.grid_rowconfigure(0, weight=1)  # Main area
+        self.device_selection_frame.grid_rowconfigure(1, weight=0)  # Terminal
+
+        # Quick Scan Results Tab
+        self.quick_scan_frame = ttk.Frame(self.notebook)
+        self.quick_scan_frame.grid_columnconfigure(0, weight=1)
+        self.quick_scan_frame.grid_rowconfigure(0, weight=0)  # Control frame - fixed height
+        self.quick_scan_frame.grid_rowconfigure(1, weight=0)  # Overlay frame - fixed height
+        self.quick_scan_frame.grid_rowconfigure(2, weight=1)  # Canvas frame - expands
+        self.quick_scan_frame.grid_rowconfigure(3, weight=0)  # Log frame - fixed height
+
+        # Device Manager Tab
+        self.device_manager_tab = ttk.Frame(self.notebook)
+        self.device_manager_tab.grid_columnconfigure(0, weight=1)
+        self.device_manager_tab.grid_rowconfigure(0, weight=1)
+
+        # Add tabs in desired order: Device Selection (main), Device Manager, Quick Scan Results
+        self.notebook.add(self.device_selection_frame, text="Device Selection")
+        self.notebook.add(self.device_manager_tab, text="Device Manager")
+        self.notebook.add(self.quick_scan_frame, text="Quick Scan Results")
+
+        # =========================
+        # BUILD UI SECTIONS
+        # =========================
+        self._create_device_manager_ui()
+        self._create_canvas_section()
+        self._create_device_selection_panel()
+        self._create_terminal_log()
         self._init_quick_scan_ui()
 
-        # Bind section and device selection to update_info_box
-        self.section_dropdown.bind("<<ComboboxSelected>>", self.update_info_box)
-        self.device_dropdown.bind("<<ComboboxSelected>>", self.update_info_box)
+        # =========================
+        # BOTTOM STATUS BAR
+        # =========================
+        self._create_status_bar()
 
-        # Automated Tests controls moved to Measurement GUI
+        # =========================
+        # INITIALIZATION
+        # =========================
+        # Initialize original_image to None to prevent AttributeError
+        self.original_image = None
+        self.tk_img = None
         
+        # Set default values WITHOUT triggering callbacks yet
+        self.Multiplexer_type_var.set("Pyswitchbox")
+        self.sample_type_var.set("Cross_bar")
         
-        # Set default sample selection and apply
+        # Now manually trigger initialization in the correct order
         try:
-            # Use the key name as defined in sample_config
-            self.sample_type_var.set("Cross_bar")
+            self.update_multiplexer(None)
+        except Exception as e:
+            print(f"Warning during multiplexer init: {e}")
+        
+        try:
             self.update_dropdowns(None)
-        except Exception:
-            pass
-        # Placeholder for clicked points
-        # self.electrode_points = []
+        except Exception as e:
+            print(f"Warning during dropdown init: {e}")
+
+    def _create_top_control_bar(self) -> None:
+        """Create the top control bar with dropdowns and measure button."""
+        control_bar = ttk.Frame(self.root, relief=tk.RAISED, borderwidth=1)
+        control_bar.grid(row=0, column=0, sticky="ew", padx=5, pady=5)
+        
+        # Multiplexer Type
+        ttk.Label(control_bar, text="Multiplexer:").pack(side="left", padx=(5, 2))
+        self.Multiplexer_type_var = tk.StringVar()
+        self.Multiplexer_dropdown = ttk.Combobox(
+            control_bar,
+            textvariable=self.Multiplexer_type_var,
+            values=list(multiplexer_types.keys()),
+            width=15,
+            state="readonly"
+        )
+        self.Multiplexer_dropdown.pack(side="left", padx=(0, 10))
+        self.Multiplexer_dropdown.bind("<<ComboboxSelected>>", self.update_multiplexer)
+        
+        # Sample Type
+        ttk.Label(control_bar, text="Sample Type:").pack(side="left", padx=(5, 2))
+        self.sample_type_var = tk.StringVar()
+        self.sample_dropdown = ttk.Combobox(
+            control_bar,
+            textvariable=self.sample_type_var,
+            values=list(sample_config.keys()),
+            width=15,
+            state="readonly"
+        )
+        self.sample_dropdown.pack(side="left", padx=(0, 10))
+        self.sample_dropdown.bind("<<ComboboxSelected>>", self.update_dropdowns)
+        
+        # Current Device Name Display
+        ttk.Label(control_bar, text="Device:").pack(side="left", padx=(5, 2))
+        self.device_name_label = tk.Label(
+            control_bar,
+            text="No Device",
+            font=("Segoe UI", 9, "bold"),
+            fg="#888888",
+            relief=tk.SUNKEN,
+            padx=10
+        )
+        self.device_name_label.pack(side="left", padx=(0, 10))
+        
+        # Section
+        ttk.Label(control_bar, text="Section:").pack(side="left", padx=(5, 2))
+        self.section_var = tk.StringVar()
+        self.section_dropdown = ttk.Combobox(
+            control_bar,
+            textvariable=self.section_var,
+            width=10,
+            state="readonly"
+        )
+        self.section_dropdown.pack(side="left", padx=(0, 10))
+        self.section_dropdown.bind("<<ComboboxSelected>>", self.update_info_box)
+        
+        # Device Number
+        ttk.Label(control_bar, text="Device:").pack(side="left", padx=(5, 2))
+        self.device_var = tk.StringVar()
+        self.device_dropdown = ttk.Combobox(
+            control_bar,
+            textvariable=self.device_var,
+            width=10,
+            state="readonly"
+        )
+        self.device_dropdown.pack(side="left", padx=(0, 20))
+        self.device_dropdown.bind("<<ComboboxSelected>>", self.update_info_box)
+        
+        # Spacer
+        ttk.Frame(control_bar).pack(side="left", expand=True)
+        
+        # Measure Button (accent color)
+        self.measure_button = tk.Button(
+            control_bar,
+            text="Measure Selected Devices",
+            command=self.open_measurement_window,
+            bg="#4CAF50",  # Green accent
+            fg="white",
+            font=("Segoe UI", 10, "bold"),
+            padx=20,
+            pady=5,
+            relief=tk.RAISED,
+            borderwidth=2,
+            cursor="hand2"
+        )
+        self.measure_button.pack(side="right", padx=10)
+
+    def _create_device_manager_ui(self) -> None:
+        """Create the Device Manager tab UI."""
+        # Main container
+        main_frame = ttk.Frame(self.device_manager_tab, padding=20)
+        main_frame.grid(row=0, column=0, sticky="nsew")
+        main_frame.grid_columnconfigure(0, weight=1)
+        main_frame.grid_columnconfigure(1, weight=2)
+        main_frame.grid_rowconfigure(1, weight=1)
+        
+        # ===== LEFT COLUMN: Current Device =====
+        left_frame = ttk.LabelFrame(main_frame, text="Current Device", padding=15)
+        left_frame.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=(0, 10))
+        
+        # Device name input
+        ttk.Label(left_frame, text="Device Name:").grid(row=0, column=0, sticky="w", pady=(0, 5))
+        
+        name_frame = ttk.Frame(left_frame)
+        name_frame.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        
+        self.device_name_entry = ttk.Entry(name_frame, font=("Segoe UI", 12), width=20)
+        self.device_name_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        ttk.Button(
+            name_frame,
+            text="Set Device",
+            command=self.set_current_device,
+            width=12
+        ).pack(side="left")
+        
+        # Device info display
+        info_frame = ttk.LabelFrame(left_frame, text="Device Information", padding=10)
+        info_frame.grid(row=2, column=0, sticky="nsew", pady=(10, 0))
+        left_frame.grid_rowconfigure(2, weight=1)
+        
+        self.device_info_text = tk.Text(
+            info_frame,
+            height=15,
+            width=35,
+            font=("Consolas", 9),
+            wrap=tk.WORD,
+            state=tk.DISABLED
+        )
+        self.device_info_text.pack(fill="both", expand=True)
+        
+        # Action buttons
+        button_frame = ttk.Frame(left_frame)
+        button_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        
+        ttk.Button(
+            button_frame,
+            text="Save Device Info",
+            command=self.save_device_info,
+            width=15
+        ).pack(side="left", padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="Clear Device",
+            command=self.clear_current_device,
+            width=15
+        ).pack(side="left", padx=5)
+        
+        # ===== RIGHT COLUMN: Device List =====
+        right_frame = ttk.Frame(main_frame)
+        right_frame.grid(row=0, column=1, rowspan=2, sticky="nsew")
+        right_frame.grid_rowconfigure(1, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+        
+        # Filter frame
+        filter_frame = ttk.LabelFrame(right_frame, text="Quick Select Devices", padding=10)
+        filter_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        
+        ttk.Label(filter_frame, text="Filter by Sample Type:").pack(side="left", padx=5)
+        
+        self.device_filter_var = tk.StringVar(value="All")
+        filter_combo = ttk.Combobox(
+            filter_frame,
+            textvariable=self.device_filter_var,
+            values=["All"] + list(sample_config.keys()),
+            width=15,
+            state="readonly"
+        )
+        filter_combo.pack(side="left", padx=5)
+        filter_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_device_list())
+        
+        ttk.Button(
+            filter_frame,
+            text="Refresh",
+            command=self.refresh_device_list,
+            width=10
+        ).pack(side="left", padx=5)
+        
+        # Device list
+        list_frame = ttk.LabelFrame(right_frame, text="Saved Devices", padding=10)
+        list_frame.grid(row=1, column=0, sticky="nsew")
+        list_frame.grid_rowconfigure(0, weight=1)
+        list_frame.grid_columnconfigure(0, weight=1)
+        
+        # Create Treeview for device list
+        columns = ("name", "sample_type", "last_modified", "status")
+        self.device_tree = ttk.Treeview(
+            list_frame,
+            columns=columns,
+            show="tree headings",
+            selectmode="browse"
+        )
+        
+        self.device_tree.heading("#0", text="")
+        self.device_tree.heading("name", text="Device Name")
+        self.device_tree.heading("sample_type", text="Sample Type")
+        self.device_tree.heading("last_modified", text="Last Modified")
+        self.device_tree.heading("status", text="Status")
+        
+        self.device_tree.column("#0", width=0, stretch=False)
+        self.device_tree.column("name", width=150)
+        self.device_tree.column("sample_type", width=120)
+        self.device_tree.column("last_modified", width=150)
+        self.device_tree.column("status", width=100)
+        
+        self.device_tree.grid(row=0, column=0, sticky="nsew")
+        
+        # Scrollbar for list
+        tree_scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.device_tree.yview)
+        tree_scroll.grid(row=0, column=1, sticky="ns")
+        self.device_tree.configure(yscrollcommand=tree_scroll.set)
+        
+        # Bind double-click to load device
+        self.device_tree.bind("<Double-Button-1>", lambda e: self.load_selected_device())
+        
+        # Load button
+        ttk.Button(
+            right_frame,
+            text="Load Selected Device",
+            command=self.load_selected_device,
+            width=20
+        ).grid(row=2, column=0, pady=(10, 0))
+        
+        # Initial refresh
+        self.refresh_device_list()
+        
+        # Initialize device info display
+        self.update_device_info_display()
+
+    def _create_canvas_section(self) -> None:
+        """Create the canvas section with navigation controls."""
+        canvas_container = ttk.Frame(self.device_selection_frame)
+        canvas_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        canvas_container.grid_rowconfigure(0, weight=1)
+        canvas_container.grid_rowconfigure(1, weight=0)
+        canvas_container.grid_columnconfigure(0, weight=1)
+        
+        # Canvas for device image
+        canvas_frame = ttk.LabelFrame(canvas_container, text="Device Map", padding=5)
+        canvas_frame.grid(row=0, column=0, sticky="nsew")
+        
+        self.canvas = tk.Canvas(
+            canvas_frame,
+            width=600,
+            height=500,
+            bg="white",
+            highlightbackground="black",
+            highlightthickness=1
+        )
+        self.canvas.pack(fill="both", expand=True)
+        self.canvas.bind("<Button-1>", self.canvas_click)
+        self.canvas.bind("<Control-Button-1>", self.canvas_ctrl_click)
+        self.canvas.bind("<Button-3>", self.canvas_right_click)  # Right-click for status menu
+        
+        # Navigation bar
+        nav_bar = ttk.Frame(canvas_container)
+        nav_bar.grid(row=1, column=0, sticky="ew", pady=5)
+        
+        # Previous button
+        self.prev_button = ttk.Button(nav_bar, text="◄ Previous", command=self.prev_device, width=12)
+        self.prev_button.pack(side="left", padx=5)
+        
+        # Info box
+        self.info_box = tk.Label(
+            nav_bar,
+            text="Current Device: None",
+            relief=tk.SUNKEN,
+            font=("Segoe UI", 10),
+            bg="#f0f0f0",
+            padx=10,
+            pady=5
+        )
+        self.info_box.pack(side="left", expand=True, fill="x", padx=5)
+        
+        # Next button
+        self.next_button = ttk.Button(nav_bar, text="Next ►", command=self.next_device, width=12)
+        self.next_button.pack(side="left", padx=5)
+        
+        # Route button
+        self.change_button = ttk.Button(
+            nav_bar,
+            text="Route to Device",
+            command=self.change_relays,
+            width=15
+        )
+        self.change_button.pack(side="left", padx=5)
+        
+        # Clear button
+        self.clear_button = ttk.Button(nav_bar, text="Clear", command=self.clear_canvas, width=10)
+        self.clear_button.pack(side="left", padx=5)
+
+    def _create_device_selection_panel(self) -> None:
+        """Create the device selection panel with checkboxes and status indicators."""
+        selection_container = ttk.LabelFrame(
+            self.device_selection_frame,
+            text="Device Selection",
+            padding=5
+        )
+        selection_container.grid(row=0, column=1, sticky="nsew", padx=5, pady=5)
+        selection_container.grid_rowconfigure(1, weight=1)
+        selection_container.grid_columnconfigure(0, weight=1)
+        
+        # Button frame
+        button_frame = ttk.Frame(selection_container)
+        button_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        
+        ttk.Button(
+            button_frame,
+            text="Select All",
+            command=self.select_all_devices,
+            width=10
+        ).pack(side="left", padx=2)
+        
+        ttk.Button(
+            button_frame,
+            text="Clear",
+            command=self.deselect_all_devices,
+            width=10
+        ).pack(side="left", padx=2)
+        
+        ttk.Button(
+            button_frame,
+            text="Invert",
+            command=self.invert_selection,
+            width=10
+        ).pack(side="left", padx=2)
+        
+        # Status marking button
+        button_frame2 = ttk.Frame(selection_container)
+        button_frame2.grid(row=2, column=0, sticky="ew", pady=5)
+        
+        ttk.Label(button_frame2, text="Mark Selected:").pack(side="left", padx=5)
+        
+        ttk.Button(
+            button_frame2,
+            text="✓ Working",
+            command=lambda: self.mark_selected_devices("working"),
+            width=10
+        ).pack(side="left", padx=2)
+        
+        ttk.Button(
+            button_frame2,
+            text="✗ Broken",
+            command=lambda: self.mark_selected_devices("broken"),
+            width=10
+        ).pack(side="left", padx=2)
+        
+        ttk.Button(
+            button_frame2,
+            text="? Reset",
+            command=lambda: self.mark_selected_devices("undefined"),
+            width=10
+        ).pack(side="left", padx=2)
+        
+        # Scrollable checkbox list
+        scroll_frame = ttk.Frame(selection_container)
+        scroll_frame.grid(row=1, column=0, sticky="nsew")
+        
+        canvas = tk.Canvas(scroll_frame, width=250, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(scroll_frame, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas)
+        
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.device_checkboxes: Dict[str, tk.Checkbutton] = {}
+        self.checkbox_vars: Dict[str, tk.BooleanVar] = {}
+        self.device_status_labels: Dict[str, tk.Label] = {}
+        
+        # Status label
+        self.selection_status = tk.Label(
+            selection_container,
+            text="Selected: 0/0",
+            font=("Segoe UI", 9, "bold"),
+            fg="#4CAF50"
+        )
+        self.selection_status.grid(row=3, column=0, pady=5)
+
+    def _create_terminal_log(self) -> None:
+        """Create the terminal log section with color coding and filtering."""
+        terminal_container = ttk.LabelFrame(
+            self.device_selection_frame,
+            text="Activity Log",
+            padding=5
+        )
+        terminal_container.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        terminal_container.grid_rowconfigure(0, weight=1)
+        terminal_container.grid_columnconfigure(0, weight=1)
+        
+        # Control frame
+        control_frame = ttk.Frame(terminal_container)
+        control_frame.grid(row=0, column=0, sticky="ew", pady=(0, 5))
+        
+        ttk.Label(control_frame, text="Filter:").pack(side="left", padx=5)
+        
+        filter_combo = ttk.Combobox(
+            control_frame,
+            textvariable=self.terminal_filter,
+            values=["All", "Info", "Success", "Warning", "Error"],
+            width=10,
+            state="readonly"
+        )
+        filter_combo.pack(side="left", padx=5)
+        filter_combo.bind("<<ComboboxSelected>>", lambda e: self._apply_terminal_filter())
+        
+        ttk.Button(
+            control_frame,
+            text="Clear Log",
+            command=self.clear_terminal,
+            width=10
+        ).pack(side="left", padx=5)
+        
+        ttk.Button(
+            control_frame,
+            text="Export Log",
+            command=self.export_terminal_log,
+            width=10
+        ).pack(side="left", padx=5)
+        
+        # Text widget with scrollbar
+        text_frame = ttk.Frame(terminal_container)
+        text_frame.grid(row=1, column=0, sticky="nsew")
+        text_frame.grid_rowconfigure(0, weight=1)
+        text_frame.grid_columnconfigure(0, weight=1)
+        
+        self.terminal_output = tk.Text(
+            text_frame,
+            height=6,
+            width=100,
+            state=tk.DISABLED,
+            bg="#1e1e1e",
+            fg="#d4d4d4",
+            font=("Consolas", 9),
+            wrap=tk.WORD
+        )
+        self.terminal_output.grid(row=0, column=0, sticky="nsew")
+        
+        terminal_scrollbar = ttk.Scrollbar(
+            text_frame,
+            orient="vertical",
+            command=self.terminal_output.yview
+        )
+        terminal_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.terminal_output.configure(yscrollcommand=terminal_scrollbar.set)
+        
+        # Configure color tags
+        self.terminal_output.tag_config("INFO", foreground="#569CD6")
+        self.terminal_output.tag_config("SUCCESS", foreground="#4CAF50")
+        self.terminal_output.tag_config("WARNING", foreground="#FFA500")
+        self.terminal_output.tag_config("ERROR", foreground="#F44336")
+        self.terminal_output.tag_config("TIMESTAMP", foreground="#888888")
+        
+        self.terminal_messages: List[Tuple[str, str, str]] = []  # (timestamp, level, message)
+
+    def _create_status_bar(self) -> None:
+        """Create the bottom status bar."""
+        status_bar = ttk.Frame(self.root, relief=tk.SUNKEN, borderwidth=1)
+        status_bar.grid(row=2, column=0, sticky="ew", padx=5, pady=(0, 5))
+        
+        # Multiplexer status
+        self.mpx_status_label = tk.Label(
+            status_bar,
+            text="Multiplexer: Not Connected",
+            font=("Segoe UI", 9),
+            anchor="w"
+        )
+        self.mpx_status_label.pack(side="left", padx=10)
+        
+        # Device count
+        self.device_count_label = tk.Label(
+            status_bar,
+            text="Devices: 0 selected / 0 total",
+            font=("Segoe UI", 9),
+            anchor="w"
+        )
+        self.device_count_label.pack(side="left", padx=10)
+        
+        # Spacer
+        ttk.Frame(status_bar).pack(side="left", expand=True)
+        
+        # Theme toggle (placeholder for future)
+        self.theme_label = tk.Label(
+            status_bar,
+            text="☀ Light Mode",
+            font=("Segoe UI", 9),
+            fg="#888888",
+            cursor="hand2"
+        )
+        self.theme_label.pack(side="right", padx=10)
+        # self.theme_label.bind("<Button-1>", lambda e: self.toggle_theme())  # Future implementation
 
     def _init_quick_scan_ui(self) -> None:
-        """Set up widgets for the Quick Scan tab."""
+        """Set up widgets for the Quick Scan tab with overlay controls."""
+        # Control frame row 1 - Scan parameters
         control_frame = ttk.Frame(self.quick_scan_frame, padding=(10, 10))
         control_frame.grid(row=0, column=0, sticky="ew")
-        control_frame.columnconfigure(8, weight=1)
+        control_frame.columnconfigure(9, weight=1)
 
         ttk.Label(control_frame, text="Voltage (V):").grid(row=0, column=0, padx=(0, 5))
         self.quick_scan_voltage_var = tk.DoubleVar(value=0.2)
@@ -278,23 +793,72 @@ class SampleGUI:
         )
         self.quick_scan_settle_spin.grid(row=0, column=3, padx=(0, 10))
 
+        ttk.Label(control_frame, text="Threshold (A):").grid(row=0, column=4, padx=(0, 5))
+        self.quick_scan_threshold_var = tk.StringVar(value="1.0e-7")
+        threshold_spin = ttk.Spinbox(
+            control_frame,
+            from_=1e-12,
+            to=1e-3,
+            increment=1e-8,
+            textvariable=self.quick_scan_threshold_var,
+            width=12
+        )
+        threshold_spin.grid(row=0, column=5, padx=(0, 10))
+        threshold_spin.bind("<Return>", lambda e: self._update_threshold_from_var())
+        threshold_spin.bind("<FocusOut>", lambda e: self._update_threshold_from_var())
+
         self.quick_scan_run_button = ttk.Button(control_frame, text="Run Scan", command=self.start_quick_scan)
-        self.quick_scan_run_button.grid(row=0, column=4, padx=5)
+        self.quick_scan_run_button.grid(row=0, column=6, padx=5)
 
         self.quick_scan_stop_button = ttk.Button(control_frame, text="Stop", command=self.stop_quick_scan, state=tk.DISABLED)
-        self.quick_scan_stop_button.grid(row=0, column=5, padx=5)
+        self.quick_scan_stop_button.grid(row=0, column=7, padx=5)
 
         self.quick_scan_save_button = ttk.Button(control_frame, text="Save", command=self.save_quick_scan_results, state=tk.DISABLED)
-        self.quick_scan_save_button.grid(row=0, column=6, padx=5)
+        self.quick_scan_save_button.grid(row=0, column=8, padx=5)
 
         self.quick_scan_load_button = ttk.Button(control_frame, text="Load", command=self.load_quick_scan_results)
-        self.quick_scan_load_button.grid(row=0, column=7, padx=5, sticky="w")
+        self.quick_scan_load_button.grid(row=0, column=9, padx=5, sticky="w")
 
         self.quick_scan_status = ttk.Label(control_frame, text="Status: Idle")
-        self.quick_scan_status.grid(row=0, column=8, padx=(10, 0), sticky="w")
+        self.quick_scan_status.grid(row=0, column=10, padx=(10, 0), sticky="w")
+        
+        # Control frame row 2 - Overlay controls (separate row!)
+        overlay_frame = ttk.Frame(self.quick_scan_frame, padding=(10, 5, 10, 5))
+        overlay_frame.grid(row=1, column=0, sticky="ew")
+        
+        ttk.Label(overlay_frame, text="Overlays:").pack(side="left", padx=5)
+        
+        ttk.Checkbutton(
+            overlay_frame,
+            text="Show Quick Scan Results",
+            variable=self.show_quick_scan_overlay,
+            command=self._redraw_quick_scan_overlay
+        ).pack(side="left", padx=5)
+        
+        ttk.Checkbutton(
+            overlay_frame,
+            text="Show Device Status",
+            variable=self.show_status_overlay,
+            command=self._redraw_quick_scan_overlay
+        ).pack(side="left", padx=5)
+        
+        ttk.Button(
+            overlay_frame,
+            text="Apply Threshold to Undefined",
+            command=self.apply_threshold_to_undefined,
+            width=25
+        ).pack(side="left", padx=10)
+        
+        ttk.Button(
+            overlay_frame,
+            text="Export Status to Excel",
+            command=self.export_device_status_excel,
+            width=20
+        ).pack(side="left", padx=5)
 
+        # Canvas frame - row 3
         canvas_frame = ttk.Frame(self.quick_scan_frame, padding=(10, 0, 10, 10))
-        canvas_frame.grid(row=1, column=0, sticky="nsew")
+        canvas_frame.grid(row=2, column=0, sticky="nsew")
         canvas_frame.columnconfigure(0, weight=1)
         canvas_frame.rowconfigure(0, weight=1)
 
@@ -320,8 +884,9 @@ class SampleGUI:
         ttk.Label(legend_frame, text="≤1e-10 A").grid(row=2, column=0, pady=(5, 0))
         ttk.Label(legend_frame, text="≥1e-6 A").grid(row=3, column=0, pady=(0, 5))
 
+        # Log frame - row 4
         log_frame = ttk.Frame(self.quick_scan_frame, padding=(10, 0, 10, 10))
-        log_frame.grid(row=2, column=0, sticky="nsew")
+        log_frame.grid(row=3, column=0, sticky="nsew")
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
 
@@ -338,7 +903,7 @@ class SampleGUI:
 
     def _update_quick_scan_background(self, image: Image.Image) -> None:
         """Update the base image shown on the quick scan canvas."""
-        if self.quick_scan_canvas is None:
+        if not hasattr(self, 'quick_scan_canvas') or self.quick_scan_canvas is None:
             return
         self.quick_scan_canvas.delete("all")
         self.quick_scan_base_image = image.copy()
@@ -383,19 +948,42 @@ class SampleGUI:
 
     def _redraw_quick_scan_overlay(self) -> None:
         """Draw or update current overlays for the quick scan canvases."""
-        self._draw_quick_scan_overlay_on(self.quick_scan_canvas if hasattr(self, "quick_scan_canvas") else None, "overlay")
-        self._draw_quick_scan_overlay_on(self.canvas if hasattr(self, "canvas") else None, "quick_scan_overlay")
+        self._draw_quick_scan_overlay_on(
+            self.quick_scan_canvas if hasattr(self, "quick_scan_canvas") else None,
+            "overlay",
+            canvas_width=600,
+            canvas_height=500
+        )
+        self._draw_quick_scan_overlay_on(
+            self.canvas if hasattr(self, "canvas") else None,
+            "quick_scan_overlay",
+            canvas_width=600,
+            canvas_height=500
+        )
+        self._draw_status_overlay_on(
+            self.canvas if hasattr(self, "canvas") else None,
+            "status_overlay",
+            canvas_width=600,
+            canvas_height=500
+        )
 
-    def _draw_quick_scan_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str) -> None:
+    def _draw_quick_scan_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str, 
+                                    canvas_width: int, canvas_height: int) -> None:
         """Draw quick scan overlay rectangles on the provided canvas."""
         if target_canvas is None:
             return
         target_canvas.delete(tag)
+        
+        # Check if quick scan overlay is enabled
+        if not self.show_quick_scan_overlay.get():
+            return
+            
         if not getattr(self, "original_image", None):
             return
+            
         orig_width, orig_height = self.original_image.size
-        scale_x = orig_width / 400
-        scale_y = orig_height / 400
+        scale_x = orig_width / canvas_width
+        scale_y = orig_height / canvas_height
 
         for device, bounds in self.device_mapping.items():
             current = self.quick_scan_results.get(device)
@@ -415,6 +1003,57 @@ class SampleGUI:
                 y_max,
                 fill=color,
                 outline="",
+                stipple="gray50",  # Semi-transparent effect
+                tags=tag
+            )
+
+    def _draw_status_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str,
+                                canvas_width: int, canvas_height: int) -> None:
+        """Draw device status overlay on the canvas."""
+        if target_canvas is None:
+            return
+        target_canvas.delete(tag)
+        
+        # Check if status overlay is enabled
+        if not self.show_status_overlay.get():
+            return
+            
+        if not getattr(self, "original_image", None):
+            return
+            
+        orig_width, orig_height = self.original_image.size
+        scale_x = orig_width / canvas_width
+        scale_y = orig_height / canvas_height
+
+        for device, bounds in self.device_mapping.items():
+            status_info = self.device_status.get(device, {})
+            manual_status = status_info.get("manual_status", "undefined")
+            
+            # Only draw for manually classified devices
+            if manual_status == "undefined":
+                continue
+                
+            x_min = bounds["x_min"] / scale_x
+            x_max = bounds["x_max"] / scale_x
+            y_min = bounds["y_min"] / scale_y
+            y_max = bounds["y_max"] / scale_y
+            
+            # Solid color for manual classification
+            if manual_status == "working":
+                color = "#4CAF50"  # Green
+            elif manual_status == "broken":
+                color = "#F44336"  # Red
+            else:
+                continue
+                
+            target_canvas.create_rectangle(
+                x_min,
+                y_min,
+                x_max,
+                y_max,
+                fill=color,
+                outline="",
+                stipple="gray75",  # Semi-transparent effect
                 tags=tag
             )
 
@@ -575,6 +1214,50 @@ class SampleGUI:
         self._set_quick_scan_buttons(running=False)
         if self.quick_scan_results:
             self.quick_scan_save_button.config(state=tk.NORMAL)
+            
+            # Automatically update device status for undefined devices
+            voltage = self.quick_scan_voltage_var.get()
+            updated_count = 0
+            for device, current in self.quick_scan_results.items():
+                if current is None or (isinstance(current, float) and math.isnan(current)):
+                    continue
+                    
+                # Get or create device status
+                if device not in self.device_status:
+                    self.device_status[device] = {
+                        "auto_classification": "unknown",
+                        "manual_status": "undefined",
+                        "last_current_a": None,
+                        "test_voltage_v": None,
+                        "last_tested": None,
+                        "notes": "",
+                        "measurement_count": 0,
+                        "quick_scan_history": []
+                    }
+                
+                # Update auto classification based on threshold
+                auto_class = "working" if current >= self.quick_scan_threshold else "not-working"
+                self.device_status[device]["auto_classification"] = auto_class
+                self.device_status[device]["last_current_a"] = current
+                self.device_status[device]["test_voltage_v"] = voltage
+                self.device_status[device]["last_tested"] = datetime.now().isoformat(timespec='seconds')
+                
+                # Add to quick scan history
+                history_entry = {
+                    "timestamp": datetime.now().isoformat(timespec='seconds'),
+                    "current_a": current,
+                    "voltage_v": voltage
+                }
+                if "quick_scan_history" not in self.device_status[device]:
+                    self.device_status[device]["quick_scan_history"] = []
+                self.device_status[device]["quick_scan_history"].append(history_entry)
+                
+                updated_count += 1
+            
+            if updated_count > 0:
+                self._save_device_status()
+                self._log_quick_scan(f"Updated status for {updated_count} device(s)")
+        
         self._log_quick_scan(f"Quick scan {status.lower()}.")
 
     def _set_quick_scan_buttons(self, running: bool) -> None:
@@ -731,69 +1414,65 @@ class SampleGUI:
         return True
 
     def _get_quick_scan_storage_dir(self, sample: str) -> Path:
+        # Use device folder if device is set
+        if self.current_device_name:
+            try:
+                return self.get_device_folder()
+            except ValueError:
+                pass
+        
+        # Fallback to old behavior
         safe_sample = sample.replace(" ", "_")
         return BASE_DIR / "Data_maps" / safe_sample
 
-    def create_device_selection_frame(self) -> None:
-        """Create a frame with checkboxes for device selection."""
-        # Main frame for device selection
-        selection_frame = tk.LabelFrame(self.device_manager_frame, text="Device Selection", padx=5, pady=5)
-        selection_frame.grid(row=0, column=3, rowspan=6, padx=10, sticky='nsew')
-        selection_frame.grid_columnconfigure(0, weight=1)
-        selection_frame.grid_rowconfigure(1, weight=1)
-
-        # Buttons frame
-        button_frame = tk.Frame(selection_frame)
-        button_frame.pack(fill='x', pady=(0, 5))
-
-        tk.Button(button_frame, text="Select All", command=self.select_all_devices).pack(side='left', padx=2)
-        tk.Button(button_frame, text="Deselect All", command=self.deselect_all_devices).pack(side='left', padx=2)
-        tk.Button(button_frame, text="Invert", command=self.invert_selection).pack(side='left', padx=2)
-
-        # Scrollable frame for checkboxes
-        canvas = tk.Canvas(selection_frame, width=150, height=300)
-        scrollbar = ttk.Scrollbar(selection_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        self.device_checkboxes: Dict[str, tk.Checkbutton] = {}
-        self.checkbox_vars: Dict[str, tk.BooleanVar] = {}
-
-        # Status label
-        self.selection_status = tk.Label(selection_frame, text="Selected: 0/0")
-        self.selection_status.pack(pady=5)
-
-        self.scrollable_frame = scrollable_frame
-
     def update_device_checkboxes(self) -> None:
-        """Update the device checkboxes based on current device list."""
+        """Update the device checkboxes based on current device list with status indicators."""
         # Clear existing checkboxes
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
 
         self.device_checkboxes.clear()
         self.checkbox_vars.clear()
+        self.device_status_labels.clear()
 
-        # Create new checkboxes
+        # Create new checkboxes with status indicators
         for i, device in enumerate(self.device_list):
             label = self.get_device_label(device)
             var = tk.BooleanVar(value=True)  # Default to selected
-            cb = tk.Checkbutton(self.scrollable_frame, text=label, variable=var,
-                                command=self.update_selected_devices)
-            cb.grid(row=i, column=0, sticky='w')
+            
+            # Create frame for checkbox + status
+            row_frame = ttk.Frame(self.scrollable_frame)
+            row_frame.grid(row=i, column=0, sticky='w', pady=1)
+            
+            cb = tk.Checkbutton(
+                row_frame,
+                text=label,
+                variable=var,
+                command=self.update_selected_devices
+            )
+            cb.pack(side="left")
+            
+            # Status indicator label
+            status_info = self.device_status.get(device, {})
+            manual_status = status_info.get("manual_status", "undefined")
+            icon = self.status_icons.get(manual_status, "?")
+            
+            status_label = tk.Label(
+                row_frame,
+                text=icon,
+                font=("Segoe UI", 10, "bold"),
+                fg=self._get_status_color(manual_status),
+                width=2
+            )
+            status_label.pack(side="left", padx=(5, 0))
+            
+            # Bind right-click to status menu
+            cb.bind("<Button-3>", lambda e, d=device: self.show_device_status_menu(e, d))
+            status_label.bind("<Button-3>", lambda e, d=device: self.show_device_status_menu(e, d))
 
             self.device_checkboxes[device] = cb
             self.checkbox_vars[device] = var
+            self.device_status_labels[device] = status_label
             self.selected_devices.add(device)
 
         self.update_selected_devices()
@@ -838,59 +1517,738 @@ class SampleGUI:
 
         # Update canvas highlights
         self.update_canvas_selection_highlights()
+        
+        # Update status bar and measure button
+        self._update_status_bar()
 
         # Log selection
         friendly_selected = [self.get_device_label(self.device_list[idx]) for idx in self.selected_indices]
-        selection_text = ", ".join(friendly_selected) if friendly_selected else "None"
-        self.log_terminal(f"Selected devices: {selection_text}")
+        selection_text = ", ".join(friendly_selected[:5])  # Show first 5
+        if len(friendly_selected) > 5:
+            selection_text += f" ... (+{len(friendly_selected)-5} more)"
+        if not selection_text:
+            selection_text = "None"
+        self.log_terminal(f"Selected devices: {selection_text}", "INFO")
+
+    def _update_status_bar(self) -> None:
+        """Update the status bar with current device counts."""
+        total = len(self.device_list) if hasattr(self, 'device_list') else 0
+        selected = len(self.selected_devices)
+        
+        # Update device count label
+        if hasattr(self, 'device_count_label'):
+            self.device_count_label.config(text=f"Devices: {selected} selected / {total} total")
+        
+        # Update measure button text
+        if hasattr(self, 'measure_button'):
+            if selected > 0:
+                self.measure_button.config(text=f"Measure {selected} Selected Device{'s' if selected != 1 else ''}")
+            else:
+                self.measure_button.config(text="Measure Selected Devices")
 
     def update_canvas_selection_highlights(self) -> None:
         """Update visual indicators on canvas for selected devices"""
         # Remove existing selection highlights
         self.canvas.delete("selection")
 
-        if hasattr(self, 'original_image'):
-            orig_width, orig_height = self.original_image.size
-            scale_x = orig_width / 400
-            scale_y = orig_height / 400
+        if not hasattr(self, 'original_image') or self.original_image is None:
+            return
+            
+        orig_width, orig_height = self.original_image.size
+        scale_x = orig_width / 600
+        scale_y = orig_height / 500
 
-            for device, bounds in self.device_mapping.items():
-                if device in self.selected_devices:
-                    x_min = bounds["x_min"] / scale_x
-                    x_max = bounds["x_max"] / scale_x
-                    y_min = bounds["y_min"] / scale_y
-                    y_max = bounds["y_max"] / scale_y
-
-                    # Draw green rectangle for selected devices
-                    self.canvas.create_rectangle(
-                        x_min, y_min, x_max, y_max,
-                        outline="green", width=1, tags="selection"
-                    )
-
-    def canvas_ctrl_click(self, event: Any) -> None:
-        """Handle Ctrl+Click for device selection toggle"""
-        if hasattr(self, 'original_image'):
-            orig_width, orig_height = self.original_image.size
-            scale_x = orig_width / 400
-            scale_y = orig_height / 400
-
-            for device, bounds in self.device_mapping.items():
+        for device, bounds in self.device_mapping.items():
+            if device in self.selected_devices:
                 x_min = bounds["x_min"] / scale_x
                 x_max = bounds["x_max"] / scale_x
                 y_min = bounds["y_min"] / scale_y
                 y_max = bounds["y_max"] / scale_y
 
-                if x_min <= event.x <= x_max and y_min <= event.y <= y_max:
-                    # Toggle device selection
-                    if device in self.checkbox_vars:
-                        current_value = self.checkbox_vars[device].get()
-                        self.checkbox_vars[device].set(not current_value)
-                        self.update_selected_devices()
-                    break
+                # Draw green rectangle for selected devices
+                self.canvas.create_rectangle(
+                    x_min, y_min, x_max, y_max,
+                    outline="#4CAF50", width=2, tags="selection"
+                )
+
+    def canvas_ctrl_click(self, event: Any) -> None:
+        """Handle Ctrl+Click for device selection toggle"""
+        if not hasattr(self, 'original_image') or self.original_image is None:
+            return
+            
+        orig_width, orig_height = self.original_image.size
+        scale_x = orig_width / 600
+        scale_y = orig_height / 500
+
+        for device, bounds in self.device_mapping.items():
+            x_min = bounds["x_min"] / scale_x
+            x_max = bounds["x_max"] / scale_x
+            y_min = bounds["y_min"] / scale_y
+            y_max = bounds["y_max"] / scale_y
+
+            if x_min <= event.x <= x_max and y_min <= event.y <= y_max:
+                # Toggle device selection
+                if device in self.checkbox_vars:
+                    current_value = self.checkbox_vars[device].get()
+                    self.checkbox_vars[device].set(not current_value)
+                    self.update_selected_devices()
+                break
+
+    def canvas_right_click(self, event: Any) -> None:
+        """Handle right-click for device status menu"""
+        if not hasattr(self, 'original_image') or self.original_image is None:
+            return
+            
+        orig_width, orig_height = self.original_image.size
+        scale_x = orig_width / 600
+        scale_y = orig_height / 500
+
+        for device, bounds in self.device_mapping.items():
+            x_min = bounds["x_min"] / scale_x
+            x_max = bounds["x_max"] / scale_x
+            y_min = bounds["y_min"] / scale_y
+            y_max = bounds["y_max"] / scale_y
+
+            if x_min <= event.x <= x_max and y_min <= event.y <= y_max:
+                self.show_device_status_menu(event, device)
+                break
+
+    # ==========================
+    # DEVICE STATUS MANAGEMENT
+    # ==========================
+
+    def _get_status_color(self, status: str) -> str:
+        """Get color for device status."""
+        colors = {
+            "working": "#4CAF50",  # Green
+            "broken": "#F44336",   # Red
+            "undefined": "#888888"  # Gray
+        }
+        return colors.get(status, "#888888")
+
+    def show_device_status_menu(self, event: Any, device: str) -> None:
+        """Show context menu for device status marking."""
+        menu = tk.Menu(self.root, tearoff=0)
+        label = self.get_device_label(device)
+        
+        menu.add_command(
+            label=f"Device {label}",
+            state=tk.DISABLED,
+            font=("Segoe UI", 9, "bold")
+        )
+        menu.add_separator()
+        
+        menu.add_command(
+            label="✓ Mark as Working",
+            command=lambda: self.mark_device_status(device, "working", quick=True)
+        )
+        menu.add_command(
+            label="✗ Mark as Broken",
+            command=lambda: self.mark_device_status(device, "broken", quick=True)
+        )
+        menu.add_command(
+            label="? Mark as Undefined",
+            command=lambda: self.mark_device_status(device, "undefined", quick=True)
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="Add/Edit Note...",
+            command=lambda: self.mark_device_status(device, None, quick=False)
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="View Status Info",
+            command=lambda: self.show_device_status_info(device)
+        )
+        
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def mark_selected_devices(self, status: str) -> None:
+        """Mark all selected devices with given status."""
+        if not self.selected_devices:
+            messagebox.showwarning("No Selection", "No devices selected.")
+            return
+        
+        for device in self.selected_devices:
+            self.mark_device_status(device, status, quick=True)
+        
+        count = len(self.selected_devices)
+        self.log_terminal(f"Marked {count} device(s) as {status}", "SUCCESS")
+
+    def mark_device_status(self, device: str, status: Optional[str], quick: bool = True) -> None:
+        """Mark device with manual status. If quick=False, open dialog for notes."""
+        label = self.get_device_label(device)
+        
+        if not quick:
+            # Open dialog for detailed marking with notes
+            dialog = tk.Toplevel(self.root)
+            dialog.title(f"Device Status: {label}")
+            dialog.geometry("400x300")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            ttk.Label(dialog, text=f"Device: {label}", font=("Segoe UI", 10, "bold")).pack(pady=10)
+            
+            # Status selection
+            status_frame = ttk.Frame(dialog)
+            status_frame.pack(pady=10)
+            
+            ttk.Label(status_frame, text="Status:").grid(row=0, column=0, padx=5)
+            status_var = tk.StringVar(value=status or "undefined")
+            ttk.Radiobutton(status_frame, text="✓ Working", variable=status_var, value="working").grid(row=0, column=1, padx=5)
+            ttk.Radiobutton(status_frame, text="✗ Broken", variable=status_var, value="broken").grid(row=0, column=2, padx=5)
+            ttk.Radiobutton(status_frame, text="? Undefined", variable=status_var, value="undefined").grid(row=0, column=3, padx=5)
+            
+            # Notes
+            ttk.Label(dialog, text="Notes:").pack(anchor="w", padx=20)
+            notes_text = tk.Text(dialog, height=8, width=45, wrap=tk.WORD)
+            notes_text.pack(padx=20, pady=5)
+            
+            # Pre-fill existing notes
+            existing_notes = self.device_status.get(device, {}).get("notes", "")
+            if existing_notes:
+                notes_text.insert("1.0", existing_notes)
+            
+            # Buttons
+            button_frame = ttk.Frame(dialog)
+            button_frame.pack(pady=10)
+            
+            def save_status():
+                final_status = status_var.get()
+                notes = notes_text.get("1.0", tk.END).strip()
+                self._update_device_status(device, final_status, notes=notes)
+                dialog.destroy()
+            
+            ttk.Button(button_frame, text="Save", command=save_status, width=12).pack(side="left", padx=5)
+            ttk.Button(button_frame, text="Cancel", command=dialog.destroy, width=12).pack(side="left", padx=5)
+            
+            dialog.wait_window()
+        else:
+            # Quick mark without notes
+            if status:
+                self._update_device_status(device, status)
+
+    def _update_device_status(self, device: str, manual_status: str, notes: str = "") -> None:
+        """Update device status in the database and UI."""
+        label = self.get_device_label(device)
+        
+        # Get or create status entry
+        if device not in self.device_status:
+            self.device_status[device] = {
+                "auto_classification": "unknown",
+                "manual_status": "undefined",
+                "last_current_a": None,
+                "test_voltage_v": None,
+                "last_tested": None,
+                "notes": "",
+                "measurement_count": 0,
+                "quick_scan_history": []
+            }
+        
+        # Update status
+        self.device_status[device]["manual_status"] = manual_status
+        if notes:
+            self.device_status[device]["notes"] = notes
+        
+        # Update timestamp
+        self.device_status[device]["last_tested"] = datetime.now().isoformat(timespec='seconds')
+        
+        # Update UI
+        if device in self.device_status_labels:
+            icon = self.status_icons.get(manual_status, "?")
+            color = self._get_status_color(manual_status)
+            self.device_status_labels[device].config(text=icon, fg=color)
+        
+        # Save to disk
+        self._save_device_status()
+        
+        # Update overlays
+        self._redraw_quick_scan_overlay()
+        
+        # Log
+        self.log_terminal(f"Device {label} marked as {manual_status}", "INFO")
+
+    def show_device_status_info(self, device: str) -> None:
+        """Show detailed status information for a device."""
+        label = self.get_device_label(device)
+        status_info = self.device_status.get(device, {})
+        
+        auto_class = status_info.get("auto_classification", "unknown")
+        manual_status = status_info.get("manual_status", "undefined")
+        last_current = status_info.get("last_current_a")
+        test_voltage = status_info.get("test_voltage_v")
+        last_tested = status_info.get("last_tested", "Never")
+        notes = status_info.get("notes", "No notes")
+        meas_count = status_info.get("measurement_count", 0)
+        
+        info_text = (
+            f"Device: {label}\n\n"
+            f"Auto Classification: {auto_class}\n"
+            f"Manual Status: {manual_status}\n"
+            f"Last Current: {f'{last_current:.3e} A' if last_current else 'N/A'}\n"
+            f"Test Voltage: {f'{test_voltage} V' if test_voltage else 'N/A'}\n"
+            f"Last Tested: {last_tested}\n"
+            f"Measurement Count: {meas_count}\n\n"
+            f"Notes:\n{notes}"
+        )
+        
+        messagebox.showinfo(f"Device Status: {label}", info_text)
+
+    def apply_threshold_to_undefined(self) -> None:
+        """Apply current threshold to classify undefined devices based on quick scan results."""
+        classified_count = 0
+        
+        for device in self.device_list:
+            status_info = self.device_status.get(device, {})
+            manual_status = status_info.get("manual_status", "undefined")
+            
+            # Only affect undefined devices
+            if manual_status == "undefined":
+                current = self.quick_scan_results.get(device)
+                if current is not None:
+                    auto_class = "working" if current >= self.quick_scan_threshold else "not-working"
+                    
+                    # Update auto classification only
+                    if device not in self.device_status:
+                        self.device_status[device] = {
+                            "auto_classification": auto_class,
+                            "manual_status": "undefined",
+                            "last_current_a": current,
+                            "test_voltage_v": self.quick_scan_voltage_var.get(),
+                            "last_tested": datetime.now().isoformat(timespec='seconds'),
+                            "notes": "",
+                            "measurement_count": 0,
+                            "quick_scan_history": []
+                        }
+                    else:
+                        self.device_status[device]["auto_classification"] = auto_class
+                        self.device_status[device]["last_current_a"] = current
+                        self.device_status[device]["test_voltage_v"] = self.quick_scan_voltage_var.get()
+                    
+                    classified_count += 1
+        
+        if classified_count > 0:
+            self._save_device_status()
+            self._redraw_quick_scan_overlay()
+            self.log_terminal(f"Applied threshold to {classified_count} undefined device(s)", "SUCCESS")
+        else:
+            messagebox.showinfo("Threshold", "No undefined devices to classify.")
+
+    def _save_device_status(self) -> None:
+        """Save device status to JSON and Excel files."""
+        # Use device folder if device is set, otherwise use sample folder
+        if self.current_device_name:
+            try:
+                save_dir = self.get_device_folder()
+            except ValueError:
+                return
+        else:
+            sample = self.sample_type_var.get()
+            if not sample:
+                return
+            save_root = resolve_default_save_root()
+            save_dir = save_root / sample.replace(" ", "_")
+        
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save JSON
+        json_path = save_dir / "device_status.json"
+        try:
+            with json_path.open("w", encoding="utf-8") as f:
+                json.dump(self.device_status, f, indent=2)
+        except Exception as e:
+            self.log_terminal(f"Failed to save device status JSON: {e}", "ERROR")
+        
+        # Save Excel
+        self._save_device_status_excel(save_dir / "device_status.xlsx")
+
+    def _save_device_status_excel(self, path: Path) -> None:
+        """Save device status to Excel file using csv module (readable by Excel)."""
+        try:
+            with path.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "Device", "Auto Classification", "Manual Status", "Last Current (A)",
+                    "Test Voltage (V)", "Last Tested", "Measurement Count", "Notes"
+                ])
+                
+                for device in self.device_list:
+                    label = self.get_device_label(device)
+                    status_info = self.device_status.get(device, {})
+                    
+                    writer.writerow([
+                        label,
+                        status_info.get("auto_classification", "unknown"),
+                        status_info.get("manual_status", "undefined"),
+                        f"{status_info.get('last_current_a', 0):.3e}" if status_info.get("last_current_a") else "",
+                        status_info.get("test_voltage_v", ""),
+                        status_info.get("last_tested", ""),
+                        status_info.get("measurement_count", 0),
+                        status_info.get("notes", "")
+                    ])
+        except Exception as e:
+            self.log_terminal(f"Failed to save Excel: {e}", "ERROR")
+
+    def _load_device_status(self) -> None:
+        """Load device status from JSON file."""
+        sample = self.sample_type_var.get()
+        if not sample:
+            return
+        
+        save_root = resolve_default_save_root()
+        sample_dir = save_root / sample.replace(" ", "_")
+        json_path = sample_dir / "device_status.json"
+        
+        if not json_path.exists():
+            self.log_terminal("No saved device status found", "INFO")
+            return
+        
+        try:
+            with json_path.open("r", encoding="utf-8") as f:
+                self.device_status = json.load(f)
+            self.log_terminal(f"Loaded device status from {json_path.name}", "SUCCESS")
+            
+            # Update UI
+            if hasattr(self, 'device_status_labels'):
+                for device, status_label in self.device_status_labels.items():
+                    status_info = self.device_status.get(device, {})
+                    manual_status = status_info.get("manual_status", "undefined")
+                    icon = self.status_icons.get(manual_status, "?")
+                    color = self._get_status_color(manual_status)
+                    status_label.config(text=icon, fg=color)
+        except Exception as e:
+            self.log_terminal(f"Failed to load device status: {e}", "ERROR")
+
+    def export_device_status_excel(self) -> None:
+        """Export device status to Excel file (user-initiated)."""
+        sample = self.sample_type_var.get()
+        if not sample:
+            messagebox.showwarning("Export", "No sample selected.")
+            return
+        
+        save_root = resolve_default_save_root()
+        sample_dir = save_root / sample.replace(" ", "_")
+        sample_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_path = sample_dir / f"device_status_export_{timestamp}.csv"
+        
+        self._save_device_status_excel(export_path)
+        
+        messagebox.showinfo("Export Complete", f"Device status exported to:\n{export_path}")
+        self.log_terminal(f"Exported device status to {export_path.name}", "SUCCESS")
+
+    # ==========================
+    # DEVICE MANAGEMENT
+    # ==========================
+
+    def get_device_folder(self, device_name: Optional[str] = None) -> Path:
+        """Get the folder path for a specific device."""
+        save_root = resolve_default_save_root()
+        name = device_name or self.current_device_name
+        if not name:
+            raise ValueError("No device name specified")
+        return save_root / name.replace(" ", "_")
+
+    def set_current_device(self) -> None:
+        """Set the current device name from user input."""
+        device_name = self.device_name_entry.get().strip()
+        
+        if not device_name:
+            messagebox.showwarning("Device Name", "Please enter a device name (e.g., D104)")
+            return
+        
+        # Validate device name (alphanumeric, dashes, underscores)
+        import re
+        if not re.match(r'^[A-Za-z0-9_-]+$', device_name):
+            messagebox.showerror("Invalid Name", "Device name can only contain letters, numbers, dashes, and underscores.")
+            return
+        
+        self.current_device_name = device_name
+        
+        # Create device folder
+        device_folder = self.get_device_folder()
+        device_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Update device info
+        sample_type = self.sample_type_var.get()
+        self.device_info = {
+            "name": device_name,
+            "sample_type": sample_type,
+            "created": datetime.now().isoformat(timespec='seconds'),
+            "last_modified": datetime.now().isoformat(timespec='seconds'),
+            "notes": ""
+        }
+        
+        # Save device info
+        self.save_device_info()
+        
+        # Update UI
+        self.device_name_label.config(text=device_name, fg="#4CAF50")
+        self.update_device_info_display()
+        self.log_terminal(f"Set current device to: {device_name}", "SUCCESS")
+        
+        # Refresh device list
+        self.refresh_device_list()
+
+    def clear_current_device(self) -> None:
+        """Clear the current device."""
+        if messagebox.askyesno("Clear Device", "Are you sure you want to clear the current device?"):
+            self.current_device_name = None
+            self.device_info = {}
+            self.device_name_entry.delete(0, tk.END)
+            self.device_name_label.config(text="No Device", fg="#888888")
+            self.update_device_info_display()
+            self.log_terminal("Cleared current device", "INFO")
+
+    def save_device_info(self) -> None:
+        """Save device information to JSON file."""
+        if not self.current_device_name:
+            messagebox.showwarning("No Device", "No device is currently set.")
+            return
+        
+        device_folder = self.get_device_folder()
+        device_folder.mkdir(parents=True, exist_ok=True)
+        
+        # Update last modified
+        self.device_info["last_modified"] = datetime.now().isoformat(timespec='seconds')
+        
+        # Save device info
+        info_path = device_folder / "device_info.json"
+        try:
+            with info_path.open("w", encoding="utf-8") as f:
+                json.dump(self.device_info, f, indent=2)
+            self.log_terminal(f"Saved device info for {self.current_device_name}", "SUCCESS")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save device info: {e}")
+            self.log_terminal(f"Error saving device info: {e}", "ERROR")
+
+    def load_selected_device(self) -> None:
+        """Load the device selected in the tree view."""
+        selection = self.device_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a device from the list.")
+            return
+        
+        item = self.device_tree.item(selection[0])
+        device_name = item["values"][0]  # First column is device name
+        
+        self.load_device(device_name)
+
+    def load_device(self, device_name: str) -> None:
+        """Load a device and all its data."""
+        device_folder = self.get_device_folder(device_name)
+        
+        if not device_folder.exists():
+            messagebox.showerror("Device Not Found", f"Device folder not found: {device_folder}")
+            return
+        
+        # Load device info
+        info_path = device_folder / "device_info.json"
+        if info_path.exists():
+            try:
+                with info_path.open("r", encoding="utf-8") as f:
+                    self.device_info = json.load(f)
+                
+                self.current_device_name = device_name
+                self.device_name_entry.delete(0, tk.END)
+                self.device_name_entry.insert(0, device_name)
+                self.device_name_label.config(text=device_name, fg="#4CAF50")
+                
+                # Update sample type if stored
+                if "sample_type" in self.device_info:
+                    self.sample_type_var.set(self.device_info["sample_type"])
+                    self.update_dropdowns(None)
+                
+                # Load device status
+                status_path = device_folder / "device_status.json"
+                if status_path.exists():
+                    with status_path.open("r", encoding="utf-8") as f:
+                        self.device_status = json.load(f)
+                    self.log_terminal(f"Loaded device status for {device_name}", "SUCCESS")
+                
+                # Load quick scan results
+                quick_scan_path = device_folder / "quick_scan.json"
+                if quick_scan_path.exists():
+                    with quick_scan_path.open("r", encoding="utf-8") as f:
+                        scan_data = json.load(f)
+                        results = {}
+                        for entry in scan_data.get("results", []):
+                            key = entry.get("device_key")
+                            current = entry.get("current_a")
+                            if key is not None:
+                                results[key] = current
+                        self.quick_scan_results = results
+                        self._redraw_quick_scan_overlay()
+                    self.log_terminal(f"Loaded quick scan results for {device_name}", "SUCCESS")
+                
+                self.update_device_info_display()
+                self.log_terminal(f"Loaded device: {device_name}", "SUCCESS")
+                
+                # Update checkboxes with loaded status
+                if hasattr(self, 'device_status_labels'):
+                    for device, status_label in self.device_status_labels.items():
+                        status_info = self.device_status.get(device, {})
+                        manual_status = status_info.get("manual_status", "undefined")
+                        icon = self.status_icons.get(manual_status, "?")
+                        color = self._get_status_color(manual_status)
+                        status_label.config(text=icon, fg=color)
+                
+                messagebox.showinfo("Device Loaded", f"Successfully loaded device: {device_name}")
+                
+            except Exception as e:
+                messagebox.showerror("Load Error", f"Failed to load device: {e}")
+                self.log_terminal(f"Error loading device {device_name}: {e}", "ERROR")
+        else:
+            messagebox.showerror("Device Info Missing", f"Device info file not found: {info_path}")
+
+    def refresh_device_list(self) -> None:
+        """Refresh the list of saved devices."""
+        # Clear existing items
+        for item in self.device_tree.get_children():
+            self.device_tree.delete(item)
+        
+        save_root = resolve_default_save_root()
+        if not save_root.exists():
+            return
+        
+        filter_type = self.device_filter_var.get()
+        
+        # Scan for device folders
+        for device_folder in save_root.iterdir():
+            if not device_folder.is_dir():
+                continue
+            
+            info_path = device_folder / "device_info.json"
+            if not info_path.exists():
+                continue
+            
+            try:
+                with info_path.open("r", encoding="utf-8") as f:
+                    info = json.load(f)
+                
+                device_name = info.get("name", device_folder.name)
+                sample_type = info.get("sample_type", "Unknown")
+                last_modified = info.get("last_modified", "Unknown")
+                
+                # Apply filter
+                if filter_type != "All" and sample_type != filter_type:
+                    continue
+                
+                # Determine status
+                status_path = device_folder / "device_status.json"
+                if status_path.exists():
+                    status = "Has Data"
+                else:
+                    status = "New"
+                
+                # Add to tree
+                self.device_tree.insert(
+                    "",
+                    "end",
+                    values=(device_name, sample_type, last_modified, status)
+                )
+                
+            except Exception as e:
+                print(f"Error reading device {device_folder.name}: {e}")
+
+    def update_device_info_display(self) -> None:
+        """Update the device info text display."""
+        self.device_info_text.config(state=tk.NORMAL)
+        self.device_info_text.delete("1.0", tk.END)
+        
+        if not self.current_device_name:
+            self.device_info_text.insert("1.0", "No device currently set.\n\nEnter a device name and click 'Set Device' to begin.")
+        else:
+            info_lines = [
+                f"Device Name: {self.device_info.get('name', 'Unknown')}",
+                f"Sample Type: {self.device_info.get('sample_type', 'Unknown')}",
+                f"Created: {self.device_info.get('created', 'Unknown')}",
+                f"Last Modified: {self.device_info.get('last_modified', 'Unknown')}",
+                "",
+                "Notes:",
+                self.device_info.get('notes', 'No notes')
+            ]
+            self.device_info_text.insert("1.0", "\n".join(info_lines))
+        
+        self.device_info_text.config(state=tk.DISABLED)
+
+    # ==========================
+    # TERMINAL LOG MANAGEMENT
+    # ==========================
+
+    def log_terminal(self, message: str, level: str = "INFO") -> None:
+        """Log message to terminal with color coding and timestamp."""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.terminal_messages.append((timestamp, level, message))
+        
+        # Apply filter
+        if self.terminal_filter.get() != "All" and level != self.terminal_filter.get().upper():
+            return
+        
+        self.terminal_output.config(state=tk.NORMAL)
+        self.terminal_output.insert(tk.END, f"[{timestamp}] ", "TIMESTAMP")
+        self.terminal_output.insert(tk.END, f"{message}\n", level.upper())
+        self.terminal_output.config(state=tk.DISABLED)
+        self.terminal_output.see(tk.END)
+
+    def _apply_terminal_filter(self) -> None:
+        """Reapply terminal filter to show only relevant messages."""
+        filter_value = self.terminal_filter.get()
+        
+        self.terminal_output.config(state=tk.NORMAL)
+        self.terminal_output.delete("1.0", tk.END)
+        
+        for timestamp, level, message in self.terminal_messages:
+            if filter_value == "All" or level == filter_value.upper():
+                self.terminal_output.insert(tk.END, f"[{timestamp}] ", "TIMESTAMP")
+                self.terminal_output.insert(tk.END, f"{message}\n", level.upper())
+        
+        self.terminal_output.config(state=tk.DISABLED)
+        self.terminal_output.see(tk.END)
+
+    def clear_terminal(self) -> None:
+        """Clear terminal output."""
+        self.terminal_output.config(state=tk.NORMAL)
+        self.terminal_output.delete("1.0", tk.END)
+        self.terminal_output.config(state=tk.DISABLED)
+        self.terminal_messages.clear()
+
+    def export_terminal_log(self) -> None:
+        """Export terminal log to file."""
+        save_root = resolve_default_save_root()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = save_root / f"terminal_log_{timestamp}.txt"
+        
+        try:
+            with log_path.open("w", encoding="utf-8") as f:
+                for ts, level, msg in self.terminal_messages:
+                    f.write(f"[{ts}] [{level}] {msg}\n")
+            messagebox.showinfo("Export Complete", f"Log exported to:\n{log_path}")
+            self.log_terminal(f"Exported log to {log_path.name}", "SUCCESS")
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export log: {e}")
+
+    # ==========================
+    # OVERLAY MANAGEMENT
+    # ==========================
+
+    def _update_threshold_from_var(self) -> None:
+        """Update threshold value from StringVar."""
+        try:
+            value = float(self.quick_scan_threshold_var.get())
+            if value > 0:
+                self.quick_scan_threshold = value
+                self.log_terminal(f"Threshold updated to {value:.3e} A", "INFO")
+        except ValueError:
+            messagebox.showerror("Invalid Value", "Please enter a valid scientific notation (e.g., 1.0e-7)")
+            self.quick_scan_threshold_var.set(f"{self.quick_scan_threshold:.1e}")
 
     def update_multiplexer(self, event: Optional[Any]) -> None:
         self.multiplexer_type = self.Multiplexer_type_var.get()
-        print("Multiplexer set to:", self.multiplexer_type)
         
         # Use new MultiplexerManager to create appropriate adapter
         try:
@@ -899,53 +2257,68 @@ class SampleGUI:
                     "Pyswitchbox",
                     pin_mapping=pin_mapping
                 )
-                print("Initiated Pyswitchbox via MultiplexerManager")
+                self.log_terminal("Initiated Pyswitchbox via MultiplexerManager", "SUCCESS")
+                self.mpx_status_label.config(text=f"Multiplexer: {self.multiplexer_type} Connected", fg="#4CAF50")
             elif self.multiplexer_type == "Electronic_Mpx":
                 # Try to create with real hardware, fall back to simulation if needed
                 try:
                     self.mpx = MultiplexerController(simulation_mode=False)
-                    print("Initiated Electronic_Mpx with real hardware")
+                    self.log_terminal("Initiated Electronic_Mpx with real hardware", "SUCCESS")
                 except Exception as e:
-                    print(f"Hardware not available, using simulation mode: {e}")
+                    self.log_terminal(f"Hardware not available, using simulation mode", "WARNING")
                     self.mpx = MultiplexerController(simulation_mode=True)
-                    print("Initiated Electronic_Mpx in simulation mode")
                 
                 self.mpx_manager = MultiplexerManager.create(
                     "Electronic_Mpx",
                     controller=self.mpx
                 )
-                print("Initiated Electronic_Mpx via MultiplexerManager")
+                self.mpx_status_label.config(text=f"Multiplexer: {self.multiplexer_type} Connected", fg="#4CAF50")
             else:
-                print("Unknown multiplexer type")
+                self.log_terminal("Unknown multiplexer type", "ERROR")
+                self.mpx_status_label.config(text="Multiplexer: Unknown Type", fg="#F44336")
         except Exception as e:
-            print(f"Error initializing multiplexer: {e}")
+            self.log_terminal(f"Error initializing multiplexer: {e}", "ERROR")
+            self.mpx_status_label.config(text="Multiplexer: Error", fg="#F44336")
 
     def load_image(self, sample: str) -> None:
-        """ Load image into canvas set up to add others later simply """
+        """Load image into canvas set up to add others later simply."""
         image_path: Optional[Path] = None
         if sample == 'Cross_bar':
             image_path = BASE_DIR / "Helpers" / "Sample_Infomation" / "memristor.png"
         elif sample == 'Device_Array_10':
             image_path = BASE_DIR / "Helpers" / "Sample_Infomation" / "Multiplexer_10_OUT.jpg"
 
-        if image_path is None or not image_path.exists():
+        if image_path is None:
+            self.log_terminal(f"No image path defined for sample: {sample}", "WARNING")
+            return
+            
+        if not image_path.exists():
+            self.log_terminal(f"Image file not found: {image_path}", "ERROR")
             self.original_image = None
             self.tk_img = None
             self.canvas.delete("all")
-            self.quick_scan_canvas.delete("all")
+            if hasattr(self, 'quick_scan_canvas'):
+                self.quick_scan_canvas.delete("all")
             return
 
-        self.original_image = Image.open(image_path)
-        img = self.original_image.resize((400, 400))
-        self.tk_img = ImageTk.PhotoImage(img)
-        self.canvas.delete("all")
-        self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
+        try:
+            self.original_image = Image.open(image_path)
+            img = self.original_image.resize((600, 500))
+            self.tk_img = ImageTk.PhotoImage(img)
+            self.canvas.delete("all")
+            self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
+            self.log_terminal(f"Loaded image for {sample}", "SUCCESS")
 
-        self._update_quick_scan_background(img)
+            if hasattr(self, 'quick_scan_canvas'):
+                self._update_quick_scan_background(img)
 
-        # Redraw selection highlights
-        self.update_canvas_selection_highlights()
-        self._redraw_quick_scan_overlay()
+            # Redraw selection highlights
+            self.update_canvas_selection_highlights()
+            self._redraw_quick_scan_overlay()
+        except Exception as e:
+            self.log_terminal(f"Error loading image: {e}", "ERROR")
+            self.original_image = None
+            self.tk_img = None
 
     def update_device_type(self, current_device_map: str) -> None:
         # all maps from dict
@@ -1015,7 +2388,13 @@ class SampleGUI:
 
     def update_dropdowns(self, event: Optional[Any]) -> None:
         sample = self.sample_type_var.get()
-        print("Sample chosen:", sample)
+        self.log_terminal(f"Sample chosen: {sample}", "INFO")
+        
+        # Load image FIRST before updating device type
+        # This ensures the canvas has an image before any drawing happens
+        self.load_image(sample)
+        
+        # Now update device type (which triggers checkbox updates)
         self.update_device_type(sample)
 
         if sample in sample_config:
@@ -1030,14 +2409,21 @@ class SampleGUI:
             self.device_dropdown["values"] = self.device_labels
             self.device_dropdown.set("")
 
-            # Call do_something when sample changes
-            self.load_image(sample)
             self.device = self.device_var.get()
+            
+            # Load device status for this sample
+            self._load_device_status()
+            
+            # Load quick scan results
             if not self._load_quick_scan_for_sample(sample, silent=True):
                 self.quick_scan_results.clear()
                 self._redraw_quick_scan_overlay()
-                self.quick_scan_save_button.config(state=tk.DISABLED)
+                if hasattr(self, 'quick_scan_save_button'):
+                    self.quick_scan_save_button.config(state=tk.DISABLED)
                 self._set_quick_scan_status("Idle")
+            
+            # Update status bar
+            self._update_status_bar()
 
     def prev_device(self) -> None:
         """Move to the previous device in the selected devices list"""
@@ -1096,12 +2482,11 @@ class SampleGUI:
         self.update_highlight(new_device)
 
     def canvas_click(self, event: Any) -> None:
-        mapname = self.current_map_name
-        #print(mapname)
-        #print(self.current_map_map)
-
+        if not hasattr(self, 'original_image') or self.original_image is None:
+            return
+            
         orig_width, orig_height = self.original_image.size
-        scaled_width, scaled_height = 400, 400
+        scaled_width, scaled_height = 600, 500
         # Compute the scaling factors
         scale_x = orig_width / scaled_width
         scale_y = orig_height / scaled_height
@@ -1131,6 +2516,7 @@ class SampleGUI:
                     x_min_scaled, y_min_scaled, x_max_scaled, y_max_scaled,
                     outline="#009dff", width=3, tags="highlight"
                 )
+                break
 
     def update_highlight(self, device: str) -> None:
         # Clear any existing highlights
@@ -1138,9 +2524,9 @@ class SampleGUI:
 
         # Get the device bounds
         bounds = self.device_mapping.get(device, None)
-        if bounds:
+        if bounds and hasattr(self, 'original_image') and self.original_image is not None:
             orig_width, orig_height = self.original_image.size
-            scaled_width, scaled_height = 400, 400
+            scaled_width, scaled_height = 600, 500
             # Compute the scaling factors
             scale_x = orig_width / scaled_width
             scale_y = orig_height / scaled_height
@@ -1164,12 +2550,28 @@ class SampleGUI:
             if not selected_device_list:
                 messagebox.showwarning("Warning", "No devices selected for measurement.")
                 return
+            
+            # Warn if no device is set
+            if not self.current_device_name:
+                response = messagebox.askyesno(
+                    "No Device Set",
+                    "No device name is currently set. Measurements will be saved to the sample folder.\n\n"
+                    "Do you want to continue?",
+                    icon='warning'
+                )
+                if not response:
+                    return
 
             self.change_relays()
             print("")
             print("Selected devices:")
             print([self.get_device_label(device) for device in selected_device_list])
+            if self.current_device_name:
+                print(f"Current Device: {self.current_device_name}")
             print("")
+            
+            # TODO: Pass device_name to MeasurementGUI for device-specific saving
+            # For now, MeasurementGUI can access it via self.current_device_name
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
         else:
@@ -1241,12 +2643,6 @@ class SampleGUI:
             sample = self.sample_type_var.get()
             if sample:
                 self.load_image(sample)
-
-    def log_terminal(self, message: str) -> None:
-        self.terminal_output.config(state=tk.NORMAL)
-        self.terminal_output.insert(tk.END, message + "\n")
-        self.terminal_output.config(state=tk.DISABLED)
-        self.terminal_output.see(tk.END)
 
     def _pump_test_logs(self):
         """Transfer messages from worker queue to terminal in UI thread."""
