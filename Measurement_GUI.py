@@ -249,10 +249,10 @@ class MeasurementGUI:
         self.measurment_number = None
         self.sweep_num = None
         self.master = tk.Toplevel(master)
-        self._base_title = "Measurement Setup"
+        self._base_title = "IV Measurement System"
         self._status_message = ""
         self.master.title(self._base_title)
-        self.master.geometry("1800x1200")
+        self.master.geometry("1920x1080")
         #200+100
         self.sample_gui = sample_gui
         self.current_index = self.sample_gui.current_index
@@ -330,24 +330,8 @@ class MeasurementGUI:
         self.test_names = list(self.custom_sweeps.keys())
         self.code_names = {name: self.custom_sweeps[name].get("code_name") for name in self.test_names}
 
-        # Container frames
-        self.left_frame = tk.Frame(self.master)
-        self.left_frame.grid(row=1, column=0, sticky="nsew",padx=0, pady=0)
-
-        self.middle_frame = tk.Frame(self.master)
-        self.middle_frame.grid(row=1, column=1, sticky="nsew", padx=0, pady=0)
-
-        self.Graph_frame = tk.Frame(self.master)
-        self.Graph_frame.grid(row=0, column=2, sticky="nsew", padx=0,rowspan=10 ,pady=0)
-
-        self.top_frame = tk.Frame(self.master)
-        self.top_frame.grid(row=0, column=0, columnspan=2, sticky="nsew",padx=0, pady=0)
-
-        # Make the columns expand
-        # self.master.columnconfigure(0, weight=1)
-        # self.master.columnconfigure(1, weight=2)
-        # self.master.rowconfigure(0, weight=1)
-
+        # === NEW MODERN LAYOUT INITIALIZATION ===
+        # Create layout builder with callbacks
         self.layout_builder = MeasurementGUILayoutBuilder(
             gui=self,
             callbacks={
@@ -371,21 +355,48 @@ class MeasurementGUI:
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
             },
         )
-        self.layout_builder.build_all_panels(self.left_frame, self.middle_frame, self.top_frame)
+        
+        # Build the modern tabbed layout
+        self.layout_builder.build_modern_layout(self.master)
+        
+        # Set default system
         self.set_default_system()
-
-        self.create_sweep_parameters(self.middle_frame)
-        self.create_automated_tests_section(self.middle_frame)
-
-        # right frame - matplotlib panels
+        
+        # Create sweep parameters section (will populate the collapsible frame)
+        if hasattr(self, 'sweep_parameters_frame'):
+            self.create_sweep_parameters(self.sweep_parameters_frame)
+        
+        # Create automated tests section (for advanced tests tab)
+        # This will be called later when needed
+        
+        # Initialize plot panels with modern layout
         self.plot_panels = MeasurementPlotPanels(
             font_config={"axis": self.axis_font_size, "title": self.title_font_size}
         )
-        self.plot_panels.create_all_plots(self.Graph_frame, temp_enabled=self.itc_connected)
+        
+        # Create plots in the measurements tab graph panel
+        if hasattr(self, 'measurements_graph_panel'):
+            self.plot_panels.create_all_plots_modern(
+                self.measurements_graph_panel, 
+                temp_enabled=self.itc_connected
+            )
+        
+        # Attach plot attributes to self for backwards compatibility
         self.plot_panels.attach_to(self)
+        
+        # Start plot updaters
         self.plot_updaters = PlotUpdaters(gui=self, plot_panels=self.plot_panels)
         self.plot_updaters.start_all_threads()
         self.plot_updaters.start_temperature_thread(self.itc_connected)
+        
+        # Update overlay with initial device info
+        if hasattr(self.plot_panels, 'update_overlay'):
+            self.plot_panels.update_overlay(
+                sample_name=self.sample_name_var.get() if hasattr(self, 'sample_name_var') else "—",
+                device=self.device_section_and_number,
+                voltage="0V",
+                loop="#1"
+            )
 
         # self.measurement_thread = None
         # self.plotter = None
@@ -1092,36 +1103,64 @@ class MeasurementGUI:
         """Enable/disable and style components based on address availability"""
         has_address = bool(address and address.strip())
 
+        # Build components list - labels may not exist in modern layout
         if component_type == "iv":
-            components = [self.iv_label, self.iv_address_entry, self.iv_connect_button]
+            label = getattr(self, "iv_label", None)
+            entry = getattr(self, "iv_address_entry", None)
+            button = getattr(self, "iv_connect_button", None)
         elif component_type == "psu":
-            components = [self.psu_label, self.psu_address_entry, self.psu_connect_button]
+            label = getattr(self, "psu_label", None)
+            entry = getattr(self, "psu_address_entry", None)
+            button = getattr(self, "psu_connect_button", None)
         elif component_type == "temp":
-            components = [self.temp_label, self.temp_address_entry, self.temp_connect_button]
+            label = getattr(self, "temp_label", None)
+            entry = getattr(self, "temp_address_entry", None)
+            button = getattr(self, "temp_connect_button", None)
         else:
             return
 
+        # Skip if required components don't exist
+        if entry is None or button is None:
+            return
+
+        # Update label color if it exists
+        if label is not None:
+            if has_address:
+                label.configure(fg="black")
+            else:
+                label.configure(fg="grey")
+
+        # Update entry state
+        # Check if it's a ttk.Entry (doesn't support bg/fg options)
+        is_ttk_entry = entry.winfo_class() == "TEntry"
+        
         if has_address:
-            for component in components:
-                component.configure(state="normal")
-            components[0].configure(fg="black")
-            components[1].configure(state="normal", bg="white", fg="black")
-            components[2].configure(state="normal")
+            if is_ttk_entry:
+                entry.configure(state="normal")
+            else:
+                entry.configure(state="normal", bg="white", fg="black")
         else:
-            components[0].configure(fg="grey")
-            components[1].configure(state="disabled", bg="lightgrey", fg="grey")
-            components[2].configure(state="disabled")
+            if is_ttk_entry:
+                entry.configure(state="disabled")
+            else:
+                entry.configure(state="disabled", bg="lightgrey", fg="grey")
+
+        # Update button state
+        if has_address:
+            button.configure(state="normal")
+        else:
+            button.configure(state="disabled")
     def create_mode_selection(self,parent: tk.Misc) -> None:
         """Legacy wrapper retained for backward compatibility."""
         pass
 
     def create_sweep_parameters(self, parent: tk.Misc) -> None:
-        """Sweep parameter section"""
-        frame = tk.LabelFrame(parent, text="Sweep Parameters", padx=5, pady=5)
-        frame.grid(row=2, column=0,columnspan = 2 ,padx=10, pady=5, sticky="ew")
+        """Sweep parameter section - no frame wrapper, uses parent directly"""
+        # Use parent directly - it's already the content frame from collapsible section
+        frame = parent
 
         # Measurement Type selector (DC Triangle IV, SMU_AND_PMU pulse modes, etc.)
-        tk.Label(frame, text="Measurement Type:").grid(row=0, column=0, sticky="w")
+        tk.Label(frame, text="Measurement Type:", bg='#f0f0f0').grid(row=0, column=0, sticky="w", pady=2)
         self.excitation_var = tk.StringVar(value="DC Triangle IV")
         self.excitation_menu = ttk.Combobox(frame, textvariable=self.excitation_var,
                                             values=["DC Triangle IV",
@@ -1138,7 +1177,7 @@ class MeasurementGUI:
         self.excitation_menu.grid(row=0, column=1, sticky="ew")
 
         # Source Mode Selection (placed right after measurement type)
-        tk.Label(frame, text="Source Mode:", font=("Arial", 9, "bold")).grid(row=1, column=0, sticky="w")
+        tk.Label(frame, text="Source Mode:", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=1, column=0, sticky="w")
         self.source_mode_var = tk.StringVar(value="voltage")  # Default: voltage source
         source_mode_dropdown = ttk.Combobox(
             frame, 
@@ -1155,7 +1194,7 @@ class MeasurementGUI:
         #info_label.grid(row=1, column=2, sticky="w", padx=(5, 0))
 
         # Dynamic params container for excitation-specific options
-        exc_dyn = tk.Frame(frame)
+        exc_dyn = tk.Frame(frame, bg='#f0f0f0')
         exc_dyn.grid(row=2, column=0, columnspan=2, sticky="ew")
         exc_dyn.columnconfigure(1, weight=1)
         self._excitation_params_frame = exc_dyn
@@ -1205,16 +1244,16 @@ class MeasurementGUI:
             sel = self.excitation_var.get()
             r = 0
             if sel == "DC Triangle IV":
-                tk.Label(self._excitation_params_frame, text="Triangle IV sweep (FS/PS/NS).", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Triangle IV sweep (FS/PS/NS).", fg="grey", bg='#f0f0f0').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 # Sweep Mode
-                tk.Label(self._excitation_params_frame, text="Sweep Mode:").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Sweep Mode:", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 sweep_mode_menu = ttk.Combobox(self._excitation_params_frame, textvariable=self.sweep_mode_var,
                                                values=[VoltageRangeMode.FIXED_STEP,
                                                        VoltageRangeMode.FIXED_SWEEP_RATE,
                                                        VoltageRangeMode.FIXED_VOLTAGE_TIME], state="readonly")
                 sweep_mode_menu.grid(row=r, column=1, sticky="ew"); r+=1
                 # Sweep Type directly below
-                tk.Label(self._excitation_params_frame, text="Sweep Type:").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Sweep Type:", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 sweep_type_menu = ttk.Combobox(self._excitation_params_frame, textvariable=self.sweep_type_var,
                                                values=["FS", "PS", "NS"], state="readonly")
                 sweep_type_menu.grid(row=r, column=1, sticky="ew"); r+=1
@@ -1256,24 +1295,24 @@ class MeasurementGUI:
                     elif mode == VoltageRangeMode.FIXED_SWEEP_RATE:
                         _toggle_dc_step_fields(False)
                         # Row 6: Sweep rate (V/s)
-                        self._dc_alt_lbl1 = tk.Label(frame, text="Sweep rate (V/s):")
+                        self._dc_alt_lbl1 = tk.Label(frame, text="Sweep rate (V/s):", bg='#f0f0f0')
                         self._dc_alt_lbl1.grid(row=6, column=0, sticky="w")
                         self._dc_alt_ent1 = tk.Entry(frame, textvariable=self.var_sweep_rate)
                         self._dc_alt_ent1.grid(row=6, column=1, sticky="ew")
                         # Row 7: # Steps (optional)
-                        self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):")
+                        self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):", bg='#f0f0f0')
                         self._dc_alt_lbl2.grid(row=7, column=0, sticky="w")
                         self._dc_alt_ent2 = tk.Entry(frame, textvariable=self.var_num_steps)
                         self._dc_alt_ent2.grid(row=7, column=1, sticky="ew")
                     elif mode == VoltageRangeMode.FIXED_VOLTAGE_TIME:
                         _toggle_dc_step_fields(False)
                         # Row 6: Total sweep time (s)
-                        self._dc_alt_lbl1 = tk.Label(frame, text="Total sweep time (s):")
+                        self._dc_alt_lbl1 = tk.Label(frame, text="Total sweep time (s):", bg='#f0f0f0')
                         self._dc_alt_lbl1.grid(row=6, column=0, sticky="w")
                         self._dc_alt_ent1 = tk.Entry(frame, textvariable=self.var_total_time)
                         self._dc_alt_ent1.grid(row=6, column=1, sticky="ew")
                         # Row 7: # Steps (optional)
-                        self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):")
+                        self._dc_alt_lbl2 = tk.Label(frame, text="# Steps (optional):", bg='#f0f0f0')
                         self._dc_alt_lbl2.grid(row=7, column=0, sticky="w")
                         self._dc_alt_ent2 = tk.Entry(frame, textvariable=self.var_num_steps)
                         self._dc_alt_ent2.grid(row=7, column=1, sticky="ew")
@@ -1288,16 +1327,16 @@ class MeasurementGUI:
                     pass
                 return
             if sel == "Endurance":
-                tk.Label(self._excitation_params_frame, text="Repeated SET/RESET pulses with readback.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="SET Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Repeated SET/RESET pulses with readback.", fg="grey", bg='#f0f0f0').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="SET Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_set_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="RESET Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="RESET Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_reset_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Pulse Width (ms)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Pulse Width (ms)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Cycles").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Cycles", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_cycles, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Read Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Read Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 try:
                     for w in self._dc_widgets:
@@ -1307,16 +1346,16 @@ class MeasurementGUI:
                     pass
                 return
             if sel == "Retention":
-                tk.Label(self._excitation_params_frame, text="Measure state retention over time.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="SET Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Measure state retention over time.", fg="grey", bg='#f0f0f0').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="SET Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_set_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="SET Time (ms)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="SET Time (ms)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_set_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Read Voltage (V)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Read Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 if not hasattr(self, "ret_measure_delay"):
                     self.ret_measure_delay = tk.DoubleVar(value=10.0)
-                tk.Label(self._excitation_params_frame, text="Measure after (s)").grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Measure after (s)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_measure_delay, width=14).grid(row=r, column=1, sticky="w"); r+=1
                 try:
                     for w in self._dc_widgets:
@@ -1331,15 +1370,15 @@ class MeasurementGUI:
                     self.ex_piv_width_ms.set(_min_pulse_width_ms_default())
                 except Exception:
                     pass
-                tk.Label(self._excitation_params_frame, text="One pulse per amplitude, read at Vbase; plots A vs I.", fg="grey").grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="One pulse per amplitude, read at Vbase; plots A vs I.", fg="grey", bg='#f0f0f0').grid(row=r, column=0, columnspan=2, sticky="w"); r+=1
                 # For pulse modes, hide DC sweep-mode/type, so nothing to render here
-                tk.Label(self._excitation_params_frame, text="Vstart").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_start, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Vstop").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_stop, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Step (use or set #steps)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_step, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="#Steps (optional)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_nsteps, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Pulse width (ms)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_width_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Vbase").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
-                tk.Label(self._excitation_params_frame, text="Inter-step delay (s)").grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_inter_delay, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vstart", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_start, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vstop", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_stop, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Step (use or set #steps)", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_step, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="#Steps (optional)", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_nsteps, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Pulse width (ms)", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_width_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Vbase", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_vbase, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                tk.Label(self._excitation_params_frame, text="Inter-step delay (s)", bg='#f0f0f0').grid(row=r, column=0, sticky="w"); tk.Entry(self._excitation_params_frame, textvariable=self.ex_piv_inter_delay, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 # Hide DC widgets
                 try:
                     for w in self._dc_widgets:
