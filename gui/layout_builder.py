@@ -19,7 +19,7 @@ This version features a modernized Sample_GUI inspired design with:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, List, Tuple, Any
 
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -30,6 +30,7 @@ class MeasurementGUILayoutBuilder:
     gui: object
     callbacks: Dict[str, Callable]
     widgets: Dict[str, tk.Widget] = field(default_factory=dict)
+    _updating_system: bool = False  # Flag to prevent recursive updates
     
     # Sample_GUI color scheme
     COLOR_PRIMARY = "#4CAF50"  # Green for buttons/accents
@@ -100,6 +101,41 @@ class MeasurementGUILayoutBuilder:
         
         gui.systems = gui.load_systems()
         gui.system_var = tk.StringVar()
+        
+        # Set default value if systems exist
+        if gui.systems and gui.systems[0] != "No systems available":
+            gui.system_var.set(gui.systems[0])
+        
+        # Add trace to sync both dropdowns when StringVar changes
+        # This will be called when either dropdown changes the StringVar
+        # Store reference to this builder for the trace callback
+        builder_ref = self
+        def sync_system_dropdowns(*args):
+            if builder_ref._updating_system:
+                return
+            builder_ref._updating_system = True
+            try:
+                selected = gui.system_var.get()
+                if not selected:
+                    return
+                # Update top bar dropdown if value differs
+                if hasattr(gui, 'system_dropdown') and gui.system_dropdown and selected in gui.system_dropdown['values']:
+                    current_top = gui.system_dropdown.get()
+                    if current_top != selected:
+                        gui.system_dropdown.set(selected)
+                # Update Setup tab dropdown if it exists and value differs
+                if hasattr(gui, 'system_combo') and gui.system_combo and selected in gui.system_combo['values']:
+                    current_setup = gui.system_combo.get()
+                    if current_setup != selected:
+                        gui.system_combo.set(selected)
+            except Exception:
+                # Silently ignore errors during sync to prevent crashes
+                pass
+            finally:
+                builder_ref._updating_system = False
+        
+        gui.system_var.trace_add('write', sync_system_dropdowns)
+        
         system_dropdown = ttk.Combobox(
             left_section,
             textvariable=gui.system_var,
@@ -197,10 +233,18 @@ class MeasurementGUILayoutBuilder:
     
     def _on_system_change_and_connect(self) -> None:
         """Handle system change and attempt auto-connect"""
-        # First call the existing system change callback
+        gui = self.gui
+        
+        # StringVar trace will automatically sync Setup tab dropdown
+        # First load the system configuration (comprehensive update)
+        load_system_cb = self.callbacks.get("load_system")
+        if load_system_cb:
+            load_system_cb()
+        
+        # Also call the system change callback for address updates
         system_change_cb = self.callbacks.get("on_system_change")
         if system_change_cb:
-            system_change_cb(self.gui.system_var.get())
+            system_change_cb(gui.system_var.get())
         
         # Then attempt to auto-connect
         self._auto_connect_instruments()
@@ -272,6 +316,7 @@ class MeasurementGUILayoutBuilder:
         self._create_advanced_tests_tab(notebook)
         self._create_setup_tab(notebook)
         self._create_custom_measurements_tab(notebook)
+        self._create_notes_tab(notebook)
         
         self.widgets["notebook"] = notebook
     
@@ -867,12 +912,12 @@ class MeasurementGUILayoutBuilder:
         self.widgets["setup_tab"] = tab
     
     def _build_connection_section_modern(self, parent: tk.Misc) -> None:
-        """Modern connection section for Setup tab"""
+        """Modern connection section for Setup tab with system builder"""
         gui = self.gui
         
         frame = tk.LabelFrame(
             parent,
-            text="Instrument Connections",
+            text="System Configuration & Instrument Connections",
             font=self.FONT_HEADING,
             bg=self.COLOR_BG,
             relief='solid',
@@ -882,17 +927,150 @@ class MeasurementGUILayoutBuilder:
         )
         frame.pack(fill='x', padx=5, pady=5)
         
-        # SMU/Keithley
+        # System Selector Section
+        system_frame = tk.LabelFrame(frame, text="System Configuration", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=10, pady=10)
+        system_frame.pack(fill='x', pady=(0, 15))
+        
+        tk.Label(system_frame, text="Load System:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5, padx=(0, 10))
+        
+        # Load systems list
+        if hasattr(gui, 'load_systems'):
+            systems = gui.load_systems()
+        else:
+            systems = []
+        if not systems or systems == ["No systems available"]:
+            systems = []
+        
+        # Use existing system_var if it exists (from top bar), otherwise create new one
+        if not hasattr(gui, 'system_var') or gui.system_var is None:
+            gui.system_var = tk.StringVar(value=systems[0] if systems else "")
+        else:
+            # If system_var exists, make sure it has a valid value
+            current_value = gui.system_var.get()
+            if not current_value or current_value not in systems:
+                if systems:
+                    gui.system_var.set(systems[0])
+        
+        # Update top bar dropdown values if it exists
+        if hasattr(gui, 'system_dropdown') and gui.system_dropdown:
+            gui.system_dropdown['values'] = systems
+        
+        gui.system_combo = ttk.Combobox(system_frame, textvariable=gui.system_var, values=systems, 
+                                        font=self.FONT_MAIN, width=25, state='readonly')
+        gui.system_combo.grid(row=0, column=1, sticky='ew', pady=5, padx=(0, 10))
+        
+        # Unified handler that loads system (StringVar trace will sync dropdowns)
+        def on_system_selected(event=None):
+            if self._updating_system:
+                return
+            # Load the system configuration
+            load_system_cb = self.callbacks.get("load_system")
+            if load_system_cb:
+                load_system_cb()
+            # Also trigger system change for address updates
+            system_change_cb = self.callbacks.get("on_system_change")
+            if system_change_cb:
+                system_change_cb(gui.system_var.get())
+        
+        gui.system_combo.bind('<<ComboboxSelected>>', on_system_selected)
+        
+        def on_load_button_click():
+            # Load the system configuration (StringVar trace will sync dropdowns)
+            load_system_cb = self.callbacks.get("load_system")
+            if load_system_cb:
+                load_system_cb()
+            # Also trigger system change for address updates
+            system_change_cb = self.callbacks.get("on_system_change")
+            if system_change_cb:
+                system_change_cb(gui.system_var.get())
+        
+        tk.Button(
+            system_frame,
+            text="Load",
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_PRIMARY,
+            fg='white',
+            command=on_load_button_click,
+            padx=15
+        ).grid(row=0, column=2, pady=5, padx=(0, 10))
+        
+        tk.Button(
+            system_frame,
+            text="Save As...",
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_PRIMARY,
+            fg='white',
+            command=self.callbacks.get("save_system", lambda: None),
+            padx=15
+        ).grid(row=0, column=3, pady=5)
+        
+        system_frame.columnconfigure(1, weight=1)
+        
+        # SMU/Keithley Section
         smu_frame = tk.LabelFrame(frame, text="SMU / Keithley", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=10, pady=10)
         smu_frame.pack(fill='x', pady=(0, 10))
         
-        tk.Label(smu_frame, text="GPIB Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        tk.Label(smu_frame, text="Type:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        smu_types = ['Keithley 2401', 'Keithley 2450', 'Keithley 2450 (Simulation)', 'Hp4140b', 'Keithley 4200A']
+        gui.smu_type_var = tk.StringVar(value=getattr(gui, "SMU_type", smu_types[0]))
+        gui.smu_type_combo = ttk.Combobox(smu_frame, textvariable=gui.smu_type_var, values=smu_types,
+                                          font=self.FONT_MAIN, width=25, state='readonly')
+        gui.smu_type_combo.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        
+        tk.Label(smu_frame, text="Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=1, column=0, sticky='w', pady=5)
         gui.keithley_address_var = tk.StringVar(value=getattr(gui, "keithley_address", ""))
-        gui.iv_address_entry = ttk.Entry(smu_frame, textvariable=gui.keithley_address_var, font=self.FONT_MAIN, width=30)
-        gui.iv_address_entry.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        
+        # Address combobox with refresh button
+        address_frame = tk.Frame(smu_frame, bg=self.COLOR_BG)
+        address_frame.grid(row=1, column=1, sticky='ew', pady=5, padx=(10, 5))
+        
+        gui.iv_address_combo = ttk.Combobox(address_frame, textvariable=gui.keithley_address_var, 
+                                             font=self.FONT_MAIN, width=28)
+        gui.iv_address_combo.grid(row=0, column=0, sticky='ew')
+        gui.iv_address_combo['values'] = self._scan_visa_resources()
+        gui.iv_address_combo.bind('<FocusOut>', lambda e: self._validate_and_identify_address(gui, 'smu'))
+        gui.iv_address_combo.bind('<<ComboboxSelected>>', lambda e: self._validate_and_identify_address(gui, 'smu'))
+        
+        refresh_btn_smu = tk.Button(
+            address_frame,
+            text="🔄",
+            font=("Arial", 10),
+            bg=self.COLOR_BG,
+            fg='black',
+            relief='flat',
+            command=lambda: self._refresh_address_combo(gui.iv_address_combo),
+            padx=5
+        )
+        refresh_btn_smu.grid(row=0, column=1, padx=(5, 0))
+        
+        address_frame.columnconfigure(0, weight=1)
+        gui.iv_address_entry = gui.iv_address_combo  # Keep for backward compatibility
+        
+        # Status indicator
+        gui.smu_status_indicator = tk.Label(smu_frame, text="●", font=("Arial", 16), bg=self.COLOR_BG, fg='gray')
+        gui.smu_status_indicator.grid(row=1, column=2, padx=(5, 5), sticky='w')
+        
+        # Test and Connect buttons
+        button_frame_smu = tk.Frame(smu_frame, bg=self.COLOR_BG)
+        button_frame_smu.grid(row=1, column=3, pady=5, padx=(0, 0))
+        
+        # Device info label (below address row)
+        gui.smu_device_info = tk.Label(smu_frame, text="", font=("Segoe UI", 8), bg=self.COLOR_BG, fg='#666666')
+        gui.smu_device_info.grid(row=2, column=1, columnspan=2, sticky='w', padx=(10, 0), pady=(2, 0))
+        
+        gui.iv_test_button = tk.Button(
+            button_frame_smu,
+            text="Test",
+            font=self.FONT_BUTTON,
+            bg='#FF9800',
+            fg='white',
+            command=lambda: self._test_connection(gui, 'smu'),
+            padx=10
+        )
+        gui.iv_test_button.pack(side='left', padx=(0, 5))
         
         gui.iv_connect_button = tk.Button(
-            smu_frame,
+            button_frame_smu,
             text="Connect",
             font=self.FONT_BUTTON,
             bg=self.COLOR_PRIMARY,
@@ -900,21 +1078,75 @@ class MeasurementGUILayoutBuilder:
             command=self.callbacks.get("connect_keithley"),
             padx=15
         )
-        gui.iv_connect_button.grid(row=0, column=2, pady=5)
+        gui.iv_connect_button.pack(side='left')
         
         smu_frame.columnconfigure(1, weight=1)
         
-        # PSU
+        # PSU Section
         psu_frame = tk.LabelFrame(frame, text="Power Supply", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=10, pady=10)
         psu_frame.pack(fill='x', pady=(0, 10))
         
-        tk.Label(psu_frame, text="GPIB Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        tk.Label(psu_frame, text="Type:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        psu_types = ['Keithley 2220', 'None']
+        gui.psu_type_var = tk.StringVar(value=getattr(gui, "psu_type", psu_types[0]))
+        gui.psu_type_combo = ttk.Combobox(psu_frame, textvariable=gui.psu_type_var, values=psu_types,
+                                          font=self.FONT_MAIN, width=25, state='readonly')
+        gui.psu_type_combo.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        
+        tk.Label(psu_frame, text="Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=1, column=0, sticky='w', pady=5)
         gui.psu_address_var = tk.StringVar(value=getattr(gui, "psu_visa_address", ""))
-        gui.psu_address_entry = ttk.Entry(psu_frame, textvariable=gui.psu_address_var, font=self.FONT_MAIN, width=30)
-        gui.psu_address_entry.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        
+        # Address combobox with refresh button
+        address_frame_psu = tk.Frame(psu_frame, bg=self.COLOR_BG)
+        address_frame_psu.grid(row=1, column=1, sticky='ew', pady=5, padx=(10, 5))
+        
+        gui.psu_address_combo = ttk.Combobox(address_frame_psu, textvariable=gui.psu_address_var, 
+                                            font=self.FONT_MAIN, width=28)
+        gui.psu_address_combo.grid(row=0, column=0, sticky='ew')
+        gui.psu_address_combo['values'] = self._scan_visa_resources()
+        gui.psu_address_combo.bind('<FocusOut>', lambda e: self._validate_and_identify_address(gui, 'psu'))
+        gui.psu_address_combo.bind('<<ComboboxSelected>>', lambda e: self._validate_and_identify_address(gui, 'psu'))
+        
+        refresh_btn_psu = tk.Button(
+            address_frame_psu,
+            text="🔄",
+            font=("Arial", 10),
+            bg=self.COLOR_BG,
+            fg='black',
+            relief='flat',
+            command=lambda: self._refresh_address_combo(gui.psu_address_combo),
+            padx=5
+        )
+        refresh_btn_psu.grid(row=0, column=1, padx=(5, 0))
+        
+        address_frame_psu.columnconfigure(0, weight=1)
+        gui.psu_address_entry = gui.psu_address_combo  # Keep for backward compatibility
+        
+        # Status indicator
+        gui.psu_status_indicator = tk.Label(psu_frame, text="●", font=("Arial", 16), bg=self.COLOR_BG, fg='gray')
+        gui.psu_status_indicator.grid(row=1, column=2, padx=(5, 5), sticky='w')
+        
+        # Test and Connect buttons
+        button_frame_psu = tk.Frame(psu_frame, bg=self.COLOR_BG)
+        button_frame_psu.grid(row=1, column=3, pady=5, padx=(0, 0))
+        
+        # Device info label (below address row)
+        gui.psu_device_info = tk.Label(psu_frame, text="", font=("Segoe UI", 8), bg=self.COLOR_BG, fg='#666666')
+        gui.psu_device_info.grid(row=2, column=1, columnspan=2, sticky='w', padx=(10, 0), pady=(2, 0))
+        
+        gui.psu_test_button = tk.Button(
+            button_frame_psu,
+            text="Test",
+            font=self.FONT_BUTTON,
+            bg='#FF9800',
+            fg='white',
+            command=lambda: self._test_connection(gui, 'psu'),
+            padx=10
+        )
+        gui.psu_test_button.pack(side='left', padx=(0, 5))
         
         gui.psu_connect_button = tk.Button(
-            psu_frame,
+            button_frame_psu,
             text="Connect",
             font=self.FONT_BUTTON,
             bg=self.COLOR_PRIMARY,
@@ -922,21 +1154,75 @@ class MeasurementGUILayoutBuilder:
             command=self.callbacks.get("connect_psu"),
             padx=15
         )
-        gui.psu_connect_button.grid(row=0, column=2, pady=5)
+        gui.psu_connect_button.pack(side='left')
         
         psu_frame.columnconfigure(1, weight=1)
         
-        # Temperature Controller
+        # Temperature Controller Section
         temp_frame = tk.LabelFrame(frame, text="Temperature Controller", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=10, pady=10)
-        temp_frame.pack(fill='x')
+        temp_frame.pack(fill='x', pady=(0, 10))
         
-        tk.Label(temp_frame, text="GPIB Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        tk.Label(temp_frame, text="Type:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        temp_types = ['Auto-Detect', 'Lakeshore 335', 'Oxford ITC4', 'None']
+        gui.temp_type_var = tk.StringVar(value=getattr(gui, "temp_controller_type", temp_types[0]))
+        gui.temp_type_combo = ttk.Combobox(temp_frame, textvariable=gui.temp_type_var, values=temp_types,
+                                          font=self.FONT_MAIN, width=25, state='readonly')
+        gui.temp_type_combo.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        
+        tk.Label(temp_frame, text="Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=1, column=0, sticky='w', pady=5)
         gui.temp_address_var = tk.StringVar(value=getattr(gui, "temp_controller_address", ""))
-        gui.temp_address_entry = ttk.Entry(temp_frame, textvariable=gui.temp_address_var, font=self.FONT_MAIN, width=30)
-        gui.temp_address_entry.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        
+        # Address combobox with refresh button (include serial for temp controllers)
+        address_frame_temp = tk.Frame(temp_frame, bg=self.COLOR_BG)
+        address_frame_temp.grid(row=1, column=1, sticky='ew', pady=5, padx=(10, 5))
+        
+        gui.temp_address_combo = ttk.Combobox(address_frame_temp, textvariable=gui.temp_address_var, 
+                                              font=self.FONT_MAIN, width=28)
+        gui.temp_address_combo.grid(row=0, column=0, sticky='ew')
+        gui.temp_address_combo['values'] = self._scan_visa_resources(include_serial=True)
+        gui.temp_address_combo.bind('<FocusOut>', lambda e: self._validate_and_identify_address(gui, 'temp'))
+        gui.temp_address_combo.bind('<<ComboboxSelected>>', lambda e: self._validate_and_identify_address(gui, 'temp'))
+        
+        refresh_btn_temp = tk.Button(
+            address_frame_temp,
+            text="🔄",
+            font=("Arial", 10),
+            bg=self.COLOR_BG,
+            fg='black',
+            relief='flat',
+            command=lambda: self._refresh_address_combo(gui.temp_address_combo, include_serial=True),
+            padx=5
+        )
+        refresh_btn_temp.grid(row=0, column=1, padx=(5, 0))
+        
+        address_frame_temp.columnconfigure(0, weight=1)
+        gui.temp_address_entry = gui.temp_address_combo  # Keep for backward compatibility
+        
+        # Status indicator
+        gui.temp_status_indicator = tk.Label(temp_frame, text="●", font=("Arial", 16), bg=self.COLOR_BG, fg='gray')
+        gui.temp_status_indicator.grid(row=1, column=2, padx=(5, 5), sticky='w')
+        
+        # Test and Connect buttons
+        button_frame_temp = tk.Frame(temp_frame, bg=self.COLOR_BG)
+        button_frame_temp.grid(row=1, column=3, pady=5, padx=(0, 0))
+        
+        # Device info label (below address row)
+        gui.temp_device_info = tk.Label(temp_frame, text="", font=("Segoe UI", 8), bg=self.COLOR_BG, fg='#666666')
+        gui.temp_device_info.grid(row=2, column=1, columnspan=2, sticky='w', padx=(10, 0), pady=(2, 0))
+        
+        gui.temp_test_button = tk.Button(
+            button_frame_temp,
+            text="Test",
+            font=self.FONT_BUTTON,
+            bg='#FF9800',
+            fg='white',
+            command=lambda: self._test_connection(gui, 'temp'),
+            padx=10
+        )
+        gui.temp_test_button.pack(side='left', padx=(0, 5))
         
         gui.temp_connect_button = tk.Button(
-            temp_frame,
+            button_frame_temp,
             text="Connect",
             font=self.FONT_BUTTON,
             bg=self.COLOR_PRIMARY,
@@ -944,11 +1230,440 @@ class MeasurementGUILayoutBuilder:
             command=self.callbacks.get("connect_temp"),
             padx=15
         )
-        gui.temp_connect_button.grid(row=0, column=2, pady=5)
+        gui.temp_connect_button.pack(side='left')
         
         temp_frame.columnconfigure(1, weight=1)
         
+        # Optical Excitation Section (Collapsible)
+        self._build_optical_section(frame, gui)
+        
         self.widgets["connection_section_modern"] = frame
+    
+    def _scan_visa_resources(self, include_serial: bool = False) -> List[str]:
+        """Scan for available VISA resources (USB, GPIB, and optionally serial)
+        
+        Args:
+            include_serial: If True, also include ASRL (serial) resources
+            
+        Returns:
+            List of available resource addresses
+        """
+        devices = []
+        try:
+            import pyvisa
+            rm = pyvisa.ResourceManager()
+            resources = rm.list_resources()
+            
+            # Filter for USB, GPIB, and optionally serial devices
+            for res in resources:
+                if res.startswith('USB') or res.startswith('GPIB'):
+                    devices.append(res)
+                elif include_serial and (res.startswith('ASRL') or res.startswith('COM')):
+                    devices.append(res)
+            
+            # Sort for better UX
+            devices.sort()
+            
+        except ImportError:
+            print("PyVISA not available - cannot scan for devices")
+        except Exception as e:
+            print(f"Could not scan VISA resources: {e}")
+        
+        return devices
+    
+    def _refresh_address_combo(self, combo: ttk.Combobox, include_serial: bool = False) -> None:
+        """Refresh the address combobox with current VISA resources
+        
+        Args:
+            combo: The combobox to refresh
+            include_serial: If True, include serial resources
+        """
+        current_value = combo.get()
+        available_devices = self._scan_visa_resources(include_serial=include_serial)
+        
+        # Keep current value if it's not in the list
+        if current_value and current_value not in available_devices:
+            available_devices.insert(0, current_value)
+        
+        combo['values'] = available_devices
+        
+        # Restore current value if it was set
+        if current_value:
+            combo.set(current_value)
+    
+    def _validate_address_format(self, address: str) -> Tuple[bool, str]:
+        """Validate address format
+        
+        Args:
+            address: Address string to validate
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not address or not address.strip():
+            return True, ""  # Empty is valid (optional field)
+        
+        address = address.strip()
+        
+        # Check for common valid patterns
+        valid_patterns = [
+            address.startswith('GPIB'),
+            address.startswith('USB'),
+            address.startswith('ASRL'),
+            address.startswith('COM'),
+            address.startswith('TCPIP'),
+            address.startswith('192.168.'),  # IP address
+            address.startswith('SIM'),  # Simulation
+        ]
+        
+        if any(valid_patterns):
+            return True, ""
+        
+        # Check if it looks like an IP:port
+        if ':' in address and '.' in address.split(':')[0]:
+            try:
+                parts = address.split(':')
+                if len(parts) == 2:
+                    ip, port = parts
+                    # Basic IP validation
+                    ip_parts = ip.split('.')
+                    if len(ip_parts) == 4:
+                        all(int(p) >= 0 and int(p) <= 255 for p in ip_parts)
+                        int(port)  # Validate port is numeric
+                        return True, ""
+            except:
+                pass
+        
+        return False, "Invalid address format. Expected: GPIB0::X::INSTR, USB0::..., ASRLX::INSTR, COMX, or IP:PORT"
+    
+    def _query_device_idn(self, address: str, timeout_ms: int = 2000) -> Tuple[bool, str]:
+        """Query device identification using *IDN?
+        
+        Args:
+            address: VISA address
+            timeout_ms: Timeout in milliseconds
+            
+        Returns:
+            Tuple of (success, idn_string or error_message)
+        """
+        if not address or not address.strip():
+            return False, "No address provided"
+        
+        address = address.strip()
+        
+        # Skip simulation addresses
+        if address.upper().startswith('SIM'):
+            return True, "Simulation Device"
+        
+        try:
+            import pyvisa
+            rm = pyvisa.ResourceManager()
+            resource = rm.open_resource(address)
+            resource.timeout = timeout_ms
+            
+            try:
+                idn = resource.query('*IDN?').strip()
+                resource.close()
+                return True, idn
+            except Exception as e:
+                resource.close()
+                # Some devices might not support *IDN?, that's okay
+                return False, f"Device doesn't respond to *IDN?: {str(e)[:50]}"
+        except ImportError:
+            return False, "PyVISA not available"
+        except Exception as e:
+            return False, f"Connection error: {str(e)[:50]}"
+    
+    def _validate_and_identify_address(self, gui: object, device_type: str) -> None:
+        """Validate address format and attempt to identify device
+        
+        Args:
+            gui: GUI instance
+            device_type: 'smu', 'psu', or 'temp'
+        """
+        # Get address based on device type
+        if device_type == 'smu':
+            address_var = gui.keithley_address_var
+            status_indicator = getattr(gui, 'smu_status_indicator', None)
+            device_info = getattr(gui, 'smu_device_info', None)
+        elif device_type == 'psu':
+            address_var = gui.psu_address_var
+            status_indicator = getattr(gui, 'psu_status_indicator', None)
+            device_info = getattr(gui, 'psu_device_info', None)
+        elif device_type == 'temp':
+            address_var = gui.temp_address_var
+            status_indicator = getattr(gui, 'temp_status_indicator', None)
+            device_info = getattr(gui, 'temp_device_info', None)
+        else:
+            return
+        
+        address = address_var.get()
+        
+        # Validate format
+        is_valid, error_msg = self._validate_address_format(address)
+        
+        if not is_valid:
+            if status_indicator:
+                status_indicator.config(fg='red', text="●")
+            if device_info:
+                device_info.config(text=error_msg, fg='red')
+            return
+        
+        if not address or not address.strip():
+            # Empty address is valid
+            if status_indicator:
+                status_indicator.config(fg='gray', text="●")
+            if device_info:
+                device_info.config(text="")
+            return
+        
+        # Try to identify device (non-blocking, quick timeout)
+        if status_indicator:
+            status_indicator.config(fg='orange', text="●")  # Testing
+        if device_info:
+            device_info.config(text="Identifying device...", fg='#666666')
+        
+        # Use after() to avoid blocking UI
+        def identify_async():
+            success, result = self._query_device_idn(address, timeout_ms=1500)
+            if success:
+                if status_indicator:
+                    status_indicator.config(fg='green', text="●")
+                if device_info:
+                    # Truncate long IDN strings
+                    display_text = result if len(result) <= 60 else result[:57] + "..."
+                    device_info.config(text=display_text, fg='green')
+            else:
+                if status_indicator:
+                    status_indicator.config(fg='gray', text="●")
+                if device_info:
+                    device_info.config(text="", fg='#666666')
+        
+        # Schedule async identification
+        if hasattr(gui, 'master'):
+            gui.master.after(100, identify_async)
+    
+    def _test_connection(self, gui: object, device_type: str) -> None:
+        """Test connection to device without full connection
+        
+        Args:
+            gui: GUI instance
+            device_type: 'smu', 'psu', or 'temp'
+        """
+        # Get address based on device type
+        if device_type == 'smu':
+            address_var = gui.keithley_address_var
+            status_indicator = getattr(gui, 'smu_status_indicator', None)
+            device_info = getattr(gui, 'smu_device_info', None)
+            test_button = getattr(gui, 'iv_test_button', None)
+        elif device_type == 'psu':
+            address_var = gui.psu_address_var
+            status_indicator = getattr(gui, 'psu_status_indicator', None)
+            device_info = getattr(gui, 'psu_device_info', None)
+            test_button = getattr(gui, 'psu_test_button', None)
+        elif device_type == 'temp':
+            address_var = gui.temp_address_var
+            status_indicator = getattr(gui, 'temp_status_indicator', None)
+            device_info = getattr(gui, 'temp_device_info', None)
+            test_button = getattr(gui, 'temp_test_button', None)
+        else:
+            return
+        
+        address = address_var.get()
+        
+        if not address or not address.strip():
+            if device_info:
+                device_info.config(text="No address specified", fg='red')
+            return
+        
+        # Disable button during test
+        if test_button:
+            test_button.config(state='disabled', text="Testing...")
+        
+        if status_indicator:
+            status_indicator.config(fg='orange', text="●")
+        if device_info:
+            device_info.config(text="Testing connection...", fg='orange')
+        
+        def test_async():
+            # Validate format first
+            is_valid, error_msg = self._validate_address_format(address)
+            if not is_valid:
+                if status_indicator:
+                    status_indicator.config(fg='red', text="●")
+                if device_info:
+                    device_info.config(text=error_msg, fg='red')
+                if test_button:
+                    test_button.config(state='normal', text="Test")
+                return
+            
+            # Try to query device
+            success, result = self._query_device_idn(address, timeout_ms=3000)
+            
+            if success:
+                if status_indicator:
+                    status_indicator.config(fg='green', text="●")
+                if device_info:
+                    display_text = result if len(result) <= 60 else result[:57] + "..."
+                    device_info.config(text=f"✓ {display_text}", fg='green')
+            else:
+                if status_indicator:
+                    status_indicator.config(fg='red', text="●")
+                if device_info:
+                    device_info.config(text=f"✗ {result}", fg='red')
+            
+            if test_button:
+                test_button.config(state='normal', text="Test")
+        
+        # Schedule async test
+        if hasattr(gui, 'master'):
+            gui.master.after(100, test_async)
+    
+    def _build_optical_section(self, parent: tk.Misc, gui: object) -> None:
+        """Build collapsible optical excitation configuration section"""
+        # Container frame
+        optical_container = tk.Frame(parent, bg=self.COLOR_BG)
+        optical_container.pack(fill='x', pady=(0, 10))
+        
+        # Toggle button and label
+        toggle_frame = tk.Frame(optical_container, bg=self.COLOR_BG)
+        toggle_frame.pack(fill='x')
+        
+        gui.optical_expanded_var = tk.BooleanVar(value=False)
+        
+        # Collapsible frame (create first so we can reference it in lambda)
+        optical_frame = tk.LabelFrame(optical_container, text="", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=10, pady=10)
+        optical_frame.pack_forget()  # Initially hidden
+        
+        toggle_btn = tk.Button(
+            toggle_frame,
+            text="▶",
+            font=("Arial", 10),
+            bg=self.COLOR_BG,
+            fg='black',
+            relief='flat',
+            command=lambda: self._toggle_optical_section(gui, optical_frame, toggle_btn)
+        )
+        toggle_btn.pack(side='left', padx=(0, 5))
+        
+        tk.Label(toggle_frame, text="Optical Excitation (LED/Laser) - Optional", 
+                font=self.FONT_MAIN, bg=self.COLOR_BG).pack(side='left')
+        
+        # Optical type
+        tk.Label(optical_frame, text="Type:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+        optical_types = ['None', 'LED', 'Laser']
+        gui.optical_type_var = tk.StringVar(value='None')
+        gui.optical_type_combo = ttk.Combobox(optical_frame, textvariable=gui.optical_type_var, values=optical_types,
+                                              font=self.FONT_MAIN, width=20, state='readonly')
+        gui.optical_type_combo.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+        gui.optical_type_combo.bind('<<ComboboxSelected>>', 
+                                   lambda e: self._update_optical_ui(gui, optical_frame))
+        
+        # LED-specific fields (initially hidden)
+        gui.optical_led_frame = tk.Frame(optical_frame, bg=self.COLOR_BG)
+        gui.optical_led_frame.grid(row=1, column=0, columnspan=3, sticky='ew', pady=5)
+        
+        # Laser-specific fields (initially hidden)
+        gui.optical_laser_frame = tk.Frame(optical_frame, bg=self.COLOR_BG)
+        gui.optical_laser_frame.grid(row=2, column=0, columnspan=3, sticky='ew', pady=5)
+        
+        optical_frame.columnconfigure(1, weight=1)
+        gui.optical_config_frame = optical_frame
+        gui.optical_toggle_button = toggle_btn
+    
+    def _toggle_optical_section(self, gui: object, frame: tk.Frame, button: tk.Button) -> None:
+        """Toggle visibility of optical configuration section"""
+        if gui.optical_expanded_var.get():
+            frame.pack_forget()
+            button.config(text="▶")
+            gui.optical_expanded_var.set(False)
+        else:
+            frame.pack(fill='x', pady=(0, 10))
+            button.config(text="▼")
+            gui.optical_expanded_var.set(True)
+    
+    def _update_optical_ui(self, gui: object, parent: tk.Frame) -> None:
+        """Update optical UI based on selected type"""
+        opt_type = gui.optical_type_var.get()
+        
+        # Hide all sub-frames
+        for widget in gui.optical_led_frame.winfo_children():
+            widget.destroy()
+        for widget in gui.optical_laser_frame.winfo_children():
+            widget.destroy()
+        
+        if opt_type == 'LED':
+            # LED configuration
+            tk.Label(gui.optical_led_frame, text="Units:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+            led_units = ['mA', 'V']
+            gui.optical_led_units_var = tk.StringVar(value='mA')
+            ttk.Combobox(gui.optical_led_frame, textvariable=gui.optical_led_units_var, values=led_units,
+                        font=self.FONT_MAIN, width=15, state='readonly').grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_led_frame, text="Channels (e.g., 380nm:1,420nm:2):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=1, column=0, sticky='w', pady=5)
+            gui.optical_led_channels_var = tk.StringVar(value="380nm:1,420nm:2")
+            ttk.Entry(gui.optical_led_frame, textvariable=gui.optical_led_channels_var, 
+                     font=self.FONT_MAIN, width=30).grid(row=1, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_led_frame, text="Min:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=2, column=0, sticky='w', pady=5)
+            gui.optical_led_min_var = tk.StringVar(value="0.0")
+            ttk.Entry(gui.optical_led_frame, textvariable=gui.optical_led_min_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=2, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_led_frame, text="Max:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=2, column=2, sticky='w', pady=5, padx=(10, 0))
+            gui.optical_led_max_var = tk.StringVar(value="30.0")
+            ttk.Entry(gui.optical_led_frame, textvariable=gui.optical_led_max_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=2, column=3, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_led_frame, text="Default Channel:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=3, column=0, sticky='w', pady=5)
+            gui.optical_led_default_channel_var = tk.StringVar(value="380nm")
+            ttk.Entry(gui.optical_led_frame, textvariable=gui.optical_led_default_channel_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=3, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            gui.optical_led_frame.columnconfigure(1, weight=1)
+            gui.optical_led_frame.pack(fill='x')
+            
+        elif opt_type == 'Laser':
+            # Laser configuration
+            tk.Label(gui.optical_laser_frame, text="Driver:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
+            laser_drivers = ['Oxxius']
+            gui.optical_laser_driver_var = tk.StringVar(value='Oxxius')
+            ttk.Combobox(gui.optical_laser_frame, textvariable=gui.optical_laser_driver_var, values=laser_drivers,
+                        font=self.FONT_MAIN, width=20, state='readonly').grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_laser_frame, text="Address:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=1, column=0, sticky='w', pady=5)
+            gui.optical_laser_address_var = tk.StringVar(value="COM4")
+            ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_address_var, 
+                     font=self.FONT_MAIN, width=30).grid(row=1, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_laser_frame, text="Baud:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=2, column=0, sticky='w', pady=5)
+            gui.optical_laser_baud_var = tk.StringVar(value="19200")
+            ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_baud_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=2, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_laser_frame, text="Units:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=3, column=0, sticky='w', pady=5)
+            laser_units = ['mW']
+            gui.optical_laser_units_var = tk.StringVar(value='mW')
+            ttk.Combobox(gui.optical_laser_frame, textvariable=gui.optical_laser_units_var, values=laser_units,
+                        font=self.FONT_MAIN, width=15, state='readonly').grid(row=3, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_laser_frame, text="Wavelength (nm):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=4, column=0, sticky='w', pady=5)
+            gui.optical_laser_wavelength_var = tk.StringVar(value="405")
+            ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_wavelength_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=4, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_laser_frame, text="Min (mW):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=5, column=0, sticky='w', pady=5)
+            gui.optical_laser_min_var = tk.StringVar(value="0.0")
+            ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_min_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=5, column=1, sticky='ew', pady=5, padx=(10, 10))
+            
+            tk.Label(gui.optical_laser_frame, text="Max (mW):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=5, column=2, sticky='w', pady=5, padx=(10, 0))
+            gui.optical_laser_max_var = tk.StringVar(value="10.0")
+            ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_max_var, 
+                     font=self.FONT_MAIN, width=15).grid(row=5, column=3, sticky='ew', pady=5, padx=(10, 10))
+            
+            gui.optical_laser_frame.columnconfigure(1, weight=1)
+            gui.optical_laser_frame.pack(fill='x')
     
     # ------------------------------------------------------------------
     # TAB 4: Custom Measurements (full interface)
@@ -980,8 +1695,1223 @@ class MeasurementGUILayoutBuilder:
             content = self._create_scrollable_panel(tab)
             content._container.pack(fill='both', expand=True, padx=20, pady=20)
             self._build_custom_measurement_section(content)
-        
+
         self.widgets["custom_measurements_tab"] = tab
+    
+    # ------------------------------------------------------------------
+    # TAB 5: Notes
+    # ------------------------------------------------------------------
+    def _create_notes_tab(self, notebook: ttk.Notebook) -> None:
+        """Create the Notes tab for device and sample notes"""
+        gui = self.gui
+        
+        tab = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab, text="  Notes  ")
+        
+        # Configure grid - split view: left (current notes) and right (previous devices)
+        tab.columnconfigure(0, weight=2)  # Left side - current notes (more space)
+        tab.columnconfigure(1, weight=1)  # Right side - previous devices (less space)
+        tab.rowconfigure(1, weight=1)
+        
+        # Control frame at top (spans both columns)
+        control_frame = tk.Frame(tab, bg=self.COLOR_BG, padx=20, pady=10)
+        control_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+        control_frame.columnconfigure(1, weight=1)
+        
+        # Notes type selector
+        tk.Label(control_frame, text="Notes Type:", font=self.FONT_HEADING, bg=self.COLOR_BG).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        
+        gui.notes_type_var = tk.StringVar(value="device")
+        notes_type_frame = tk.Frame(control_frame, bg=self.COLOR_BG)
+        notes_type_frame.grid(row=0, column=1, sticky="w")
+        
+        tk.Radiobutton(
+            notes_type_frame,
+            text="Device Notes",
+            variable=gui.notes_type_var,
+            value="device",
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG,
+            command=lambda: self._switch_notes_type(gui, "device")
+        ).pack(side="left", padx=5)
+        
+        tk.Radiobutton(
+            notes_type_frame,
+            text="Sample Notes",
+            variable=gui.notes_type_var,
+            value="sample",
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG,
+            command=lambda: self._switch_notes_type(gui, "sample")
+        ).pack(side="left", padx=5)
+        
+        # Save button
+        save_btn = tk.Button(
+            control_frame,
+            text="Save Notes",
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_PRIMARY,
+            fg="white",
+            command=lambda: self._save_notes(gui),
+            padx=15,
+            pady=5
+        )
+        save_btn.grid(row=0, column=2, sticky="e", padx=(20, 0))
+        gui.notes_save_button = save_btn
+        
+        # Status label
+        gui.notes_status_label = tk.Label(
+            control_frame,
+            text="",
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG,
+            fg=self.COLOR_SECONDARY
+        )
+        gui.notes_status_label.grid(row=0, column=3, sticky="e", padx=(10, 0))
+        
+        # LEFT SIDE - Current notes text area
+        left_frame = tk.Frame(tab, bg=self.COLOR_BG)
+        left_frame.grid(row=1, column=0, sticky="nsew", padx=(20, 10), pady=(0, 20))
+        left_frame.columnconfigure(0, weight=1)
+        left_frame.rowconfigure(1, weight=1)  # Text widget row
+        
+        # Toolbar with formatting and utility buttons
+        toolbar_frame = tk.Frame(left_frame, bg=self.COLOR_BG, pady=5)
+        toolbar_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+        
+        # Date/Time button
+        date_btn = tk.Button(
+            toolbar_frame,
+            text="📅 Date/Time",
+            font=self.FONT_MAIN,
+            bg="#e3f2fd",
+            fg="#1976d2",
+            command=lambda: self._insert_datetime(gui),
+            padx=8,
+            pady=3
+        )
+        date_btn.pack(side="left", padx=2)
+        
+        # Measurement Details button
+        meas_btn = tk.Button(
+            toolbar_frame,
+            text="📊 Measurement Details",
+            font=self.FONT_MAIN,
+            bg="#e3f2fd",
+            fg="#1976d2",
+            command=lambda: self._insert_measurement_details(gui),
+            padx=8,
+            pady=3
+        )
+        meas_btn.pack(side="left", padx=2)
+        
+        # Separator
+        tk.Frame(toolbar_frame, bg="#ccc", width=1).pack(side="left", padx=5, fill="y", pady=2)
+        
+        # Bold button
+        bold_btn = tk.Button(
+            toolbar_frame,
+            text="B",
+            font=("Arial", 12, "bold"),
+            bg="#f5f5f5",
+            fg="black",
+            command=lambda: self._toggle_bold(gui),
+            padx=8,
+            pady=3,
+            width=3
+        )
+        bold_btn.pack(side="left", padx=2)
+        
+        # Italic button
+        italic_btn = tk.Button(
+            toolbar_frame,
+            text="I",
+            font=("Arial", 12, "italic"),
+            bg="#f5f5f5",
+            fg="black",
+            command=lambda: self._toggle_italic(gui),
+            padx=8,
+            pady=3,
+            width=3
+        )
+        italic_btn.pack(side="left", padx=2)
+        
+        # Text widget with scrollbar (enable undo/redo and formatting)
+        gui.notes_text = tk.Text(
+            left_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 10),
+            bg="white",
+            fg="black",
+            padx=10,
+            pady=10,
+            relief=tk.SOLID,
+            borderwidth=1,
+            undo=True,
+            maxundo=50
+        )
+        gui.notes_text.grid(row=1, column=0, sticky="nsew")
+        
+        notes_scrollbar = ttk.Scrollbar(left_frame, orient="vertical", command=gui.notes_text.yview)
+        notes_scrollbar.grid(row=1, column=1, sticky="ns")
+        gui.notes_text.configure(yscrollcommand=notes_scrollbar.set)
+        
+        # Info label with keyboard shortcuts hint
+        info_label = tk.Label(
+            left_frame,
+            text="Auto-saves after 500ms of no typing. | Shortcuts: Ctrl+S (Save), Ctrl+D (Date/Time), Ctrl+Z (Undo), Ctrl+Y (Redo), Ctrl+B (Bold), Ctrl+I (Italic)",
+            font=("Segoe UI", 8),
+            bg=self.COLOR_BG,
+            fg=self.COLOR_SECONDARY,
+            anchor="w"
+        )
+        info_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        
+        # RIGHT SIDE - Previous devices' notes
+        right_frame = tk.Frame(tab, bg=self.COLOR_BG)
+        right_frame.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+        right_frame.rowconfigure(1, weight=1)
+        
+        # Get previous two devices
+        previous_devices = self._get_previous_devices(gui)
+        
+        # Previous device 1 (most recent)
+        if len(previous_devices) > 0:
+            prev1_frame = tk.LabelFrame(right_frame, text=f"Previous Device 1: {previous_devices[0]['name']}", 
+                                       font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+            prev1_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+            prev1_frame.columnconfigure(0, weight=1)
+            prev1_frame.rowconfigure(0, weight=1)
+            
+            gui.prev_device1_text = tk.Text(
+                prev1_frame,
+                wrap=tk.WORD,
+                font=("Consolas", 9),
+                bg="white",
+                fg="black",
+                padx=8,
+                pady=8,
+                relief=tk.SOLID,
+                borderwidth=1,
+                height=15,
+                undo=True,
+                maxundo=50
+            )
+            gui.prev_device1_text.grid(row=0, column=0, sticky="nsew")
+            
+            prev1_scrollbar = ttk.Scrollbar(prev1_frame, orient="vertical", command=gui.prev_device1_text.yview)
+            prev1_scrollbar.grid(row=0, column=1, sticky="ns")
+            gui.prev_device1_text.configure(yscrollcommand=prev1_scrollbar.set)
+            
+            # Load notes for previous device 1
+            self._load_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+            
+            # Auto-save on focus loss and track changes
+            gui.prev_device1_text.bind("<FocusOut>", lambda e: self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text))
+            gui.prev_device1_text.bind("<KeyRelease>", lambda e: self._mark_prev_device1_changed(gui))
+        else:
+            # Empty frame if no previous device
+            empty_frame1 = tk.LabelFrame(right_frame, text="Previous Device 1: None", 
+                                        font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+            empty_frame1.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+            tk.Label(empty_frame1, text="No previous device", font=self.FONT_MAIN, 
+                    bg=self.COLOR_BG, fg=self.COLOR_SECONDARY).pack(pady=20)
+            gui.prev_device1_text = None
+        
+        # Previous device 2 (second most recent)
+        if len(previous_devices) > 1:
+            prev2_frame = tk.LabelFrame(right_frame, text=f"Previous Device 2: {previous_devices[1]['name']}", 
+                                       font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+            prev2_frame.grid(row=1, column=0, sticky="nsew")
+            prev2_frame.columnconfigure(0, weight=1)
+            prev2_frame.rowconfigure(0, weight=1)
+            
+            gui.prev_device2_text = tk.Text(
+                prev2_frame,
+                wrap=tk.WORD,
+                font=("Consolas", 9),
+                bg="white",
+                fg="black",
+                padx=8,
+                pady=8,
+                relief=tk.SOLID,
+                borderwidth=1,
+                height=15,
+                undo=True,
+                maxundo=50
+            )
+            gui.prev_device2_text.grid(row=0, column=0, sticky="nsew")
+            
+            prev2_scrollbar = ttk.Scrollbar(prev2_frame, orient="vertical", command=gui.prev_device2_text.yview)
+            prev2_scrollbar.grid(row=0, column=1, sticky="ns")
+            gui.prev_device2_text.configure(yscrollcommand=prev2_scrollbar.set)
+            
+            # Load notes for previous device 2
+            self._load_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+            
+            # Auto-save on focus loss and track changes
+            gui.prev_device2_text.bind("<FocusOut>", lambda e: self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text))
+            gui.prev_device2_text.bind("<KeyRelease>", lambda e: self._mark_prev_device2_changed(gui))
+        else:
+            # Empty frame if no second previous device
+            empty_frame2 = tk.LabelFrame(right_frame, text="Previous Device 2: None", 
+                                        font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+            empty_frame2.grid(row=1, column=0, sticky="nsew")
+            tk.Label(empty_frame2, text="No previous device", font=self.FONT_MAIN, 
+                    bg=self.COLOR_BG, fg=self.COLOR_SECONDARY).pack(pady=20)
+            gui.prev_device2_text = None
+        
+        # Load initial notes
+        self._load_notes(gui)
+        
+        # Track last saved content for change detection
+        gui.notes_last_saved = gui.notes_text.get("1.0", tk.END)
+        gui.notes_changed = False
+        if gui.prev_device1_text:
+            gui.prev_device1_last_saved = gui.prev_device1_text.get("1.0", tk.END)
+            gui.prev_device1_changed = False
+        if gui.prev_device2_text:
+            gui.prev_device2_last_saved = gui.prev_device2_text.get("1.0", tk.END)
+            gui.prev_device2_changed = False
+        
+        # Auto-save on focus loss and every change (immediate save)
+        gui.notes_text.bind("<FocusOut>", lambda e: self._auto_save_notes(gui))
+        gui.notes_text.bind("<KeyRelease>", lambda e: self._on_notes_key_release(gui))
+        
+        # Keyboard shortcuts for Notes tab
+        self._setup_notes_keyboard_shortcuts(gui, tab)
+        
+        # Auto-save on tab switch (CRITICAL - save before leaving Notes tab)
+        def on_tab_change(event):
+            try:
+                current_tab_text = event.widget.tab('current')['text'].strip()
+                if current_tab_text == 'Notes':
+                    # Entering Notes tab - reload notes
+                    self._load_notes(gui)
+                    # Reload previous devices' notes (refresh the previous devices list)
+                    previous_devices = self._get_previous_devices(gui)
+                    if len(previous_devices) > 0 and hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+                        self._load_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+                        gui.prev_device1_last_saved = gui.prev_device1_text.get("1.0", tk.END)
+                        # Update label with device name
+                        prev1_frame = gui.prev_device1_text.master
+                        if isinstance(prev1_frame, tk.LabelFrame):
+                            prev1_frame.config(text=f"Previous Device 1: {previous_devices[0]['name']}")
+                    if len(previous_devices) > 1 and hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
+                        self._load_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+                        gui.prev_device2_last_saved = gui.prev_device2_text.get("1.0", tk.END)
+                        # Update label with device name
+                        prev2_frame = gui.prev_device2_text.master
+                        if isinstance(prev2_frame, tk.LabelFrame):
+                            prev2_frame.config(text=f"Previous Device 2: {previous_devices[1]['name']}")
+                else:
+                    # Leaving Notes tab - FORCE SAVE immediately (user lost notes before)
+                    if hasattr(gui, 'notes_text') and hasattr(gui, 'notes_type_var'):
+                        self._save_notes(gui)  # Use _save_notes instead of _auto_save_notes for immediate save
+                    # Save previous devices' notes
+                    if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+                        previous_devices = self._get_previous_devices(gui)
+                        if len(previous_devices) > 0:
+                            self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+                    if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
+                        previous_devices = self._get_previous_devices(gui)
+                        if len(previous_devices) > 1:
+                            self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+            except Exception:
+                pass  # Silently ignore errors during tab switching
+        
+        notebook.bind("<<NotebookTabChanged>>", on_tab_change)
+        
+        # Start periodic auto-save (every 10 seconds)
+        self._start_auto_save_timer(gui)
+        
+        # Start polling for device changes in Sample_GUI (to auto-reload device notes)
+        self._start_device_change_polling(gui)
+        
+        self.widgets["notes_tab"] = tab
+    
+    def _get_previous_devices(self, gui) -> List[Dict[str, Any]]:
+        """Get the previous two devices from the same sample (e.g., if on A2, show A1; if on A3, show A2 and A1)"""
+        previous_devices = []
+        
+        try:
+            # Get current device identifier (A1, A2, etc.)
+            current_device_id = None
+            if hasattr(gui, 'device_section_and_number'):
+                current_device_id = gui.device_section_and_number
+            
+            # Get sample name (D104, etc.)
+            sample_name = None
+            if hasattr(gui, 'sample_gui') and gui.sample_gui:
+                sample_name = getattr(gui.sample_gui, 'current_device_name', None)
+                if not sample_name:
+                    sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
+                    if sample_type_var and hasattr(sample_type_var, 'get'):
+                        sample_name = sample_type_var.get()
+            
+            if not sample_name:
+                sample_name = getattr(gui, 'sample_name_var', None)
+                if sample_name and hasattr(sample_name, 'get'):
+                    sample_name = sample_name.get()
+            
+            if not current_device_id or not sample_name:
+                return previous_devices
+            
+            # Get device list to find current device's position
+            device_list = getattr(gui, 'device_list', [])
+            if not device_list:
+                return previous_devices
+            
+            # Find current device index in the list
+            current_index = None
+            for idx, device_key in enumerate(device_list):
+                # Convert device key to identifier (A1, A2, etc.)
+                if hasattr(gui, 'convert_to_name'):
+                    device_identifier = gui.convert_to_name(idx)
+                    if device_identifier == current_device_id:
+                        current_index = idx
+                        break
+            
+            if current_index is None:
+                return previous_devices
+            
+            # Get previous devices by going backwards in the device list
+            from pathlib import Path
+            save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+            sample_folder = save_root / sample_name.replace(" ", "_")
+            
+            if not sample_folder.exists():
+                return previous_devices
+            
+            # Look for previous devices in sequence (A1 if on A2, A2 and A1 if on A3, etc.)
+            for offset in range(1, 3):  # Get previous 2 devices
+                prev_index = current_index - offset
+                if prev_index >= 0 and prev_index < len(device_list):
+                    # Convert to device identifier
+                    if hasattr(gui, 'convert_to_name'):
+                        prev_device_id = gui.convert_to_name(prev_index)
+                        # Build path: {save_root}/{sample_name}/{letter}/{number}/device_info.json
+                        letter = prev_device_id[0] if len(prev_device_id) > 0 else "A"
+                        number = prev_device_id[1:] if len(prev_device_id) > 1 else "1"
+                        device_folder = sample_folder / letter / number
+                        info_path = device_folder / "device_info.json"
+                        
+                        if info_path.exists():
+                            try:
+                                import json
+                                with info_path.open("r", encoding="utf-8") as f:
+                                    device_info = json.load(f)
+                                    previous_devices.append({
+                                        "name": prev_device_id,
+                                        "folder": device_folder,
+                                        "last_modified": device_info.get("last_modified", ""),
+                                        "device_id": prev_device_id
+                                    })
+                            except Exception:
+                                continue
+                        else:
+                            # Device folder exists but no notes yet - still add it
+                            previous_devices.append({
+                                "name": prev_device_id,
+                                "folder": device_folder,
+                                "last_modified": "",
+                                "device_id": prev_device_id
+                            })
+            
+        except Exception as e:
+            print(f"Error getting previous devices: {e}")
+        
+        return previous_devices
+    
+    def _load_previous_device_notes(self, gui, device_info: Dict[str, Any], text_widget: tk.Text) -> None:
+        """Load notes for a previous device"""
+        try:
+            # Disable undo temporarily while loading
+            text_widget.config(undo=False)
+            text_widget.delete("1.0", tk.END)
+            
+            # device_info["folder"] is already the device folder path
+            info_path = device_info["folder"] / "device_info.json"
+            if info_path.exists():
+                import json
+                with info_path.open("r", encoding="utf-8") as f:
+                    device_data = json.load(f)
+                    notes = device_data.get("notes", "")
+                    if notes:
+                        text_widget.insert("1.0", notes)
+            # Re-enable undo and reset stack
+            text_widget.config(undo=True)
+            text_widget.edit_reset()
+        except Exception as e:
+            print(f"Error loading previous device notes: {e}")
+            # Make sure undo is re-enabled even on error
+            try:
+                text_widget.config(undo=True)
+            except:
+                pass
+    
+    def _save_previous_device_notes(self, gui, device_info: Dict[str, Any], text_widget: tk.Text) -> None:
+        """Save notes for a previous device"""
+        try:
+            notes_content = text_widget.get("1.0", tk.END).strip()
+            info_path = device_info["folder"] / "device_info.json"
+            
+            # Load existing device_info or create new
+            device_data = {}
+            if info_path.exists():
+                import json
+                with info_path.open("r", encoding="utf-8") as f:
+                    device_data = json.load(f)
+            
+            # Update notes and metadata
+            from datetime import datetime
+            device_data["notes"] = notes_content
+            device_data["last_modified"] = datetime.now().isoformat(timespec='seconds')
+            if "name" not in device_data:
+                device_data["name"] = device_info["name"]
+            if "created" not in device_data:
+                device_data["created"] = datetime.now().isoformat(timespec='seconds')
+            
+            # Save
+            import json
+            with info_path.open("w", encoding="utf-8") as f:
+                json.dump(device_data, f, indent=2)
+        except Exception as e:
+            print(f"Error saving previous device notes: {e}")
+    
+    def _mark_notes_changed(self, gui) -> None:
+        """Mark that notes have been changed (for auto-save detection)"""
+        if hasattr(gui, 'notes_text'):
+            gui.notes_changed = True
+    
+    def _on_notes_key_release(self, gui) -> None:
+        """Handle key release - mark changed and auto-save immediately"""
+        self._mark_notes_changed(gui)
+        # Auto-save immediately on change (debounced slightly)
+        if hasattr(gui, '_notes_save_timer'):
+            gui.master.after_cancel(gui._notes_save_timer)
+        # Save after 500ms of no typing (debounce)
+        gui._notes_save_timer = gui.master.after(500, lambda: self._auto_save_notes(gui))
+    
+    def _mark_prev_device1_changed(self, gui) -> None:
+        """Mark that previous device 1 notes have been changed"""
+        if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+            gui.prev_device1_changed = True
+    
+    def _mark_prev_device2_changed(self, gui) -> None:
+        """Mark that previous device 2 notes have been changed"""
+        if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
+            gui.prev_device2_changed = True
+    
+    def _setup_notes_keyboard_shortcuts(self, gui, tab: tk.Frame) -> None:
+        """Setup keyboard shortcuts for Notes tab: Ctrl+S (save), Ctrl+Z (undo), Ctrl+Y (redo)"""
+        def get_focused_text_widget():
+            """Get the currently focused text widget"""
+            focused = gui.master.focus_get()
+            if focused == gui.notes_text:
+                return gui.notes_text
+            elif hasattr(gui, 'prev_device1_text') and gui.prev_device1_text and focused == gui.prev_device1_text:
+                return gui.prev_device1_text
+            elif hasattr(gui, 'prev_device2_text') and gui.prev_device2_text and focused == gui.prev_device2_text:
+                return gui.prev_device2_text
+            return None
+        
+        def on_save(event):
+            """Ctrl+S: Quick save notes"""
+            text_widget = get_focused_text_widget()
+            if text_widget == gui.notes_text:
+                # Save main notes
+                self._save_notes(gui)
+                # Show quick save confirmation
+                if hasattr(gui, 'notes_status_label'):
+                    original_text = gui.notes_status_label.cget("text")
+                    gui.notes_status_label.config(text="✓ Saved!", fg=self.COLOR_SUCCESS)
+                    # Reset after 2 seconds
+                    if hasattr(gui, 'master'):
+                        gui.master.after(2000, lambda: gui.notes_status_label.config(text=original_text, fg=self.COLOR_INFO))
+            elif text_widget == gui.prev_device1_text:
+                # Save previous device 1 notes
+                previous_devices = self._get_previous_devices(gui)
+                if len(previous_devices) > 0:
+                    self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+            elif text_widget == gui.prev_device2_text:
+                # Save previous device 2 notes
+                previous_devices = self._get_previous_devices(gui)
+                if len(previous_devices) > 1:
+                    self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+            return "break"  # Prevent default behavior
+        
+        def on_undo(event):
+            """Ctrl+Z: Undo"""
+            text_widget = get_focused_text_widget()
+            if text_widget:
+                try:
+                    text_widget.edit_undo()
+                except tk.TclError:
+                    pass  # No undo available
+            return "break"
+        
+        def on_redo(event):
+            """Ctrl+Y: Redo"""
+            text_widget = get_focused_text_widget()
+            if text_widget:
+                try:
+                    text_widget.edit_redo()
+                except tk.TclError:
+                    pass  # No redo available
+            return "break"
+        
+        # Bind shortcuts to the master window (works when Notes tab is active)
+        # Also bind to individual text widgets for better focus handling
+        def on_datetime(event):
+            """Ctrl+D: Insert date/time"""
+            self._insert_datetime(gui)
+            return "break"
+        
+        def on_bold(event):
+            """Ctrl+B: Toggle bold"""
+            self._toggle_bold(gui)
+            return "break"
+        
+        def on_italic(event):
+            """Ctrl+I: Toggle italic"""
+            self._toggle_italic(gui)
+            return "break"
+        
+        gui.notes_text.bind("<Control-s>", on_save)
+        gui.notes_text.bind("<Control-S>", on_save)
+        gui.notes_text.bind("<Control-d>", on_datetime)
+        gui.notes_text.bind("<Control-D>", on_datetime)
+        gui.notes_text.bind("<Control-z>", on_undo)
+        gui.notes_text.bind("<Control-Z>", on_undo)
+        gui.notes_text.bind("<Control-y>", on_redo)
+        gui.notes_text.bind("<Control-Y>", on_redo)
+        gui.notes_text.bind("<Control-b>", on_bold)
+        gui.notes_text.bind("<Control-B>", on_bold)
+        gui.notes_text.bind("<Control-i>", on_italic)
+        gui.notes_text.bind("<Control-I>", on_italic)
+        
+        if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+            gui.prev_device1_text.bind("<Control-s>", on_save)
+            gui.prev_device1_text.bind("<Control-S>", on_save)
+            gui.prev_device1_text.bind("<Control-z>", on_undo)
+            gui.prev_device1_text.bind("<Control-Z>", on_undo)
+            gui.prev_device1_text.bind("<Control-y>", on_redo)
+            gui.prev_device1_text.bind("<Control-Y>", on_redo)
+        
+        if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
+            gui.prev_device2_text.bind("<Control-s>", on_save)
+            gui.prev_device2_text.bind("<Control-S>", on_save)
+            gui.prev_device2_text.bind("<Control-z>", on_undo)
+            gui.prev_device2_text.bind("<Control-Z>", on_undo)
+            gui.prev_device2_text.bind("<Control-y>", on_redo)
+            gui.prev_device2_text.bind("<Control-Y>", on_redo)
+    
+    def _insert_datetime(self, gui) -> None:
+        """Insert current date and time at cursor position"""
+        from datetime import datetime
+        dt_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        gui.notes_text.insert(tk.INSERT, dt_str)
+    
+    def _insert_measurement_details(self, gui) -> None:
+        """Insert current measurement details from Measurement GUI or TSP Testing GUI"""
+        details = []
+        
+        # Try to get details from TSP Testing GUI first (if open)
+        tsp_details = self._get_tsp_testing_details(gui)
+        if tsp_details:
+            details.append("=== Pulse Testing Details ===")
+            details.extend(tsp_details)
+            details.append("")
+        
+        # Get details from Measurement GUI
+        meas_details = self._get_measurement_gui_details(gui)
+        if meas_details:
+            if tsp_details:
+                details.append("=== Measurement GUI Details ===")
+            details.extend(meas_details)
+        
+        if not details:
+            details.append("No active measurement parameters found.")
+        
+        # Insert at cursor position
+        text_to_insert = "\n".join(details) + "\n\n"
+        gui.notes_text.insert(tk.INSERT, text_to_insert)
+    
+    def _get_tsp_testing_details(self, gui) -> List[str]:
+        """Get measurement details from TSP Testing GUI if it's open"""
+        details = []
+        try:
+            # Check if TSP Testing GUI is open by searching all Toplevel windows
+            # TSP Testing GUI is a Toplevel window
+            root = gui.master.winfo_toplevel()
+            tsp_gui = None
+            
+            # Search through all windows
+            def find_tsp_window(widget):
+                if isinstance(widget, tk.Toplevel):
+                    try:
+                        title = widget.title()
+                        if 'Pulse Testing' in title or 'TSP' in title:
+                            return widget
+                    except:
+                        pass
+                # Check children
+                for child in widget.winfo_children():
+                    result = find_tsp_window(child)
+                    if result:
+                        return result
+                return None
+            
+            tsp_gui = find_tsp_window(root)
+            
+            if tsp_gui:
+                    
+                    # Get test name
+                    if hasattr(tsp_gui, 'test_var'):
+                        test_name = tsp_gui.test_var.get()
+                        if test_name:
+                            details.append(f"Test Type: {test_name}")
+                    
+                    # Get parameters
+                    if hasattr(tsp_gui, 'param_vars'):
+                        params = {}
+                        for param_name, param_info in tsp_gui.param_vars.items():
+                            try:
+                                var = param_info["var"]
+                                param_type = param_info["type"]
+                                value_str = var.get()
+                                
+                                if param_type == "list":
+                                    params[param_name] = value_str
+                                else:
+                                    params[param_name] = value_str
+                            except:
+                                pass
+                        
+                        # Format key parameters
+                        if 'pulse_voltage' in params:
+                            details.append(f"Pulse Voltage: {params['pulse_voltage']} V")
+                        if 'pulse_width' in params:
+                            details.append(f"Pulse Width: {params['pulse_width']} ms")
+                        if 'read_voltage' in params:
+                            details.append(f"Read Voltage: {params['read_voltage']} V")
+                        if 'num_cycles' in params:
+                            details.append(f"Number of Cycles: {params['num_cycles']}")
+                        if 'num_pulses' in params:
+                            details.append(f"Number of Pulses: {params['num_pulses']}")
+                        if 'set_voltage' in params:
+                            details.append(f"SET Voltage: {params['set_voltage']} V")
+                        if 'reset_voltage' in params:
+                            details.append(f"RESET Voltage: {params['reset_voltage']} V")
+                    
+                    # Get device address
+                    if hasattr(tsp_gui, 'addr_var'):
+                        addr = tsp_gui.addr_var.get()
+                        if addr:
+                            details.append(f"Device Address: {addr}")
+                    
+                    # Get system
+                    if hasattr(tsp_gui, 'current_system_name'):
+                        system = tsp_gui.current_system_name
+                        if system:
+                            details.append(f"System: {system.upper()}")
+        except Exception as e:
+            print(f"Error getting TSP Testing details: {e}")
+        
+        return details
+    
+    def _get_measurement_gui_details(self, gui) -> List[str]:
+        """Get measurement details from Measurement GUI"""
+        details = []
+        try:
+            # Measurement type
+            if hasattr(gui, 'excitation_var'):
+                meas_type = gui.excitation_var.get()
+                if meas_type:
+                    details.append(f"Measurement Type: {meas_type}")
+            
+            # Sweep mode and type
+            if hasattr(gui, 'sweep_mode_var'):
+                sweep_mode = gui.sweep_mode_var.get()
+                if sweep_mode:
+                    details.append(f"Sweep Mode: {sweep_mode}")
+            
+            if hasattr(gui, 'sweep_type_var'):
+                sweep_type = gui.sweep_type_var.get()
+                if sweep_type:
+                    details.append(f"Sweep Type: {sweep_type}")
+            
+            # Voltage parameters (try common attribute names)
+            voltage_params = []
+            for attr in ['start_voltage_var', 'stop_voltage_var', 'voltage_var', 'max_voltage_var']:
+                if hasattr(gui, attr):
+                    var = getattr(gui, attr)
+                    if hasattr(var, 'get'):
+                        val = var.get()
+                        if val:
+                            param_name = attr.replace('_var', '').replace('_', ' ').title()
+                            voltage_params.append(f"{param_name}: {val} V")
+            
+            if voltage_params:
+                details.extend(voltage_params)
+            
+            # Source mode
+            if hasattr(gui, 'source_mode_var'):
+                source_mode = gui.source_mode_var.get()
+                if source_mode:
+                    details.append(f"Source Mode: {source_mode}")
+            
+            # Device info
+            if hasattr(gui, 'device_section_and_number'):
+                device = gui.device_section_and_number
+                if device:
+                    details.append(f"Device: {device}")
+            
+            # Sample name
+            if hasattr(gui, 'sample_name_var'):
+                sample_name = gui.sample_name_var.get()
+                if sample_name:
+                    details.append(f"Sample: {sample_name}")
+            
+        except Exception as e:
+            print(f"Error getting Measurement GUI details: {e}")
+        
+        return details
+    
+    def _toggle_bold(self, gui) -> None:
+        """Toggle bold formatting for selected text or at cursor"""
+        try:
+            # Get current selection
+            sel_start = gui.notes_text.index(tk.SEL_FIRST) if gui.notes_text.tag_ranges(tk.SEL) else gui.notes_text.index(tk.INSERT)
+            sel_end = gui.notes_text.index(tk.SEL_LAST) if gui.notes_text.tag_ranges(tk.SEL) else gui.notes_text.index(tk.INSERT + " wordend")
+            
+            # Check if bold tag exists
+            tags = gui.notes_text.tag_names(sel_start)
+            if "bold" in tags:
+                # Remove bold
+                gui.notes_text.tag_remove("bold", sel_start, sel_end)
+            else:
+                # Add bold
+                gui.notes_text.tag_add("bold", sel_start, sel_end)
+                gui.notes_text.tag_config("bold", font=("Consolas", 10, "bold"))
+        except Exception:
+            # If no selection, just add bold tag at cursor for next typing
+            gui.notes_text.tag_add("bold", tk.INSERT)
+            gui.notes_text.tag_config("bold", font=("Consolas", 10, "bold"))
+    
+    def _toggle_italic(self, gui) -> None:
+        """Toggle italic formatting for selected text or at cursor"""
+        try:
+            # Get current selection
+            sel_start = gui.notes_text.index(tk.SEL_FIRST) if gui.notes_text.tag_ranges(tk.SEL) else gui.notes_text.index(tk.INSERT)
+            sel_end = gui.notes_text.index(tk.SEL_LAST) if gui.notes_text.tag_ranges(tk.SEL) else gui.notes_text.index(tk.INSERT + " wordend")
+            
+            # Check if italic tag exists
+            tags = gui.notes_text.tag_names(sel_start)
+            if "italic" in tags:
+                # Remove italic
+                gui.notes_text.tag_remove("italic", sel_start, sel_end)
+            else:
+                # Add italic
+                gui.notes_text.tag_add("italic", sel_start, sel_end)
+                gui.notes_text.tag_config("italic", font=("Consolas", 10, "italic"))
+        except Exception:
+            # If no selection, just add italic tag at cursor for next typing
+            gui.notes_text.tag_add("italic", tk.INSERT)
+            gui.notes_text.tag_config("italic", font=("Consolas", 10, "italic"))
+    
+    def _start_device_change_polling(self, gui) -> None:
+        """Poll for device changes (device_section_and_number) and auto-reload device notes"""
+        def check_device_change():
+            try:
+                # Check if we're in device notes mode
+                if hasattr(gui, 'notes_type_var') and gui.notes_type_var.get() == "device":
+                    # Get current device identifier (A1, A2, etc.)
+                    current_device_id = None
+                    if hasattr(gui, 'device_section_and_number'):
+                        current_device_id = gui.device_section_and_number
+                    
+                    # Track last known device identifier
+                    if not hasattr(gui, '_last_polled_device_id'):
+                        gui._last_polled_device_id = current_device_id
+                    
+                    # If device identifier changed, reload notes
+                    if current_device_id != gui._last_polled_device_id:
+                        gui._last_polled_device_id = current_device_id
+                        # Save current notes before switching
+                        self._save_notes(gui)
+                        # Small delay to ensure save completes
+                        gui.master.update_idletasks()
+                        # Reload notes for new device
+                        self._load_notes(gui)
+                        
+                        # Also reload previous devices (they may have changed - e.g., A1 when switching to A2)
+                        previous_devices = self._get_previous_devices(gui)
+                        if len(previous_devices) > 0 and hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+                            self._load_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+                            gui.prev_device1_last_saved = gui.prev_device1_text.get("1.0", tk.END)
+                            # Update label
+                            prev1_frame = gui.prev_device1_text.master
+                            if isinstance(prev1_frame, tk.LabelFrame):
+                                prev1_frame.config(text=f"Previous Device 1: {previous_devices[0]['name']}")
+                        if len(previous_devices) > 1 and hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
+                            self._load_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+                            gui.prev_device2_last_saved = gui.prev_device2_text.get("1.0", tk.END)
+                            # Update label
+                            prev2_frame = gui.prev_device2_text.master
+                            if isinstance(prev2_frame, tk.LabelFrame):
+                                prev2_frame.config(text=f"Previous Device 2: {previous_devices[1]['name']}")
+                        
+                        if hasattr(gui, 'notes_status_label') and current_device_id:
+                            gui.notes_status_label.config(
+                                text=f"Switched to device: {current_device_id}",
+                                fg=self.COLOR_INFO
+                            )
+            except Exception as e:
+                print(f"Error polling device changes: {e}")
+            
+            # Poll every 500ms
+            if hasattr(gui, 'master') and gui.master.winfo_exists():
+                gui.master.after(500, check_device_change)
+        
+        # Start polling
+        if hasattr(gui, 'master'):
+            gui.master.after(500, check_device_change)
+    
+    def _start_auto_save_timer(self, gui) -> None:
+        """Start the periodic auto-save timer (every 10 seconds)"""
+        def check_and_save():
+            try:
+                # Check main notes
+                if hasattr(gui, 'notes_text') and hasattr(gui, 'notes_changed'):
+                    current_content = gui.notes_text.get("1.0", tk.END)
+                    if hasattr(gui, 'notes_last_saved') and current_content != gui.notes_last_saved:
+                        self._auto_save_notes(gui)
+                        gui.notes_last_saved = current_content
+                        gui.notes_changed = False
+                
+                # Check previous device 1
+                if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+                    current_content = gui.prev_device1_text.get("1.0", tk.END)
+                    if hasattr(gui, 'prev_device1_last_saved') and current_content != gui.prev_device1_last_saved:
+                        previous_devices = self._get_previous_devices(gui)
+                        if len(previous_devices) > 0:
+                            self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+                            gui.prev_device1_last_saved = current_content
+                
+                # Check previous device 2
+                if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
+                    current_content = gui.prev_device2_text.get("1.0", tk.END)
+                    if hasattr(gui, 'prev_device2_last_saved') and current_content != gui.prev_device2_last_saved:
+                        previous_devices = self._get_previous_devices(gui)
+                        if len(previous_devices) > 1:
+                            self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+                            gui.prev_device2_last_saved = current_content
+            except Exception as e:
+                print(f"Auto-save check error: {e}")
+            
+            # Schedule next check (10 seconds)
+            if hasattr(gui, 'master') and gui.master.winfo_exists():
+                gui.master.after(10000, check_and_save)
+        
+        # Start the timer
+        if hasattr(gui, 'master'):
+            gui.master.after(10000, check_and_save)
+    
+    def _switch_notes_type(self, gui, notes_type: str) -> None:
+        """Switch between device and sample notes"""
+        # Force save current notes before switching (critical - user lost notes before)
+        self._save_notes(gui)
+        
+        # Small delay to ensure save completes
+        gui.master.update_idletasks()
+        
+        # Load the other type
+        self._load_notes(gui)
+    
+    def _load_notes(self, gui) -> None:
+        """Load notes from file based on current type"""
+        notes_type = gui.notes_type_var.get()
+        # Disable undo temporarily while loading
+        gui.notes_text.config(undo=False)
+        gui.notes_text.delete("1.0", tk.END)
+        
+        try:
+            if notes_type == "device":
+                # Load device notes from device_info.json
+                # Use device_section_and_number (A1, A2, etc.) for individual device notes
+                device_id = None
+                sample_name = None
+                
+                # Get device identifier (A1, A2, etc.)
+                if hasattr(gui, 'device_section_and_number'):
+                    device_id = gui.device_section_and_number
+                
+                # Get sample name (D104, etc.) for folder structure
+                if hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
+                    if not sample_name:
+                        # Fallback to sample_type_var
+                        sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
+                        if sample_type_var and hasattr(sample_type_var, 'get'):
+                            sample_name = sample_type_var.get()
+                
+                # Also try from sample_name_var in Measurement GUI
+                if not sample_name and hasattr(gui, 'sample_name_var'):
+                    sample_name = gui.sample_name_var.get().strip()
+                
+                if device_id and sample_name:
+                    from pathlib import Path
+                    # Use the save root from Measurement_GUI
+                    save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+                    # Folder structure: {save_root}/{sample_name}/{letter}/{number}/device_info.json
+                    letter = device_id[0] if len(device_id) > 0 else "A"
+                    number = device_id[1:] if len(device_id) > 1 else "1"
+                    device_folder = save_root / sample_name.replace(" ", "_") / letter / number
+                    info_path = device_folder / "device_info.json"
+                    
+                    if info_path.exists():
+                        import json
+                        with info_path.open("r", encoding="utf-8") as f:
+                            device_info = json.load(f)
+                            notes = device_info.get("notes", "")
+                            if notes:
+                                gui.notes_text.insert("1.0", notes)
+                    gui.notes_status_label.config(text=f"Device: {device_id} (Sample: {sample_name})", fg=self.COLOR_INFO)
+                elif device_id:
+                    gui.notes_status_label.config(text=f"Device: {device_id} (No sample name)", fg=self.COLOR_WARNING)
+                else:
+                    gui.notes_status_label.config(text="No device selected", fg=self.COLOR_WARNING)
+            else:
+                # Load sample notes from sample_notes.json
+                # Sample notes are for the whole sample (D104, etc.) - the name from device manager
+                sample_name = None
+                
+                # First try: get from Sample_GUI's current_device_name (this is the sample name from device manager)
+                if hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
+                
+                # Fallback: try sample_name_var from Measurement GUI
+                if not sample_name and hasattr(gui, 'sample_name_var'):
+                    sample_name = gui.sample_name_var.get().strip()
+                
+                # Last fallback: sample_type_var (sample type, not the device name)
+                if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
+                    if sample_type_var and hasattr(sample_type_var, 'get'):
+                        sample_name = sample_type_var.get()
+                
+                if sample_name:
+                    from pathlib import Path
+                    # Use the save root from Measurement_GUI
+                    save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+                    sample_folder = save_root / sample_name.replace(" ", "_")
+                    notes_path = sample_folder / "sample_notes.json"
+                    
+                    if notes_path.exists():
+                        import json
+                        with notes_path.open("r", encoding="utf-8") as f:
+                            notes_data = json.load(f)
+                            notes = notes_data.get("notes", "")
+                            if notes:
+                                gui.notes_text.insert("1.0", notes)
+                    gui.notes_status_label.config(text=f"Sample: {sample_name}", fg=self.COLOR_INFO)
+                else:
+                    gui.notes_status_label.config(text="No sample name set", fg=self.COLOR_WARNING)
+        except Exception as e:
+            print(f"Error loading notes: {e}")
+            gui.notes_status_label.config(text=f"Error loading notes: {e}", fg=self.COLOR_ERROR)
+        finally:
+            # Re-enable undo and reset stack after loading
+            try:
+                gui.notes_text.config(undo=True)
+                gui.notes_text.edit_reset()
+            except:
+                pass
+    
+    def _save_notes(self, gui) -> None:
+        """Save notes to file"""
+        notes_type = gui.notes_type_var.get()
+        notes_content = gui.notes_text.get("1.0", tk.END).strip()
+        
+        try:
+            from pathlib import Path
+            from datetime import datetime
+            import json
+            
+            # Use the save root from Measurement_GUI
+            save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+            
+            if notes_type == "device":
+                # Save to device_info.json
+                # Use device_section_and_number (A1, A2, etc.) for individual device notes
+                device_id = None
+                sample_name = None
+                
+                # Get device identifier (A1, A2, etc.)
+                if hasattr(gui, 'device_section_and_number'):
+                    device_id = gui.device_section_and_number
+                
+                # Get sample name (D104, etc.) for folder structure
+                if hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
+                    if not sample_name:
+                        # Fallback to sample_type_var
+                        sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
+                        if sample_type_var and hasattr(sample_type_var, 'get'):
+                            sample_name = sample_type_var.get()
+                
+                # Also try from sample_name_var in Measurement GUI
+                if not sample_name and hasattr(gui, 'sample_name_var'):
+                    sample_name = gui.sample_name_var.get().strip()
+                
+                if not device_id:
+                    messagebox.showwarning("No Device", "No device is selected. Please select a device first.")
+                    return
+                
+                if not sample_name:
+                    messagebox.showwarning("No Sample", "No sample name is set. Please set a sample name first.")
+                    return
+                
+                # Folder structure: {save_root}/{sample_name}/{letter}/{number}/device_info.json
+                letter = device_id[0] if len(device_id) > 0 else "A"
+                number = device_id[1:] if len(device_id) > 1 else "1"
+                device_folder = save_root / sample_name.replace(" ", "_") / letter / number
+                device_folder.mkdir(parents=True, exist_ok=True)
+                info_path = device_folder / "device_info.json"
+                
+                # Load existing device_info or create new
+                device_info = {}
+                if info_path.exists():
+                    with info_path.open("r", encoding="utf-8") as f:
+                        device_info = json.load(f)
+                
+                # Update notes and metadata
+                device_info["notes"] = notes_content
+                device_info["last_modified"] = datetime.now().isoformat(timespec='seconds')
+                if "name" not in device_info:
+                    device_info["name"] = device_id
+                if "created" not in device_info:
+                    device_info["created"] = datetime.now().isoformat(timespec='seconds')
+                
+                # Save
+                with info_path.open("w", encoding="utf-8") as f:
+                    json.dump(device_info, f, indent=2)
+                
+                gui.notes_status_label.config(text=f"Device notes saved: {device_id}", fg=self.COLOR_SUCCESS)
+            else:
+                # Save to sample_notes.json
+                # Sample notes are for the whole sample (D104, etc.) - the name from device manager
+                sample_name = None
+                
+                # First try: get from Sample_GUI's current_device_name (this is the sample name from device manager)
+                if hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
+                
+                # Fallback: try sample_name_var from Measurement GUI
+                if not sample_name and hasattr(gui, 'sample_name_var'):
+                    sample_name = gui.sample_name_var.get().strip()
+                
+                # Last fallback: sample_type_var (sample type, not the device name)
+                if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
+                    if sample_type_var and hasattr(sample_type_var, 'get'):
+                        sample_name = sample_type_var.get()
+                
+                if not sample_name:
+                    messagebox.showwarning("No Sample", "No sample name is set in Device Manager. Please set a device name (e.g., D104) in Sample GUI first.")
+                    return
+                
+                sample_folder = save_root / sample_name.replace(" ", "_")
+                sample_folder.mkdir(parents=True, exist_ok=True)
+                notes_path = sample_folder / "sample_notes.json"
+                
+                # Create notes data structure
+                notes_data = {
+                    "sample_name": sample_name,
+                    "notes": notes_content,
+                    "last_modified": datetime.now().isoformat(timespec='seconds')
+                }
+                
+                # Save
+                with notes_path.open("w", encoding="utf-8") as f:
+                    json.dump(notes_data, f, indent=2)
+                
+                gui.notes_status_label.config(text="Sample notes saved", fg=self.COLOR_SUCCESS)
+            
+            # Clear status after 3 seconds
+            gui.master.after(3000, lambda: gui.notes_status_label.config(text=""))
+            
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save notes: {e}")
+            gui.notes_status_label.config(text=f"Error: {e}", fg=self.COLOR_ERROR)
+    
+    def _auto_save_notes(self, gui) -> None:
+        """Auto-save notes without showing dialog"""
+        try:
+            notes_type = gui.notes_type_var.get()
+            notes_content = gui.notes_text.get("1.0", tk.END).strip()
+            
+            from pathlib import Path
+            from datetime import datetime
+            import json
+            
+            # Use the save root from Measurement_GUI
+            save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+            
+            if notes_type == "device":
+                device_name = None
+                if hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    device_name = getattr(gui.sample_gui, 'current_device_name', None)
+                
+                if device_name:
+                    device_folder = save_root / device_name.replace(" ", "_")
+                    device_folder.mkdir(parents=True, exist_ok=True)
+                    info_path = device_folder / "device_info.json"
+                    
+                    device_info = {}
+                    if info_path.exists():
+                        with info_path.open("r", encoding="utf-8") as f:
+                            device_info = json.load(f)
+                    
+                    device_info["notes"] = notes_content
+                    device_info["last_modified"] = datetime.now().isoformat(timespec='seconds')
+                    if "name" not in device_info:
+                        device_info["name"] = device_name
+                    if "created" not in device_info:
+                        device_info["created"] = datetime.now().isoformat(timespec='seconds')
+                    
+                    with info_path.open("w", encoding="utf-8") as f:
+                        json.dump(device_info, f, indent=2)
+            else:
+                sample_name = None
+                if hasattr(gui, 'sample_name_var'):
+                    sample_name = gui.sample_name_var.get().strip()
+                
+                if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
+                    sample_name = getattr(gui.sample_gui, 'sample_type_var', None)
+                    if sample_name and hasattr(sample_name, 'get'):
+                        sample_name = sample_name.get()
+                
+                if sample_name:
+                    sample_folder = save_root / sample_name.replace(" ", "_")
+                    sample_folder.mkdir(parents=True, exist_ok=True)
+                    notes_path = sample_folder / "sample_notes.json"
+                    
+                    notes_data = {
+                        "sample_name": sample_name,
+                        "notes": notes_content,
+                        "last_modified": datetime.now().isoformat(timespec='seconds')
+                    }
+                    
+                    with notes_path.open("w", encoding="utf-8") as f:
+                        json.dump(notes_data, f, indent=2)
+        except Exception as e:
+            # Silently fail on auto-save
+            print(f"Auto-save notes error: {e}")
     
     # ------------------------------------------------------------------
     # Bottom Status Bar
