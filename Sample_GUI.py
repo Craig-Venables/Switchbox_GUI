@@ -9,7 +9,7 @@ Enhanced with device status tracking, improved layout, and data persistence.
 
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import json
 import math
 import threading
@@ -190,6 +190,13 @@ class SampleGUI:
         
         # Terminal filter
         self.terminal_filter = tk.StringVar(value="All")
+        
+        # Telegram variables
+        self.telegram_enabled = tk.BooleanVar(value=False)
+        self.telegram_bot_name_var = tk.StringVar(value="")
+        self.telegram_bot: Optional[Any] = None
+        self.telegram_bots: Dict[str, Dict[str, str]] = {}  # {name: {token, chatid}}
+        self._load_telegram_bots()
 
         # =========================
         # TOP CONTROL BAR
@@ -862,10 +869,11 @@ class SampleGUI:
         canvas_frame.columnconfigure(0, weight=1)
         canvas_frame.rowconfigure(0, weight=1)
 
+        # Canvas at larger size (600x500) for better visibility
         self.quick_scan_canvas = tk.Canvas(
             canvas_frame,
-            width=400,
-            height=400,
+            width=600,
+            height=500,
             bg="white",
             highlightbackground="black"
         )
@@ -883,6 +891,33 @@ class SampleGUI:
             legend_canvas.create_line(0, 199 - i, 30, 199 - i, fill=color)
         ttk.Label(legend_frame, text="≤1e-10 A").grid(row=2, column=0, pady=(5, 0))
         ttk.Label(legend_frame, text="≥1e-6 A").grid(row=3, column=0, pady=(0, 5))
+        
+        # Telegram controls below legend
+        telegram_frame = ttk.LabelFrame(legend_frame, text="Telegram", padding=5)
+        telegram_frame.grid(row=4, column=0, pady=(10, 0), sticky="ew")
+        
+        ttk.Label(telegram_frame, text="Bot:").grid(row=0, column=0, sticky="w", pady=2)
+        bot_names = list(self.telegram_bots.keys())
+        telegram_bot_combo = ttk.Combobox(
+            telegram_frame,
+            textvariable=self.telegram_bot_name_var,
+            values=bot_names,
+            width=18,
+            state="readonly"
+        )
+        telegram_bot_combo.grid(row=1, column=0, sticky="ew", pady=2)
+        if bot_names:
+            self.telegram_bot_name_var.set(bot_names[0])
+        telegram_bot_combo.bind("<<ComboboxSelected>>", lambda e: self._update_telegram_bot())
+        
+        ttk.Checkbutton(
+            telegram_frame,
+            text="Enable Notifications",
+            variable=self.telegram_enabled,
+            command=self._update_telegram_bot
+        ).grid(row=2, column=0, sticky="w", pady=(5, 0))
+        
+        telegram_frame.columnconfigure(0, weight=1)
 
         # Log frame - row 4
         log_frame = ttk.Frame(self.quick_scan_frame, padding=(10, 0, 10, 10))
@@ -906,7 +941,9 @@ class SampleGUI:
         if not hasattr(self, 'quick_scan_canvas') or self.quick_scan_canvas is None:
             return
         self.quick_scan_canvas.delete("all")
-        self.quick_scan_base_image = image.copy()
+        # Resize image to match quick scan canvas size (600x500) - zoomed in
+        quick_scan_img = image.resize((600, 500))
+        self.quick_scan_base_image = quick_scan_img.copy()
         self.quick_scan_canvas_image = ImageTk.PhotoImage(self.quick_scan_base_image)
         self.quick_scan_canvas.create_image(0, 0, anchor="nw", image=self.quick_scan_canvas_image)
         self._redraw_quick_scan_overlay()
@@ -951,7 +988,7 @@ class SampleGUI:
         self._draw_quick_scan_overlay_on(
             self.quick_scan_canvas if hasattr(self, "quick_scan_canvas") else None,
             "overlay",
-            canvas_width=600,
+            canvas_width=600,  # Original canvas width
             canvas_height=500
         )
         self._draw_quick_scan_overlay_on(
@@ -1207,6 +1244,250 @@ class SampleGUI:
         self.quick_scan_results[device] = current
         self._redraw_quick_scan_overlay()
 
+    # ==========================
+    # TELEGRAM INTEGRATION
+    # ==========================
+
+    def _load_telegram_bots(self) -> None:
+        """Load Telegram bot configurations from messaging_data.json."""
+        config_path = BASE_DIR / "Json_Files" / "messaging_data.json"
+        self.telegram_bots = {}
+        
+        try:
+            with config_path.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            
+            if isinstance(data, dict):
+                for name, info in data.items():
+                    if isinstance(info, dict):
+                        token = str(info.get("token", "") or "")
+                        chatid = str(info.get("chatid", info.get("chat_id", "")) or "")
+                        if token and chatid:
+                            self.telegram_bots[str(name)] = {"token": token, "chatid": chatid}
+        except FileNotFoundError:
+            pass  # File doesn't exist, that's okay
+        except Exception as e:
+            print(f"Failed to load Telegram bot config: {e}")
+
+    def _update_telegram_bot(self) -> None:
+        """Update or create Telegram bot instance based on current settings."""
+        if not self.telegram_enabled.get():
+            self.telegram_bot = None
+            return
+        
+        bot_name = self.telegram_bot_name_var.get().strip()
+        if not bot_name or bot_name not in self.telegram_bots:
+            self.telegram_bot = None
+            return
+        
+        bot_config = self.telegram_bots[bot_name]
+        token = bot_config.get("token", "").strip()
+        chat_id = bot_config.get("chatid", "").strip()
+        
+        if not token or not chat_id:
+            self.telegram_bot = None
+            return
+        
+        try:
+            from TelegramBot import TelegramBot
+            self.telegram_bot = TelegramBot(token, chat_id)
+            self._log_quick_scan(f"Telegram bot '{bot_name}' initialized")
+        except Exception as e:
+            self.telegram_bot = None
+            self._log_quick_scan(f"Failed to initialize Telegram bot '{bot_name}': {e}")
+
+    def _capture_canvas_image(self) -> Optional[Path]:
+        """Capture the quick scan canvas with heat map overlay as an image file."""
+        if not hasattr(self, 'quick_scan_base_image') or self.quick_scan_base_image is None:
+            return None
+        
+        try:
+            # Start with the base image
+            canvas_image = self.quick_scan_base_image.copy()
+            
+            # Convert to RGBA if needed for transparency
+            if canvas_image.mode != 'RGBA':
+                canvas_image = canvas_image.convert('RGBA')
+            
+            # Create overlay layer
+            overlay = Image.new('RGBA', canvas_image.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+            
+            # Get scaling factors
+            # Device bounds are in original image coordinates, need to scale to quick scan canvas (600x500)
+            orig_width, orig_height = self.original_image.size if hasattr(self, 'original_image') and self.original_image else (600, 500)
+            quick_scan_width = 600
+            quick_scan_height = 500
+            scale_x = orig_width / quick_scan_width
+            scale_y = orig_height / quick_scan_height
+            
+            # Draw quick scan overlay if enabled
+            if self.show_quick_scan_overlay.get() and hasattr(self, 'device_mapping'):
+                for device, bounds in self.device_mapping.items():
+                    current = self.quick_scan_results.get(device)
+                    if current is None or (isinstance(current, float) and math.isnan(current)):
+                        continue
+                    
+                    # Calculate device bounds on canvas
+                    x_min_raw = bounds["x_min"] / scale_x
+                    x_max_raw = bounds["x_max"] / scale_x
+                    y_min_raw = bounds["y_min"] / scale_y
+                    y_max_raw = bounds["y_max"] / scale_y
+                    
+                    # Ensure min < max (handle cases where coordinates might be reversed)
+                    x_min = int(min(x_min_raw, x_max_raw))
+                    x_max = int(max(x_min_raw, x_max_raw))
+                    y_min = int(min(y_min_raw, y_max_raw))
+                    y_max = int(max(y_min_raw, y_max_raw))
+                    
+                    # Skip if invalid bounds
+                    if x_min >= x_max or y_min >= y_max:
+                        continue
+                    
+                    # Clamp to image bounds
+                    x_min = max(0, min(x_min, canvas_image.width - 1))
+                    x_max = max(1, min(x_max, canvas_image.width))
+                    y_min = max(0, min(y_min, canvas_image.height - 1))
+                    y_max = max(1, min(y_max, canvas_image.height))
+                    
+                    # Get color for this current value
+                    color = self._current_to_color(current)
+                    # Convert hex color to RGBA
+                    r = int(color[1:3], 16)
+                    g = int(color[3:5], 16)
+                    b = int(color[5:7], 16)
+                    overlay_color = (r, g, b, 128)  # Semi-transparent
+                    
+                    # Draw rectangle on overlay
+                    draw.rectangle([x_min, y_min, x_max, y_max], fill=overlay_color)
+            
+            # Draw device status overlay if enabled
+            if self.show_status_overlay.get() and hasattr(self, 'device_mapping'):
+                for device, bounds in self.device_mapping.items():
+                    status_info = self.device_status.get(device, {})
+                    manual_status = status_info.get("manual_status", "undefined")
+                    
+                    if manual_status == "undefined":
+                        continue
+                    
+                    # Calculate device bounds on canvas
+                    x_min_raw = bounds["x_min"] / scale_x
+                    x_max_raw = bounds["x_max"] / scale_x
+                    y_min_raw = bounds["y_min"] / scale_y
+                    y_max_raw = bounds["y_max"] / scale_y
+                    
+                    # Ensure min < max (handle cases where coordinates might be reversed)
+                    x_min = int(min(x_min_raw, x_max_raw))
+                    x_max = int(max(x_min_raw, x_max_raw))
+                    y_min = int(min(y_min_raw, y_max_raw))
+                    y_max = int(max(y_min_raw, y_max_raw))
+                    
+                    # Skip if invalid bounds
+                    if x_min >= x_max or y_min >= y_max:
+                        continue
+                    
+                    # Clamp to image bounds
+                    x_min = max(0, min(x_min, canvas_image.width - 1))
+                    x_max = max(1, min(x_max, canvas_image.width))
+                    y_min = max(0, min(y_min, canvas_image.height - 1))
+                    y_max = max(1, min(y_max, canvas_image.height))
+                    
+                    if manual_status == "working":
+                        overlay_color = (76, 175, 80, 192)  # Green, more opaque
+                    elif manual_status == "broken":
+                        overlay_color = (244, 67, 54, 192)  # Red, more opaque
+                    else:
+                        continue
+                    
+                    draw.rectangle([x_min, y_min, x_max, y_max], fill=overlay_color)
+            
+            # Composite overlay onto base image
+            final_image = Image.alpha_composite(canvas_image, overlay)
+            # Convert back to RGB for saving
+            final_image = final_image.convert('RGB')
+            
+            # Create file path
+            save_root = resolve_default_save_root()
+            if self.current_device_name:
+                device_folder = self.get_device_folder()
+                device_folder.mkdir(parents=True, exist_ok=True)
+                image_path = device_folder / f"quick_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            else:
+                sample = self.sample_type_var.get()
+                sample_dir = save_root / sample.replace(" ", "_")
+                sample_dir.mkdir(parents=True, exist_ok=True)
+                image_path = sample_dir / f"quick_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            
+            # Save image
+            final_image.save(image_path, 'PNG')
+            
+            return image_path
+            
+        except Exception as e:
+            self._log_quick_scan(f"Failed to capture canvas image: {e}")
+            return None
+
+    def _send_telegram_notification(self, aborted: bool) -> None:
+        """Send Telegram notification when quick scan completes."""
+        if not self.telegram_enabled.get() or self.telegram_bot is None:
+            return
+        
+        try:
+            sample = self.sample_type_var.get()
+            device_name = self.current_device_name or "Unknown Device"
+            voltage = self.quick_scan_voltage_var.get()
+            
+            status = "Aborted" if aborted else "Complete"
+            device_count = len(self.quick_scan_results)
+            
+            # Count working vs non-working devices
+            working_count = 0
+            non_working_count = 0
+            for device, current in self.quick_scan_results.items():
+                if current is None or (isinstance(current, float) and math.isnan(current)):
+                    continue
+                if current >= self.quick_scan_threshold:
+                    working_count += 1
+                else:
+                    non_working_count += 1
+            
+            # Escape markdown special characters to avoid parsing errors
+            def escape_markdown(text: str) -> str:
+                """Escape markdown special characters that cause parsing issues."""
+                # Only escape characters that commonly cause issues in our messages
+                # Underscores are the main culprit (e.g., "Cross_bar")
+                # Don't escape dots/minuses in numbers (e.g., "1.000e-07")
+                text = text.replace('_', '\\_')  # Underscore for italics
+                text = text.replace('*', '\\*')  # Asterisk for bold
+                text = text.replace('[', '\\[')  # Square brackets for links
+                text = text.replace(']', '\\]')
+                return text
+            
+            message = (
+                f"Quick Scan {status}\n\n"
+                f"Device: {escape_markdown(device_name)}\n"
+                f"Sample Type: {escape_markdown(sample)}\n"
+                f"Voltage: {voltage} V\n"
+                f"Threshold: {escape_markdown(f'{self.quick_scan_threshold:.3e}')} A\n"
+                f"Devices Scanned: {device_count}\n"
+                f"Working: {working_count}\n"
+                f"Non-Working: {non_working_count}"
+            )
+            
+            self.telegram_bot.send_message(message)
+            
+            # Capture and send canvas image
+            image_path = self._capture_canvas_image()
+            if image_path and image_path.exists():
+                caption = f"Quick Scan Heat Map - {escape_markdown(device_name)} ({escape_markdown(sample)})"
+                self.telegram_bot.send_image(str(image_path), caption)
+                self._log_quick_scan("Sent Telegram notification with image")
+            else:
+                self._log_quick_scan("Sent Telegram notification (image capture failed)")
+                
+        except Exception as e:
+            self._log_quick_scan(f"Failed to send Telegram notification: {e}")
+
     def _finalize_quick_scan(self, aborted: bool) -> None:
         self.quick_scan_running = False
         status = "Aborted" if aborted else "Complete"
@@ -1259,6 +1540,10 @@ class SampleGUI:
                 self._log_quick_scan(f"Updated status for {updated_count} device(s)")
         
         self._log_quick_scan(f"Quick scan {status.lower()}.")
+        
+        # Send Telegram notification if enabled
+        if not aborted:  # Only send on completion, not abort
+            self._send_telegram_notification(aborted)
 
     def _set_quick_scan_buttons(self, running: bool) -> None:
         run_state = tk.DISABLED if running else tk.NORMAL
