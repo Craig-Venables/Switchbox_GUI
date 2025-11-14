@@ -1,8 +1,56 @@
-"""Connection check GUI
+"""
+Check Connection GUI - Connection Verification Tool
+====================================================
 
-Small Tkinter window to quickly verify an electrical connection by applying a
-tiny DC bias and plotting measured current vs time. Optionally beeps when the
-absolute current crosses a threshold (default 1e-9 A).
+Purpose:
+--------
+Small popup tool to quickly verify electrical connections by applying a small
+DC bias and monitoring current in real-time. Useful for checking if probes
+are making good contact before running measurements.
+
+Key Features:
+-------------
+- Real-time current vs time plotting
+- Audio alerts when current exceeds threshold
+- Adjustable current threshold (default: 1e-9 A)
+- Continuous or one-time alert modes
+- Data recording for analysis
+- Simple, focused interface
+
+Entry Points:
+-------------
+Launched from MeasurementGUI:
+  ```python
+  # In MeasurementGUI
+  check_connection = CheckConnection(master=self.master, keithley=self.keithley)
+  ```
+
+Dependencies:
+-------------
+- Requires: Keithley instrument instance (passed from MeasurementGUI)
+- matplotlib: For real-time plotting
+- tkinter: GUI framework
+
+Relationships:
+-------------
+CheckConnection (this file)
+    └─> Launched from: MeasurementGUI
+    └─> Uses: Keithley instrument from MeasurementGUI
+
+Usage:
+------
+1. User clicks "Check Connection" in MeasurementGUI
+2. Window opens with real-time current plot
+3. User observes current to verify connection
+4. Audio alert triggers if current exceeds threshold
+5. User closes window when done
+
+File Structure:
+---------------
+- ~382 lines
+- Main class: CheckConnection
+- Focused, single-purpose tool
+- Good example of a well-scoped GUI component
 """
 
 import tkinter as tk

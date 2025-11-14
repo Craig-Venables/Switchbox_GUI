@@ -1,3 +1,60 @@
+"""
+Advanced Tests GUI - Volatile Memristor Testing
+================================================
+
+Purpose:
+--------
+Specialized GUI for advanced/volatile memristor tests that require complex
+timing patterns and multiple pulse sequences. Focuses on neuromorphic and
+volatile memory characterization tests.
+
+Key Features:
+-------------
+- Transient Decay: Measure current decay after pulse
+- Paired-Pulse Facilitation (PPF): Two-pulse timing dependence
+- STDP: Spike-timing dependent plasticity
+- SRDP: Rate-dependent plasticity
+- Customizable timing parameters
+- Real-time result display
+
+Entry Points:
+-------------
+Launched from MeasurementGUI:
+  ```python
+  # In MeasurementGUI
+  advanced_tests = AdvancedTestsGUI(master=self.master, provider=self)
+  ```
+
+Dependencies:
+-------------
+- Requires provider object with:
+  - measurement_service (MeasurementService)
+  - keithley (IV controller)
+  - sample_name_var, final_device_letter, final_device_number
+  - stop_measurement_flag (optional)
+- Measurement_GUI: Provides context and measurement service
+
+Relationships:
+-------------
+AdvancedTestsGUI (this file)
+    └─> Launched from: MeasurementGUI
+    └─> Uses: MeasurementService from provider
+
+Test Types:
+-----------
+1. Transient Decay: Single pulse, then measure I(t) decay
+2. PPF: Two pulses separated by Δt, measure facilitation
+3. STDP: Pre/post pulses with timing dependence
+4. SRDP: Rate-dependent plasticity with frequency sweeps
+
+File Structure:
+---------------
+- ~464 lines
+- Main class: AdvancedTestsGUI
+- Tabbed interface (currently only "Volatile" tab)
+- Focused on specialized test patterns
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading

@@ -1,29 +1,97 @@
-"""Measurement GUI
+"""
+Measurement GUI - Main Measurement Interface
+=============================================
 
-Module summary:
-This module implements a Tkinter-based GUI used to control IV/PMU/SMU
-measurements for arrays of devices. It provides:
-- Connection helpers for instrument managers (SMU, PSU, temperature controllers)
-- A centralized `MeasurementService` integration for performing IV sweeps,
-  pulsed measurements, endurance/retention tests, and transient captures
-- Real-time plotting using matplotlib embedded in Tkinter windows
-- Utilities for saving measurement data, creating summary plots and
-  sending results via Telegram.
+Purpose:
+--------
+Main measurement interface for IV/PMU/SMU measurements on device arrays.
+Provides comprehensive control over instrument connections, measurement
+configuration, real-time plotting, and data saving. Acts as the central hub
+for launching specialized measurement tools.
 
-Key components:
-- `SMUAdapter`: small adapter layer that exposes a common minimal interface
-  (set_voltage, measure_current, enable_output, ...) wrapping an IV controller
-  manager instance. Used by the automated tester and other consumers that
-  expect a simple instrument API.
-- `MeasurementGUI`: the main window/class that constructs the Tkinter layout,
-  handles user inputs, routes measurements to `MeasurementService`, updates
-  live plots, and saves results.
+Key Features:
+-------------
+- Instrument connection management (SMU, PSU, temperature controllers)
+- IV sweep configuration and execution
+- Custom measurement sweeps (loadable from JSON)
+- Real-time plotting (voltage, current, resistance)
+- Sequential measurement support
+- Manual endurance/retention test controls
+- Data saving with automatic file naming
+- Telegram integration for notifications
+- Optical excitation control (LED, laser)
 
-Notes:
-- The file intentionally routes most measurement work to `MeasurementService`
-  to keep GUI logic separate from instrument/measurement details.
-- Docstrings and inline comments focus on clarifying the intent of complex
-  functions and public APIs rather than literal line-by-line explanation.
+Entry Points:
+-------------
+Launched from Sample_GUI:
+  ```python
+  # In Sample_GUI, when user clicks "Start Measurement"
+  measurement_gui = MeasurementGUI(
+      master=parent_window,
+      sample_type="Cross_bar",
+      section="A",
+      device_list=["1", "2", "3"],
+      sample_gui=self
+  )
+  ```
+
+Launches:
+---------
+- TSPTestingGUI: Pulse testing interface
+  - Access: "Pulse Testing" button/tab
+  - Passes: device address, sample context
+
+- CheckConnection: Connection verification tool
+  - Access: "Check Connection" button
+  - Purpose: Verify electrical connections
+
+- MotorControlWindow: Motor control for laser positioning
+  - Access: "Motor Control" button
+  - Purpose: XY stage control
+
+- AdvancedTestsGUI: Advanced/volatile memristor tests
+  - Access: "Advanced Tests" button/tab
+  - Tests: PPF, STDP, SRDP, transient decay
+
+- AutomatedTesterGUI: Automated testing workflows
+  - Access: "Automated Tester" button
+  - Purpose: Batch device testing
+
+Dependencies:
+-------------
+- Measurments.measurement_services_smu: SMU measurement service
+- Measurments.measurement_services_pmu: PMU measurement service
+- Measurments.connection_manager: Instrument connection management
+- gui.layout_builder: Modern tabbed layout builder
+- gui.plot_panels: Plotting components
+- gui.plot_updaters: Plot update logic
+- Equipment.iv_controller_manager: IV controller management
+- Equipment.power_supply_manager: Power supply management
+- Equipment.temperature_controller_manager: Temperature control
+
+Relationships:
+-------------
+MeasurementGUI (this file)
+    ├─> Launched from: Sample_GUI
+    ├─> Launches: TSPTestingGUI
+    ├─> Launches: CheckConnection
+    ├─> Launches: MotorControlWindow
+    ├─> Launches: AdvancedTestsGUI
+    └─> Launches: AutomatedTesterGUI
+
+Key Components:
+---------------
+- SMUAdapter: Adapter layer for simple instrument API
+- MeasurementGUI: Main window class
+- InstrumentConnectionManager: Manages instrument lifecycles
+- MeasurementGUILayoutBuilder: Builds modern tabbed interface
+
+File Structure:
+---------------
+- ~2000+ lines
+- Main class: MeasurementGUI
+- Uses layout_builder.py for UI construction (good separation!)
+- Routes measurement work to MeasurementService (good separation!)
 """
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
@@ -330,6 +398,10 @@ class MeasurementGUI:
         self.test_names = list(self.custom_sweeps.keys())
         self.code_names = {name: self.custom_sweeps[name].get("code_name") for name in self.test_names}
 
+        # Initialize system configurations
+        self.system_configs = {}
+        self.systems = self.load_systems()
+
         # === NEW MODERN LAYOUT INITIALIZATION ===
         # Create layout builder with callbacks
         self.layout_builder = MeasurementGUILayoutBuilder(
@@ -340,6 +412,8 @@ class MeasurementGUI:
                 "connect_temp": self.reconnect_temperature_controller,
                 "measure_one_device": self.measure_one_device,
                 "on_system_change": self.on_system_change,
+                "load_system": self.load_system,
+                "save_system": self.save_system,
                 "on_custom_save_toggle": self._on_custom_save_toggle,
                 "browse_save": self._browse_save_location,
                 "open_motor_control": self.open_motor_control,
@@ -1059,27 +1133,337 @@ class MeasurementGUI:
         except (FileNotFoundError, json.JSONDecodeError):
             return ["No systems available"]
 
+    def load_system(self) -> None:
+        """Load the selected system configuration and populate all fields"""
+        selected_system = getattr(self, 'system_var', None)
+        if not selected_system:
+            return
+        
+        system_name = selected_system.get() if hasattr(selected_system, 'get') else str(selected_system)
+        if not system_name or system_name == "No systems available":
+            return
+        
+        if not hasattr(self, 'system_configs') or system_name not in self.system_configs:
+            # Reload systems
+            self.load_systems()
+            if system_name not in self.system_configs:
+                messagebox.showwarning("System Not Found", f"System '{system_name}' not found in configuration file.")
+                return
+        
+        config = self.system_configs[system_name]
+        
+        # Update SMU section
+        smu_type = config.get("SMU Type", "")
+        smu_address = config.get("SMU_address", "")
+        if hasattr(self, 'smu_type_var'):
+            self.smu_type_var.set(smu_type)
+        if hasattr(self, 'keithley_address_var'):
+            self.keithley_address_var.set(smu_address)
+        # Ensure address is in combobox values if using combobox
+        if hasattr(self, 'iv_address_combo') and smu_address:
+            current_values = list(self.iv_address_combo['values'])
+            if smu_address not in current_values:
+                self.iv_address_combo['values'] = tuple([smu_address] + list(current_values))
+        self.SMU_type = smu_type
+        self.keithley_address = smu_address
+        self.iv_address = smu_address
+        
+        # Update PSU section
+        psu_type = config.get("psu_type", "None")
+        psu_address = config.get("psu_address", "")
+        if hasattr(self, 'psu_type_var'):
+            self.psu_type_var.set(psu_type if psu_type else "None")
+        if hasattr(self, 'psu_address_var'):
+            self.psu_address_var.set(psu_address)
+        # Ensure address is in combobox values if using combobox
+        if hasattr(self, 'psu_address_combo') and psu_address:
+            current_values = list(self.psu_address_combo['values'])
+            if psu_address not in current_values:
+                self.psu_address_combo['values'] = tuple([psu_address] + list(current_values))
+        self.psu_visa_address = psu_address
+        
+        # Update Temp section
+        temp_type = config.get("temp_controller", "Auto-Detect")
+        temp_address = config.get("temp_address", "")
+        if hasattr(self, 'temp_type_var'):
+            self.temp_type_var.set(temp_type if temp_type else "Auto-Detect")
+        if hasattr(self, 'temp_address_var'):
+            self.temp_address_var.set(temp_address)
+        # Ensure address is in combobox values if using combobox
+        if hasattr(self, 'temp_address_combo') and temp_address:
+            current_values = list(self.temp_address_combo['values'])
+            if temp_address not in current_values:
+                self.temp_address_combo['values'] = tuple([temp_address] + list(current_values))
+        self.temp_controller_type = temp_type
+        self.temp_controller_address = temp_address
+        self.controller_type = temp_type or "Auto-Detect"
+        self.controller_address = temp_address
+        
+        # Update optical section
+        optical_config = config.get("optical")
+        if optical_config and hasattr(self, 'optical_type_var'):
+            opt_type = optical_config.get("type", "None")
+            self.optical_type_var.set(opt_type)
+            
+            # Expand optical section if configured
+            if opt_type != "None" and hasattr(self, 'optical_config_frame'):
+                if hasattr(self, 'optical_expanded_var') and not self.optical_expanded_var.get():
+                    if hasattr(self, 'optical_toggle_button'):
+                        self.layout_builder._toggle_optical_section(self, self.optical_config_frame, self.optical_toggle_button)
+            
+            if opt_type == "LED":
+                if hasattr(self, 'optical_led_units_var'):
+                    self.optical_led_units_var.set(optical_config.get("units", "mA"))
+                if hasattr(self, 'optical_led_channels_var'):
+                    channels = optical_config.get("channels", {})
+                    channels_str = ",".join([f"{k}:{v}" for k, v in channels.items()])
+                    self.optical_led_channels_var.set(channels_str)
+                limits = optical_config.get("limits", {})
+                if hasattr(self, 'optical_led_min_var'):
+                    self.optical_led_min_var.set(str(limits.get("min", "0.0")))
+                if hasattr(self, 'optical_led_max_var'):
+                    self.optical_led_max_var.set(str(limits.get("max", "30.0")))
+                defaults = optical_config.get("defaults", {})
+                if hasattr(self, 'optical_led_default_channel_var'):
+                    self.optical_led_default_channel_var.set(defaults.get("channel", "380nm"))
+                # Update UI
+                if hasattr(self, 'optical_config_frame'):
+                    self.layout_builder._update_optical_ui(self, self.optical_config_frame)
+                    
+            elif opt_type == "Laser":
+                if hasattr(self, 'optical_laser_driver_var'):
+                    self.optical_laser_driver_var.set(optical_config.get("driver", "Oxxius"))
+                if hasattr(self, 'optical_laser_address_var'):
+                    self.optical_laser_address_var.set(optical_config.get("address", "COM4"))
+                if hasattr(self, 'optical_laser_baud_var'):
+                    self.optical_laser_baud_var.set(str(optical_config.get("baud", "19200")))
+                if hasattr(self, 'optical_laser_units_var'):
+                    self.optical_laser_units_var.set(optical_config.get("units", "mW"))
+                if hasattr(self, 'optical_laser_wavelength_var'):
+                    self.optical_laser_wavelength_var.set(str(optical_config.get("wavelength_nm", "405")))
+                limits = optical_config.get("limits", {})
+                if hasattr(self, 'optical_laser_min_var'):
+                    self.optical_laser_min_var.set(str(limits.get("min", "0.0")))
+                if hasattr(self, 'optical_laser_max_var'):
+                    self.optical_laser_max_var.set(str(limits.get("max", "10.0")))
+                # Update UI
+                if hasattr(self, 'optical_config_frame'):
+                    self.layout_builder._update_optical_ui(self, self.optical_config_frame)
+        elif hasattr(self, 'optical_type_var'):
+            self.optical_type_var.set("None")
+        
+        # Try to create optical object
+        try:
+            self.optical = create_optical_from_system_config(config)
+        except Exception:
+            self.optical = None
+        
+        messagebox.showinfo("System Loaded", f"System '{system_name}' loaded successfully.")
+    
+    def save_system(self) -> None:
+        """Save current configuration as a new system"""
+        # Get system name from user
+        system_name = simpledialog.askstring("Save System", "Enter system name:")
+        if not system_name:
+            return
+        
+        # Build configuration dictionary
+        config = {}
+        
+        # SMU configuration
+        if hasattr(self, 'smu_type_var'):
+            config["SMU Type"] = self.smu_type_var.get()
+        elif hasattr(self, 'SMU_type'):
+            config["SMU Type"] = self.SMU_type
+        else:
+            config["SMU Type"] = "Keithley 2401"
+        
+        if hasattr(self, 'keithley_address_var'):
+            config["SMU_address"] = self.keithley_address_var.get()
+        elif hasattr(self, 'keithley_address'):
+            config["SMU_address"] = self.keithley_address
+        else:
+            config["SMU_address"] = ""
+        
+        # PSU configuration
+        if hasattr(self, 'psu_type_var'):
+            psu_type = self.psu_type_var.get()
+            if psu_type and psu_type != "None":
+                config["psu_type"] = psu_type
+                if hasattr(self, 'psu_address_var'):
+                    config["psu_address"] = self.psu_address_var.get()
+                elif hasattr(self, 'psu_visa_address'):
+                    config["psu_address"] = self.psu_visa_address
+                else:
+                    config["psu_address"] = ""
+        
+        # Temperature controller configuration
+        if hasattr(self, 'temp_type_var'):
+            temp_type = self.temp_type_var.get()
+            if temp_type and temp_type != "None" and temp_type != "Auto-Detect":
+                config["temp_controller"] = temp_type
+                if hasattr(self, 'temp_address_var'):
+                    config["temp_address"] = self.temp_address_var.get()
+                elif hasattr(self, 'temp_controller_address'):
+                    config["temp_address"] = self.temp_controller_address
+                else:
+                    config["temp_address"] = ""
+        
+        # Optical configuration
+        if hasattr(self, 'optical_type_var'):
+            opt_type = self.optical_type_var.get()
+            if opt_type and opt_type != "None":
+                optical_config = {"type": opt_type}
+                
+                if opt_type == "LED":
+                    if hasattr(self, 'optical_led_units_var'):
+                        optical_config["units"] = self.optical_led_units_var.get()
+                    else:
+                        optical_config["units"] = "mA"
+                    
+                    # Parse channels string
+                    if hasattr(self, 'optical_led_channels_var'):
+                        channels_str = self.optical_led_channels_var.get()
+                        channels = {}
+                        for pair in channels_str.split(','):
+                            if ':' in pair:
+                                key, val = pair.strip().split(':', 1)
+                                try:
+                                    channels[key] = int(val)
+                                except ValueError:
+                                    pass
+                        optical_config["channels"] = channels
+                    
+                    # Limits
+                    limits = {}
+                    if hasattr(self, 'optical_led_min_var'):
+                        try:
+                            limits["min"] = float(self.optical_led_min_var.get())
+                        except ValueError:
+                            limits["min"] = 0.0
+                    if hasattr(self, 'optical_led_max_var'):
+                        try:
+                            limits["max"] = float(self.optical_led_max_var.get())
+                        except ValueError:
+                            limits["max"] = 30.0
+                    optical_config["limits"] = limits
+                    
+                    # Defaults
+                    defaults = {}
+                    if hasattr(self, 'optical_led_default_channel_var'):
+                        defaults["channel"] = self.optical_led_default_channel_var.get()
+                    optical_config["defaults"] = defaults
+                    
+                elif opt_type == "Laser":
+                    if hasattr(self, 'optical_laser_driver_var'):
+                        optical_config["driver"] = self.optical_laser_driver_var.get()
+                    else:
+                        optical_config["driver"] = "Oxxius"
+                    
+                    if hasattr(self, 'optical_laser_address_var'):
+                        optical_config["address"] = self.optical_laser_address_var.get()
+                    else:
+                        optical_config["address"] = "COM4"
+                    
+                    if hasattr(self, 'optical_laser_baud_var'):
+                        try:
+                            optical_config["baud"] = int(self.optical_laser_baud_var.get())
+                        except ValueError:
+                            optical_config["baud"] = 19200
+                    else:
+                        optical_config["baud"] = 19200
+                    
+                    if hasattr(self, 'optical_laser_units_var'):
+                        optical_config["units"] = self.optical_laser_units_var.get()
+                    else:
+                        optical_config["units"] = "mW"
+                    
+                    if hasattr(self, 'optical_laser_wavelength_var'):
+                        try:
+                            optical_config["wavelength_nm"] = int(self.optical_laser_wavelength_var.get())
+                        except ValueError:
+                            optical_config["wavelength_nm"] = 405
+                    else:
+                        optical_config["wavelength_nm"] = 405
+                    
+                    # Limits
+                    limits = {}
+                    if hasattr(self, 'optical_laser_min_var'):
+                        try:
+                            limits["min"] = float(self.optical_laser_min_var.get())
+                        except ValueError:
+                            limits["min"] = 0.0
+                    if hasattr(self, 'optical_laser_max_var'):
+                        try:
+                            limits["max"] = float(self.optical_laser_max_var.get())
+                        except ValueError:
+                            limits["max"] = 10.0
+                    optical_config["limits"] = limits
+                    
+                    # Defaults
+                    defaults = {}
+                    if hasattr(self, 'optical_laser_min_var'):
+                        try:
+                            defaults["level"] = float(self.optical_laser_min_var.get())
+                        except ValueError:
+                            defaults["level"] = 0.6
+                    optical_config["defaults"] = defaults
+                
+                config["optical"] = optical_config
+        
+        # Load existing configs
+        config_file = "Json_Files/system_configs.json"
+        try:
+            with open(config_file, 'r') as f:
+                all_configs = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            all_configs = {}
+        
+        # Add/update system
+        all_configs[system_name] = config
+        
+        # Save to file
+        try:
+            with open(config_file, 'w') as f:
+                json.dump(all_configs, f, indent=4)
+            
+            # Update local configs
+            self.system_configs = all_configs
+            
+            # Update system combo
+            if hasattr(self, 'system_combo'):
+                systems = list(all_configs.keys())
+                self.system_combo['values'] = systems
+                self.system_var.set(system_name)
+            
+            messagebox.showinfo("System Saved", f"System '{system_name}' saved successfully.")
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save system: {e}")
+    
     def on_system_change(self, selected_system: str) -> None:
-        """Update addresses when system selection changes"""
+        """Update addresses when system selection changes (legacy method)"""
         if selected_system in self.system_configs:
             config = self.system_configs[selected_system]
 
             # Update IV section
             iv_address = config.get("SMU_address", "")
             self.iv_address = iv_address
-            self.keithley_address_var.set(iv_address)
+            if hasattr(self, 'keithley_address_var'):
+                self.keithley_address_var.set(iv_address)
             self.keithley_address = iv_address
             self.update_component_state("iv", iv_address)
 
             # Update PSU section
             psu_address = config.get("psu_address", "")
-            self.psu_address_var.set(psu_address)
+            if hasattr(self, 'psu_address_var'):
+                self.psu_address_var.set(psu_address)
             self.psu_visa_address = psu_address
             self.update_component_state("psu", psu_address)
 
             # Update Temp section
             temp_address = config.get("temp_address", "")
-            self.temp_address_var.set(temp_address)
+            if hasattr(self, 'temp_address_var'):
+                self.temp_address_var.set(temp_address)
             self.temp_controller_address = temp_address
             self.update_component_state("temp", temp_address)
 
@@ -1131,19 +1515,26 @@ class MeasurementGUI:
                 label.configure(fg="grey")
 
         # Update entry state
-        # Check if it's a ttk.Entry (doesn't support bg/fg options)
-        is_ttk_entry = entry.winfo_class() == "TEntry"
+        # Check if it's a ttk widget (ttk widgets don't support bg/fg options)
+        # Ttk widgets have class names starting with "T" (e.g., "TEntry", "TCombobox")
+        # Regular tk widgets have class names without "T" prefix (e.g., "Entry", "Button")
+        widget_class = entry.winfo_class()
+        is_ttk_widget = widget_class.startswith("T")
         
-        if has_address:
-            if is_ttk_entry:
-                entry.configure(state="normal")
+        try:
+            if has_address:
+                if is_ttk_widget:
+                    entry.configure(state="normal")
+                else:
+                    entry.configure(state="normal", bg="white", fg="black")
             else:
-                entry.configure(state="normal", bg="white", fg="black")
-        else:
-            if is_ttk_entry:
-                entry.configure(state="disabled")
-            else:
-                entry.configure(state="disabled", bg="lightgrey", fg="grey")
+                if is_ttk_widget:
+                    entry.configure(state="disabled")
+                else:
+                    entry.configure(state="disabled", bg="lightgrey", fg="grey")
+        except Exception:
+            # Fallback: if bg/fg options aren't supported, just update state
+            entry.configure(state="normal" if has_address else "disabled")
 
         # Update button state
         if has_address:

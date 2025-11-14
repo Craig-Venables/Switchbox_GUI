@@ -1,10 +1,64 @@
-"""Sample GUI
+"""
+Sample GUI - Device Selection and Sample Management
+===================================================
 
-Tkinter-based interface to browse/select devices on an image map, manage
-device selections, control multiplexer routing, and launch the
-`MeasurementGUI` for measurements on the selected subset.
+Purpose:
+--------
+Main entry point for device selection and sample management. Provides a visual
+interface to browse device maps, select devices to test, control multiplexer
+routing, and launch measurement interfaces.
 
-Enhanced with device status tracking, improved layout, and data persistence.
+Key Features:
+-------------
+- Visual device map/image viewer with click-to-select devices
+- Device status tracking (working, failed, untested)
+- Multiplexer routing control (PySwitchbox, Electronic Mpx)
+- Quick scan functionality for rapid device testing
+- Sample configuration and device mapping
+- Data persistence (device status, sample info)
+
+Entry Points:
+-------------
+- Primary: Launched from main.py
+  ```python
+  root = tk.Tk()
+  app = SampleGUI(root)
+  root.mainloop()
+  ```
+
+Launches:
+---------
+- MeasurementGUI: When user selects devices and clicks "Start Measurement"
+  - Passes: sample_type, section, device_list, sample_gui reference
+
+Dependencies:
+-------------
+- Measurement_GUI: For launching measurement interface
+- Equipment.multiplexer_manager: Multiplexer control
+- Equipment.Multiplexers: Multiplexer implementations
+- Json_Files/pin_mapping.json: Device pin mappings
+- Json_Files/mapping.json: Device layout mappings
+
+Relationships:
+-------------
+Sample_GUI (this file)
+    └─> MeasurementGUI
+            └─> TSP_Testing_GUI, Check_Connection_GUI, etc.
+
+Usage Flow:
+-----------
+1. User starts application (main.py)
+2. Sample_GUI displays device map
+3. User selects devices to test
+4. User clicks "Start Measurement"
+5. Sample_GUI launches MeasurementGUI with selected devices
+6. User can return to Sample_GUI to select different devices
+
+File Structure:
+---------------
+- ~3200 lines
+- Main class: SampleGUI
+- Key methods: device selection, multiplexer control, quick scan
 """
 
 import tkinter as tk
@@ -2457,9 +2511,31 @@ class SampleGUI:
                 f"Created: {self.device_info.get('created', 'Unknown')}",
                 f"Last Modified: {self.device_info.get('last_modified', 'Unknown')}",
                 "",
-                "Notes:",
+                "Device Notes:",
                 self.device_info.get('notes', 'No notes')
             ]
+            
+            # Also load and display sample notes if available
+            sample_type = self.device_info.get('sample_type', '')
+            if sample_type:
+                try:
+                    sample_folder = resolve_default_save_root() / sample_type.replace(" ", "_")
+                    sample_notes_path = sample_folder / "sample_notes.json"
+                    if sample_notes_path.exists():
+                        with sample_notes_path.open("r", encoding="utf-8") as f:
+                            sample_notes_data = json.load(f)
+                            sample_notes = sample_notes_data.get("notes", "")
+                            if sample_notes:
+                                info_lines.extend([
+                                    "",
+                                    "=" * 50,
+                                    "",
+                                    "Sample Notes:",
+                                    sample_notes
+                                ])
+                except Exception:
+                    pass  # Silently ignore if sample notes can't be loaded
+            
             self.device_info_text.insert("1.0", "\n".join(info_lines))
         
         self.device_info_text.config(state=tk.DISABLED)
@@ -2828,7 +2904,8 @@ class SampleGUI:
             self.canvas.create_rectangle(x_min, y_min, x_max, y_max, outline="#009dff", width=3, tags="highlight")
 
     def _show_no_devices_dialog(self) -> None:
-        """Show dialog when no devices are selected (called after tab switch)."""
+        """Show dialog when no devices are selected (called after tab switch).
+        Note: Device name check has already been handled before this is called."""
         response = messagebox.askyesnocancel(
             "No Devices Selected",
             "No devices are currently selected for measurement.\n\n"
@@ -2843,46 +2920,45 @@ class SampleGUI:
             return
         elif response is False:  # No - skip and continue anyway
             self.notebook.select(0)  # Return to Device Selection tab
-            # Continue with opening measurement window
-            self._continue_measurement_without_devices()
+            
+            # Continue with opening measurement window (incorporated logic)
+            sample_type = self.sample_type_var.get()
+            section = self.section_var.get()
+            selected_device_list = []  # Empty list
+
+            self.change_relays()
+            print("")
+            print("Selected devices: []")
+            if self.current_device_name:
+                print(f"Current Device: {self.current_device_name}")
+            else:
+                print("Current Device: None (measurements will be saved to sample folder)")
+            print("")
+            
+            # Open measurement window with empty device list
+            self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
+            self.measurement_window = True
         else:  # Yes - stay on Device Manager tab
             return
     
-    def _continue_measurement_without_devices(self) -> None:
-        """Continue opening measurement window even without selected devices."""
-        sample_type = self.sample_type_var.get()
-        section = self.section_var.get()
-        selected_device_list = []  # Empty list
-        
-        # Warn if no device is set
-        if not self.current_device_name:
-            response = messagebox.askyesno(
-                "No Device Set",
-                "No device name is currently set. Measurements will be saved to the sample folder.\n\n"
-                "Do you want to continue?",
-                icon='warning'
-            )
-            if not response:
-                return
-
-        self.change_relays()
-        print("")
-        print("Selected devices: []")
-        if self.current_device_name:
-            print(f"Current Device: {self.current_device_name}")
-        print("")
-        
-        # Open measurement window with empty device list
-        self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
-        self.measurement_window = True
-    
     def open_measurement_window(self) -> None:
-        """Open the measurement window. If no devices selected, show Device Manager tab first."""
+        """Open the measurement window. Checks device name first, then device selection."""
         if not self.measurement_window:
             sample_type = self.sample_type_var.get()
             section = self.section_var.get()
 
-            # Pass only selected devices to measurement window
+            # FIRST: Check if device name is set
+            if not self.current_device_name:
+                # Switch to Device Manager tab first (make it visible)
+                self.notebook.select(1)  # Device Manager tab is at index 1
+                self.root.update_idletasks()  # Process pending display updates
+                self.root.update()  # Force UI update to show the tab switch
+                
+                # Small delay to ensure tab is visible before showing dialog
+                self.root.after(100, lambda: self._show_no_device_name_dialog())
+                return
+
+            # SECOND: Check if devices are selected
             selected_device_list = [self.device_list[i] for i in self.selected_indices]
 
             if not selected_device_list:
@@ -2894,18 +2970,8 @@ class SampleGUI:
                 # Small delay to ensure tab is visible before showing dialog
                 self.root.after(100, lambda: self._show_no_devices_dialog())
                 return
-            
-            # Warn if no device is set
-            if not self.current_device_name:
-                response = messagebox.askyesno(
-                    "No Device Set",
-                    "No device name is currently set. Measurements will be saved to the sample folder.\n\n"
-                    "Do you want to continue?",
-                    icon='warning'
-                )
-                if not response:
-                    return
 
+            # Both device name and device selection are set - proceed with measurement
             self.change_relays()
             print("")
             print("Selected devices:")
@@ -2920,6 +2986,51 @@ class SampleGUI:
             self.measurement_window = True
         else:
             self.measuremnt_gui.bring_to_top()
+    
+    def _show_no_device_name_dialog(self) -> None:
+        """Show dialog when no device name is set (called after tab switch)."""
+        response = messagebox.askyesnocancel(
+            "No Device Name Set",
+            "No device name is currently set. Measurements will be saved to the sample folder.\n\n"
+            "Would you like to:\n"
+            "• Yes: Stay on Device Manager to set a device name\n"
+            "• No: Continue anyway without setting a device name\n"
+            "• Cancel: Return to device selection",
+            icon='question'
+        )
+        if response is None:  # Cancel
+            self.notebook.select(0)  # Return to Device Selection tab
+            return
+        elif response is False:  # No - continue anyway without device name
+            self.notebook.select(0)  # Return to Device Selection tab
+            
+            # Check if devices are selected
+            selected_device_list = [self.device_list[i] for i in self.selected_indices]
+            
+            if not selected_device_list:
+                # No devices selected either - show device selection dialog
+                self.notebook.select(1)  # Go back to Device Manager
+                self.root.update_idletasks()
+                self.root.update()
+                self.root.after(100, lambda: self._show_no_devices_dialog())
+                return
+            
+            # Devices are selected, continue with measurement
+            sample_type = self.sample_type_var.get()
+            section = self.section_var.get()
+            
+            self.change_relays()
+            print("")
+            print("Selected devices:")
+            print([self.get_device_label(device) for device in selected_device_list])
+            print("Current Device: None (measurements will be saved to sample folder)")
+            print("")
+            
+            # Open measurement window without device name
+            self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
+            self.measurement_window = True
+        else:  # Yes - stay on Device Manager tab to set device name
+            return
 
     def update_info_box(self, event: Optional[Any] = None) -> None:
         selected_device = self.device_var.get()

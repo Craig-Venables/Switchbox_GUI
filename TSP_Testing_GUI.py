@@ -1,12 +1,72 @@
 """
-Multi-System Pulse Testing GUI
-Fast, buffer-based pulse testing with real-time visualization
+TSP Testing GUI - Multi-System Pulse Testing Interface
+========================================================
 
-Supports:
-- Keithley 2450 (TSP-based)
-- Keithley 4200A-SCS (KXCI-based)
+Purpose:
+--------
+Fast, buffer-based pulse testing GUI with real-time visualization for Keithley
+instruments. Supports both Keithley 2450 (TSP-based) and Keithley 4200A-SCS
+(KXCI-based) systems. Automatically routes tests to the appropriate measurement
+system based on device address.
 
-Uses SystemWrapper for automatic routing to appropriate measurement system.
+Key Features:
+-------------
+- Pulse-read-repeat tests
+- Width sweeps (pulse width characterization)
+- Potentiation/depression cycles
+- Endurance testing
+- Real-time plotting and visualization
+- Automatic system detection (2450 vs 4200A)
+- Test parameter configuration
+- Data saving with customizable locations
+
+Entry Points:
+-------------
+1. Standalone mode:
+   ```python
+   root = tk.Tk()
+   gui = TSPTestingGUI(root, device_address="USB0::0x05E6::0x2450::04496615::INSTR")
+   root.mainloop()
+   ```
+
+2. Launched from MeasurementGUI:
+   - User clicks "Pulse Testing" button in MeasurementGUI
+   - Passes device address and context (sample name, device label)
+
+Dependencies:
+-------------
+- Pulse_Testing.system_wrapper: System detection and routing
+- Pulse_Testing.test_capabilities: Test availability checking
+- Equipment.SMU_AND_PMU.Keithley2450_TSP: 2450 TSP interface
+- Equipment.SMU_AND_PMU.keithley2450_tsp_scripts: 2450 test scripts
+- Equipment.SMU_AND_PMU.keithley4200_kxci_scripts: 4200A KXCI scripts
+- Measurments.data_formats: Data formatting and saving
+
+Relationships:
+-------------
+TSP_Testing_GUI (this file)
+    ├─> Can be launched from MeasurementGUI
+    ├─> Can be standalone
+    └─> Uses SystemWrapper to route to:
+            ├─> Keithley 2450 system
+            └─> Keithley 4200A system
+
+Test Functions:
+---------------
+Defined in TEST_FUNCTIONS dictionary:
+- Pulse-Read-Repeat
+- Multi-Pulse-Then-Read
+- Width Sweep
+- Potentiation/Depression Cycle
+- Endurance Test
+- And more...
+
+File Structure:
+---------------
+- ~3289 lines
+- Main class: TSPTestingGUI
+- Key components: Test definitions, test runner, plot manager, connection handler
+- TODO: Consider breaking into smaller modules (see GUI_REFACTORING_PLAN.md)
 """
 
 import threading
