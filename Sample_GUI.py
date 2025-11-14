@@ -282,7 +282,7 @@ class SampleGUI:
         self.Multiplexer_dropdown.bind("<<ComboboxSelected>>", self.update_multiplexer)
         
         # Sample Type
-        ttk.Label(control_bar, text="Sample Type:").pack(side="left", padx=(5, 2))
+        ttk.Label(control_bar, text="Type:").pack(side="left", padx=(5, 2))
         self.sample_type_var = tk.StringVar()
         self.sample_dropdown = ttk.Combobox(
             control_bar,
