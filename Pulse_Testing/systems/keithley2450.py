@@ -200,6 +200,38 @@ class Keithley2450System(BaseMeasurementSystem):
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
         return self.test_scripts.relaxation_after_multi_pulse_with_pulse_measurement(**params)
+    
+    # Optional additional tests (also available in 2450)
+    
+    def voltage_amplitude_sweep(self, **params) -> Dict[str, Any]:
+        """Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset"""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        return self.test_scripts.voltage_amplitude_sweep(**params)
+    
+    def ispp_test(self, **params) -> Dict[str, Any]:
+        """Pattern: Start at low voltage, increase by step each pulse"""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        return self.test_scripts.ispp_test(**params)
+    
+    def switching_threshold_test(self, **params) -> Dict[str, Any]:
+        """Pattern: Try increasing voltages, find minimum that causes switching"""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        return self.test_scripts.switching_threshold_test(**params)
+    
+    def multilevel_programming(self, **params) -> Dict[str, Any]:
+        """Pattern: For each level: Reset → Program with pulses → Read"""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        return self.test_scripts.multilevel_programming(**params)
+    
+    def pulse_train_varying_amplitudes(self, **params) -> Dict[str, Any]:
+        """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        return self.test_scripts.pulse_train_varying_amplitudes(**params)
 
 
 class Keithley2450SimSystem(Keithley2450System):

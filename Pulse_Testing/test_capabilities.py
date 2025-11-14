@@ -12,7 +12,7 @@ To add 4200A support for a test:
 
 from typing import Dict, List, Optional
 
-# All available test function names (must match method names in base_system.py)
+# All available test function names (must match method names in base_system.py or system implementations)
 ALL_TEST_FUNCTIONS = [
     'pulse_read_repeat',
     'pulse_then_read',
@@ -30,6 +30,12 @@ ALL_TEST_FUNCTIONS = [
     'current_range_finder',
     'relaxation_after_multi_pulse',
     'relaxation_after_multi_pulse_with_pulse_measurement',
+    # Additional tests available in some systems
+    'voltage_amplitude_sweep',
+    'ispp_test',
+    'switching_threshold_test',
+    'multilevel_programming',
+    'pulse_train_varying_amplitudes',
 ]
 
 # System capability matrix
@@ -52,25 +58,36 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'current_range_finder': True,
         'relaxation_after_multi_pulse': True,
         'relaxation_after_multi_pulse_with_pulse_measurement': True,
+        'voltage_amplitude_sweep': True,
+        'ispp_test': True,
+        'switching_threshold_test': True,
+        'multilevel_programming': True,
+        'pulse_train_varying_amplitudes': True,
     },
     'keithley4200a': {
-        # All False initially - set to True when implementation is ready
-        'pulse_read_repeat': False,
-        'pulse_then_read': False,
-        'multi_pulse_then_read': False,
-        'varying_width_pulses': False,
-        'width_sweep_with_reads': False,
-        'width_sweep_with_all_measurements': False,
-        'potentiation_depression_cycle': False,
-        'potentiation_only': False,
-        'depression_only': False,
-        'endurance_test': False,
-        'retention_test': False,
-        'pulse_multi_read': False,
-        'multi_read_only': False,
-        'current_range_finder': False,
-        'relaxation_after_multi_pulse': False,
-        'relaxation_after_multi_pulse_with_pulse_measurement': False,
+        # Tests implemented in keithley4200_kxci_scripts.py
+        'pulse_read_repeat': True,
+        'pulse_then_read': False,  # Not available - use pulse_read_repeat instead
+        'multi_pulse_then_read': True,
+        'varying_width_pulses': False,  # Not available - use width_sweep_with_reads instead
+        'width_sweep_with_reads': True,
+        'width_sweep_with_all_measurements': False,  # Raises NotImplementedError - requires new C module
+        'potentiation_depression_cycle': False,  # Not available/not working
+        'potentiation_only': True,
+        'depression_only': True,
+        'endurance_test': True,
+        'retention_test': False,  # Not yet implemented
+        'pulse_multi_read': True,
+        'multi_read_only': True,
+        'current_range_finder': False,  # Raises NotImplementedError - requires new C module
+        'relaxation_after_multi_pulse': True,
+        'relaxation_after_multi_pulse_with_pulse_measurement': False,  # Raises NotImplementedError - requires new C module
+        # Additional tests available in 4200A
+        'voltage_amplitude_sweep': True,
+        'ispp_test': True,
+        'switching_threshold_test': True,
+        'multilevel_programming': True,
+        'pulse_train_varying_amplitudes': True,
     },
 }
 

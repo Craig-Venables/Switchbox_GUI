@@ -88,6 +88,10 @@ def detect_system_from_address(address: str) -> Optional[str]:
             return 'keithley4200a'
         return 'keithley2450'
     
+    # Check for 4200 indicators in GPIB addresses
+    if address_lower.startswith('gpib') and '4200' in address_lower:
+        return 'keithley4200a'
+    
     # Default: assume 2450 for USB/GPIB addresses
     if address_lower.startswith(('usb', 'gpib')):
         return 'keithley2450'

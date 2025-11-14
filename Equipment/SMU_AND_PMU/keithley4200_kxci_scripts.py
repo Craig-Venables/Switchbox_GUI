@@ -82,6 +82,227 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# AVAILABLE TEST FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 📋 BASIC PULSE-READ PATTERNS
+# ────────────────────────────────────────────────────────────────────────────────
+# 1. pulse_read_repeat()
+#    Pattern: (Pulse → Read → Delay) × N
+#    Use: Basic pulse response, immediate read after each pulse
+#    Params: pulse_voltage, pulse_width, read_voltage, delay_between, num_cycles, clim
+#
+# 2. multi_pulse_then_read()
+#    Pattern: (Pulse×N → Read×M) × Cycles
+#    Use: Multiple pulses then multiple reads per cycle
+#    Params: pulse_voltage, num_pulses_per_read, pulse_width, delay_between_pulses,
+#            read_voltage, num_reads, delay_between_reads, num_cycles, delay_between_cycles, clim
+#
+# 🧠 MEMRISTOR / RRAM TESTS
+# ────────────────────────────────────────────────────────────────────────────────
+# 3. potentiation_only()
+#    Pattern: Initial Read → Repeated SET pulses with reads
+#    Use: Gradual conductance increase, weight potentiation
+#    Params: set_voltage, pulse_width, read_voltage, num_pulses, delay_between,
+#            num_post_reads, post_read_interval, num_cycles, delay_between_cycles, clim
+#
+# 4. depression_only()
+#    Pattern: Initial Read → Repeated RESET pulses with reads
+#    Use: Gradual conductance decrease, weight depression
+#    Params: reset_voltage, pulse_width, read_voltage, num_pulses, delay_between,
+#            num_post_reads, post_read_interval, num_cycles, delay_between_cycles, clim
+#
+# 5. potentiation_depression_cycle()
+#    Pattern: Initial Read → (Gradual SET → Gradual RESET) × N cycles
+#    Use: Synaptic weight update, neuromorphic applications
+#    Params: set_voltage, reset_voltage, pulse_width, read_voltage, steps, num_cycles,
+#            delay_between, clim
+#
+# 6. potentiation_depression_alternating()
+#    Pattern: Initial Read → (SET → RESET) × N cycles with reads
+#    Use: Alternating SET/RESET pattern for endurance testing
+#    Params: set_voltage, reset_voltage, pulse_width, read_voltage, num_pulses_per_cycle,
+#            delay_between, num_post_reads, post_read_interval, num_cycles, delay_between_cycles, clim
+#
+# ⏱️ RELIABILITY / STABILITY TESTS
+# ────────────────────────────────────────────────────────────────────────────────
+# 7. endurance_test()
+#    Pattern: Initial Read → (SET → Read → RESET → Read) × N cycles
+#    Use: Device lifetime, cycling endurance, degradation monitoring
+#    Params: set_voltage, reset_voltage, pulse_width, read_voltage, num_cycles,
+#            delay_between, clim
+#
+# 🔬 RELAXATION & DYNAMICS TESTS
+# ────────────────────────────────────────────────────────────────────────────────
+# 8. relaxation_after_multi_pulse()
+#    Pattern: 1×Read → N×Pulse → N×Read (measure reads only)
+#    Use: Find how device relaxes after cumulative pulsing
+#    Params: pulse_voltage, num_pulses, pulse_width, delay_between_pulses,
+#            read_voltage, num_reads, delay_between_reads, clim
+#
+# 9. relaxation_after_multi_pulse_with_pulse_measurement()
+#    Pattern: 1×Read → N×Pulse(measured) → N×Read
+#    Use: Full relaxation characterization including pulse peak currents
+#    Params: pulse_voltage, num_pulses, pulse_width, delay_between_pulses,
+#            read_voltage, num_reads, delay_between_reads, clim
+#
+# 🔄 PULSE WIDTH CHARACTERIZATION
+# ────────────────────────────────────────────────────────────────────────────────
+# 10. width_sweep_with_reads()
+#     Pattern: For each width: Initial Read, (Pulse→Read)×N, Reset (per width)
+#     Use: Measure pulse width dependence (reads only)
+#     Params: pulse_voltage, pulse_widths (list), read_voltage, num_pulses_per_width,
+#             reset_voltage, reset_width, delay_between_widths, clim
+#
+# 11. width_sweep_with_all_measurements()
+#     Pattern: For each width: Initial Read, (Pulse(measured)→Read)×N, Reset (per width)
+#     Use: Full width characterization including pulse peak currents
+#     Params: pulse_voltage, pulse_widths (list), read_voltage, num_pulses_per_width,
+#             reset_voltage, reset_width, delay_between_widths, clim
+#
+# 📊 VOLTAGE CHARACTERIZATION
+# ────────────────────────────────────────────────────────────────────────────────
+# 12. voltage_amplitude_sweep()
+#     Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset
+#     Use: Test different pulse voltages at fixed width
+#     Params: pulse_voltage_start, pulse_voltage_stop, pulse_voltage_step, pulse_width,
+#             read_voltage, num_pulses_per_voltage, delay_between, reset_voltage,
+#             reset_width, delay_between_voltages, clim
+#
+# 13. ispp_test() - Incremental Step Pulse Programming
+#     Pattern: Start at low voltage, increase by step each pulse
+#     Use: Gradually increase voltage until switching occurs
+#     Params: start_voltage, voltage_step, max_voltage, pulse_width, read_voltage,
+#             target_resistance, resistance_threshold_factor, max_pulses, delay_between, clim
+#
+# 14. switching_threshold_test()
+#     Pattern: Try increasing voltages, find minimum that causes switching
+#     Use: Find minimum SET or RESET voltage
+#     Params: direction (set/reset), start_voltage, voltage_step, max_voltage, pulse_width,
+#             read_voltage, resistance_threshold_factor, num_pulses_per_voltage,
+#             delay_between, clim
+#
+# 🎯 MULTILEVEL & PATTERN TESTS
+# ────────────────────────────────────────────────────────────────────────────────
+# 15. multilevel_programming()
+#     Pattern: For each level: Reset → Program with pulses → Read
+#     Use: Target specific resistance states for multilevel memory
+#     Params: target_levels (list), pulse_voltage, pulse_width, read_voltage,
+#             num_pulses_per_level, delay_between, reset_voltage, reset_width,
+#             delay_between_levels, clim
+#
+# 16. pulse_train_varying_amplitudes()
+#     Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
+#     Use: Alternating or varying amplitude pulses
+#     Params: pulse_voltages (list), pulse_width, read_voltage, num_repeats,
+#             delay_between, clim
+#
+# 🔍 DIAGNOSTIC TESTS
+# ────────────────────────────────────────────────────────────────────────────────
+# 17. current_range_finder()
+#     Pattern: Test multiple current ranges and recommend best for device
+#     Use: Find optimal current measurement range
+#     Params: test_voltage, num_reads_per_range, delay_between_reads, current_ranges (list)
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# HARDWARE LIMITS - Keithley 4200A-SCS with KXCI C Module Constraints
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# CRITICAL C MODULE LIMITATIONS:
+# ────────────────────────────────────────────────────────────────────────────────
+# The underlying C modules (pmu_retention_dual_channel, readtrain_dual_channel) have
+# hard limits that MUST be respected:
+#
+# 1. Maximum Points: 30,000 points (hardcoded in C module)
+#    - The C module enforces max_pts <= 30000
+#    - Python validation allows up to 30000 points
+#    - Exceeding this causes measurement failures
+#
+# 2. Minimum Sampling Rate: 200,000 samples/second
+#    - The C module requires rate >= 200000 samples/sec
+#    - Calculated as: min_rate = 200000000 / 1000
+#    - Lower rates cause "rate is too small" errors
+#
+# 3. Maximum Measurement Time: ~150 milliseconds per measurement
+#    - Calculated from: max_time = 30000 points / 200000 samples/sec = 0.15 seconds
+#    - For measurements longer than ~150ms, the C module cannot fit the required
+#      points within the 30000 limit while maintaining the minimum rate
+#    - This causes rate calculation failures (error -2 from ret_getRate)
+#
+# 4. Consequences:
+#    - Very long measurements (>150ms total time) will fail
+#    - Solutions:
+#      a) Break long measurements into shorter chunks (<150ms each)
+#      b) Accept the ~150ms limit per measurement
+#      c) Modify the C code to increase max_pts (requires recompiling)
+#
+# PARAMETER LIMITS (from RetentionConfig validation):
+# ────────────────────────────────────────────────────────────────────────────────
+# All parameters are validated and clamped to these limits with warnings.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Pulse width limits (seconds)
+MIN_PULSE_WIDTH = 2e-8          # 20ns - minimum pulse width (C module limit)
+MAX_PULSE_WIDTH = 1.0           # 1s - maximum pulse width
+DEFAULT_PULSE_WIDTH = 100e-6    # 100µs default (converted from ms in GUI)
+
+# Voltage limits (volts)
+MIN_VOLTAGE = -20.0              # -20V minimum voltage
+MAX_VOLTAGE = 20.0               # +20V maximum voltage
+DEFAULT_READ_VOLTAGE = 0.3       # 0.3V default (NOTE: C module uses 0.3V, not user's read_voltage)
+
+# Current range limits (amps) - for i_range parameter
+MIN_CURRENT_RANGE = 100e-9       # 100nA minimum current range
+MAX_CURRENT_RANGE = 0.8          # 0.8A maximum current range
+DEFAULT_CURRENT_RANGE = 1e-4      # 0.1mA default (NOTE: C module uses 1e-4, not converted clim)
+
+# Timing limits (seconds)
+MIN_RISE_TIME = 2e-8             # 20ns minimum rise/fall time
+MAX_RISE_TIME = 1.0              # 1s maximum rise/fall time
+MIN_DELAY = 2e-8                 # 20ns minimum delay between operations
+MAX_DELAY = 1.0                  # 1s maximum delay
+
+# Measurement limits
+MIN_MAX_POINTS = 12              # Minimum points required by C module
+MAX_MAX_POINTS = 30000           # Maximum points (C module hard limit)
+DEFAULT_MAX_POINTS = 10000       # Default max points
+
+# Pulse count limits
+MIN_NUM_PULSES = 8               # Minimum pulses per sequence
+MAX_NUM_PULSES = 1000            # Maximum pulses per sequence
+MIN_NUM_INITIAL_MEAS_PULSES = 1  # Minimum initial measurement pulses
+MAX_NUM_INITIAL_MEAS_PULSES = 100 # Maximum initial measurement pulses
+MIN_NUM_PULSES_SEQ = 1           # Minimum pulses in sequence
+MAX_NUM_PULSES_SEQ = 100         # Maximum pulses in sequence
+
+# Safety flags
+ENABLE_PULSE_WIDTH_CHECK = True  # Set False to disable min pulse width enforcement
+ENABLE_VOLTAGE_CHECK = True      # Set False to disable voltage limit checks
+ENABLE_CURRENT_CHECK = True       # Set False to disable current range checks
+ENABLE_MAX_POINTS_CHECK = True   # Set False to disable max points check
+#
+# FIXED PARAMETERS (Must Use Defaults - Do Not Change):
+# ────────────────────────────────────────────────────────────────────────────────
+# The C module is very sensitive to certain parameters. These MUST use the working
+# example defaults (not user inputs) to avoid errors:
+#
+# - meas_v: Fixed to 0.3V (NOT user's read_voltage parameter)
+# - meas_width: Fixed to 1e-6 (1µs) - measurement pulse width
+# - meas_delay: Fixed to 2e-6 (2µs) - delay between measurement pulses
+# - pulse_delay: Fixed to 1e-6 (1µs) - delay between pulses in sequence
+# - i_range: Fixed to 1e-4 (0.1mA) - current measurement range
+# - reset_width: Fixed to 1e-7 (0.1µs) - reset pulse width
+# - iteration: Fixed to 1 - affects measurement processing
+#
+# Using user-provided values for these causes:
+# - "rate is too small" errors (sampling rate < 200000 samples/sec)
+# - "segment time too short" errors (segment validation failures)
+# - Inconsistent behavior between different parameter combinations
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
 # ============================================================================
 # KXCI Client and Helper Functions
 # ============================================================================
