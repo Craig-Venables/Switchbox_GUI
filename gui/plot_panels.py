@@ -10,6 +10,12 @@ delegate widget construction and gradually shrink to orchestration logic.
 The module also provides small maintenance utilities (clear plots, remember
 last sweep, reset state) that make it easier to add verification tests or
 port the GUI to another toolkit.
+
+MODERNIZED VERSION:
+- Supports dynamic show/hide of individual plots
+- Larger display area with flexible grid layout
+- Floating info overlay on main plots
+- Graph visibility dropdown menu
 """
 
 from __future__ import annotations
@@ -19,6 +25,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import tkinter as tk
+from tkinter import ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
@@ -35,28 +42,342 @@ class MeasurementPlotPanels:
     GUI (`ax_rt_iv`, `canvas_all_logiv`, ...).  The method
     :meth:`attach_to` copies these attributes onto the caller so existing
     code continues to work while we complete the refactor.
+    
+    NEW: Supports dynamic visibility management and floating overlays
     """
 
     font_config: Dict[str, int] = field(
-        default_factory=lambda: {"axis": 7, "title": 9, "ticks": 6}
+        default_factory=lambda: {"axis": 9, "title": 11, "ticks": 8}
     )
     figures: Dict[str, Figure] = field(default_factory=dict)
     axes: Dict[str, object] = field(default_factory=dict)
     canvases: Dict[str, FigureCanvasTkAgg] = field(default_factory=dict)
     lines: Dict[str, object] = field(default_factory=dict)
     last_sweep: PlotLine = field(default_factory=lambda: ([], []))
+    
+    # New attributes for modern layout
+    plot_frames: Dict[str, tk.Frame] = field(default_factory=dict)
+    plot_visibility: Dict[str, tk.BooleanVar] = field(default_factory=dict)
+    overlay_label: Optional[tk.Label] = None
+    main_container: Optional[tk.Frame] = None
 
     # ------------------------------------------------------------------
     # Public construction API
     # ------------------------------------------------------------------
     def create_all_plots(self, graph_frame: tk.Misc, temp_enabled: bool) -> None:
-        """Create every matplotlib panel and embed it inside ``graph_frame``."""
+        """Create every matplotlib panel and embed it inside ``graph_frame`` - LEGACY"""
         self.create_main_iv_plots(graph_frame)
         self.create_all_sweeps_plots(graph_frame)
         self.create_vi_logiv_plots(graph_frame)
         self.create_current_time_plot(graph_frame)
         self.create_temp_time_plot(graph_frame, temp_enabled=temp_enabled)
         self.create_endurance_retention_plots(graph_frame)
+    
+    def create_all_plots_modern(self, graph_frame: tk.Misc, temp_enabled: bool) -> None:
+        """
+        Create modern plot layout with dynamic visibility controls.
+        This is the new entry point for the modernized GUI.
+        """
+        self.main_container = graph_frame
+        
+        # Create control bar at top with visibility dropdown
+        control_bar = tk.Frame(graph_frame, bg='white', height=40)
+        control_bar.pack(side='top', fill='x', padx=10, pady=(5, 0))
+        control_bar.pack_propagate(False)
+        
+        tk.Label(control_bar, text="Visible Graphs:", font=("Segoe UI", 9, "bold"), bg='white').pack(side='left', padx=(0, 10))
+        
+        # Visibility controls button
+        visibility_btn = tk.Button(
+            control_bar,
+            text="Select Graphs ▼",
+            font=("Segoe UI", 9),
+            command=lambda: self._show_visibility_menu(visibility_btn),
+            bg='#f0f0f0',
+            relief='raised',
+            padx=10,
+            pady=3
+        )
+        visibility_btn.pack(side='left')
+        
+        # Create container for plots with dynamic grid
+        plot_container = tk.Frame(graph_frame, bg='white')
+        plot_container.pack(side='top', fill='both', expand=True, padx=10, pady=10)
+        
+        # Initialize visibility states (IV and LogIV always visible by default)
+        self.plot_visibility = {
+            "rt_iv": tk.BooleanVar(value=True),
+            "rt_logiv": tk.BooleanVar(value=True),
+            "all_sweeps": tk.BooleanVar(value=False),
+            "logilogv": tk.BooleanVar(value=False),
+            "current_time": tk.BooleanVar(value=False),
+            "temp_time": tk.BooleanVar(value=False),
+            "endurance": tk.BooleanVar(value=False),
+            "retention": tk.BooleanVar(value=False),
+        }
+        
+        # Create all plot frames (initially hidden except IV/LogIV)
+        self._create_modern_plot_panels(plot_container, temp_enabled)
+        
+        # Create floating overlay
+        self._create_floating_overlay(plot_container)
+        
+        # Initial layout
+        self._update_plot_layout()
+    
+    def _show_visibility_menu(self, button: tk.Widget) -> None:
+        """Show dropdown menu for graph visibility selection"""
+        menu = tk.Menu(button, tearoff=0)
+        
+        # Add checkboxes for each plot
+        labels = {
+            "rt_iv": "IV Plot (Real-time)",
+            "rt_logiv": "Log IV Plot (Real-time)",
+            "all_sweeps": "All Sweeps",
+            "logilogv": "Log V vs Log I",
+            "current_time": "Current vs Time",
+            "temp_time": "Temperature vs Time",
+            "endurance": "Endurance",
+            "retention": "Retention",
+        }
+        
+        for key, label in labels.items():
+            if key in self.plot_visibility:
+                menu.add_checkbutton(
+                    label=label,
+                    variable=self.plot_visibility[key],
+                    command=self._update_plot_layout
+                )
+        
+        # Show menu below button
+        try:
+            x = button.winfo_rootx()
+            y = button.winfo_rooty() + button.winfo_height()
+            menu.post(x, y)
+        except:
+            pass
+    
+    def _update_plot_layout(self) -> None:
+        """Update the grid layout based on visibility settings"""
+        # Hide all plots first
+        for frame in self.plot_frames.values():
+            frame.grid_forget()
+        
+        # Get visible plots
+        visible = [key for key, var in self.plot_visibility.items() if var.get()]
+        
+        if not visible:
+            return
+        
+        # Layout strategy: IV and LogIV get priority (larger, side by side if both visible)
+        # Others fill in below in a 2-column grid
+        
+        row = 0
+        col = 0
+        
+        # Priority plots (IV and LogIV) - always larger
+        priority_plots = ["rt_iv", "rt_logiv"]
+        priority_visible = [p for p in priority_plots if p in visible]
+        
+        if len(priority_visible) == 2:
+            # Both IV and LogIV visible - side by side, large
+            self.plot_frames["rt_iv"].grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
+            self.plot_frames["rt_logiv"].grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=(0, 5))
+            row = 1
+        elif len(priority_visible) == 1:
+            # Only one priority plot - full width, large
+            self.plot_frames[priority_visible[0]].grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 5))
+            row = 1
+        
+        # Secondary plots - 2 column grid
+        secondary_plots = [p for p in visible if p not in priority_visible]
+        for i, plot_key in enumerate(secondary_plots):
+            if plot_key in self.plot_frames:
+                col = i % 2
+                if col == 0 and i > 0:
+                    row += 1
+                pad_x = (0, 5) if col == 0 else (5, 0)
+                self.plot_frames[plot_key].grid(row=row, column=col, sticky="nsew", padx=pad_x, pady=(0, 5))
+        
+        # Configure grid weights for responsive resizing
+        if self.main_container:
+            parent = list(self.plot_frames.values())[0].master
+            parent.columnconfigure(0, weight=1)
+            parent.columnconfigure(1, weight=1)
+            # Priority row gets more weight
+            parent.rowconfigure(0, weight=3)
+            for r in range(1, row + 1):
+                parent.rowconfigure(r, weight=1)
+    
+    def _create_modern_plot_panels(self, parent: tk.Frame, temp_enabled: bool) -> None:
+        """Create all plot panels in modern layout"""
+        # IV Plot
+        frame_iv = tk.LabelFrame(parent, text="IV Plot", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_iv, ax_iv = self._make_figure(title="IV", figsize=(5, 4))
+        self._style_axis(ax_iv, "Voltage (V)", "Current (A)")
+        canvas_iv = FigureCanvasTkAgg(fig_iv, master=frame_iv)
+        canvas_iv.get_tk_widget().pack(fill='both', expand=True)
+        line_iv, = ax_iv.plot([], [], marker=".", markersize=3)
+        self._register("rt_iv", fig_iv, ax_iv, canvas_iv, line_iv)
+        self.plot_frames["rt_iv"] = frame_iv
+        
+        # Log IV Plot
+        frame_logiv = tk.LabelFrame(parent, text="Log IV Plot", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_log, ax_log = self._make_figure(title="Log IV", figsize=(5, 4))
+        ax_log.set_yscale("log")
+        self._style_axis(ax_log, "Voltage (V)", "|Current| (A)")
+        canvas_log = FigureCanvasTkAgg(fig_log, master=frame_logiv)
+        canvas_log.get_tk_widget().pack(fill='both', expand=True)
+        line_log, = ax_log.plot([], [], marker=".", markersize=3)
+        self._register("rt_logiv", fig_log, ax_log, canvas_log, line_log)
+        self.plot_frames["rt_logiv"] = frame_logiv
+        
+        # All Sweeps (combined IV and Log IV)
+        frame_all = tk.LabelFrame(parent, text="All Sweeps", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        inner_frame = tk.Frame(frame_all, bg='white')
+        inner_frame.pack(fill='both', expand=True)
+        inner_frame.columnconfigure(0, weight=1)
+        inner_frame.columnconfigure(1, weight=1)
+        inner_frame.rowconfigure(0, weight=1)
+        
+        fig_all_iv, ax_all_iv = self._make_figure(title="IV - All", figsize=(4, 3))
+        self._style_axis(ax_all_iv, "Voltage (V)", "Current (A)")
+        canvas_all_iv = FigureCanvasTkAgg(fig_all_iv, master=inner_frame)
+        canvas_all_iv.get_tk_widget().grid(row=0, column=0, sticky='nsew', padx=(0, 3))
+        
+        fig_all_log, ax_all_log = self._make_figure(title="Log IV - All", figsize=(4, 3))
+        ax_all_log.set_yscale("log")
+        self._style_axis(ax_all_log, "Voltage (V)", "|Current| (A)")
+        canvas_all_log = FigureCanvasTkAgg(fig_all_log, master=inner_frame)
+        canvas_all_log.get_tk_widget().grid(row=0, column=1, sticky='nsew', padx=(3, 0))
+        
+        btn_frame = tk.Frame(frame_all, bg='white')
+        btn_frame.pack(fill='x', pady=(5, 0))
+        tk.Button(btn_frame, text="Clear IV", command=lambda: self.clear_axis(2), font=("Segoe UI", 8)).pack(side='left', padx=3)
+        tk.Button(btn_frame, text="Clear Log IV", command=lambda: self.clear_axis(3), font=("Segoe UI", 8)).pack(side='left', padx=3)
+        
+        self._register("all_iv", fig_all_iv, ax_all_iv, canvas_all_iv, None)
+        self._register("all_logiv", fig_all_log, ax_all_log, canvas_all_log, None)
+        self.plot_frames["all_sweeps"] = frame_all
+        
+        # Log V vs Log I
+        frame_logilogv = tk.LabelFrame(parent, text="Log V vs Log I", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_logilogv, ax_logilogv = self._make_figure(title="LogV vs LogI", figsize=(4, 3))
+        ax_logilogv.set_xscale("log")
+        ax_logilogv.set_yscale("log")
+        self._style_axis(ax_logilogv, "|Voltage| (V)", "|Current| (A)")
+        canvas_logilogv = FigureCanvasTkAgg(fig_logilogv, master=frame_logilogv)
+        canvas_logilogv.get_tk_widget().pack(fill='both', expand=True)
+        line_logilogv, = ax_logilogv.plot([], [], marker=".", color="r", markersize=3)
+        self._register("rt_logilogv", fig_logilogv, ax_logilogv, canvas_logilogv, line_logilogv)
+        self.plot_frames["logilogv"] = frame_logilogv
+        
+        # Current vs Time
+        frame_ct = tk.LabelFrame(parent, text="Current vs Time", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_ct, ax_ct = self._make_figure(title="Current vs Time", figsize=(4, 3))
+        self._style_axis(ax_ct, "Time (s)", "Current (A)")
+        canvas_ct = FigureCanvasTkAgg(fig_ct, master=frame_ct)
+        canvas_ct.get_tk_widget().pack(fill='both', expand=True)
+        line_ct, = ax_ct.plot([], [], marker=".", markersize=3)
+        self._register("ct_rt", fig_ct, ax_ct, canvas_ct, line_ct)
+        self.plot_frames["current_time"] = frame_ct
+        
+        # Temperature vs Time (if enabled)
+        if temp_enabled:
+            frame_tt = tk.LabelFrame(parent, text="Temperature vs Time", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+            fig_tt, ax_tt = self._make_figure(title="Temperature vs Time", figsize=(4, 3))
+            self._style_axis(ax_tt, "Time (s)", "Temp (°C)")
+            canvas_tt = FigureCanvasTkAgg(fig_tt, master=frame_tt)
+            canvas_tt.get_tk_widget().pack(fill='both', expand=True)
+            line_tt, = ax_tt.plot([], [], marker="x", markersize=3)
+            self._register("tt_rt", fig_tt, ax_tt, canvas_tt, line_tt)
+            self.plot_frames["temp_time"] = frame_tt
+        
+        # Endurance
+        frame_end = tk.LabelFrame(parent, text="Endurance", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_end, ax_end = self._make_figure(title="Endurance (ON/OFF)", figsize=(4, 3))
+        self._style_axis(ax_end, "Cycle", "ON/OFF Ratio")
+        canvas_end = FigureCanvasTkAgg(fig_end, master=frame_end)
+        canvas_end.get_tk_widget().pack(fill='both', expand=True)
+        self.endurance_ratios: List[float] = []
+        self._register("endurance", fig_end, ax_end, canvas_end, None)
+        self.plot_frames["endurance"] = frame_end
+        
+        # Retention
+        frame_ret = tk.LabelFrame(parent, text="Retention", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_ret, ax_ret = self._make_figure(title="Retention", figsize=(4, 3))
+        ax_ret.set_xscale("log")
+        ax_ret.set_yscale("log")
+        self._style_axis(ax_ret, "Time (s)", "Current (A)")
+        canvas_ret = FigureCanvasTkAgg(fig_ret, master=frame_ret)
+        canvas_ret.get_tk_widget().pack(fill='both', expand=True)
+        self.retention_times: List[float] = []
+        self.retention_currents: List[float] = []
+        self._register("retention", fig_ret, ax_ret, canvas_ret, None)
+        self.plot_frames["retention"] = frame_ret
+    
+    def _create_floating_overlay(self, parent: tk.Frame) -> None:
+        """Create a floating info overlay with light orange transparency"""
+        overlay = tk.Label(
+            parent,
+            text="Sample: — | Device: — | Voltage: 0V | Loop: #1",
+            font=("Segoe UI", 9, "bold"),
+            bg='#ffe0b2',  # Light orange
+            fg='#e65100',  # Dark orange text
+            relief='solid',
+            borderwidth=1,
+            padx=12,
+            pady=6
+        )
+        # Position at top-center
+        overlay.place(relx=0.5, rely=0.01, anchor='n')
+        
+        self.overlay_label = overlay
+    
+    def update_overlay(self, sample_name: str = "—", device: str = "—", voltage: str = "0V", loop: str = "#1") -> None:
+        """Update the floating overlay text"""
+        if self.overlay_label:
+            text = f"Sample: {sample_name} | Device: {device} | Voltage: {voltage} | Loop: {loop}"
+            self.overlay_label.config(text=text)
+    
+    # ------------------------------------------------------------------
+    # Conditional visibility helpers
+    # ------------------------------------------------------------------
+    def show_plot(self, plot_key: str) -> None:
+        """Show a specific plot by setting its visibility to True"""
+        if plot_key in self.plot_visibility:
+            self.plot_visibility[plot_key].set(True)
+            self._update_plot_layout()
+    
+    def hide_plot(self, plot_key: str) -> None:
+        """Hide a specific plot by setting its visibility to False"""
+        if plot_key in self.plot_visibility:
+            self.plot_visibility[plot_key].set(False)
+            self._update_plot_layout()
+    
+    def show_endurance_plot(self) -> None:
+        """Show endurance plot when endurance test is running"""
+        self.show_plot("endurance")
+    
+    def hide_endurance_plot(self) -> None:
+        """Hide endurance plot when endurance test is complete"""
+        self.hide_plot("endurance")
+    
+    def show_retention_plot(self) -> None:
+        """Show retention plot when retention test is running"""
+        self.show_plot("retention")
+    
+    def hide_retention_plot(self) -> None:
+        """Hide retention plot when retention test is complete"""
+        self.hide_plot("retention")
+    
+    def show_temp_plot(self) -> None:
+        """Show temperature plot when temp measurements are active"""
+        self.show_plot("temp_time")
+    
+    def hide_temp_plot(self) -> None:
+        """Hide temperature plot when temp measurements are inactive"""
+        self.hide_plot("temp_time")
 
     # Individual panels -------------------------------------------------
     def create_main_iv_plots(self, parent: tk.Misc) -> None:
