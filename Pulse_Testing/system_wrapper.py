@@ -55,9 +55,12 @@ def detect_system_from_address(address: str) -> Optional[str]:
     Detection logic:
     - USB/GPIB addresses containing "2450" → keithley2450
     - IP:port format (e.g., "192.168.0.10:8888") → keithley4200a
-    - GPIB addresses → try keithley2450 as default
+    - GPIB0::17::INSTR (common 4200A address) → keithley4200a
+    - Other GPIB addresses → try to query instrument ID, fallback to keithley2450
+    - USB addresses → keithley2450 (default)
     """
     address_lower = address.lower().strip()
+    address_normalized = address.strip()
     
     # Check for 2450 indicators
     if '2450' in address_lower:
@@ -92,8 +95,39 @@ def detect_system_from_address(address: str) -> Optional[str]:
     if address_lower.startswith('gpib') and '4200' in address_lower:
         return 'keithley4200a'
     
-    # Default: assume 2450 for USB/GPIB addresses
-    if address_lower.startswith(('usb', 'gpib')):
+    # Check for common 4200A GPIB address (GPIB0::17::INSTR)
+    # This is the standard address used throughout the codebase for 4200A
+    if address_normalized == "GPIB0::17::INSTR" or address_lower == "gpib0::17::instr":
+        return 'keithley4200a'
+    
+    # For other GPIB addresses without clear indicators, try to query instrument
+    if address_lower.startswith('gpib'):
+        # Try to query instrument ID to determine system
+        try:
+            import pyvisa
+            rm = pyvisa.ResourceManager()
+            inst = rm.open_resource(address_normalized)
+            inst.timeout = 2000  # 2 second timeout for quick check
+            inst.write_termination = "\n"
+            inst.read_termination = "\n"
+            idn = inst.query("*IDN?").strip().upper()
+            inst.close()
+            rm.close()
+            
+            # Check IDN response for system indicators
+            if '4200' in idn or '4200A' in idn or '4200-SCS' in idn:
+                return 'keithley4200a'
+            elif '2450' in idn:
+                return 'keithley2450'
+        except Exception:
+            # If query fails, fall through to default
+            pass
+        
+        # Fallback: default GPIB to 2450 (most common)
+        return 'keithley2450'
+    
+    # Default: assume 2450 for USB addresses
+    if address_lower.startswith('usb'):
         return 'keithley2450'
     
     # Unknown format - return None (caller should handle)

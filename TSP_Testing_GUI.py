@@ -76,7 +76,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, simpledialog
@@ -97,6 +97,39 @@ from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_addre
 from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
 
 from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
+
+
+# Standalone utility function for independent operation
+def find_largest_number_in_folder(folder: Union[str, Path]) -> Optional[int]:
+    """
+    Return the largest numeric prefix found in folder filenames.
+    
+    Scans existing files in the folder to find the largest numeric prefix
+    (e.g., "5-test.txt" -> 5). Used for sequential file numbering.
+    
+    Args:
+        folder: Path to folder to scan
+        
+    Returns:
+        Largest number found, or None if no numeric prefixes found
+    """
+    try:
+        entries = os.listdir(folder)
+    except (FileNotFoundError, OSError):
+        return None
+    
+    max_idx: Optional[int] = None
+    for name in entries:
+        try:
+            # Extract prefix before first hyphen
+            prefix = name.split("-", 1)[0]
+            value = int(prefix)
+            if max_idx is None or value > max_idx:
+                max_idx = value
+        except (ValueError, IndexError):
+            continue
+    
+    return max_idx
 
 
 # Test function definitions with parameters
@@ -995,6 +1028,15 @@ class TSPTestingGUI(tk.Toplevel):
                 available_devices.insert(0, default_addr)
             self.addr_combo['values'] = available_devices
             self.log(f"🔧 Auto-populated device address for {system_name}: {default_addr}")
+        
+        # Update current_system_name for parameter unit conversion
+        # (even if not connected, this affects default display units)
+        if not self.system_wrapper.is_connected():
+            self.current_system_name = system_name
+        
+        # Refresh parameters to show correct units (ms for 2450, µs for 4200A)
+        if hasattr(self, 'test_var') and self.test_var.get():
+            self.populate_parameters()
     
     def _update_system_detection(self):
         """Update system selection when address changes (optional - user can override)"""
@@ -1053,7 +1095,7 @@ class TSPTestingGUI(tk.Toplevel):
             # Update test list based on capabilities - this greys out unsupported tests
             self._update_test_list_capabilities()
             
-            # Check current test and update button state
+            # Check current test and update button state (this will refresh parameters with correct units)
             self.on_test_selected(None)
             
             self.run_btn.config(state=tk.NORMAL)
@@ -1197,20 +1239,62 @@ class TSPTestingGUI(tk.Toplevel):
             
             row += 1
         
+        # Check if current system is 4200A (use µs instead of ms)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        # Time parameters that should be in µs for 4200A
+        time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
+                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
+                      'reset_width', 'delay_between_voltages', 'delay_between_levels']
+        
+        # Default values for 4200A (in µs) - different from 2450 defaults
+        # For 4200A, we want 1 µs for pulse_width and delays, not 1000 µs (1 ms)
+        defaults_4200a = {
+            'pulse_width': 1.0,  # 1 µs
+            'delay_between': 10.0,  # 10 µs
+            'delay_between_pulses': 1.0,  # 1 µs
+            'delay_between_reads': 10.0,  # 10 µs
+            'delay_between_cycles': 10.0,  # 10 µs
+            'post_read_interval': 1.0,  # 1 µs
+            'reset_width': 1.0,  # 1 µs
+            'delay_between_voltages': 1000.0,  # 1000 µs = 1 ms
+            'delay_between_levels': 1000.0,  # 1000 µs = 1 ms
+        }
+        
         for param_name, param_info in params.items():
+            # Adjust label and default for 4200A time parameters
+            label = param_info["label"]
+            default_value = param_info["default"]
+            
+            if is_4200a and param_name in time_params:
+                # Convert label from (ms) to (µs)
+                if "(ms)" in label:
+                    label = label.replace("(ms)", "(µs)")
+                # Use 4200A-specific defaults (in µs) if available, otherwise convert from ms
+                if param_name in defaults_4200a:
+                    default_value = defaults_4200a[param_name]
+                elif isinstance(default_value, (int, float)):
+                    # Fallback: convert from ms to µs (multiply by 1000)
+                    default_value = default_value * 1000.0
+            
             # Label
-            tk.Label(self.params_frame, text=param_info["label"], anchor="w").grid(
+            tk.Label(self.params_frame, text=label, anchor="w").grid(
                 row=row, column=0, sticky="w", padx=5, pady=2)
             
             # Entry
-            var = tk.StringVar(value=str(param_info["default"]))
+            var = tk.StringVar(value=str(default_value))
             entry = tk.Entry(self.params_frame, textvariable=var, width=20)
             entry.grid(row=row, column=1, sticky="ew", padx=5, pady=2)
             
             # Bind entry to update diagram when changed
             var.trace_add("write", lambda *args: self.update_pulse_diagram())
             
-            self.param_vars[param_name] = {"var": var, "type": param_info["type"]}
+            # Store original label and whether this is a time param for 4200A
+            self.param_vars[param_name] = {
+                "var": var, 
+                "type": param_info["type"],
+                "is_time_param": param_name in time_params,
+                "original_label": param_info["label"]
+            }
             row += 1
         
         self.params_frame.columnconfigure(1, weight=1)
@@ -1222,14 +1306,18 @@ class TSPTestingGUI(tk.Toplevel):
     def get_test_parameters(self):
         """Extract and validate parameters"""
         params = {}
-        # Time parameters that need conversion from ms to seconds
+        # Time parameters that need conversion
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
                       'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
                       'reset_width', 'delay_between_voltages', 'delay_between_levels']
         
+        # Check if current system is 4200A (values are in µs, need to convert to seconds)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        
         for param_name, param_info in self.param_vars.items():
             var = param_info["var"]
             param_type = param_info["type"]
+            is_time_param = param_info.get("is_time_param", False)
             
             try:
                 value_str = var.get()
@@ -1237,9 +1325,14 @@ class TSPTestingGUI(tk.Toplevel):
                     params[param_name] = int(value_str)
                 elif param_type == "float":
                     value = float(value_str)
-                    # Convert ms to seconds for time parameters
-                    if param_name in time_params:
-                        value = value / 1000.0  # ms → s
+                    # Convert time parameters to seconds
+                    if is_time_param:
+                        if is_4200a:
+                            # 4200A: values are in µs, convert to seconds
+                            value = value / 1e6  # µs → s
+                        else:
+                            # 2450: values are in ms, convert to seconds
+                            value = value / 1000.0  # ms → s
                     params[param_name] = value
                 elif param_type == "list":
                     # Parse comma-separated list
@@ -1956,7 +2049,6 @@ class TSPTestingGUI(tk.Toplevel):
                 
                 # Get next index for sequential numbering (simple mode)
                 # Find largest number prefix from existing files
-                from Measurement_GUI import find_largest_number_in_folder
                 max_num = find_largest_number_in_folder(str(save_dir))
                 index = 0 if max_num is None else max_num + 1
             else:
@@ -1982,7 +2074,6 @@ class TSPTestingGUI(tk.Toplevel):
                     save_dir.mkdir(parents=True, exist_ok=True)
                     
                     # Get next index for sequential numbering
-                    from Measurement_GUI import find_largest_number_in_folder
                     max_num = find_largest_number_in_folder(str(save_dir))
                     index = 0 if max_num is None else max_num + 1
                     
@@ -2380,12 +2471,22 @@ class TSPTestingGUI(tk.Toplevel):
         
         try:
             # Get current parameters (with fallbacks)
+            # Check if current system is 4200A (values are in µs)
+            is_4200a = self.current_system_name in ('keithley4200a',)
+            time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
+                          'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
+                          'reset_width', 'delay_between_voltages', 'delay_between_levels']
+            
             params = {}
             for key, info in self.param_vars.items():
                 try:
                     val = info["var"].get()
                     if info["type"] == "float":
-                        params[key] = float(val)
+                        value = float(val)
+                        # Convert µs to seconds for diagram (diagram expects seconds)
+                        if is_4200a and info.get("is_time_param", False):
+                            value = value / 1e6  # µs → s
+                        params[key] = value
                     elif info["type"] == "int":
                         params[key] = int(val)
                     elif info["type"] == "list":
@@ -3282,16 +3383,24 @@ class TSPTestingGUI(tk.Toplevel):
             return
         
         # Load parameters into GUI
+        # Check if current system is 4200A (need to convert to µs)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
+                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
+                      'reset_width', 'delay_between_voltages', 'delay_between_levels']
+        
         for param_name, value in params.items():
             if param_name in self.param_vars:
                 var = self.param_vars[param_name]["var"]
                 param_type = self.param_vars[param_name]["type"]
+                is_time_param = self.param_vars[param_name].get("is_time_param", False)
                 
-                # Convert back from seconds to milliseconds for time parameters
-                time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                              'delay_between_reads', 'delay_between_cycles']
-                if param_name in time_params and param_type == "float":
-                    value = value * 1000.0  # s → ms
+                # Convert back from seconds to display units for time parameters
+                if is_time_param and param_type == "float":
+                    if is_4200a:
+                        value = value * 1e6  # s → µs
+                    else:
+                        value = value * 1000.0  # s → ms
                 
                 # Format value appropriately
                 if param_type == "int":

@@ -139,11 +139,11 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: Initial Read → (Pulse → Read → Delay) × N"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs for 4200A scripts (they expect µs)
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0  # ms → µs
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0  # ms → µs
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         return self._scripts.pulse_read_repeat(**params)
     
     def pulse_then_read(self, **params) -> Dict[str, Any]:
@@ -155,15 +155,15 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: (Pulse×N → Read×M) × Cycles"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between_pulses' in params:
-            params['delay_between_pulses'] = params['delay_between_pulses'] * 1000.0
+            params['delay_between_pulses'] = params['delay_between_pulses'] * 1e6  # s → µs
         if 'delay_between_reads' in params:
-            params['delay_between_reads'] = params['delay_between_reads'] * 1000.0
+            params['delay_between_reads'] = params['delay_between_reads'] * 1e6  # s → µs
         if 'delay_between_cycles' in params:
-            params['delay_between_cycles'] = params['delay_between_cycles'] * 1000.0
+            params['delay_between_cycles'] = params['delay_between_cycles'] * 1e6  # s → µs
         return self._scripts.multi_pulse_then_read(**params)
     
     def varying_width_pulses(self, **params) -> Dict[str, Any]:
@@ -210,24 +210,24 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: Initial Read → Gradual SET → Gradual RESET"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         return self._scripts.potentiation_depression_cycle(**params)
     
     def potentiation_only(self, **params) -> Dict[str, Any]:
         """Pattern: Initial Read → Repeated SET pulses with reads"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         if 'post_read_interval' in params:
-            params['post_read_interval'] = params['post_read_interval'] * 1000.0
+            params['post_read_interval'] = params['post_read_interval'] * 1e6  # s → µs
         if 'delay_between_cycles' in params:
             # Already in seconds, keep as-is
             pass
@@ -237,13 +237,13 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: Initial Read → Repeated RESET pulses with reads"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         if 'post_read_interval' in params:
-            params['post_read_interval'] = params['post_read_interval'] * 1000.0
+            params['post_read_interval'] = params['post_read_interval'] * 1e6  # s → µs
         if 'delay_between_cycles' in params:
             # Already in seconds, keep as-is
             pass
@@ -253,11 +253,11 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: (SET → Read → RESET → Read) × N cycles"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         return self._scripts.endurance_test(**params)
     
     def retention_test(self, **params) -> Dict[str, Any]:
@@ -269,31 +269,31 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: N pulses then many reads"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between_pulses' in params:
-            params['delay_between_pulses'] = params['delay_between_pulses'] * 1000.0
+            params['delay_between_pulses'] = params['delay_between_pulses'] * 1e6  # s → µs
         if 'delay_between_reads' in params:
-            params['delay_between_reads'] = params['delay_between_reads'] * 1000.0
+            params['delay_between_reads'] = params['delay_between_reads'] * 1e6  # s → µs
         return self._scripts.pulse_multi_read(**params)
     
     def multi_read_only(self, **params) -> Dict[str, Any]:
         """Pattern: Just reads, no pulses"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         return self._scripts.multi_read_only(**params)
     
     def current_range_finder(self, **params) -> Dict[str, Any]:
         """Find optimal current measurement range"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'delay_between_reads' in params:
-            params['delay_between_reads'] = params['delay_between_reads'] * 1000.0
+            params['delay_between_reads'] = params['delay_between_reads'] * 1e6  # s → µs
         # Handle current_ranges if it's a string
         if 'current_ranges' in params and isinstance(params['current_ranges'], str):
             params['current_ranges'] = [float(x.strip()) for x in params['current_ranges'].split(",")]
@@ -303,26 +303,26 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: 1×Read → N×Pulse → N×Read (measure reads only)"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between_pulses' in params:
-            params['delay_between_pulses'] = params['delay_between_pulses'] * 1000.0
+            params['delay_between_pulses'] = params['delay_between_pulses'] * 1e6  # s → µs
         if 'delay_between_reads' in params:
-            params['delay_between_reads'] = params['delay_between_reads'] * 1000.0
+            params['delay_between_reads'] = params['delay_between_reads'] * 1e6  # s → µs
         return self._scripts.relaxation_after_multi_pulse(**params)
     
     def relaxation_after_multi_pulse_with_pulse_measurement(self, **params) -> Dict[str, Any]:
         """Pattern: 1×Read → N×Pulse(measured) → N×Read"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between_pulses' in params:
-            params['delay_between_pulses'] = params['delay_between_pulses'] * 1000.0
+            params['delay_between_pulses'] = params['delay_between_pulses'] * 1e6  # s → µs
         if 'delay_between_reads' in params:
-            params['delay_between_reads'] = params['delay_between_reads'] * 1000.0
+            params['delay_between_reads'] = params['delay_between_reads'] * 1e6  # s → µs
         return self._scripts.relaxation_after_multi_pulse_with_pulse_measurement(**params)
     
     # Additional tests available in 4200A but not in base_system
@@ -332,13 +332,13 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         if 'reset_width' in params:
-            params['reset_width'] = params['reset_width'] * 1000.0
+            params['reset_width'] = params['reset_width'] * 1e6  # s → µs
         if 'delay_between_voltages' in params:
             # Already in seconds, keep as-is
             pass
@@ -348,35 +348,35 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: Start at low voltage, increase by step each pulse"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         return self._scripts.ispp_test(**params)
     
     def switching_threshold_test(self, **params) -> Dict[str, Any]:
         """Pattern: Try increasing voltages, find minimum that causes switching"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         return self._scripts.switching_threshold_test(**params)
     
     def multilevel_programming(self, **params) -> Dict[str, Any]:
         """Pattern: For each level: Reset → Program with pulses → Read"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         if 'reset_width' in params:
-            params['reset_width'] = params['reset_width'] * 1000.0
+            params['reset_width'] = params['reset_width'] * 1e6  # s → µs
         if 'delay_between_levels' in params:
             # Already in seconds, keep as-is
             pass
@@ -389,11 +389,11 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert ms to µs
+        # Convert seconds to µs for 4200A scripts (they expect µs)
         if 'pulse_width' in params:
-            params['pulse_width'] = params['pulse_width'] * 1000.0
+            params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
-            params['delay_between'] = params['delay_between'] * 1000.0
+            params['delay_between'] = params['delay_between'] * 1e6  # s → µs
         # Handle pulse_voltages if it's a string
         if 'pulse_voltages' in params and isinstance(params['pulse_voltages'], str):
             params['pulse_voltages'] = [float(x.strip()) for x in params['pulse_voltages'].split(",")]

@@ -66,22 +66,23 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
     },
     'keithley4200a': {
         # Tests implemented in keithley4200_kxci_scripts.py
-        'pulse_read_repeat': True,
+        # See 4200A_TEST_STATUS.md for detailed status
+        'pulse_read_repeat': False,  # ❌ Requires NEW C module: pulse_read_repeat_dual_channel.c
         'pulse_then_read': False,  # Not available - use pulse_read_repeat instead
-        'multi_pulse_then_read': True,
+        'multi_pulse_then_read': True,  # ⚠️ Works but limited to 8 reads (needs C modification for N reads)
         'varying_width_pulses': False,  # Not available - use width_sweep_with_reads instead
-        'width_sweep_with_reads': True,
-        'width_sweep_with_all_measurements': False,  # Raises NotImplementedError - requires new C module
+        'width_sweep_with_reads': True,  # ⚠️ Works but needs Python-side loop over widths
+        'width_sweep_with_all_measurements': False,  # ❌ Requires NEW C module with pulse measurement
         'potentiation_depression_cycle': False,  # Not available/not working
         'potentiation_only': True,
         'depression_only': True,
         'endurance_test': True,
         'retention_test': False,  # Not yet implemented
-        'pulse_multi_read': True,
-        'multi_read_only': True,
-        'current_range_finder': False,  # Raises NotImplementedError - requires new C module
-        'relaxation_after_multi_pulse': True,
-        'relaxation_after_multi_pulse_with_pulse_measurement': False,  # Raises NotImplementedError - requires new C module
+        'pulse_multi_read': True,  # ✅ Fully working
+        'multi_read_only': True,  # ✅ Fully working
+        'current_range_finder': False,  # ❌ Requires NEW C module (or Python-side loop)
+        'relaxation_after_multi_pulse': True,  # ✅ Fully working
+        'relaxation_after_multi_pulse_with_pulse_measurement': False,  # ❌ Requires NEW C module with pulse measurement
         # Additional tests available in 4200A
         'voltage_amplitude_sweep': True,
         'ispp_test': True,
@@ -157,8 +158,12 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
     # Custom explanations for unsupported tests (can be expanded)
     explanations = {
         'keithley4200a': {
-            'pulse_read_repeat': '4200A implementation not yet ready - LabVIEW/KXCI integration pending',
-            'endurance_test': '4200A implementation not yet ready - LabVIEW/KXCI integration pending',
+            'pulse_read_repeat': 'Can use pmu_retention_dual_channel.c if we remove min-8 requirement. Need to modify C code validation (line 266) and Python validation (line 310 in run_pmu_retention.py). Pattern: Initial Read → (Pulse → Read → Delay) × N',
+            'multi_pulse_then_read': 'Currently limited to 8 reads per cycle. C module needs modification to support N reads (1-1000)',
+            'width_sweep_with_reads': 'Works but needs Python-side loop to call C module multiple times (once per width)',
+            'width_sweep_with_all_measurements': 'Requires NEW C module with pulse peak current measurement capability',
+            'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module: relaxation_with_pulse_measurement.c to measure pulse peaks',
+            'current_range_finder': 'Requires NEW C module or Python-side loop over current ranges',
             # Add more specific explanations as needed
         }
     }

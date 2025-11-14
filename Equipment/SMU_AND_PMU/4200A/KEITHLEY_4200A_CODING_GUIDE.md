@@ -928,6 +928,117 @@ def safe_query(gp_param: int, num_points: int, name: str, max_retries: int = 3):
     return []
 ```
 
+### 16. Delay Segments Must Set End Voltage AFTER Increment
+
+**CRITICAL:** When creating flat delay segments (e.g., delay at 0V between pulse and read), you **MUST** set the end voltage **AFTER** incrementing `segIdx`, not before.
+
+**How `ret_Define_SegmentsILimit` works:**
+- Segment `i` goes from `v[i]` to `v[i+1]` over `t[i]`
+- So for a flat delay at 0V: `v[i]` must be 0.0, `v[i+1]` must be 0.0, `t[i]` = delay time
+
+**Wrong (causes slow rise):**
+```c
+// After pulse falls to 0V
+volts[segIdx] = 0.0;  // END of FALL
+segIdx++;
+
+// DELAY segment - WRONG PATTERN
+times[segIdx] = PulseDelay;  // 1us
+volts[segIdx] = 0.0;  // Setting end voltage BEFORE increment
+segIdx++;
+
+// RISE segment
+times[segIdx] = riseTime;  // 100ns
+volts[segIdx] = measV;  // This makes delay segment go 0V->measV over 1us!
+```
+
+**Right (creates proper flat delay):**
+```c
+// After pulse falls to 0V
+volts[segIdx] = 0.0;  // END of FALL
+segIdx++;
+
+// DELAY segment - CORRECT PATTERN
+times[segIdx] = PulseDelay;  // 1us
+// volts[segIdx] already 0.0 from previous segment (start of delay)
+segIdx++;  // Increment FIRST
+volts[segIdx] = 0.0;  // END voltage of delay (flat at 0V) - set AFTER increment
+
+// RISE segment
+times[segIdx] = riseTime;  // 100ns
+segIdx++;
+volts[segIdx] = measV;  // END voltage of RISE
+```
+
+**Result:**
+- Delay segment: `v[i-1]` (0.0) → `v[i]` (0.0) over `t[i-1]` (1us) = **flat delay**
+- Rise segment: `v[i]` (0.0) → `v[i+1]` (measV) over `t[i]` (100ns) = **fast rise**
+
+**Common Symptom:**
+If you see a slow rise (e.g., 700ns instead of 100ns) after a delay segment, the delay segment is likely being interpreted as a transition instead of a flat segment. Check that you're setting the end voltage **after** incrementing `segIdx`.
+
+### 17. Extra segIdx Increment Causes Zero-Time Segments
+
+**CRITICAL:** When creating flat segments (e.g., measurement pulse top), ensure you don't have an extra `segIdx++` after setting the end voltage. This will skip setting the time for the next segment, causing a zero-time segment error.
+
+**How segments work:**
+- Segment `i` goes from `v[i]` to `v[i+1]` over `t[i]`
+- Each segment requires: `times[segIdx]` set, then `segIdx++`, then `volts[segIdx]` set (end voltage)
+
+**Wrong (causes zero-time segment error):**
+```c
+// TOP: Measurement pulse width at measV
+times[segIdx] = measWidth;
+ttime += times[segIdx];
+volts[segIdx] = measV;  // Stay at measV during measurement window
+segIdx++;
+volts[segIdx] = measV;  // END voltage (same as start = flat top)
+segIdx++;  // EXTRA INCREMENT - WRONG! This skips the next segment's time
+
+// FALL delay at measV (setFallTime) - optional settling time
+times[segIdx] = setFallTime;  // This sets time for segIdx+1, not segIdx!
+ttime += times[segIdx];
+volts[segIdx] = measV;
+segIdx++;
+```
+
+**Error Message:**
+```
+error segment 4 has zero or negative time start 0.3v stop 0.3v time 0
+```
+
+**Right (correct segment structure):**
+```c
+// TOP: Measurement pulse width at measV
+times[segIdx] = measWidth;
+ttime += times[segIdx];
+volts[segIdx] = measV;  // Stay at measV during measurement window
+segIdx++;
+volts[segIdx] = measV;  // END voltage (same as start = flat top)
+// NO extra segIdx++ here!
+
+// FALL delay at measV (setFallTime) - optional settling time
+times[segIdx] = setFallTime;  // Now correctly sets time for current segment
+ttime += times[segIdx];
+volts[segIdx] = measV;
+segIdx++;
+volts[segIdx] = measV;  // END voltage of delay segment
+```
+
+**Pattern to Follow:**
+For each segment:
+1. Set `times[segIdx]` (time for this segment)
+2. Update `ttime` if needed
+3. Set `volts[segIdx]` (start voltage - usually already set from previous segment)
+4. Increment `segIdx++`
+5. Set `volts[segIdx]` (end voltage of this segment)
+6. **DO NOT increment again** unless starting a new segment
+
+**Common Symptom:**
+- Error: "segment N has zero or negative time"
+- The segment with zero time will have the same start and end voltage as the previous segment
+- Check for extra `segIdx++` after setting end voltages of flat segments
+
 ---
 
 ## Measurement Window (40-80% Rule)
@@ -1105,6 +1216,7 @@ GP <parameter_number>
 ---
 
 **Last Updated**: Based on codebase analysis of ACraig modules (ACraig2 through ACraig12)
+
 
 
 
