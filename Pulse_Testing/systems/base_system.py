@@ -172,6 +172,44 @@ class BaseMeasurementSystem(ABC):
         """Pattern: 1×Read → N×Pulse(measured) → N×Read"""
         pass
     
+    # Optional additional tests (not all systems support these)
+    # These are not abstract - systems can implement them if supported
+    
+    def voltage_amplitude_sweep(self, **params) -> Dict[str, Any]:
+        """Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset
+        
+        Optional test - not all systems support this.
+        """
+        raise NotImplementedError("voltage_amplitude_sweep not implemented for this system")
+    
+    def ispp_test(self, **params) -> Dict[str, Any]:
+        """Pattern: Start at low voltage, increase by step each pulse
+        
+        Optional test - not all systems support this.
+        """
+        raise NotImplementedError("ispp_test not implemented for this system")
+    
+    def switching_threshold_test(self, **params) -> Dict[str, Any]:
+        """Pattern: Try increasing voltages, find minimum that causes switching
+        
+        Optional test - not all systems support this.
+        """
+        raise NotImplementedError("switching_threshold_test not implemented for this system")
+    
+    def multilevel_programming(self, **params) -> Dict[str, Any]:
+        """Pattern: For each level: Reset → Program with pulses → Read
+        
+        Optional test - not all systems support this.
+        """
+        raise NotImplementedError("multilevel_programming not implemented for this system")
+    
+    def pulse_train_varying_amplitudes(self, **params) -> Dict[str, Any]:
+        """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
+        
+        Optional test - not all systems support this.
+        """
+        raise NotImplementedError("pulse_train_varying_amplitudes not implemented for this system")
+    
     def _format_results(self, timestamps: List[float], voltages: List[float], 
                        currents: List[float], resistances: List[float],
                        **extras) -> Dict[str, Any]:

@@ -346,10 +346,18 @@ class MeasurementGUILayoutBuilder:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Mouse wheel scrolling
+        # Mouse wheel scrolling - bind to canvas only (not global)
         def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            # Check if canvas still exists before trying to scroll
+            try:
+                # Try to access canvas to verify it exists
+                _ = canvas.winfo_id()
+                canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            except (tk.TclError, AttributeError):
+                # Canvas has been destroyed, ignore the event
+                pass
+        # Bind only to this canvas, not globally
+        canvas.bind("<MouseWheel>", _on_mousewheel)
         
         # Store container reference in scrollable_frame for caller to grid
         scrollable_frame._container = container

@@ -2047,14 +2047,17 @@ class SampleGUI:
             color = self._get_status_color(manual_status)
             self.device_status_labels[device].config(text=icon, fg=color)
         
-        # Save to disk
+        # Save to disk (auto-saves notes and status to JSON and Excel)
         self._save_device_status()
+        
+        # Log the update
+        if notes:
+            self.log_terminal(f"Device {label}: Status updated to '{manual_status}' with notes (auto-saved)", "SUCCESS")
+        else:
+            self.log_terminal(f"Device {label}: Status updated to '{manual_status}' (auto-saved)", "SUCCESS")
         
         # Update overlays
         self._redraw_quick_scan_overlay()
-        
-        # Log
-        self.log_terminal(f"Device {label} marked as {manual_status}", "INFO")
 
     def show_device_status_info(self, device: str) -> None:
         """Show detailed status information for a device."""
@@ -2824,7 +2827,57 @@ class SampleGUI:
             # Draw a new rectangle
             self.canvas.create_rectangle(x_min, y_min, x_max, y_max, outline="#009dff", width=3, tags="highlight")
 
+    def _show_no_devices_dialog(self) -> None:
+        """Show dialog when no devices are selected (called after tab switch)."""
+        response = messagebox.askyesnocancel(
+            "No Devices Selected",
+            "No devices are currently selected for measurement.\n\n"
+            "Would you like to:\n"
+            "• Yes: Stay on Device Manager to select/create devices\n"
+            "• No: Skip and continue anyway (measurements will use current device)\n"
+            "• Cancel: Return to device selection",
+            icon='question'
+        )
+        if response is None:  # Cancel
+            self.notebook.select(0)  # Return to Device Selection tab
+            return
+        elif response is False:  # No - skip and continue anyway
+            self.notebook.select(0)  # Return to Device Selection tab
+            # Continue with opening measurement window
+            self._continue_measurement_without_devices()
+        else:  # Yes - stay on Device Manager tab
+            return
+    
+    def _continue_measurement_without_devices(self) -> None:
+        """Continue opening measurement window even without selected devices."""
+        sample_type = self.sample_type_var.get()
+        section = self.section_var.get()
+        selected_device_list = []  # Empty list
+        
+        # Warn if no device is set
+        if not self.current_device_name:
+            response = messagebox.askyesno(
+                "No Device Set",
+                "No device name is currently set. Measurements will be saved to the sample folder.\n\n"
+                "Do you want to continue?",
+                icon='warning'
+            )
+            if not response:
+                return
+
+        self.change_relays()
+        print("")
+        print("Selected devices: []")
+        if self.current_device_name:
+            print(f"Current Device: {self.current_device_name}")
+        print("")
+        
+        # Open measurement window with empty device list
+        self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
+        self.measurement_window = True
+    
     def open_measurement_window(self) -> None:
+        """Open the measurement window. If no devices selected, show Device Manager tab first."""
         if not self.measurement_window:
             sample_type = self.sample_type_var.get()
             section = self.section_var.get()
@@ -2833,7 +2886,13 @@ class SampleGUI:
             selected_device_list = [self.device_list[i] for i in self.selected_indices]
 
             if not selected_device_list:
-                messagebox.showwarning("Warning", "No devices selected for measurement.")
+                # Switch to Device Manager tab first (make it visible)
+                self.notebook.select(1)  # Device Manager tab is at index 1
+                self.root.update_idletasks()  # Process pending display updates
+                self.root.update()  # Force UI update to show the tab switch
+                
+                # Small delay to ensure tab is visible before showing dialog
+                self.root.after(100, lambda: self._show_no_devices_dialog())
                 return
             
             # Warn if no device is set

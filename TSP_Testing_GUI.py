@@ -1,6 +1,12 @@
 """
-TSP Testing GUI for Keithley 2450
+Multi-System Pulse Testing GUI
 Fast, buffer-based pulse testing with real-time visualization
+
+Supports:
+- Keithley 2450 (TSP-based)
+- Keithley 4200A-SCS (KXCI-based)
+
+Uses SystemWrapper for automatic routing to appropriate measurement system.
 """
 
 import threading
@@ -322,11 +328,15 @@ TEST_FUNCTIONS = {
 
 
 class TSPTestingGUI(tk.Toplevel):
-    """Keithley 2450 TSP Fast Pulse Testing GUI"""
+    """Multi-System Pulse Testing GUI
+    
+    Supports Keithley 2450 (TSP) and Keithley 4200A-SCS (KXCI).
+    Automatically routes tests to appropriate system based on device address.
+    """
     
     def __init__(self, master, device_address: str = "USB0::0x05E6::0x2450::04496615::INSTR", provider=None):
         super().__init__(master)
-        self.title("Keithley 2450 TSP Pulse Testing")
+        self.title("Multi-System Pulse Testing")
         self.geometry("1400x900")
         self.resizable(True, True)
         
