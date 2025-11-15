@@ -289,7 +289,7 @@ def create_optical_from_system_config(system_cfg: Dict[str, Any]) -> Optional[Op
     if otype == "led":
         # Build PSU manager from config
         try:
-            from Equipment.power_supply_manager import PowerSupplyManager  # local import to avoid cycles
+            from Equipment.managers.power_supply import PowerSupplyManager  # local import to avoid cycles
         except Exception as _:
             return None
         psu_type = system_cfg.get("psu_type", "Keithley 2220")

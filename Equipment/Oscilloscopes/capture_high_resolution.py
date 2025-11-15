@@ -22,7 +22,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from Equipment.oscilloscope_manager import OscilloscopeManager
+from Equipment.managers.oscilloscope import OscilloscopeManager
 
 
 def _default_data_format(scope) -> str:

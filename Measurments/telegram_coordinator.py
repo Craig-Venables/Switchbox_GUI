@@ -96,7 +96,7 @@ class TelegramCoordinator:
             return None
         if self._bot is None:
             try:
-                from TelegramBot import TelegramBot  # Local import to avoid hard dep at startup
+                from Notifications import TelegramBot  # Local import to avoid hard dep at startup
 
                 token = self.gui.token_var.get().strip()
                 chat_id = self.gui.chatid_var.get().strip()

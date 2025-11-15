@@ -1,5 +1,5 @@
 import tkinter as tk
-from Sample_GUI import SampleGUI
+from gui.sample_gui import SampleGUI
 
 # record data when checking for connection to see if the current increases over times
 # maybe cut off after a sharp increase is seen!

@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from gui.plot_panels import MeasurementPlotPanels
-from gui.plot_updaters import PlotUpdaters
+from gui.measurement_gui.plot_panels import MeasurementPlotPanels
+from gui.measurement_gui.plot_updaters import PlotUpdaters
 
 
 def _build_plot_panels(temp_enabled: bool = True):

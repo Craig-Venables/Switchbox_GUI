@@ -1,5 +1,5 @@
 from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
-from Equipment.function_generator_manager import FunctionGeneratorManager
+from Equipment.managers.function_generator import FunctionGeneratorManager
 from Measurments.measurement_services_pmu import MeasurementServicesPMU
 import os
 import json

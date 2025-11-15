@@ -5,8 +5,8 @@ import tkinter as tk
 
 import pytest
 
-import Sample_GUI
-from Sample_GUI import SampleGUI
+import gui.sample_gui as Sample_GUI
+from gui.sample_gui import SampleGUI
 
 
 @pytest.fixture
