@@ -18,7 +18,7 @@ from typing import Iterable, Optional, Callable, Tuple, List, Any
 import numpy as np
 import pandas as pd
 
-from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
+from Equipment.SMU_AND_PMU import Keithley4200A_PMUDualChannel
 from Equipment.managers.function_generator import FunctionGeneratorManager
 
 

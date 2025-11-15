@@ -185,7 +185,7 @@ if TYPE_CHECKING:
         retention_times_s: List[float]
         max_voltage_v: float
         max_compliance_a: float
-from Automated_tester_GUI import AutomatedTesterGUI
+#from Automated_tester_GUI import AutomatedTesterGUI
 
 # Set logging level to WARNING (hides INFO messages)
 logging.getLogger("pymeasure").setLevel(logging.WARNING)
@@ -327,6 +327,19 @@ class MeasurementGUI:
         self.current_index = self.sample_gui.current_index
         self.load_messaging_data()
         
+        # Set up window close protocol to notify sample_gui
+        def on_closing():
+            """Handle window close - notify sample_gui and cleanup"""
+            # Notify sample_gui that measurement window is closing
+            if hasattr(self.sample_gui, '_on_measurement_window_closed'):
+                self.sample_gui._on_measurement_window_closed()
+            # Clean up resources
+            self.cleanup()
+            # Destroy the window
+            self.master.destroy()
+        
+        self.master.protocol("WM_DELETE_WINDOW", on_closing)
+        
         self.psu_visa_address = "USB0::0x05E6::0x2220::9210734::INSTR"
         self.temp_controller_address= 'ASRL12::INSTR'
         self.keithley_address = "GPIB0::24::INSTR"
@@ -458,6 +471,10 @@ class MeasurementGUI:
         
         # Attach plot attributes to self for backwards compatibility
         self.plot_panels.attach_to(self)
+        
+        # Set up context menus for quick notes on all plot canvases
+        if hasattr(self, 'layout_builder'):
+            self.layout_builder._setup_plot_context_menus(self)
         
         # Start plot updaters
         self.plot_updaters = PlotUpdaters(gui=self, plot_panels=self.plot_panels)
@@ -3325,14 +3342,18 @@ class MeasurementGUI:
         """Raise the main window and ensure it gains focus."""
         try:
             master = getattr(self, "master", None)
-            if master:
+            if master and master.winfo_exists():
                 master.deiconify()
                 master.lift()
                 master.focus_force()
                 master.attributes("-topmost", True)
                 master.after(100, lambda: master.attributes("-topmost", False))
+            else:
+                # Window doesn't exist anymore, return False to indicate failure
+                raise Exception("Window no longer exists")
         except Exception as exc:
             print(f"[GUI] Failed to bring window to top: {exc}")
+            raise  # Re-raise to let caller know it failed
 
     def convert_to_name(self, index: int) -> str:
         """Translate a device index into the legacy section/number label."""

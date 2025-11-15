@@ -2582,6 +2582,240 @@ class Keithley4200_KXCI_Scripts:
             voltages_applied=voltages_applied
         )
     
+    def laser_and_read(self,
+                      read_voltage: float = 0.3,
+                      read_width: float = 0.5,  # µs, will convert to seconds
+                      read_period: float = 2.0,  # µs, will convert to seconds
+                      num_reads: int = 500,
+                      # Laser (CH2) parameters
+                      laser_voltage_high: float = 1.5,  # Laser pulse voltage (V) - MUST BE LIMITED
+                      laser_voltage_low: float = 0.0,  # Laser baseline voltage (V)
+                      laser_width: float = 10.0,  # µs, will convert to seconds
+                      laser_delay: float = 5.0,  # µs delay before laser pulse starts, will convert to seconds
+                      laser_rise_time: float = 0.1,  # µs, will convert to seconds
+                      laser_fall_time: float = 0.1,  # µs, will convert to seconds
+                      # Instrument parameters
+                      volts_source_rng: float = 10.0,  # CH1 voltage range (V)
+                      current_measure_rng: float = 0.00001,  # CH1 current range (A)
+                      sample_rate: float = 200e6,  # Sample rate (Sa/s)
+                      clim: float = 100e-3) -> Dict:
+        """Laser-assisted read measurements.
+        
+        ⚠️ IMPORTANT SAFETY WARNINGS:
+        - You MUST reconfigure coax cables before running this test
+        - CH2 laser voltage MUST NOT exceed safe limits (typically 2.0V max) to prevent laser damage
+        - This test uses CH1 for measurement and CH2 for laser pulse (independent timing)
+        
+        Pattern: CH1 continuous reads at specified period, CH2 independent laser pulse
+        
+        Args:
+            read_voltage: CH1 read voltage (V)
+            read_width: CH1 pulse width (µs) - will be converted to seconds
+            read_period: CH1 pulse period (µs) - will be converted to seconds
+            num_reads: Number of CH1 read pulses (burst_count)
+            laser_voltage_high: CH2 laser pulse voltage (V) - MUST BE LIMITED (max 2.0V recommended)
+            laser_voltage_low: CH2 baseline voltage (V)
+            laser_width: CH2 laser pulse width (µs) - will be converted to seconds
+            laser_delay: CH2 delay before laser pulse starts (µs) - will be converted to seconds
+            laser_rise_time: CH2 rise time (µs) - will be converted to seconds
+            laser_fall_time: CH2 fall time (µs) - will be converted to seconds
+            volts_source_rng: CH1 voltage range (V)
+            current_measure_rng: CH1 current measurement range (A)
+            sample_rate: Sample rate (Sa/s)
+            clim: Current limit (A) - not directly used, kept for compatibility
+        
+        Returns:
+            Dict with timestamps, voltages, currents, resistances
+        
+        Raises:
+            ValueError: If laser_voltage_high exceeds safety limit (2.0V)
+        """
+        # Safety check: Limit laser voltage to prevent damage
+        MAX_LASER_VOLTAGE = 2.0  # Maximum safe voltage for laser (V)
+        if abs(laser_voltage_high) > MAX_LASER_VOLTAGE:
+            raise ValueError(
+                f"⚠️ SAFETY ERROR: laser_voltage_high ({laser_voltage_high}V) exceeds maximum safe limit ({MAX_LASER_VOLTAGE}V). "
+                f"This could damage the laser. Please reduce the voltage."
+            )
+        
+        # Convert µs to seconds
+        read_width_s = self._convert_us_to_seconds(read_width)
+        read_period_s = self._convert_us_to_seconds(read_period)
+        laser_width_s = self._convert_us_to_seconds(laser_width)
+        laser_delay_s = self._convert_us_to_seconds(laser_delay)
+        laser_rise_time_s = self._convert_us_to_seconds(laser_rise_time)
+        laser_fall_time_s = self._convert_us_to_seconds(laser_fall_time)
+        
+        # Auto-calculate array size (one value per pulse in average mode)
+        array_size = num_reads
+        
+        # Build EX command for ACraig10_PMU_Waveform_SegArb
+        # CH1: Continuous waveform reads
+        # CH2: Laser pulse with independent timing
+        command = self._build_laser_read_ex_command(
+            # CH1 parameters
+            width=read_width_s,
+            rise=100e-9,  # Default rise time (100ns)
+            fall=100e-9,  # Default fall time (100ns)
+            delay=0.0,  # No pre-pulse delay
+            period=read_period_s,
+            volts_source_rng=volts_source_rng,
+            current_measure_rng=current_measure_rng,
+            dut_res=1e6,  # Default DUT resistance
+            start_v=read_voltage,
+            stop_v=read_voltage,
+            step_v=0.0,  # No voltage sweep
+            base_v=0.0,  # Base voltage
+            acq_type=1,  # Average mode (one value per pulse)
+            lle_comp=0,  # Load line effect compensation off
+            pre_data_pct=0.1,  # Default pre-pulse data capture
+            post_data_pct=0.1,  # Default post-pulse data capture
+            pulse_avg_cnt=1,  # No pulse averaging
+            burst_count=num_reads,
+            sample_rate=sample_rate,
+            pmu_mode=0,  # Simple mode
+            chan=1,  # CH1 for measurement
+            pmu_id="PMU1",
+            array_size=array_size,
+            # CH2 parameters (laser pulse)
+            ch2_enable=1,  # Enable CH2
+            ch2_vrange=10.0,  # CH2 voltage range (V)
+            ch2_vlow=laser_voltage_low,
+            ch2_vhigh=laser_voltage_high,
+            ch2_width=laser_width_s,
+            ch2_rise=laser_rise_time_s,
+            ch2_fall=laser_fall_time_s,
+            ch2_period=laser_delay_s,  # Delay before laser pulse starts
+            ch2_loop_count=1.0,  # Single laser pulse
+            clarius_debug=1  # Enable debug output
+        )
+        
+        controller = self._get_controller()
+        
+        if not controller.connect():
+            raise RuntimeError("Unable to connect to instrument")
+        
+        try:
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            
+            return_value, error = controller._execute_ex_command(command)
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+            
+            if return_value is not None and return_value < 0:
+                raise RuntimeError(f"EX command returned error code: {return_value}")
+            
+            time.sleep(0.2)  # Allow data to be ready
+            
+            # Query data from GP parameters
+            # Parameter positions: 23=V_Meas, 25=I_Meas, 27=T_Stamp
+            voltage = self._query_gp_data(controller, 23, array_size, "voltage")
+            current = self._query_gp_data(controller, 25, array_size, "current")
+            time_axis = self._query_gp_data(controller, 27, array_size, "time")
+            
+            # Trim to valid data
+            usable = min(len(voltage), len(current), len(time_axis))
+            voltage = voltage[:usable]
+            current = current[:usable]
+            time_axis = time_axis[:usable]
+            
+            # Calculate resistances
+            resistances: List[float] = []
+            for v, i in zip(voltage, current):
+                if abs(i) > 1e-12:
+                    resistances.append(v / i)
+                else:
+                    resistances.append(float('inf') if v > 0 else float('-inf'))
+            
+            return self._format_results(time_axis, voltage, current, resistances)
+            
+        finally:
+            try:
+                controller._exit_ul_mode()
+            except Exception:
+                pass
+    
+    def _build_laser_read_ex_command(
+        self,
+        # CH1 parameters
+        width: float, rise: float, fall: float, delay: float, period: float,
+        volts_source_rng: float, current_measure_rng: float, dut_res: float,
+        start_v: float, stop_v: float, step_v: float, base_v: float,
+        acq_type: int, lle_comp: int, pre_data_pct: float, post_data_pct: float,
+        pulse_avg_cnt: int, burst_count: int, sample_rate: float, pmu_mode: int,
+        chan: int, pmu_id: str, array_size: int,
+        # CH2 parameters (laser pulse)
+        ch2_enable: int, ch2_vrange: float,
+        ch2_vlow: float, ch2_vhigh: float, ch2_width: float,
+        ch2_rise: float, ch2_fall: float, ch2_period: float, ch2_loop_count: float,
+        clarius_debug: int = 1
+    ) -> str:
+        """Build EX command for ACraig10_PMU_Waveform_SegArb (laser read)."""
+        ch2_num_segments = 0  # 0 = auto-build mode
+        
+        params = [
+            # CH1 parameters
+            format_param(width),
+            format_param(rise),
+            format_param(fall),
+            format_param(delay),
+            format_param(period),
+            format_param(volts_source_rng),
+            format_param(current_measure_rng),
+            format_param(dut_res),
+            format_param(start_v),
+            format_param(stop_v),
+            format_param(step_v),
+            format_param(base_v),
+            format_param(acq_type),
+            format_param(lle_comp),
+            format_param(pre_data_pct),
+            format_param(post_data_pct),
+            format_param(pulse_avg_cnt),
+            format_param(burst_count),
+            format_param(sample_rate),
+            format_param(pmu_mode),
+            format_param(chan),
+            pmu_id,
+            "",  # V_Meas output array
+            format_param(array_size),
+            "",  # I_Meas output array
+            format_param(array_size),
+            "",  # T_Stamp output array
+            format_param(array_size),
+            # CH2 parameters - ORDER MATCHES METADATA
+            format_param(ch2_enable),           # 29: Ch2Enable
+            format_param(ch2_vrange),          # 30: Ch2VRange
+            format_param(ch2_vlow),            # 31: Ch2Vlow
+            format_param(ch2_vhigh),           # 32: Ch2Vhigh
+            format_param(ch2_width),           # 33: Ch2Width
+            format_param(ch2_rise),            # 34: Ch2Rise
+            format_param(ch2_fall),            # 35: Ch2Fall
+            format_param(ch2_period),          # 36: Ch2Period
+            format_param(ch2_num_segments),    # 37: Ch2NumSegments (0 = auto-build)
+            "",                                 # 38: Ch2StartV (empty array for auto-build)
+            format_param(10),                  # 39: Ch2StartV_size
+            "",                                 # 40: Ch2StopV (empty array)
+            format_param(10),                  # 41: Ch2StopV_size
+            "",                                 # 42: Ch2SegTime (empty array)
+            format_param(10),                  # 43: Ch2SegTime_size
+            "",                                 # 44: Ch2SSRCtrl (empty array)
+            format_param(10),                  # 45: Ch2SSRCtrl_size
+            "",                                 # 46: Ch2SegTrigOut (empty array)
+            format_param(10),                  # 47: Ch2SegTrigOut_size
+            "",                                 # 48: Ch2MeasType (empty array)
+            format_param(10),                  # 49: Ch2MeasType_size
+            "",                                 # 50: Ch2MeasStart (empty array)
+            format_param(10),                  # 51: Ch2MeasStart_size
+            "",                                 # 52: Ch2MeasStop (empty array)
+            format_param(10),                  # 53: Ch2MeasStop_size
+            format_param(ch2_loop_count),      # 54: Ch2LoopCount
+            format_param(clarius_debug),       # 55: ClariusDebug
+        ]
+        
+        return f"EX A_Ch1Read_Ch2Laser_Pulse ACraig10_PMU_Waveform_SegArb({','.join(params)})"
+    
     # ============================================================================
     # Placeholders for Tests Requiring New C Modules
     # ============================================================================

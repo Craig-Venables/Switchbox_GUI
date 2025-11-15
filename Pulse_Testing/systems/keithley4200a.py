@@ -8,16 +8,31 @@ Integrates with keithley4200_kxci_scripts.py for all test functions.
 
 from typing import Dict, List, Any, Optional
 from .base_system import BaseMeasurementSystem
-from Equipment.SMU_AND_PMU.keithley4200_kxci_scripts import (
-    Keithley4200_KXCI_Scripts,
-    MIN_PULSE_WIDTH,
-    MAX_PULSE_WIDTH,
-    MIN_VOLTAGE,
-    MAX_VOLTAGE,
-    MIN_CURRENT_RANGE,
-    MAX_CURRENT_RANGE,
-    MAX_MAX_POINTS,
-)
+# Import from backward-compatible module
+from Equipment.SMU_AND_PMU import keithley4200_kxci_scripts
+
+# Extract script class and constants
+try:
+    Keithley4200_KXCI_Scripts = keithley4200_kxci_scripts.Keithley4200_KXCI_Scripts
+    MIN_PULSE_WIDTH = getattr(keithley4200_kxci_scripts, 'MIN_PULSE_WIDTH', 50e-6)
+    MAX_PULSE_WIDTH = getattr(keithley4200_kxci_scripts, 'MAX_PULSE_WIDTH', 1.0)
+    MIN_VOLTAGE = getattr(keithley4200_kxci_scripts, 'MIN_VOLTAGE', -40.0)
+    MAX_VOLTAGE = getattr(keithley4200_kxci_scripts, 'MAX_VOLTAGE', 40.0)
+    MIN_CURRENT_RANGE = getattr(keithley4200_kxci_scripts, 'MIN_CURRENT_RANGE', 100e-9)
+    MAX_CURRENT_RANGE = getattr(keithley4200_kxci_scripts, 'MAX_CURRENT_RANGE', 0.8)
+    MAX_MAX_POINTS = getattr(keithley4200_kxci_scripts, 'MAX_MAX_POINTS', 30000)
+except AttributeError:
+    # Fallback if not available - import directly
+    from Equipment.SMU_AND_PMU.keithley4200.kxci_scripts import (
+        Keithley4200_KXCI_Scripts,
+    )
+    MIN_PULSE_WIDTH = 50e-6
+    MAX_PULSE_WIDTH = 1.0
+    MIN_VOLTAGE = -40.0
+    MAX_VOLTAGE = 40.0
+    MIN_CURRENT_RANGE = 100e-9
+    MAX_CURRENT_RANGE = 0.8
+    MAX_MAX_POINTS = 30000
 
 
 class Keithley4200ASystem(BaseMeasurementSystem):
@@ -398,3 +413,26 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         if 'pulse_voltages' in params and isinstance(params['pulse_voltages'], str):
             params['pulse_voltages'] = [float(x.strip()) for x in params['pulse_voltages'].split(",")]
         return self._scripts.pulse_train_varying_amplitudes(**params)
+    
+    def laser_and_read(self, **params) -> Dict[str, Any]:
+        """Pattern: CH1 continuous reads, CH2 independent laser pulse
+        
+        ⚠️ IMPORTANT: You MUST reconfigure coax cables before running this test.
+        CH2 laser voltage is limited to 2.0V maximum to prevent laser damage.
+        """
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        # Convert seconds to µs for 4200A scripts (they expect µs)
+        if 'read_width' in params:
+            params['read_width'] = params['read_width'] * 1e6  # s → µs
+        if 'read_period' in params:
+            params['read_period'] = params['read_period'] * 1e6  # s → µs
+        if 'laser_width' in params:
+            params['laser_width'] = params['laser_width'] * 1e6  # s → µs
+        if 'laser_delay' in params:
+            params['laser_delay'] = params['laser_delay'] * 1e6  # s → µs
+        if 'laser_rise_time' in params:
+            params['laser_rise_time'] = params['laser_rise_time'] * 1e6  # s → µs
+        if 'laser_fall_time' in params:
+            params['laser_fall_time'] = params['laser_fall_time'] * 1e6  # s → µs
+        return self._scripts.laser_and_read(**params)

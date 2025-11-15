@@ -9,20 +9,36 @@ for the Pulse Testing architecture.
 from typing import Dict, List, Any, Optional
 from .base_system import BaseMeasurementSystem
 
-# Import the actual implementation
-from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
-from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
-from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import (
-    Keithley2450_TSP_Scripts,
-    MIN_PULSE_WIDTH,
-    MAX_PULSE_WIDTH,
-    MAX_VOLTAGE,
-    MIN_CURRENT_LIMIT,
-    MAX_CURRENT_LIMIT,
+# Import the actual implementation - use backward-compatible imports
+from Equipment.SMU_AND_PMU import (
+    Keithley2450_TSP,
+    Keithley2450_TSP_Sim,
+    keithley2450_tsp_scripts,
+    keithley2450_tsp_sim_scripts,
 )
-from Equipment.SMU_AND_PMU.keithley2450_tsp_sim_scripts import (
-    Keithley2450_TSP_Sim_Scripts,
-)
+
+# Extract the script classes and constants
+try:
+    Keithley2450_TSP_Scripts = keithley2450_tsp_scripts.Keithley2450_TSP_Scripts
+    # Extract constants from the module
+    MIN_PULSE_WIDTH = keithley2450_tsp_scripts.MIN_PULSE_WIDTH
+    MAX_PULSE_WIDTH = keithley2450_tsp_scripts.MAX_PULSE_WIDTH
+    MAX_VOLTAGE = keithley2450_tsp_scripts.MAX_VOLTAGE
+    MIN_CURRENT_LIMIT = keithley2450_tsp_scripts.MIN_CURRENT_LIMIT
+    MAX_CURRENT_LIMIT = keithley2450_tsp_scripts.MAX_CURRENT_LIMIT
+except AttributeError:
+    # Fallback if constants not available
+    Keithley2450_TSP_Scripts = None
+    MIN_PULSE_WIDTH = 1e-3
+    MAX_PULSE_WIDTH = 10.0
+    MAX_VOLTAGE = 5.0
+    MIN_CURRENT_LIMIT = 1e-6
+    MAX_CURRENT_LIMIT = 1.0
+
+try:
+    Keithley2450_TSP_Sim_Scripts = keithley2450_tsp_sim_scripts.Keithley2450_TSP_Sim_Scripts
+except AttributeError:
+    Keithley2450_TSP_Sim_Scripts = None
 
 
 class Keithley2450System(BaseMeasurementSystem):

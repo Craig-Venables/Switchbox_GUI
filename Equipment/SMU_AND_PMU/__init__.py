@@ -48,8 +48,11 @@ except ImportError:
     Keithley2450_TSP_Sim_Scripts = None
 
 try:
-    from Equipment.SMU_AND_PMU.keithley4200.kxci_scripts import Keithley4200A_KXCI_Scripts
+    from Equipment.SMU_AND_PMU.keithley4200.kxci_scripts import Keithley4200_KXCI_Scripts
+    # Alias for backward compatibility
+    Keithley4200A_KXCI_Scripts = Keithley4200_KXCI_Scripts
 except ImportError:
+    Keithley4200_KXCI_Scripts = None
     Keithley4200A_KXCI_Scripts = None
 
 __all__ = [
@@ -70,6 +73,7 @@ __all__ = [
     # Script classes
     'Keithley2450_TSP_Scripts',
     'Keithley2450_TSP_Sim_Scripts',
-    'Keithley4200A_KXCI_Scripts',
+    'Keithley4200_KXCI_Scripts',
+    'Keithley4200A_KXCI_Scripts',  # Alias for backward compatibility
 ]
 

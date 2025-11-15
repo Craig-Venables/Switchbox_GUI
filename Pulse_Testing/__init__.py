@@ -11,3 +11,18 @@ Provides unified interface for pulse testing across different measurement system
 
 __version__ = "1.0.0"
 
+# Import visualization module
+from .pulse_pattern_visualizer import (
+    PulsePatternVisualizer,
+    visualize_laser_and_read_pattern,
+    PulsePatternTimeline,
+    SignalSegment
+)
+
+__all__ = [
+    'PulsePatternVisualizer',
+    'visualize_laser_and_read_pattern',
+    'PulsePatternTimeline',
+    'SignalSegment',
+]
+

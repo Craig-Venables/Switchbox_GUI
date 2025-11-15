@@ -95,13 +95,14 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
-# Legacy imports kept for compatibility
-from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
-from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import Keithley2450_TSP_Scripts
+# Legacy imports kept for compatibility - use backward-compatible imports
+from Equipment.SMU_AND_PMU import Keithley2450_TSP, keithley2450_tsp_scripts
+Keithley2450_TSP_Scripts = keithley2450_tsp_scripts.Keithley2450_TSP_Scripts if hasattr(keithley2450_tsp_scripts, 'Keithley2450_TSP_Scripts') else None
 
 # New modular pulse testing system
 from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_address, get_default_address_for_system
 from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
+from Pulse_Testing.pulse_pattern_visualizer import PulsePatternVisualizer
 
 from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
 
@@ -150,6 +151,28 @@ TEST_FUNCTIONS = {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
             "num_cycles": {"default": 100, "label": "Number of Cycles", "type": "int"},
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "time_series",
+    },
+    
+    "Laser and Read": {
+        "function": "laser_and_read",
+        "description": "⚠️ IMPORTANT: You MUST reconfigure coax cables before running this test!\nPattern: CH1 continuous reads, CH2 independent laser pulse\nPhoto-induced effects, laser-assisted switching, time-resolved photoconductivity",
+        "params": {
+            "read_voltage": {"default": 0.3, "label": "CH1 Read Voltage (V)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "CH1 Read Width (µs)", "type": "float"},
+            "read_period": {"default": 2.0, "label": "CH1 Read Period (µs)", "type": "float"},
+            "num_reads": {"default": 500, "label": "Number of Reads", "type": "int"},
+            "laser_voltage_high": {"default": 1.5, "label": "CH2 Laser Voltage (V) - MAX 2.0V!", "type": "float"},
+            "laser_voltage_low": {"default": 0.0, "label": "CH2 Baseline Voltage (V)", "type": "float"},
+            "laser_width": {"default": 10.0, "label": "CH2 Laser Width (µs)", "type": "float"},
+            "laser_delay": {"default": 5.0, "label": "CH2 Laser Delay (µs)", "type": "float"},
+            "laser_rise_time": {"default": 0.1, "label": "CH2 Rise Time (µs)", "type": "float"},
+            "laser_fall_time": {"default": 0.1, "label": "CH2 Fall Time (µs)", "type": "float"},
+            "volts_source_rng": {"default": 10.0, "label": "CH1 Voltage Range (V)", "type": "float"},
+            "current_measure_rng": {"default": 0.00001, "label": "CH1 Current Range (A)", "type": "float"},
+            "sample_rate": {"default": 200e6, "label": "Sample Rate (Sa/s)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "time_series",
@@ -470,8 +493,7 @@ class TSPTestingGUI(tk.Toplevel):
         # Create UI
         self.create_ui()
         
-        # Attempt auto-connect
-        self.after(500, self.auto_connect)
+        # Auto-connect disabled - user must manually connect
     
     def create_ui(self):
         """Create the main UI layout"""
@@ -2534,6 +2556,8 @@ class TSPTestingGUI(tk.Toplevel):
                 self._draw_multilevel(params)
             elif "Pulse Train" in test_name:
                 self._draw_pulse_train(params)
+            elif "Laser and Read" in test_name:
+                self._draw_laser_and_read(params)
             else:
                 self._draw_generic_pattern()
             
@@ -3244,6 +3268,164 @@ class TSPTestingGUI(tk.Toplevel):
         min_v = min(min(voltages) if voltages else 0, min(pulse_voltages) if pulse_voltages else 0)
         max_v_plot = max(max(voltages) if voltages else 0, max(pulse_voltages) if pulse_voltages else 0)
         self.diagram_ax.set_ylim(min_v*1.2, max_v_plot*1.2)
+    
+    def _draw_laser_and_read(self, params):
+        """Draw laser and read pattern using visualizer"""
+        try:
+            # Check if current system is 4200A (values are in µs)
+            is_4200a = self.current_system_name in ('keithley4200a',)
+            
+            # Extract and convert parameters (convert µs to seconds for visualizer)
+            read_voltage = params.get('read_voltage', 0.3)
+            read_width = params.get('read_width', 0.5)  # In µs
+            read_period = params.get('read_period', 2.0)  # In µs
+            num_reads_total = params.get('num_reads', 500)  # Total number of reads for generation
+            laser_voltage_high = params.get('laser_voltage_high', 1.5)
+            laser_voltage_low = params.get('laser_voltage_low', 0.0)
+            laser_width = params.get('laser_width', 10.0)  # In µs
+            laser_delay = params.get('laser_delay', 5.0)  # In µs
+            laser_rise_time = params.get('laser_rise_time', 0.1)  # In µs
+            laser_fall_time = params.get('laser_fall_time', 0.1)  # In µs
+            
+            # Convert µs to seconds
+            if is_4200a:
+                read_width_s = read_width * 1e-6
+                read_period_s = read_period * 1e-6
+                laser_width_s = laser_width * 1e-6
+                laser_delay_s = laser_delay * 1e-6
+                laser_rise_time_s = laser_rise_time * 1e-6
+                laser_fall_time_s = laser_fall_time * 1e-6
+            else:
+                # 2450 uses ms, but this test is 4200A only typically
+                read_width_s = read_width * 1e-6
+                read_period_s = read_period * 1e-6
+                laser_width_s = laser_width * 1e-6
+                laser_delay_s = laser_delay * 1e-6
+                laser_rise_time_s = laser_rise_time * 1e-6
+                laser_fall_time_s = laser_fall_time * 1e-6
+            
+            # Calculate how many reads to show - ensure at least 20 reads are visible
+            min_reads_to_show = 20
+            # Calculate laser end time
+            laser_end_time_us = laser_delay + laser_width + laser_fall_time
+            # Calculate time needed for 20 reads
+            time_for_20_reads_us = min_reads_to_show * read_period
+            
+            # Use whichever is longer: 20 reads or full laser pulse (with some margin)
+            num_reads_to_generate = max(
+                min_reads_to_show,
+                int((laser_end_time_us + 5) / read_period) + 5  # Show laser plus margin
+            )
+            # But don't generate more than the total requested reads
+            num_reads_to_generate = min(num_reads_to_generate, num_reads_total)
+            
+            # Create visualizer and generate timeline
+            visualizer = PulsePatternVisualizer(time_resolution=0.1e-6)  # 100ns resolution
+            timeline = visualizer.generate_laser_and_read_pattern(
+                read_voltage=read_voltage,
+                read_width=read_width_s,
+                read_period=read_period_s,
+                num_reads=num_reads_to_generate,
+                laser_voltage_high=laser_voltage_high,
+                laser_voltage_low=laser_voltage_low,
+                laser_width=laser_width_s,
+                laser_delay=laser_delay_s,
+                laser_rise_time=laser_rise_time_s,
+                laser_fall_time=laser_fall_time_s
+            )
+            
+            # Clear axis completely - remove any existing twin axes
+            self.diagram_ax.clear()
+            # Remove any existing secondary axes (twinx axes)
+            # Get all axes in the figure and remove any that aren't the main one
+            for ax in self.diagram_fig.get_axes():
+                if ax != self.diagram_ax:
+                    try:
+                        self.diagram_fig.delaxes(ax)
+                    except:
+                        pass
+            
+            # Convert time to microseconds for display
+            time_us = timeline.time_points * 1e6
+            
+            # Create two y-axes for voltage and laser (create fresh twin axis)
+            ax_voltage = self.diagram_ax
+            ax_laser = ax_voltage.twinx()
+            
+            # Plot voltage signal (read pulses) on left axis
+            ax_voltage.plot(time_us, timeline.voltage_signal, 'b-', linewidth=1.5, label='CH1 Read', alpha=0.8)
+            ax_voltage.fill_between(time_us, 0, timeline.voltage_signal, alpha=0.3, color='blue')
+            ax_voltage.set_ylabel('Read Voltage (V)', color='blue', fontsize=9, fontweight='bold')
+            ax_voltage.tick_params(axis='y', labelcolor='blue')
+            
+            # Plot laser signal on right axis
+            ax_laser.plot(time_us, timeline.laser_signal, 'r-', linewidth=2, label='CH2 Laser', alpha=0.8)
+            ax_laser.fill_between(time_us, laser_voltage_low, timeline.laser_signal, 
+                                 where=(timeline.laser_signal > laser_voltage_low * 1.1),
+                                 alpha=0.3, color='red')
+            ax_laser.set_ylabel('Laser Voltage (V)', color='red', fontsize=9, fontweight='bold')
+            ax_laser.tick_params(axis='y', labelcolor='red')
+            
+            # Mark laser pulse (only one should exist, but handle first one only)
+            laser_end_time_display_us = 0
+            if timeline.laser_pulses and len(timeline.laser_pulses) > 0:
+                # Only process the first laser pulse (should only be one)
+                laser_start, laser_end = timeline.laser_pulses[0]
+                laser_start_us = laser_start * 1e6
+                laser_end_us = laser_end * 1e6
+                laser_end_time_display_us = laser_end_us
+                
+                # Draw laser pulse region
+                ax_laser.axvspan(laser_start_us, laser_end_us, alpha=0.2, color='orange')
+                ax_laser.axvline(laser_start_us, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
+                ax_laser.axvline(laser_end_us, color='red', linestyle='--', alpha=0.7, linewidth=1.5)
+                
+                # Add single annotation at the center of the laser pulse
+                mid_time = (laser_start_us + laser_end_us) / 2
+                duration = laser_end_us - laser_start_us
+                ax_laser.annotate(f'ON\n{duration:.2f} µs', 
+                               xy=(mid_time, laser_voltage_high * 0.5),
+                               ha='center', va='center', fontsize=8, fontweight='bold',
+                               bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7))
+            
+            # Mark read windows (show up to 20 or until laser end)
+            reads_to_mark = min(len(timeline.read_windows), min_reads_to_show)
+            for i, (read_start, read_end) in enumerate(timeline.read_windows[:reads_to_mark]):
+                read_start_us = read_start * 1e6
+                read_end_us = read_end * 1e6
+                ax_voltage.axvspan(read_start_us, read_end_us, alpha=0.15, color='cyan')
+                if i == 0:
+                    ax_voltage.axvline(read_start_us, color='cyan', linestyle='--', alpha=0.5, linewidth=0.8)
+            
+            # Set labels and title
+            ax_voltage.set_xlabel('Time (µs)', fontsize=9, fontweight='bold')
+            ax_voltage.set_title('Laser and Read Pattern: CH1 Reads & CH2 Laser', fontsize=10, fontweight='bold')
+            ax_voltage.grid(True, alpha=0.3)
+            
+            # Calculate x limits: show at least 20 reads OR full laser pulse (whichever is longer)
+            time_for_20_reads_us = min_reads_to_show * read_period
+            if laser_end_time_display_us > 0:
+                # Show whichever is longer: 20 reads or laser pulse + margin
+                max_time = max(time_for_20_reads_us, laser_end_time_display_us + 2)  # +2 µs margin after laser
+            else:
+                # No laser pulse, show at least 20 reads
+                max_time = time_for_20_reads_us
+            
+            # Don't exceed the actual data range
+            max_time = min(max_time, time_us[-1])
+            ax_voltage.set_xlim(0, max_time)
+            
+            # Add legend
+            lines1, labels1 = ax_voltage.get_legend_handles_labels()
+            lines2, labels2 = ax_laser.get_legend_handles_labels()
+            ax_voltage.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=8)
+            
+        except Exception as e:
+            self.diagram_ax.clear()
+            self.diagram_ax.text(0.5, 0.5, f"Error drawing pattern:\n{str(e)}", 
+                               ha='center', va='center', fontsize=9)
+            self.diagram_ax.set_xlim(0, 1)
+            self.diagram_ax.set_ylim(0, 1)
     
     def _draw_generic_pattern(self):
         """Generic pattern for unknown tests"""

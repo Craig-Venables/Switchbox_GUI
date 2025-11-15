@@ -1,22 +1,47 @@
 """
-TSP Testing GUI - Compatibility Wrapper
+TSP Testing GUI - Standalone Launcher
+=====================================
 
-This file provides backward compatibility by importing from the new
-location at gui.pulse_testing_gui.main.
+Shortcut launcher for the Pulse Testing GUI.
 
-All functionality is now provided by gui.pulse_testing_gui.main.TSPTestingGUI.
+Usage:
+    python TSP_Testing_GUI.py
 
-This wrapper is kept for standalone testing purposes. To run the GUI standalone:
-    python -c "from TSP_Testing_GUI import TSPTestingGUI; import tkinter as tk; root = tk.Tk(); root.withdraw(); app = TSPTestingGUI(root); root.mainloop()"
+Or double-click the file to open the GUI directly.
 
-Or use the wrapper directly:
-    from TSP_Testing_GUI import TSPTestingGUI
+This file provides a quick way to launch the Pulse Testing GUI
+without needing to navigate through other parts of the application.
 """
 
 from __future__ import annotations
+
+import tkinter as tk
+import sys
+from pathlib import Path
+
+# Add project root to path if needed
+_PROJECT_ROOT = Path(__file__).resolve().parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 # Import from the new location
 from gui.pulse_testing_gui import TSPTestingGUI
 
 # Re-export for backward compatibility
 __all__ = ['TSPTestingGUI']
+
+
+def main():
+    """Launch the TSP Testing GUI"""
+    root = tk.Tk()
+    root.withdraw()  # Hide root window
+    
+    # Create and show the GUI
+    app = TSPTestingGUI(root)
+    
+    # Start the event loop
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

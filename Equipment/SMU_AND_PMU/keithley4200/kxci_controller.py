@@ -24,7 +24,7 @@ LabVIEW Workflow Replicated:
 5. Parse semicolon-separated values
 
 Usage:
-    from Equipment.SMU_AND_PMU.Keithley4200A_KXCI import Keithley4200A_KXCI
+    from Equipment.SMU_AND_PMU import Keithley4200A_KXCI
     
     # Connect to instrument
     keithley = Keithley4200A_KXCI(gpib_address="GPIB0::17::INSTR")
