@@ -6,11 +6,13 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 # Lazy imports to avoid failing if dependencies are missing
 # Each controller is imported only when needed
 if TYPE_CHECKING:
-    from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
-    from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
-    from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
-    from Equipment.SMU_AND_PMU.HP4140B import HP4140BController
-    from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
+    from Equipment.SMU_AND_PMU import (
+        Keithley2400Controller,
+        Keithley2450_TSP,
+        Keithley2450_TSP_Sim,
+        HP4140BController,
+        Keithley4200AController,
+    )
 
 
 class IVControllerManager:
@@ -33,27 +35,27 @@ class IVControllerManager:
         """Get supported controllers with lazy imports."""
         # Lazy imports to avoid failing if dependencies are missing
         try:
-            from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
+            from Equipment.SMU_AND_PMU import Keithley2400Controller
         except ImportError:
             Keithley2400Controller = None
         
         try:
-            from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
+            from Equipment.SMU_AND_PMU import Keithley2450_TSP
         except ImportError:
             Keithley2450_TSP = None
         
         try:
-            from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
+            from Equipment.SMU_AND_PMU import Keithley2450_TSP_Sim
         except ImportError:
             Keithley2450_TSP_Sim = None
         
         try:
-            from Equipment.SMU_AND_PMU.HP4140B import HP4140BController
+            from Equipment.SMU_AND_PMU import HP4140BController
         except ImportError:
             HP4140BController = None
         
         try:
-            from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
+            from Equipment.SMU_AND_PMU import Keithley4200AController
         except ImportError:
             Keithley4200AController = None
         

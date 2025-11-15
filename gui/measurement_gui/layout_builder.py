@@ -87,6 +87,8 @@ class MeasurementGUILayoutBuilder:
         self._build_top_control_bar(master_window)
         self._build_tabbed_content(master_window)
         self._build_bottom_status_bar(master_window)
+        
+        # Note: Context menus for plot canvases are set up in main.py after plots are created
     
     # ------------------------------------------------------------------
     # Top Control Bar (System selector, utility buttons)
@@ -252,8 +254,8 @@ class MeasurementGUILayoutBuilder:
         if system_change_cb:
             system_change_cb(gui.system_var.get())
         
-        # Then attempt to auto-connect
-        self._auto_connect_instruments()
+        # Auto-connect disabled - user must manually connect
+        # self._auto_connect_instruments()  # Disabled
     
     def _auto_connect_instruments(self) -> None:
         """Automatically connect to instruments after system selection"""
@@ -1729,47 +1731,23 @@ class MeasurementGUILayoutBuilder:
         # Control frame at top (spans both columns)
         control_frame = tk.Frame(tab, bg=self.COLOR_BG, padx=20, pady=10)
         control_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
-        control_frame.columnconfigure(1, weight=1)
+        control_frame.columnconfigure(0, weight=1)
         
-        # Notes type selector
-        tk.Label(control_frame, text="Notes Type:", font=self.FONT_HEADING, bg=self.COLOR_BG).grid(row=0, column=0, sticky="w", padx=(0, 10))
-        
-        gui.notes_type_var = tk.StringVar(value="device")
-        notes_type_frame = tk.Frame(control_frame, bg=self.COLOR_BG)
-        notes_type_frame.grid(row=0, column=1, sticky="w")
-        
-        tk.Radiobutton(
-            notes_type_frame,
-            text="Device Notes",
-            variable=gui.notes_type_var,
-            value="device",
-            font=self.FONT_MAIN,
-            bg=self.COLOR_BG,
-            command=lambda: self._switch_notes_type(gui, "device")
-        ).pack(side="left", padx=5)
-        
-        tk.Radiobutton(
-            notes_type_frame,
-            text="Sample Notes",
-            variable=gui.notes_type_var,
-            value="sample",
-            font=self.FONT_MAIN,
-            bg=self.COLOR_BG,
-            command=lambda: self._switch_notes_type(gui, "sample")
-        ).pack(side="left", padx=5)
+        # Title label for Device Notes
+        tk.Label(control_frame, text="Device Notes", font=self.FONT_HEADING, bg=self.COLOR_BG).grid(row=0, column=0, sticky="w")
         
         # Save button
         save_btn = tk.Button(
             control_frame,
-            text="Save Notes",
+            text="Save All Notes",
             font=self.FONT_BUTTON,
             bg=self.COLOR_PRIMARY,
             fg="white",
-            command=lambda: self._save_notes(gui),
+            command=lambda: self._save_all_notes(gui),
             padx=15,
             pady=5
         )
-        save_btn.grid(row=0, column=2, sticky="e", padx=(20, 0))
+        save_btn.grid(row=0, column=1, sticky="e", padx=(20, 0))
         gui.notes_save_button = save_btn
         
         # Status label
@@ -1780,7 +1758,7 @@ class MeasurementGUILayoutBuilder:
             bg=self.COLOR_BG,
             fg=self.COLOR_SECONDARY
         )
-        gui.notes_status_label.grid(row=0, column=3, sticky="e", padx=(10, 0))
+        gui.notes_status_label.grid(row=0, column=2, sticky="e", padx=(10, 0))
         
         # LEFT SIDE - Current notes text area
         left_frame = tk.Frame(tab, bg=self.COLOR_BG)
@@ -1880,19 +1858,19 @@ class MeasurementGUILayoutBuilder:
         )
         info_label.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 0))
         
-        # RIGHT SIDE - Previous devices' notes
+        # RIGHT SIDE - Previous device notes and Sample notes
         right_frame = tk.Frame(tab, bg=self.COLOR_BG)
         right_frame.grid(row=1, column=1, sticky="nsew", padx=(10, 20), pady=(0, 20))
         right_frame.columnconfigure(0, weight=1)
         right_frame.rowconfigure(0, weight=1)
         right_frame.rowconfigure(1, weight=1)
         
-        # Get previous two devices
+        # Get previous device (only one now)
         previous_devices = self._get_previous_devices(gui)
         
         # Previous device 1 (most recent)
         if len(previous_devices) > 0:
-            prev1_frame = tk.LabelFrame(right_frame, text=f"Previous Device 1: {previous_devices[0]['name']}", 
+            prev1_frame = tk.LabelFrame(right_frame, text=f"Previous Device: {previous_devices[0]['name']}", 
                                        font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
             prev1_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
             prev1_frame.columnconfigure(0, weight=1)
@@ -1926,55 +1904,53 @@ class MeasurementGUILayoutBuilder:
             gui.prev_device1_text.bind("<KeyRelease>", lambda e: self._mark_prev_device1_changed(gui))
         else:
             # Empty frame if no previous device
-            empty_frame1 = tk.LabelFrame(right_frame, text="Previous Device 1: None", 
+            empty_frame1 = tk.LabelFrame(right_frame, text="Previous Device: None", 
                                         font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
             empty_frame1.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
             tk.Label(empty_frame1, text="No previous device", font=self.FONT_MAIN, 
                     bg=self.COLOR_BG, fg=self.COLOR_SECONDARY).pack(pady=20)
             gui.prev_device1_text = None
         
-        # Previous device 2 (second most recent)
-        if len(previous_devices) > 1:
-            prev2_frame = tk.LabelFrame(right_frame, text=f"Previous Device 2: {previous_devices[1]['name']}", 
-                                       font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
-            prev2_frame.grid(row=1, column=0, sticky="nsew")
-            prev2_frame.columnconfigure(0, weight=1)
-            prev2_frame.rowconfigure(0, weight=1)
-            
-            gui.prev_device2_text = tk.Text(
-                prev2_frame,
-                wrap=tk.WORD,
-                font=("Consolas", 9),
-                bg="white",
-                fg="black",
-                padx=8,
-                pady=8,
-                relief=tk.SOLID,
-                borderwidth=1,
-                height=15,
-                undo=True,
-                maxundo=50
-            )
-            gui.prev_device2_text.grid(row=0, column=0, sticky="nsew")
-            
-            prev2_scrollbar = ttk.Scrollbar(prev2_frame, orient="vertical", command=gui.prev_device2_text.yview)
-            prev2_scrollbar.grid(row=0, column=1, sticky="ns")
-            gui.prev_device2_text.configure(yscrollcommand=prev2_scrollbar.set)
-            
-            # Load notes for previous device 2
-            self._load_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
-            
-            # Auto-save on focus loss and track changes
-            gui.prev_device2_text.bind("<FocusOut>", lambda e: self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text))
-            gui.prev_device2_text.bind("<KeyRelease>", lambda e: self._mark_prev_device2_changed(gui))
-        else:
-            # Empty frame if no second previous device
-            empty_frame2 = tk.LabelFrame(right_frame, text="Previous Device 2: None", 
-                                        font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
-            empty_frame2.grid(row=1, column=0, sticky="nsew")
-            tk.Label(empty_frame2, text="No previous device", font=self.FONT_MAIN, 
-                    bg=self.COLOR_BG, fg=self.COLOR_SECONDARY).pack(pady=20)
-            gui.prev_device2_text = None
+        # Sample Notes section (replaces Previous Device 2)
+        # Get sample name for label
+        sample_name = self._get_sample_name(gui)
+        sample_label = f"Sample Notes: {sample_name}" if sample_name else "Sample Notes"
+        
+        sample_frame = tk.LabelFrame(right_frame, text=sample_label, 
+                                   font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+        sample_frame.grid(row=1, column=0, sticky="nsew")
+        sample_frame.columnconfigure(0, weight=1)
+        sample_frame.rowconfigure(0, weight=1)
+        
+        gui.sample_notes_text = tk.Text(
+            sample_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 9),
+            bg="#fffef0",  # Slightly different background to distinguish from device notes
+            fg="black",
+            padx=8,
+            pady=8,
+            relief=tk.SOLID,
+            borderwidth=1,
+            height=15,
+            undo=True,
+            maxundo=50
+        )
+        gui.sample_notes_text.grid(row=0, column=0, sticky="nsew")
+        
+        sample_scrollbar = ttk.Scrollbar(sample_frame, orient="vertical", command=gui.sample_notes_text.yview)
+        sample_scrollbar.grid(row=0, column=1, sticky="ns")
+        gui.sample_notes_text.configure(yscrollcommand=sample_scrollbar.set)
+        
+        # Store the frame for later label updates
+        gui.sample_notes_frame = sample_frame
+        
+        # Load sample notes
+        self._load_sample_notes(gui)
+        
+        # Auto-save on focus loss and track changes
+        gui.sample_notes_text.bind("<FocusOut>", lambda e: self._save_sample_notes(gui))
+        gui.sample_notes_text.bind("<KeyRelease>", lambda e: self._mark_sample_notes_changed(gui))
         
         # Load initial notes
         self._load_notes(gui)
@@ -1985,9 +1961,9 @@ class MeasurementGUILayoutBuilder:
         if gui.prev_device1_text:
             gui.prev_device1_last_saved = gui.prev_device1_text.get("1.0", tk.END)
             gui.prev_device1_changed = False
-        if gui.prev_device2_text:
-            gui.prev_device2_last_saved = gui.prev_device2_text.get("1.0", tk.END)
-            gui.prev_device2_changed = False
+        # Track sample notes changes
+        gui.sample_notes_last_saved = gui.sample_notes_text.get("1.0", tk.END)
+        gui.sample_notes_changed = False
         
         # Auto-save on focus loss and every change (immediate save)
         gui.notes_text.bind("<FocusOut>", lambda e: self._auto_save_notes(gui))
@@ -2003,7 +1979,7 @@ class MeasurementGUILayoutBuilder:
                 if current_tab_text == 'Notes':
                     # Entering Notes tab - reload notes
                     self._load_notes(gui)
-                    # Reload previous devices' notes (refresh the previous devices list)
+                    # Reload previous device notes
                     previous_devices = self._get_previous_devices(gui)
                     if len(previous_devices) > 0 and hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
                         self._load_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
@@ -2011,27 +1987,28 @@ class MeasurementGUILayoutBuilder:
                         # Update label with device name
                         prev1_frame = gui.prev_device1_text.master
                         if isinstance(prev1_frame, tk.LabelFrame):
-                            prev1_frame.config(text=f"Previous Device 1: {previous_devices[0]['name']}")
-                    if len(previous_devices) > 1 and hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
-                        self._load_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
-                        gui.prev_device2_last_saved = gui.prev_device2_text.get("1.0", tk.END)
-                        # Update label with device name
-                        prev2_frame = gui.prev_device2_text.master
-                        if isinstance(prev2_frame, tk.LabelFrame):
-                            prev2_frame.config(text=f"Previous Device 2: {previous_devices[1]['name']}")
+                            prev1_frame.config(text=f"Previous Device: {previous_devices[0]['name']}")
+                    # Reload sample notes
+                    if hasattr(gui, 'sample_notes_text'):
+                        self._load_sample_notes(gui)
+                        gui.sample_notes_last_saved = gui.sample_notes_text.get("1.0", tk.END)
+                        # Update sample notes frame label
+                        sample_name = self._get_sample_name(gui)
+                        sample_label = f"Sample Notes: {sample_name}" if sample_name else "Sample Notes"
+                        if hasattr(gui, 'sample_notes_frame'):
+                            gui.sample_notes_frame.config(text=sample_label)
                 else:
                     # Leaving Notes tab - FORCE SAVE immediately (user lost notes before)
-                    if hasattr(gui, 'notes_text') and hasattr(gui, 'notes_type_var'):
-                        self._save_notes(gui)  # Use _save_notes instead of _auto_save_notes for immediate save
-                    # Save previous devices' notes
+                    if hasattr(gui, 'notes_text'):
+                        self._save_notes(gui)
+                    # Save previous device notes
                     if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
                         previous_devices = self._get_previous_devices(gui)
                         if len(previous_devices) > 0:
                             self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
-                    if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
-                        previous_devices = self._get_previous_devices(gui)
-                        if len(previous_devices) > 1:
-                            self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+                    # Save sample notes
+                    if hasattr(gui, 'sample_notes_text'):
+                        self._save_sample_notes(gui)
             except Exception:
                 pass  # Silently ignore errors during tab switching
         
@@ -2042,6 +2019,9 @@ class MeasurementGUILayoutBuilder:
         
         # Start polling for device changes in Sample_GUI (to auto-reload device notes)
         self._start_device_change_polling(gui)
+        
+        # Start polling for sample changes (to auto-reload sample notes)
+        self._start_sample_change_polling(gui)
         
         self.widgets["notes_tab"] = tab
     
@@ -2139,26 +2119,35 @@ class MeasurementGUILayoutBuilder:
         return previous_devices
     
     def _load_previous_device_notes(self, gui, device_info: Dict[str, Any], text_widget: tk.Text) -> None:
-        """Load notes for a previous device"""
+        """Load notes for a previous device from notes.json"""
         try:
             # Disable undo temporarily while loading
             text_widget.config(undo=False)
             text_widget.delete("1.0", tk.END)
             
-            # device_info["folder"] is already the device folder path
-            info_path = device_info["folder"] / "device_info.json"
-            if info_path.exists():
-                import json
-                with info_path.open("r", encoding="utf-8") as f:
-                    device_data = json.load(f)
-                    notes = device_data.get("notes", "")
-                    if notes:
-                        text_widget.insert("1.0", notes)
+            # Get device name (A1, A2, etc.) from device_info
+            device_id = device_info.get("name", "")
+            
+            # Get sample name
+            sample_name = self._get_sample_name(gui)
+            
+            if device_id and sample_name:
+                # Load the notes data from the single JSON file
+                notes_data = self._load_notes_data(gui, sample_name)
+                
+                # Get notes for this specific device
+                device_notes = notes_data.get("device", {}).get(device_id, "")
+                
+                if device_notes:
+                    text_widget.insert("1.0", device_notes)
+            
             # Re-enable undo and reset stack
             text_widget.config(undo=True)
             text_widget.edit_reset()
         except Exception as e:
             print(f"Error loading previous device notes: {e}")
+            import traceback
+            traceback.print_exc()
             # Make sure undo is re-enabled even on error
             try:
                 text_widget.config(undo=True)
@@ -2166,33 +2155,33 @@ class MeasurementGUILayoutBuilder:
                 pass
     
     def _save_previous_device_notes(self, gui, device_info: Dict[str, Any], text_widget: tk.Text) -> None:
-        """Save notes for a previous device"""
+        """Save notes for a previous device to notes.json"""
         try:
             notes_content = text_widget.get("1.0", tk.END).strip()
-            info_path = device_info["folder"] / "device_info.json"
             
-            # Load existing device_info or create new
-            device_data = {}
-            if info_path.exists():
-                import json
-                with info_path.open("r", encoding="utf-8") as f:
-                    device_data = json.load(f)
+            # Get device name (A1, A2, etc.) from device_info
+            device_id = device_info.get("name", "")
             
-            # Update notes and metadata
-            from datetime import datetime
-            device_data["notes"] = notes_content
-            device_data["last_modified"] = datetime.now().isoformat(timespec='seconds')
-            if "name" not in device_data:
-                device_data["name"] = device_info["name"]
-            if "created" not in device_data:
-                device_data["created"] = datetime.now().isoformat(timespec='seconds')
+            # Get sample name
+            sample_name = self._get_sample_name(gui)
             
-            # Save
-            import json
-            with info_path.open("w", encoding="utf-8") as f:
-                json.dump(device_data, f, indent=2)
+            if not device_id or not sample_name:
+                return
+            
+            # Load existing notes data
+            notes_data = self._load_notes_data(gui, sample_name)
+            
+            # Update device notes in the device dict
+            if "device" not in notes_data:
+                notes_data["device"] = {}
+            notes_data["device"][device_id] = notes_content
+            
+            # Save the updated notes data
+            self._save_notes_data(gui, sample_name, notes_data)
         except Exception as e:
             print(f"Error saving previous device notes: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _mark_notes_changed(self, gui) -> None:
         """Mark that notes have been changed (for auto-save detection)"""
@@ -2209,14 +2198,9 @@ class MeasurementGUILayoutBuilder:
         gui._notes_save_timer = gui.master.after(500, lambda: self._auto_save_notes(gui))
     
     def _mark_prev_device1_changed(self, gui) -> None:
-        """Mark that previous device 1 notes have been changed"""
+        """Mark that previous device notes have been changed"""
         if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
             gui.prev_device1_changed = True
-    
-    def _mark_prev_device2_changed(self, gui) -> None:
-        """Mark that previous device 2 notes have been changed"""
-        if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
-            gui.prev_device2_changed = True
     
     def _setup_notes_keyboard_shortcuts(self, gui, tab: tk.Frame) -> None:
         """Setup keyboard shortcuts for Notes tab: Ctrl+S (save), Ctrl+Z (undo), Ctrl+Y (redo)"""
@@ -2227,15 +2211,15 @@ class MeasurementGUILayoutBuilder:
                 return gui.notes_text
             elif hasattr(gui, 'prev_device1_text') and gui.prev_device1_text and focused == gui.prev_device1_text:
                 return gui.prev_device1_text
-            elif hasattr(gui, 'prev_device2_text') and gui.prev_device2_text and focused == gui.prev_device2_text:
-                return gui.prev_device2_text
+            elif hasattr(gui, 'sample_notes_text') and gui.sample_notes_text and focused == gui.sample_notes_text:
+                return gui.sample_notes_text
             return None
         
         def on_save(event):
             """Ctrl+S: Quick save notes"""
             text_widget = get_focused_text_widget()
             if text_widget == gui.notes_text:
-                # Save main notes
+                # Save main device notes
                 self._save_notes(gui)
                 # Show quick save confirmation
                 if hasattr(gui, 'notes_status_label'):
@@ -2245,15 +2229,13 @@ class MeasurementGUILayoutBuilder:
                     if hasattr(gui, 'master'):
                         gui.master.after(2000, lambda: gui.notes_status_label.config(text=original_text, fg=self.COLOR_INFO))
             elif text_widget == gui.prev_device1_text:
-                # Save previous device 1 notes
+                # Save previous device notes
                 previous_devices = self._get_previous_devices(gui)
                 if len(previous_devices) > 0:
                     self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
-            elif text_widget == gui.prev_device2_text:
-                # Save previous device 2 notes
-                previous_devices = self._get_previous_devices(gui)
-                if len(previous_devices) > 1:
-                    self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
+            elif hasattr(gui, 'sample_notes_text') and text_widget == gui.sample_notes_text:
+                # Save sample notes
+                self._save_sample_notes(gui)
             return "break"  # Prevent default behavior
         
         def on_undo(event):
@@ -2314,13 +2296,13 @@ class MeasurementGUILayoutBuilder:
             gui.prev_device1_text.bind("<Control-y>", on_redo)
             gui.prev_device1_text.bind("<Control-Y>", on_redo)
         
-        if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
-            gui.prev_device2_text.bind("<Control-s>", on_save)
-            gui.prev_device2_text.bind("<Control-S>", on_save)
-            gui.prev_device2_text.bind("<Control-z>", on_undo)
-            gui.prev_device2_text.bind("<Control-Z>", on_undo)
-            gui.prev_device2_text.bind("<Control-y>", on_redo)
-            gui.prev_device2_text.bind("<Control-Y>", on_redo)
+        if hasattr(gui, 'sample_notes_text') and gui.sample_notes_text:
+            gui.sample_notes_text.bind("<Control-s>", on_save)
+            gui.sample_notes_text.bind("<Control-S>", on_save)
+            gui.sample_notes_text.bind("<Control-z>", on_undo)
+            gui.sample_notes_text.bind("<Control-Z>", on_undo)
+            gui.sample_notes_text.bind("<Control-y>", on_redo)
+            gui.sample_notes_text.bind("<Control-Y>", on_redo)
     
     def _insert_datetime(self, gui) -> None:
         """Insert current date and time at cursor position"""
@@ -2540,51 +2522,114 @@ class MeasurementGUILayoutBuilder:
         """Poll for device changes (device_section_and_number) and auto-reload device notes"""
         def check_device_change():
             try:
-                # Check if we're in device notes mode
-                if hasattr(gui, 'notes_type_var') and gui.notes_type_var.get() == "device":
-                    # Get current device identifier (A1, A2, etc.)
-                    current_device_id = None
-                    if hasattr(gui, 'device_section_and_number'):
-                        current_device_id = gui.device_section_and_number
-                    
-                    # Track last known device identifier
-                    if not hasattr(gui, '_last_polled_device_id'):
-                        gui._last_polled_device_id = current_device_id
-                    
-                    # If device identifier changed, reload notes
-                    if current_device_id != gui._last_polled_device_id:
-                        gui._last_polled_device_id = current_device_id
-                        # Save current notes before switching
-                        self._save_notes(gui)
+                # Get current device identifier (A1, A2, etc.)
+                current_device_id = None
+                if hasattr(gui, 'device_section_and_number'):
+                    current_device_id = gui.device_section_and_number
+                
+                # Normalize to string or None for consistent comparison
+                if current_device_id:
+                    current_device_id = str(current_device_id).strip()
+                    if not current_device_id:
+                        current_device_id = None
+                
+                # Track last known device identifier
+                if not hasattr(gui, '_last_polled_device_id'):
+                    gui._last_polled_device_id = current_device_id
+                
+                # Normalize last polled ID for comparison
+                last_polled = gui._last_polled_device_id
+                if last_polled:
+                    last_polled = str(last_polled).strip()
+                    if not last_polled:
+                        last_polled = None
+                
+                # If device identifier changed (both set and different, or one is None)
+                device_changed = False
+                if current_device_id != last_polled:
+                    # Either both are set and different, or one transitioned None <-> value
+                    if (current_device_id and last_polled and current_device_id != last_polled) or \
+                       (current_device_id and not last_polled) or \
+                       (not current_device_id and last_polled):
+                        device_changed = True
+                
+                if device_changed:
+                    # CRITICAL: Save notes for the OLD device before switching
+                    # We need to temporarily restore the old device_id to save correctly
+                    if last_polled and hasattr(gui, 'notes_text'):
+                        # Temporarily set device_section_and_number to old device to save correctly
+                        # This ensures we save to the correct device in the JSON file
+                        old_device_id_backup = gui.device_section_and_number
+                        gui.device_section_and_number = last_polled
+                        
+                        try:
+                            # Save notes for the OLD device (using the notes currently in the widget)
+                            self._save_notes(gui)
+                        finally:
+                            # Restore the current device ID
+                            gui.device_section_and_number = current_device_id
+                        
                         # Small delay to ensure save completes
                         gui.master.update_idletasks()
-                        # Reload notes for new device
+                    
+                    # Update tracked device ID BEFORE loading (so we don't reload multiple times)
+                    gui._last_polled_device_id = current_device_id
+                    
+                    # Force clear and reload notes for new device
+                    if hasattr(gui, 'notes_text'):
+                        # CRITICAL: Clear widget FIRST before loading new notes
+                        # Do this multiple times to ensure it's really cleared
+                        gui.notes_text.config(undo=False)
+                        
+                        # Clear multiple times to ensure it's empty
+                        widget_content = gui.notes_text.get("1.0", "end-1c")
+                        while widget_content.strip():
+                            gui.notes_text.delete("1.0", tk.END)
+                            gui.master.update_idletasks()
+                            widget_content = gui.notes_text.get("1.0", "end-1c")
+                        
+                        # Final clear
+                        gui.notes_text.delete("1.0", tk.END)
+                        # Force update to ensure deletion is processed
+                        gui.master.update_idletasks()
+                        gui.master.update()
+                        
+                        # Verify it's empty before loading
+                        verify_content = gui.notes_text.get("1.0", "end-1c")
+                        if verify_content.strip():
+                            print(f"WARNING: Widget still has content after clearing: {repr(verify_content[:50])}")
+                            # Force clear again
+                            gui.notes_text.delete("1.0", tk.END)
+                            gui.master.update()
+                        
+                        # Now load notes for new device (which will also clear, but we already did)
                         self._load_notes(gui)
                         
-                        # Also reload previous devices (they may have changed - e.g., A1 when switching to A2)
-                        previous_devices = self._get_previous_devices(gui)
-                        if len(previous_devices) > 0 and hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
-                            self._load_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
-                            gui.prev_device1_last_saved = gui.prev_device1_text.get("1.0", tk.END)
-                            # Update label
-                            prev1_frame = gui.prev_device1_text.master
-                            if isinstance(prev1_frame, tk.LabelFrame):
-                                prev1_frame.config(text=f"Previous Device 1: {previous_devices[0]['name']}")
-                        if len(previous_devices) > 1 and hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
-                            self._load_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
-                            gui.prev_device2_last_saved = gui.prev_device2_text.get("1.0", tk.END)
-                            # Update label
-                            prev2_frame = gui.prev_device2_text.master
-                            if isinstance(prev2_frame, tk.LabelFrame):
-                                prev2_frame.config(text=f"Previous Device 2: {previous_devices[1]['name']}")
-                        
-                        if hasattr(gui, 'notes_status_label') and current_device_id:
-                            gui.notes_status_label.config(
-                                text=f"Switched to device: {current_device_id}",
-                                fg=self.COLOR_INFO
-                            )
+                        # Update last saved content after loading
+                        gui.notes_last_saved = gui.notes_text.get("1.0", tk.END)
+                        gui.notes_changed = False
+                    
+                    # Also reload previous device notes (they may have changed - e.g., A1 when switching to A2)
+                    previous_devices = self._get_previous_devices(gui)
+                    if len(previous_devices) > 0 and hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+                        self._load_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+                        gui.prev_device1_last_saved = gui.prev_device1_text.get("1.0", tk.END)
+                        # Update label
+                        prev1_frame = gui.prev_device1_text.master
+                        if isinstance(prev1_frame, tk.LabelFrame):
+                            prev1_frame.config(text=f"Previous Device: {previous_devices[0]['name']}")
+                    
+                    if hasattr(gui, 'notes_status_label') and current_device_id:
+                        gui.notes_status_label.config(
+                            text=f"Switched to device: {current_device_id}",
+                            fg=self.COLOR_INFO
+                        )
+                        # Clear status after 3 seconds
+                        gui.master.after(3000, lambda: gui.notes_status_label.config(text=""))
             except Exception as e:
                 print(f"Error polling device changes: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Poll every 500ms
             if hasattr(gui, 'master') and gui.master.winfo_exists():
@@ -2594,11 +2639,64 @@ class MeasurementGUILayoutBuilder:
         if hasattr(gui, 'master'):
             gui.master.after(500, check_device_change)
     
+    def _start_sample_change_polling(self, gui) -> None:
+        """Poll for sample name changes and auto-reload sample notes"""
+        def check_sample_change():
+            try:
+                # Get current sample name
+                current_sample_name = self._get_sample_name(gui)
+                # Normalize None and empty string
+                current_sample_name = current_sample_name if current_sample_name else None
+                
+                # Track last known sample name
+                if not hasattr(gui, '_last_polled_sample_name'):
+                    gui._last_polled_sample_name = current_sample_name
+                
+                # If sample name changed (including None to string or vice versa), reload sample notes
+                if current_sample_name != gui._last_polled_sample_name:
+                    # Save current sample notes before switching (if we had a previous sample)
+                    if gui._last_polled_sample_name:
+                        self._save_sample_notes(gui)
+                        # Small delay to ensure save completes
+                        gui.master.update_idletasks()
+                    
+                    # Update tracked sample name
+                    gui._last_polled_sample_name = current_sample_name
+                    
+                    # Clear and reload sample notes for new sample
+                    if hasattr(gui, 'sample_notes_text'):
+                        self._load_sample_notes(gui)
+                        gui.sample_notes_last_saved = gui.sample_notes_text.get("1.0", tk.END)
+                        gui.sample_notes_changed = False
+                    
+                    # Update sample notes frame label
+                    sample_label = f"Sample Notes: {current_sample_name}" if current_sample_name else "Sample Notes"
+                    if hasattr(gui, 'sample_notes_frame'):
+                        gui.sample_notes_frame.config(text=sample_label)
+                    
+                    if hasattr(gui, 'notes_status_label') and current_sample_name:
+                        gui.notes_status_label.config(
+                            text=f"Switched to sample: {current_sample_name}",
+                            fg=self.COLOR_INFO
+                        )
+                        # Clear status after 3 seconds
+                        gui.master.after(3000, lambda: gui.notes_status_label.config(text=""))
+            except Exception as e:
+                print(f"Error polling sample changes: {e}")
+            
+            # Poll every 1000ms (1 second) - less frequent than device polling
+            if hasattr(gui, 'master') and gui.master.winfo_exists():
+                gui.master.after(1000, check_sample_change)
+        
+        # Start polling
+        if hasattr(gui, 'master') and hasattr(gui, 'sample_notes_text'):
+            gui.master.after(1000, check_sample_change)
+    
     def _start_auto_save_timer(self, gui) -> None:
         """Start the periodic auto-save timer (every 10 seconds)"""
         def check_and_save():
             try:
-                # Check main notes
+                # Check main device notes
                 if hasattr(gui, 'notes_text') and hasattr(gui, 'notes_changed'):
                     current_content = gui.notes_text.get("1.0", tk.END)
                     if hasattr(gui, 'notes_last_saved') and current_content != gui.notes_last_saved:
@@ -2606,7 +2704,7 @@ class MeasurementGUILayoutBuilder:
                         gui.notes_last_saved = current_content
                         gui.notes_changed = False
                 
-                # Check previous device 1
+                # Check previous device notes
                 if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
                     current_content = gui.prev_device1_text.get("1.0", tk.END)
                     if hasattr(gui, 'prev_device1_last_saved') and current_content != gui.prev_device1_last_saved:
@@ -2615,14 +2713,13 @@ class MeasurementGUILayoutBuilder:
                             self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
                             gui.prev_device1_last_saved = current_content
                 
-                # Check previous device 2
-                if hasattr(gui, 'prev_device2_text') and gui.prev_device2_text:
-                    current_content = gui.prev_device2_text.get("1.0", tk.END)
-                    if hasattr(gui, 'prev_device2_last_saved') and current_content != gui.prev_device2_last_saved:
-                        previous_devices = self._get_previous_devices(gui)
-                        if len(previous_devices) > 1:
-                            self._save_previous_device_notes(gui, previous_devices[1], gui.prev_device2_text)
-                            gui.prev_device2_last_saved = current_content
+                # Check sample notes
+                if hasattr(gui, 'sample_notes_text') and gui.sample_notes_text:
+                    current_content = gui.sample_notes_text.get("1.0", tk.END)
+                    if hasattr(gui, 'sample_notes_last_saved') and current_content != gui.sample_notes_last_saved:
+                        self._save_sample_notes(gui)
+                        gui.sample_notes_last_saved = current_content
+                        gui.sample_notes_changed = False
             except Exception as e:
                 print(f"Auto-save check error: {e}")
             
@@ -2634,108 +2731,51 @@ class MeasurementGUILayoutBuilder:
         if hasattr(gui, 'master'):
             gui.master.after(10000, check_and_save)
     
-    def _switch_notes_type(self, gui, notes_type: str) -> None:
-        """Switch between device and sample notes"""
-        # Force save current notes before switching (critical - user lost notes before)
-        self._save_notes(gui)
-        
-        # Small delay to ensure save completes
-        gui.master.update_idletasks()
-        
-        # Load the other type
-        self._load_notes(gui)
-    
     def _load_notes(self, gui) -> None:
-        """Load notes from file based on current type"""
-        notes_type = gui.notes_type_var.get()
-        # Disable undo temporarily while loading
-        gui.notes_text.config(undo=False)
-        gui.notes_text.delete("1.0", tk.END)
+        """Load device notes from notes.json"""
+        if not hasattr(gui, 'notes_text'):
+            return
+        
+        # Force clear the notes text widget - do this FIRST and explicitly
+        try:
+            # Disable undo temporarily while loading
+            gui.notes_text.config(undo=False)
+            # Clear completely - delete everything
+            gui.notes_text.delete("1.0", tk.END)
+            # Force update to ensure deletion is processed
+            gui.master.update_idletasks()
+        except Exception as e:
+            print(f"Error clearing notes: {e}")
         
         try:
-            if notes_type == "device":
-                # Load device notes from device_info.json
-                # Use device_section_and_number (A1, A2, etc.) for individual device notes
-                device_id = None
-                sample_name = None
+            # Get device identifier (A1, A2, etc.)
+            device_id = None
+            if hasattr(gui, 'device_section_and_number'):
+                device_id = gui.device_section_and_number
+            
+            # Get sample name (D104, etc.)
+            sample_name = self._get_sample_name(gui)
+            
+            if device_id and sample_name:
+                # Load the notes data from the single JSON file
+                notes_data = self._load_notes_data(gui, sample_name)
                 
-                # Get device identifier (A1, A2, etc.)
-                if hasattr(gui, 'device_section_and_number'):
-                    device_id = gui.device_section_and_number
+                # Get notes for this specific device
+                device_notes = notes_data.get("device", {}).get(device_id, "")
                 
-                # Get sample name (D104, etc.) for folder structure
-                if hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
-                    if not sample_name:
-                        # Fallback to sample_type_var
-                        sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
-                        if sample_type_var and hasattr(sample_type_var, 'get'):
-                            sample_name = sample_type_var.get()
+                # Insert notes if they exist
+                if device_notes:
+                    gui.notes_text.insert("1.0", device_notes)
                 
-                # Also try from sample_name_var in Measurement GUI
-                if not sample_name and hasattr(gui, 'sample_name_var'):
-                    sample_name = gui.sample_name_var.get().strip()
-                
-                if device_id and sample_name:
-                    from pathlib import Path
-                    # Use the save root from Measurement_GUI
-                    save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
-                    # Folder structure: {save_root}/{sample_name}/{letter}/{number}/device_info.json
-                    letter = device_id[0] if len(device_id) > 0 else "A"
-                    number = device_id[1:] if len(device_id) > 1 else "1"
-                    device_folder = save_root / sample_name.replace(" ", "_") / letter / number
-                    info_path = device_folder / "device_info.json"
-                    
-                    if info_path.exists():
-                        import json
-                        with info_path.open("r", encoding="utf-8") as f:
-                            device_info = json.load(f)
-                            notes = device_info.get("notes", "")
-                            if notes:
-                                gui.notes_text.insert("1.0", notes)
-                    gui.notes_status_label.config(text=f"Device: {device_id} (Sample: {sample_name})", fg=self.COLOR_INFO)
-                elif device_id:
-                    gui.notes_status_label.config(text=f"Device: {device_id} (No sample name)", fg=self.COLOR_WARNING)
-                else:
-                    gui.notes_status_label.config(text="No device selected", fg=self.COLOR_WARNING)
+                gui.notes_status_label.config(text=f"Device: {device_id} (Sample: {sample_name})", fg=self.COLOR_INFO)
+            elif device_id:
+                gui.notes_status_label.config(text=f"Device: {device_id} (No sample name)", fg=self.COLOR_WARNING)
             else:
-                # Load sample notes from sample_notes.json
-                # Sample notes are for the whole sample (D104, etc.) - the name from device manager
-                sample_name = None
-                
-                # First try: get from Sample_GUI's current_device_name (this is the sample name from device manager)
-                if hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
-                
-                # Fallback: try sample_name_var from Measurement GUI
-                if not sample_name and hasattr(gui, 'sample_name_var'):
-                    sample_name = gui.sample_name_var.get().strip()
-                
-                # Last fallback: sample_type_var (sample type, not the device name)
-                if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
-                    if sample_type_var and hasattr(sample_type_var, 'get'):
-                        sample_name = sample_type_var.get()
-                
-                if sample_name:
-                    from pathlib import Path
-                    # Use the save root from Measurement_GUI
-                    save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
-                    sample_folder = save_root / sample_name.replace(" ", "_")
-                    notes_path = sample_folder / "sample_notes.json"
-                    
-                    if notes_path.exists():
-                        import json
-                        with notes_path.open("r", encoding="utf-8") as f:
-                            notes_data = json.load(f)
-                            notes = notes_data.get("notes", "")
-                            if notes:
-                                gui.notes_text.insert("1.0", notes)
-                    gui.notes_status_label.config(text=f"Sample: {sample_name}", fg=self.COLOR_INFO)
-                else:
-                    gui.notes_status_label.config(text="No sample name set", fg=self.COLOR_WARNING)
+                gui.notes_status_label.config(text="No device selected", fg=self.COLOR_WARNING)
         except Exception as e:
             print(f"Error loading notes: {e}")
+            import traceback
+            traceback.print_exc()
             gui.notes_status_label.config(text=f"Error loading notes: {e}", fg=self.COLOR_ERROR)
         finally:
             # Re-enable undo and reset stack after loading
@@ -2746,185 +2786,413 @@ class MeasurementGUILayoutBuilder:
                 pass
     
     def _save_notes(self, gui) -> None:
-        """Save notes to file"""
-        notes_type = gui.notes_type_var.get()
+        """Save device notes to notes.json"""
         notes_content = gui.notes_text.get("1.0", tk.END).strip()
         
         try:
-            from pathlib import Path
-            from datetime import datetime
-            import json
+            # Get device identifier (A1, A2, etc.)
+            device_id = None
+            if hasattr(gui, 'device_section_and_number'):
+                device_id = gui.device_section_and_number
             
-            # Use the save root from Measurement_GUI
-            save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+            # Get sample name (D104, etc.)
+            sample_name = self._get_sample_name(gui)
             
-            if notes_type == "device":
-                # Save to device_info.json
-                # Use device_section_and_number (A1, A2, etc.) for individual device notes
-                device_id = None
-                sample_name = None
-                
-                # Get device identifier (A1, A2, etc.)
-                if hasattr(gui, 'device_section_and_number'):
-                    device_id = gui.device_section_and_number
-                
-                # Get sample name (D104, etc.) for folder structure
-                if hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
-                    if not sample_name:
-                        # Fallback to sample_type_var
-                        sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
-                        if sample_type_var and hasattr(sample_type_var, 'get'):
-                            sample_name = sample_type_var.get()
-                
-                # Also try from sample_name_var in Measurement GUI
-                if not sample_name and hasattr(gui, 'sample_name_var'):
-                    sample_name = gui.sample_name_var.get().strip()
-                
-                if not device_id:
-                    messagebox.showwarning("No Device", "No device is selected. Please select a device first.")
-                    return
-                
-                if not sample_name:
-                    messagebox.showwarning("No Sample", "No sample name is set. Please set a sample name first.")
-                    return
-                
-                # Folder structure: {save_root}/{sample_name}/{letter}/{number}/device_info.json
-                letter = device_id[0] if len(device_id) > 0 else "A"
-                number = device_id[1:] if len(device_id) > 1 else "1"
-                device_folder = save_root / sample_name.replace(" ", "_") / letter / number
-                device_folder.mkdir(parents=True, exist_ok=True)
-                info_path = device_folder / "device_info.json"
-                
-                # Load existing device_info or create new
-                device_info = {}
-                if info_path.exists():
-                    with info_path.open("r", encoding="utf-8") as f:
-                        device_info = json.load(f)
-                
-                # Update notes and metadata
-                device_info["notes"] = notes_content
-                device_info["last_modified"] = datetime.now().isoformat(timespec='seconds')
-                if "name" not in device_info:
-                    device_info["name"] = device_id
-                if "created" not in device_info:
-                    device_info["created"] = datetime.now().isoformat(timespec='seconds')
-                
-                # Save
-                with info_path.open("w", encoding="utf-8") as f:
-                    json.dump(device_info, f, indent=2)
-                
-                gui.notes_status_label.config(text=f"Device notes saved: {device_id}", fg=self.COLOR_SUCCESS)
-            else:
-                # Save to sample_notes.json
-                # Sample notes are for the whole sample (D104, etc.) - the name from device manager
-                sample_name = None
-                
-                # First try: get from Sample_GUI's current_device_name (this is the sample name from device manager)
-                if hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_name = getattr(gui.sample_gui, 'current_device_name', None)
-                
-                # Fallback: try sample_name_var from Measurement GUI
-                if not sample_name and hasattr(gui, 'sample_name_var'):
-                    sample_name = gui.sample_name_var.get().strip()
-                
-                # Last fallback: sample_type_var (sample type, not the device name)
-                if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
-                    if sample_type_var and hasattr(sample_type_var, 'get'):
-                        sample_name = sample_type_var.get()
-                
-                if not sample_name:
-                    messagebox.showwarning("No Sample", "No sample name is set in Device Manager. Please set a device name (e.g., D104) in Sample GUI first.")
-                    return
-                
-                sample_folder = save_root / sample_name.replace(" ", "_")
-                sample_folder.mkdir(parents=True, exist_ok=True)
-                notes_path = sample_folder / "sample_notes.json"
-                
-                # Create notes data structure
-                notes_data = {
-                    "sample_name": sample_name,
-                    "notes": notes_content,
-                    "last_modified": datetime.now().isoformat(timespec='seconds')
-                }
-                
-                # Save
-                with notes_path.open("w", encoding="utf-8") as f:
-                    json.dump(notes_data, f, indent=2)
-                
-                gui.notes_status_label.config(text="Sample notes saved", fg=self.COLOR_SUCCESS)
+            if not device_id:
+                # Silently skip if no device selected (for auto-save)
+                return
+            
+            if not sample_name:
+                # Silently skip if no sample name (for auto-save)
+                return
+            
+            # Load existing notes data
+            notes_data = self._load_notes_data(gui, sample_name)
+            
+            # Update device notes in the device dict
+            if "device" not in notes_data:
+                notes_data["device"] = {}
+            notes_data["device"][device_id] = notes_content
+            
+            # Save the updated notes data
+            self._save_notes_data(gui, sample_name, notes_data)
+            
+            gui.notes_status_label.config(text=f"Device notes saved: {device_id}", fg=self.COLOR_SUCCESS)
             
             # Clear status after 3 seconds
             gui.master.after(3000, lambda: gui.notes_status_label.config(text=""))
             
         except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save notes: {e}")
+            print(f"Error saving device notes: {e}")
+            import traceback
+            traceback.print_exc()
             gui.notes_status_label.config(text=f"Error: {e}", fg=self.COLOR_ERROR)
     
-    def _auto_save_notes(self, gui) -> None:
-        """Auto-save notes without showing dialog"""
+    def _get_sample_name(self, gui) -> Optional[str]:
+        """Get the current sample name (e.g., D104)"""
+        sample_name = None
+        
+        # First try: get from Sample_GUI's current_device_name (this is the sample name from device manager)
+        if hasattr(gui, 'sample_gui') and gui.sample_gui:
+            sample_name = getattr(gui.sample_gui, 'current_device_name', None)
+        
+        # Fallback: try sample_name_var from Measurement GUI
+        if not sample_name and hasattr(gui, 'sample_name_var'):
+            try:
+                sample_name = gui.sample_name_var.get().strip()
+            except:
+                pass
+        
+        # Last fallback: sample_type_var (sample type, not the device name)
+        if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
+            sample_type_var = getattr(gui.sample_gui, 'sample_type_var', None)
+            if sample_type_var and hasattr(sample_type_var, 'get'):
+                try:
+                    sample_name = sample_type_var.get()
+                except:
+                    pass
+        
+        return sample_name
+    
+    def _get_notes_file_path(self, gui, sample_name: str) -> Path:
+        """Get the path to the notes JSON file for a sample"""
+        from pathlib import Path
+        save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+        sample_folder = save_root / sample_name.replace(" ", "_")
+        return sample_folder / "notes.json"
+    
+    def _load_notes_data(self, gui, sample_name: str) -> dict:
+        """Load the notes JSON file for a sample, return empty dict if not found"""
+        import json
+        notes_path = self._get_notes_file_path(gui, sample_name)
+        
+        if notes_path.exists():
+            try:
+                with notes_path.open("r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error loading notes file: {e}")
+                return {}
+        
+        # Return default structure if file doesn't exist
+        return {
+            "sample_name": sample_name,
+            "Sample_Notes": "",
+            "device": {}
+        }
+    
+    def _save_notes_data(self, gui, sample_name: str, notes_data: dict) -> None:
+        """Save the notes JSON file for a sample"""
+        import json
+        from pathlib import Path
+        
+        notes_path = self._get_notes_file_path(gui, sample_name)
+        notes_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Ensure sample_name is set
+        notes_data["sample_name"] = sample_name
+        
+        # Ensure device dict exists
+        if "device" not in notes_data:
+            notes_data["device"] = {}
+        
+        # Ensure Sample_Notes exists
+        if "Sample_Notes" not in notes_data:
+            notes_data["Sample_Notes"] = ""
+        
         try:
-            notes_type = gui.notes_type_var.get()
-            notes_content = gui.notes_text.get("1.0", tk.END).strip()
+            with notes_path.open("w", encoding="utf-8") as f:
+                json.dump(notes_data, f, indent=2)
+        except Exception as e:
+            print(f"Error saving notes file: {e}")
+            raise
+    
+    def _load_sample_notes(self, gui) -> None:
+        """Load sample notes from notes.json"""
+        if not hasattr(gui, 'sample_notes_text'):
+            return
+        
+        # Disable undo temporarily while loading
+        gui.sample_notes_text.config(undo=False)
+        gui.sample_notes_text.delete("1.0", tk.END)
+        
+        try:
+            sample_name = self._get_sample_name(gui)
             
-            from pathlib import Path
-            from datetime import datetime
-            import json
+            if sample_name:
+                # Load the notes data from the single JSON file
+                notes_data = self._load_notes_data(gui, sample_name)
+                
+                # Get sample notes
+                sample_notes = notes_data.get("Sample_Notes", "")
+                
+                if sample_notes:
+                    gui.sample_notes_text.insert("1.0", sample_notes)
+        except Exception as e:
+            print(f"Error loading sample notes: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # Re-enable undo and reset stack after loading
+            try:
+                gui.sample_notes_text.config(undo=True)
+                gui.sample_notes_text.edit_reset()
+            except:
+                pass
+    
+    def _save_sample_notes(self, gui) -> None:
+        """Save sample notes to notes.json"""
+        if not hasattr(gui, 'sample_notes_text'):
+            return
+        
+        notes_content = gui.sample_notes_text.get("1.0", tk.END).strip()
+        
+        try:
+            sample_name = self._get_sample_name(gui)
             
-            # Use the save root from Measurement_GUI
-            save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
+            if not sample_name:
+                # Silently skip if no sample name (for auto-save)
+                return
             
-            if notes_type == "device":
-                device_name = None
-                if hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    device_name = getattr(gui.sample_gui, 'current_device_name', None)
-                
-                if device_name:
-                    device_folder = save_root / device_name.replace(" ", "_")
-                    device_folder.mkdir(parents=True, exist_ok=True)
-                    info_path = device_folder / "device_info.json"
-                    
-                    device_info = {}
-                    if info_path.exists():
-                        with info_path.open("r", encoding="utf-8") as f:
-                            device_info = json.load(f)
-                    
-                    device_info["notes"] = notes_content
-                    device_info["last_modified"] = datetime.now().isoformat(timespec='seconds')
-                    if "name" not in device_info:
-                        device_info["name"] = device_name
-                    if "created" not in device_info:
-                        device_info["created"] = datetime.now().isoformat(timespec='seconds')
-                    
-                    with info_path.open("w", encoding="utf-8") as f:
-                        json.dump(device_info, f, indent=2)
-            else:
-                sample_name = None
-                if hasattr(gui, 'sample_name_var'):
-                    sample_name = gui.sample_name_var.get().strip()
-                
-                if not sample_name and hasattr(gui, 'sample_gui') and gui.sample_gui:
-                    sample_name = getattr(gui.sample_gui, 'sample_type_var', None)
-                    if sample_name and hasattr(sample_name, 'get'):
-                        sample_name = sample_name.get()
-                
-                if sample_name:
-                    sample_folder = save_root / sample_name.replace(" ", "_")
-                    sample_folder.mkdir(parents=True, exist_ok=True)
-                    notes_path = sample_folder / "sample_notes.json"
-                    
-                    notes_data = {
-                        "sample_name": sample_name,
-                        "notes": notes_content,
-                        "last_modified": datetime.now().isoformat(timespec='seconds')
-                    }
-                    
-                    with notes_path.open("w", encoding="utf-8") as f:
-                        json.dump(notes_data, f, indent=2)
+            # Load existing notes data
+            notes_data = self._load_notes_data(gui, sample_name)
+            
+            # Update sample notes
+            notes_data["Sample_Notes"] = notes_content
+            
+            # Save the updated notes data
+            self._save_notes_data(gui, sample_name, notes_data)
+        except Exception as e:
+            print(f"Error saving sample notes: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _mark_sample_notes_changed(self, gui) -> None:
+        """Mark that sample notes have been changed (for auto-save detection)"""
+        if hasattr(gui, 'sample_notes_text'):
+            gui.sample_notes_changed = True
+    
+    def _save_all_notes(self, gui) -> None:
+        """Save all notes (device, previous device, and sample)"""
+        # Save main device notes
+        self._save_notes(gui)
+        
+        # Save previous device notes
+        if hasattr(gui, 'prev_device1_text') and gui.prev_device1_text:
+            previous_devices = self._get_previous_devices(gui)
+            if len(previous_devices) > 0:
+                self._save_previous_device_notes(gui, previous_devices[0], gui.prev_device1_text)
+        
+        # Save sample notes
+        self._save_sample_notes(gui)
+        
+        # Update status
+        if hasattr(gui, 'notes_status_label'):
+            gui.notes_status_label.config(text="All notes saved!", fg=self.COLOR_SUCCESS)
+            gui.master.after(3000, lambda: gui.notes_status_label.config(text=""))
+    
+    def _auto_save_notes(self, gui) -> None:
+        """Auto-save device notes without showing dialog"""
+        try:
+            # Just call _save_notes which handles device notes
+            self._save_notes(gui)
         except Exception as e:
             # Silently fail on auto-save
             print(f"Auto-save notes error: {e}")
+    
+    def _setup_plot_context_menus(self, gui) -> None:
+        """Set up right-click context menus on all plot canvases for quick notes"""
+        if not hasattr(gui, 'plot_panels'):
+            return
+        
+        # Set up context menu on all canvases
+        for canvas_key, canvas in gui.plot_panels.canvases.items():
+            if canvas:
+                self._add_context_menu_to_canvas(gui, canvas)
+    
+    def _add_context_menu_to_canvas(self, gui, canvas: Any) -> None:
+        """Add right-click context menu to a matplotlib canvas"""
+        def show_context_menu(event):
+            """Show context menu on right-click"""
+            menu = tk.Menu(gui.master, tearoff=0)
+            menu.add_command(
+                label="Quick Notes - Device",
+                command=lambda: self._open_quick_notes_dialog(gui, "device")
+            )
+            menu.add_command(
+                label="Quick Notes - Sample",
+                command=lambda: self._open_quick_notes_dialog(gui, "sample")
+            )
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+        
+        # Get the Tkinter widget from the matplotlib canvas
+        canvas_widget = canvas.get_tk_widget()
+        canvas_widget.bind("<Button-3>", show_context_menu)  # Button-3 is right-click on Windows/Linux
+        canvas_widget.bind("<Button-2>", show_context_menu)  # Button-2 is right-click on Mac (middle button, but some use it)
+    
+    def _open_quick_notes_dialog(self, gui, notes_type: str) -> None:
+        """Open a quick notes dialog for device or sample notes"""
+        from datetime import datetime
+        
+        # Get measurement info
+        measurement_number = getattr(gui, 'measurment_number', None) or getattr(gui, 'sweep_num', None) or "N/A"
+        measurement_type = "Unknown"
+        
+        # Try to get measurement type from various sources
+        if hasattr(gui, 'excitation_var'):
+            try:
+                measurement_type = gui.excitation_var.get() or "Unknown"
+            except:
+                pass
+        
+        if measurement_type == "Unknown" and hasattr(gui, 'Sequential_measurement_var'):
+            try:
+                measurement_type = gui.Sequential_measurement_var.get() or "Unknown"
+            except:
+                pass
+        
+        # Get current timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Create dialog window
+        dialog = tk.Toplevel(gui.master)
+        dialog.title(f"Quick Notes - {'Device' if notes_type == 'device' else 'Sample'}")
+        dialog.geometry("600x400")
+        dialog.configure(bg=self.COLOR_BG)
+        
+        # Info frame at top
+        info_frame = tk.Frame(dialog, bg=self.COLOR_BG, padx=10, pady=10)
+        info_frame.pack(fill="x")
+        
+        info_text = f"Measurement #{measurement_number} | Type: {measurement_type} | Time: {timestamp}"
+        tk.Label(
+            info_frame,
+            text=info_text,
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG,
+            fg=self.COLOR_SECONDARY
+        ).pack(anchor="w")
+        
+        # Notes text area
+        text_frame = tk.Frame(dialog, bg=self.COLOR_BG)
+        text_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        notes_text = tk.Text(
+            text_frame,
+            wrap=tk.WORD,
+            font=("Consolas", 10),
+            bg="white",
+            fg="black",
+            padx=10,
+            pady=10,
+            relief=tk.SOLID,
+            borderwidth=1,
+            undo=True,
+            maxundo=50
+        )
+        notes_text.pack(fill="both", expand=True)
+        
+        # Pre-populate with header
+        header = f"[Measurement #{measurement_number} | {measurement_type} | {timestamp}]\n"
+        notes_text.insert("1.0", header)
+        notes_text.mark_set(tk.INSERT, "end-1c")  # Move cursor to end
+        
+        # Buttons frame
+        button_frame = tk.Frame(dialog, bg=self.COLOR_BG, padx=10, pady=10)
+        button_frame.pack(fill="x")
+        
+        def save_notes():
+            """Save notes to file (called on close or save button)"""
+            notes_content = notes_text.get("1.0", tk.END).strip()
+            
+            # Only save if there's actual content (not just the header)
+            header = f"[Measurement #{measurement_number} | {measurement_type} | {timestamp}]\n"
+            if notes_content.strip() == header.strip():
+                # Only header, no actual notes - skip saving
+                return
+            
+            if notes_type == "device":
+                # Append to device notes
+                device_id = getattr(gui, 'device_section_and_number', None)
+                sample_name = self._get_sample_name(gui)
+                
+                if device_id and sample_name:
+                    notes_data = self._load_notes_data(gui, sample_name)
+                    if "device" not in notes_data:
+                        notes_data["device"] = {}
+                    
+                    # Append new notes to existing device notes
+                    existing_notes = notes_data["device"].get(device_id, "")
+                    if existing_notes:
+                        notes_data["device"][device_id] = existing_notes + "\n\n" + notes_content
+                    else:
+                        notes_data["device"][device_id] = notes_content
+                    
+                    self._save_notes_data(gui, sample_name, notes_data)
+                    
+                    # Update the main notes text widget if it exists
+                    if hasattr(gui, 'notes_text'):
+                        current_content = gui.notes_text.get("1.0", tk.END).strip()
+                        if current_content:
+                            gui.notes_text.insert(tk.END, "\n\n" + notes_content)
+                        else:
+                            gui.notes_text.insert("1.0", notes_content)
+                        gui.notes_last_saved = gui.notes_text.get("1.0", tk.END)
+            else:
+                # Append to sample notes
+                sample_name = self._get_sample_name(gui)
+                
+                if sample_name:
+                    notes_data = self._load_notes_data(gui, sample_name)
+                    existing_notes = notes_data.get("Sample_Notes", "")
+                    
+                    if existing_notes:
+                        notes_data["Sample_Notes"] = existing_notes + "\n\n" + notes_content
+                    else:
+                        notes_data["Sample_Notes"] = notes_content
+                    
+                    self._save_notes_data(gui, sample_name, notes_data)
+                    
+                    # Update the sample notes text widget if it exists
+                    if hasattr(gui, 'sample_notes_text'):
+                        current_content = gui.sample_notes_text.get("1.0", tk.END).strip()
+                        if current_content:
+                            gui.sample_notes_text.insert(tk.END, "\n\n" + notes_content)
+                        else:
+                            gui.sample_notes_text.insert("1.0", notes_content)
+                        gui.sample_notes_last_saved = gui.sample_notes_text.get("1.0", tk.END)
+        
+        def on_close():
+            """Save notes and close dialog - auto-save on close"""
+            save_notes()
+            dialog.destroy()
+        
+        def save_and_close():
+            """Save notes and close dialog (explicit save button)"""
+            save_notes()
+            dialog.destroy()
+        
+        # Close button (auto-saves on close)
+        close_btn = tk.Button(
+            button_frame,
+            text="Close",
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_PRIMARY,
+            fg="white",
+            command=on_close,
+            padx=20,
+            pady=5
+        )
+        close_btn.pack(side="right")
+        
+        # Bind window close protocol to auto-save
+        dialog.protocol("WM_DELETE_WINDOW", on_close)
+        
+        # Focus on text widget
+        notes_text.focus_set()
     
     # ------------------------------------------------------------------
     # Bottom Status Bar

@@ -206,3 +206,5 @@ Voltage divider with 24kΩ and 1kΩ resistors - simplest and most accurate.
 
 
 
+
+

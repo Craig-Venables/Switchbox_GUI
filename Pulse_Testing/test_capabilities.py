@@ -8,6 +8,14 @@ Easy to update: change boolean values to enable/disable test support.
 To add 4200A support for a test:
 1. Implement the test method in keithley4200a.py
 2. Change the corresponding boolean to True in SYSTEM_CAPABILITIES['keithley4200a']
+
+IMPORTANT NOTE FOR 4200A DATA COLLECTION:
+------------------------------------------
+There is a known issue with GP parameter numbers for data collection from 
+pmu_pulse_read_interleaved.c and pmu_potentiation_depression.c. The current 
+implementation uses GP parameters 20 (setV), 22 (setI), 25 (out1), and 31 (PulseTimes)
+as shown in the example scripts, but these may need verification. If data collection
+is not working correctly, check the GP parameter numbers in the C module output.
 """
 
 from typing import Dict, List, Optional
@@ -36,6 +44,7 @@ ALL_TEST_FUNCTIONS = [
     'switching_threshold_test',
     'multilevel_programming',
     'pulse_train_varying_amplitudes',
+    'laser_and_read',
 ]
 
 # System capability matrix
@@ -65,30 +74,33 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'pulse_train_varying_amplitudes': True,
     },
     'keithley4200a': {
-        # Tests implemented in keithley4200_kxci_scripts.py
-        # See 4200A_TEST_STATUS.md for detailed status
-        'pulse_read_repeat': False,  # ❌ Requires NEW C module: pulse_read_repeat_dual_channel.c
-        'pulse_then_read': False,  # Not available - use pulse_read_repeat instead
-        'multi_pulse_then_read': True,  # ⚠️ Works but limited to 8 reads (needs C modification for N reads)
+        # Tests implemented using pmu_pulse_read_interleaved.c and pmu_potentiation_depression.c
+        # The interleaved program is highly versatile and can be configured for most test patterns
+        # NOTE: There is a known issue with GP parameter numbers for data collection - 
+        #       the method from examples is used but may need verification (GP 20, 22, 25, 31)
+        'pulse_read_repeat': True,  # ✅ Uses pmu_pulse_read_interleaved: num_cycles=N, num_reads=1, num_pulses_per_group=1
+        'pulse_then_read': True,  # ✅ Uses pmu_pulse_read_interleaved: same as pulse_read_repeat
+        'multi_pulse_then_read': True,  # ✅ Uses pmu_pulse_read_interleaved: configurable num_pulses_per_group and num_reads
         'varying_width_pulses': False,  # Not available - use width_sweep_with_reads instead
-        'width_sweep_with_reads': True,  # ⚠️ Works but needs Python-side loop over widths
-        'width_sweep_with_all_measurements': False,  # ❌ Requires NEW C module with pulse measurement
-        'potentiation_depression_cycle': False,  # Not available/not working
-        'potentiation_only': True,
-        'depression_only': True,
-        'endurance_test': True,
+        'width_sweep_with_reads': True,  # ⚠️ Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values
+        'width_sweep_with_all_measurements': False,  # ❌ Requires NEW C module with pulse measurement capability
+        'potentiation_depression_cycle': True,  # ✅ Uses pmu_potentiation_depression.c for alternating potentiation/depression cycles
+        'potentiation_only': True,  # ✅ Uses pmu_pulse_read_interleaved: positive pulses only
+        'depression_only': True,  # ✅ Uses pmu_pulse_read_interleaved: negative pulses only
+        'endurance_test': True,  # ✅ Uses pmu_pulse_read_interleaved: can configure alternating SET/RESET pattern
         'retention_test': False,  # Not yet implemented
-        'pulse_multi_read': True,  # ✅ Fully working
-        'multi_read_only': True,  # ✅ Fully working
-        'current_range_finder': False,  # ❌ Requires NEW C module (or Python-side loop)
-        'relaxation_after_multi_pulse': True,  # ✅ Fully working
-        'relaxation_after_multi_pulse_with_pulse_measurement': False,  # ❌ Requires NEW C module with pulse measurement
+        'pulse_multi_read': True,  # ✅ Uses pmu_pulse_read_interleaved: num_pulses_per_group=N, num_reads=M
+        'multi_read_only': True,  # ✅ Uses pmu_pulse_read_interleaved: num_pulses_per_group=0, num_reads=N
+        'current_range_finder': False,  # ❌ Requires Python-side loop over current ranges
+        'relaxation_after_multi_pulse': True,  # ✅ Uses pmu_pulse_read_interleaved: 1 read → N pulses → M reads
+        'relaxation_after_multi_pulse_with_pulse_measurement': False,  # ❌ Requires NEW C module with pulse measurement capability
         # Additional tests available in 4200A
         'voltage_amplitude_sweep': True,
         'ispp_test': True,
         'switching_threshold_test': True,
         'multilevel_programming': True,
         'pulse_train_varying_amplitudes': True,
+        'laser_and_read': True,  # ✅ Uses Read_With_Laser_Pulse_SegArb.c: CH1 continuous reads, CH2 independent laser pulse
     },
 }
 
@@ -158,12 +170,12 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
     # Custom explanations for unsupported tests (can be expanded)
     explanations = {
         'keithley4200a': {
-            'pulse_read_repeat': 'Can use pmu_retention_dual_channel.c if we remove min-8 requirement. Need to modify C code validation (line 266) and Python validation (line 310 in run_pmu_retention.py). Pattern: Initial Read → (Pulse → Read → Delay) × N',
-            'multi_pulse_then_read': 'Currently limited to 8 reads per cycle. C module needs modification to support N reads (1-1000)',
-            'width_sweep_with_reads': 'Works but needs Python-side loop to call C module multiple times (once per width)',
-            'width_sweep_with_all_measurements': 'Requires NEW C module with pulse peak current measurement capability',
-            'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module: relaxation_with_pulse_measurement.c to measure pulse peaks',
-            'current_range_finder': 'Requires NEW C module or Python-side loop over current ranges',
+            'varying_width_pulses': 'Not available - use width_sweep_with_reads instead (uses pmu_pulse_read_interleaved with Python-side loop)',
+            'width_sweep_with_reads': 'Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values (one call per width)',
+            'width_sweep_with_all_measurements': 'Requires NEW C module with pulse peak current measurement capability (interleaved only measures during read windows)',
+            'retention_test': 'Not yet implemented - would require time-based read measurements after initial pulse',
+            'current_range_finder': 'Requires Python-side loop over current ranges (interleaved program uses fixed i_range parameter)',
+            'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module with pulse measurement capability (interleaved only measures during read windows, not during pulses)',
             # Add more specific explanations as needed
         }
     }

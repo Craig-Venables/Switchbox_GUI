@@ -1219,7 +1219,7 @@ def simple_health_check(address: str = "192.168.0.10:8888") -> bool:
     """
     try:
         # Import locally to avoid side-effects during module import
-        from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200AController
+        from Equipment.SMU_AND_PMU import Keithley4200AController
     except Exception:
         # We're already in this module, so fallback to class defined above
         Keithley4200AController = globals().get("Keithley4200AController")

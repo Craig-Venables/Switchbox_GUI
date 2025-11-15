@@ -83,7 +83,7 @@ from Equipment.Multiplexers.Multiplexer_10_OUT.Multiplexer_Class import Multiple
 from Equipment.managers.multiplexer import MultiplexerManager
 
 try:
-    from Equipment.SMU_AND_PMU.Keithley2400 import Keithley2400Controller
+    from Equipment.SMU_AND_PMU import Keithley2400Controller
 except Exception:
     Keithley2400Controller = None
 
@@ -2441,8 +2441,6 @@ class SampleGUI:
                         color = self._get_status_color(manual_status)
                         status_label.config(text=icon, fg=color)
                 
-                messagebox.showinfo("Device Loaded", f"Successfully loaded device: {device_name}")
-                
             except Exception as e:
                 messagebox.showerror("Load Error", f"Failed to load device: {e}")
                 self.log_terminal(f"Error loading device {device_name}: {e}", "ERROR")
@@ -2512,31 +2510,49 @@ class SampleGUI:
                 f"Sample Type: {self.device_info.get('sample_type', 'Unknown')}",
                 f"Created: {self.device_info.get('created', 'Unknown')}",
                 f"Last Modified: {self.device_info.get('last_modified', 'Unknown')}",
-                "",
-                "Device Notes:",
-                self.device_info.get('notes', 'No notes')
+                ""
             ]
             
-            # Also load and display sample notes if available
-            sample_type = self.device_info.get('sample_type', '')
-            if sample_type:
+            # Load device notes from notes.json (using sample name, not sample_type)
+            sample_name = self.current_device_name  # Current device name is the sample name (D104)
+            if sample_name:
                 try:
-                    sample_folder = resolve_default_save_root() / sample_type.replace(" ", "_")
-                    sample_notes_path = sample_folder / "sample_notes.json"
-                    if sample_notes_path.exists():
-                        with sample_notes_path.open("r", encoding="utf-8") as f:
-                            sample_notes_data = json.load(f)
-                            sample_notes = sample_notes_data.get("notes", "")
+                    sample_folder = resolve_default_save_root() / sample_name.replace(" ", "_")
+                    notes_path = sample_folder / "notes.json"
+                    if notes_path.exists():
+                        with notes_path.open("r", encoding="utf-8") as f:
+                            notes_data = json.load(f)
+                            
+                            # Display sample notes FIRST if available
+                            sample_notes = notes_data.get("Sample_Notes", "")
                             if sample_notes:
                                 info_lines.extend([
+                                    "Sample Notes:",
+                                    sample_notes,
                                     "",
                                     "=" * 50,
-                                    "",
-                                    "Sample Notes:",
-                                    sample_notes
+                                    ""
                                 ])
-                except Exception:
-                    pass  # Silently ignore if sample notes can't be loaded
+                            
+                            # Then display device notes
+                            info_lines.append("Device Notes:")
+                            device_notes_dict = notes_data.get("device", {})
+                            if device_notes_dict:
+                                # Display notes for each device
+                                for device_id, device_notes in sorted(device_notes_dict.items()):
+                                    if device_notes.strip():  # Only show devices with notes
+                                        info_lines.extend([
+                                            f"\n{device_id}:",
+                                            device_notes,
+                                            ""
+                                        ])
+                            else:
+                                info_lines.append("No device notes found.")
+                except Exception as e:
+                    print(f"Error loading notes from notes.json: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    info_lines.append("Error loading notes from notes.json")
             
             self.device_info_text.insert("1.0", "\n".join(info_lines))
         
@@ -2943,8 +2959,29 @@ class SampleGUI:
         else:  # Yes - stay on Device Manager tab
             return
     
+    def _on_measurement_window_closed(self) -> None:
+        """Called when measurement window is closed - reset flags"""
+        self.measurement_window = False
+        self.measuremnt_gui = None
+    
     def open_measurement_window(self) -> None:
         """Open the measurement window. Checks device name first, then device selection."""
+        # Check if window exists and is still valid
+        if self.measurement_window and hasattr(self, 'measuremnt_gui') and self.measuremnt_gui:
+            try:
+                # Check if the window still exists
+                if hasattr(self.measuremnt_gui, 'master') and self.measuremnt_gui.master.winfo_exists():
+                    # Window exists, bring it to top
+                    self.measuremnt_gui.bring_to_top()
+                    return
+                else:
+                    # Window was destroyed, reset flags
+                    self._on_measurement_window_closed()
+            except (tk.TclError, AttributeError):
+                # Window doesn't exist, reset flags
+                self._on_measurement_window_closed()
+        
+        # Window doesn't exist, create a new one
         if not self.measurement_window:
             sample_type = self.sample_type_var.get()
             section = self.section_var.get()

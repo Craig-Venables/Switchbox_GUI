@@ -62,6 +62,9 @@ class MeasurementPlotPanels:
     plot_visibility: Dict[str, tk.BooleanVar] = field(default_factory=dict)
     overlay_label: Optional[tk.Label] = None
     main_container: Optional[tk.Frame] = None
+    
+    # Reference to GUI for context menu callbacks
+    gui: Optional[object] = None
 
     # ------------------------------------------------------------------
     # Public construction API
@@ -626,6 +629,8 @@ class MeasurementPlotPanels:
         setattr(self, f"canvas_{key}", canvas)
         if line is not None:
             setattr(self, f"line_{key}", line)
+        
+        # Context menu will be set up by layout_builder after gui is attached
 
     def _unregister(self, key: str) -> None:
         for store, prefix in (

@@ -1326,3 +1326,6 @@ if __name__ == "__main__":
     keithley.close()
     print("✓ Connection closed safely")
 
+
+# Alias for backward compatibility
+Keithley2450_SPCI = Keithley2450Controller
