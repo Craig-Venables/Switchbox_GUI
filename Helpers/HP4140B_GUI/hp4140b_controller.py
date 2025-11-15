@@ -267,22 +267,60 @@ class HP4140BController:
         self.configure_current_source(channel=channel, range_code=range_code, current_a=current, compliance_v=Vcc)
 
     def measure_voltage(self, channel: int = 1) -> float:
+        """
+        Measure voltage on specified channel.
+        
+        Args:
+            channel: Channel number (typically 1 or 2)
+            
+        Returns:
+            Voltage in volts (float)
+        """
         self.trigger_voltage_measure(channel=channel, mode=0)
         _, v, _ = self.read_data(channel)
         return v
 
     def measure_current(self, channel: int = 1) -> float:
+        """
+        Measure current on specified channel.
+        
+        Args:
+            channel: Channel number (typically 1 or 2)
+            
+        Returns:
+            Current in amperes (float)
+        """
         self.trigger_current_measure(channel=channel, mode=0)
         _, _, i = self.read_data(channel)
         return i
 
     def measure_both(self, channel: int = 1):
+        """
+        Measure both voltage and current on specified channel.
+        
+        Args:
+            channel: Channel number (typically 1 or 2)
+            
+        Returns:
+            Tuple of (voltage_v, current_a)
+        """
         self.trigger_voltage_measure(channel=channel, mode=0)
         self.trigger_current_measure(channel=channel, mode=0)
         _, v, i = self.read_data(channel)
         return v, i
 
     def voltage_ramp(self, target_voltage_v: float, steps: int = 30, pause_s: float = 0.02, compliance_a: float = 1e-3, channel: int = 1, range_code: int = 0) -> None:
+        """
+        Ramp voltage from current value to target value.
+        
+        Args:
+            target_voltage_v: Target voltage in volts
+            steps: Number of steps for ramp (default: 30)
+            pause_s: Pause between steps in seconds (default: 0.02)
+            compliance_a: Current compliance limit in amperes (default: 1e-3)
+            channel: Channel number (typically 1 or 2). Defaults to 1.
+            range_code: Voltage range code (refer to HP4140B manual). Defaults to 0.
+        """
         if not self.inst:
             print("HP4140B: No device connected")
             return
@@ -299,6 +337,12 @@ class HP4140BController:
             time.sleep(pause_s)
 
     def shutdown(self, channel: int = 1) -> None:
+        """
+        Safely shutdown instrument by ramping to zero and disabling output.
+        
+        Args:
+            channel: Channel number (typically 1 or 2). Defaults to 1.
+        """
         if not self.inst:
             return
         try:
@@ -310,6 +354,9 @@ class HP4140BController:
             print(f"HP4140B: Shutdown warning: {exc}")
 
     def close(self) -> None:
+        """
+        Close instrument connection and clean up resources.
+        """
         if self.inst:
             try:
                 self.shutdown()
@@ -355,5 +402,4 @@ class HP4140BController:
         except Exception as exc:
             # Beep command may not be available on all instruments
             print(f"HP4140B: Beep command failed: {exc}")
-
 
