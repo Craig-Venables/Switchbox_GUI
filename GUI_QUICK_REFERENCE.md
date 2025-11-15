@@ -212,3 +212,4 @@ GUI components (reusable parts) are in `gui/`:
 - See `GUI_ARCHITECTURE.md` for architecture overview
 - See `GUI_REFACTORING_PLAN.md` for future improvements
 
+
