@@ -2,19 +2,19 @@
 GUI package
 ============
 
-This package contains Tkinter-front-end building blocks extracted from
-`Measurement_GUI.py`. Each module focuses on a single responsibility:
-- `layout_builder`: widget and layout creation
-- `plot_panels`: matplotlib figure construction
-- `plot_updaters`: background update loops
+This package contains GUI modules organized by application:
+- `measurement_gui`: Main measurement interface and components
+- `pulse_testing_gui`: Pulse testing interface
+- `sample_gui`: Device selection and routing interface
 
-Having a dedicated package keeps GUI concerns isolated from measurement
-logic so we can eventually target alternative toolkits such as Qt.
+Each GUI module has its own components and utilities.
 """
 
 __all__ = [
-    "layout_builder",
-    "plot_panels",
-    "plot_updaters",
+    "measurement_gui",
+    "pulse_testing_gui",
+    "sample_gui",
+    "motor_control_gui",
+    "connection_check_gui",
 ]
 

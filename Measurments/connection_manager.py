@@ -21,12 +21,22 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Any
 import sys
+import warnings
 
 try:
-    from Equipment.iv_controller_manager import IVControllerManager
+    from Equipment.managers.iv_controller import IVControllerManager
 except ImportError as exc:  # pragma: no cover - optional hardware dependency
     IVControllerManager = Any  # type: ignore
     _IVC_ERROR = exc
+    warnings.warn(
+        f"⚠️  WARNING: IVControllerManager could not be imported.\n"
+        f"   Error: {exc}\n"
+        f"   The IV Controller Manager will not be available for connecting to SMU devices.\n"
+        f"   Please check that Equipment/managers/iv_controller.py exists and all required dependencies are installed.",
+        ImportWarning,
+        stacklevel=2
+    )
+    print(f"⚠️  WARNING: IVControllerManager dependency not available: {exc}")
 else:
     _IVC_ERROR = None
 
@@ -39,7 +49,7 @@ else:
     _PSU_ERROR = None
 
 try:
-    from Equipment.temperature_controller_manager import TemperatureControllerManager
+    from Equipment.managers.temperature import TemperatureControllerManager
 except ImportError as exc:  # pragma: no cover
     TemperatureControllerManager = Any  # type: ignore
     _TC_ERROR = exc
@@ -80,7 +90,24 @@ class InstrumentConnectionManager:
     def connect_keithley(self, smu_type: str, address: str) -> IVControllerManager:
         """Connect to a Keithley SMU using the IV controller manager."""
         if _IVC_ERROR is not None:  # pragma: no cover - hardware dependency missing
-            raise RuntimeError("IVControllerManager dependency not available") from _IVC_ERROR
+            error_msg = (
+                f"❌ ERROR: Could not connect to IV Controller Manager - dependency not available.\n\n"
+                f"   Original import error: {_IVC_ERROR}\n\n"
+                f"   This usually means:\n"
+                f"   - Equipment/managers/iv_controller.py could not be imported\n"
+                f"   - A required dependency for IV controller is missing (e.g., pymeasure, visa, etc.)\n"
+                f"   - The Equipment/managers/ directory structure is incorrect\n\n"
+                f"   Please check:\n"
+                f"   1. That Equipment/managers/iv_controller.py exists\n"
+                f"   2. That all required dependencies are installed (pip install -r requirements.txt)\n"
+                f"   3. That your Python path includes the project root directory\n"
+                f"   4. Try restarting Python/your IDE to clear any cached imports\n\n"
+                f"   SMU Type: {smu_type}\n"
+                f"   Address: {address}"
+            )
+            print(error_msg)
+            warnings.warn(error_msg, RuntimeWarning, stacklevel=2)
+            raise RuntimeError(error_msg) from _IVC_ERROR
         instrument = IVControllerManager(smu_type, address)
         try:
             connected = bool(instrument.is_connected())

@@ -26,7 +26,7 @@ import time
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from Equipment.camera_manager import CameraManager
+from Equipment.managers.camera import CameraManager
 
 
 def main():

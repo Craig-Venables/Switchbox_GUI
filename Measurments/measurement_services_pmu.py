@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
-from Equipment.function_generator_manager import FunctionGeneratorManager
+from Equipment.managers.function_generator import FunctionGeneratorManager
 
 
 class MeasurementServicesPMU:
