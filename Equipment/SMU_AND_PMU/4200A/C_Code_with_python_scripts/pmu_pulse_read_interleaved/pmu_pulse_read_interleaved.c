@@ -18,7 +18,7 @@
 		setStopV,	double,	Input,	4,	-20,	20
 		steps,	int,	Input,	5,	1,	
 		IRange,	double,	Input,	1e-2,	100e-9,	.8
-		max_points,	int,	Input,	10000,	12,	30000
+		max_points,	int,	Input,	10000,	12,	1000000
 		setR,	D_ARRAY_T,	Output,	,	,	
 		setR_size,	int,	Input,	5,	1,	30000
 		resetR,	D_ARRAY_T,	Output,	,	,	
@@ -65,6 +65,7 @@ int ACraig1_retention_pulseNK( char *InstrName, long ForceCh, double ForceVRange
 __declspec( dllexport ) int ret_find_value(double *vals, double *t, int pts, double start, double stop, double *result);
 __declspec( dllexport ) void ret_report_values(double *T, int numpts, double *out, int out_size);
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts);
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts);
 
 extern int debug;
 extern int details;
@@ -129,6 +130,7 @@ int ACraig1_retention_pulseNK( char *InstrName, long ForceCh, double ForceVRange
 __declspec( dllexport ) int ret_find_value(double *vals, double *t, int pts, double start, double stop, double *result);
 __declspec( dllexport ) void ret_report_values(double *T, int numpts, double *out, int out_size);
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts);
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts);
 
 extern int debug;
 extern int details;
@@ -149,6 +151,8 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
 
   double *measMinTime = NULL;
   double *measMaxTime = NULL;
+  double *measOffMinTime = NULL;
+  double *measOffMaxTime = NULL;
   int recordedProbeCount = 0;
   int probeCapacity = 0;
 
@@ -273,7 +277,9 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
 
   measMinTime = (double *)calloc(probeCapacity, sizeof(double));
   measMaxTime = (double *)calloc(probeCapacity, sizeof(double));
-  if(measMinTime == NULL || measMaxTime == NULL)
+  measOffMinTime = (double *)calloc(probeCapacity, sizeof(double));
+  measOffMaxTime = (double *)calloc(probeCapacity, sizeof(double));
+  if(measMinTime == NULL || measMaxTime == NULL || measOffMinTime == NULL || measOffMaxTime == NULL)
   {
     if(debug) printf("%s: Unable to allocate measurement window buffers (capacity %d)\n", mod, probeCapacity);
     stat = -203;
@@ -355,10 +361,11 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
 
   // TOP: Measurement pulse width at measV
   times[segIdx] = measWidth;
-  measMinTime[recordedProbeCount] = ttime + ratio * measWidth; 
-  measMaxTime[recordedProbeCount] = ttime + measWidth * 0.9;
+  int initialProbeIdx = recordedProbeCount;
+  measMinTime[initialProbeIdx] = ttime + ratio * measWidth; 
+  measMaxTime[initialProbeIdx] = ttime + measWidth * 0.9;
   if(debug)printf("Initial read measMinTime[%d]= %g; measMaxTime[%d]= %g\n", 
-    recordedProbeCount, measMinTime[recordedProbeCount], recordedProbeCount, measMaxTime[recordedProbeCount] );
+    initialProbeIdx, measMinTime[initialProbeIdx], initialProbeIdx, measMaxTime[initialProbeIdx] );
   recordedProbeCount++;
   ttime += times[segIdx];
   volts[segIdx] = measV;  // Stay at measV during measurement window
@@ -386,6 +393,7 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
     mod, segIdx, 0.0);
 
   // DELAY: Delay at 0V after initial read, before cycles
+  double initialDelayStart = ttime;
   times[segIdx] = measDelay;
   ttime += times[segIdx];
   if(debug) printf("%s: Initial DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
@@ -394,6 +402,10 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
   volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
   if(debug) printf("%s: Initial DELAY AT 0V: End v[%d]=%.6fV (flat delay at 0V before cycles)\n",
     mod, segIdx, 0.0);
+  measOffMinTime[initialProbeIdx] = initialDelayStart + ratio * measDelay;
+  measOffMaxTime[initialProbeIdx] = initialDelayStart + measDelay * 0.9;
+  if(debug) printf("%s: Initial read offset window[%d] = (%g, %g)\n",
+    mod, initialProbeIdx, measOffMinTime[initialProbeIdx], measOffMaxTime[initialProbeIdx]);
 
   // ****************
   // Cycles: ((Pulse)xn, (Read)xn) × NumCycles
@@ -480,10 +492,11 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
         stat = -205;
         goto RETS;
       }
-      measMinTime[recordedProbeCount] = ttime + ratio * measWidth; 
-      measMaxTime[recordedProbeCount] = ttime + measWidth * 0.9;
+      int readProbeIdx = recordedProbeCount;
+      measMinTime[readProbeIdx] = ttime + ratio * measWidth; 
+      measMaxTime[readProbeIdx] = ttime + measWidth * 0.9;
       if(debug)printf("Cycle %d Read %d measMinTime[%d]= %g; measMaxTime[%d]= %g\n", 
-        cycleIdx+1, readIdx+1, recordedProbeCount, measMinTime[recordedProbeCount], recordedProbeCount, measMaxTime[recordedProbeCount] );
+        cycleIdx+1, readIdx+1, readProbeIdx, measMinTime[readProbeIdx], readProbeIdx, measMaxTime[readProbeIdx] );
       recordedProbeCount++;
       ttime += times[segIdx];
       volts[segIdx] = measV;  // Stay at measV during measurement window
@@ -506,6 +519,7 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
         mod, cycleIdx+1, readIdx+1, segIdx, 0.0);
 
       // DELAY: Delay at 0V after read (before next read or next cycle)
+      double readDelayStart = ttime;
       times[segIdx] = measDelay;
       ttime += times[segIdx];
       if(debug) printf("%s: Cycle %d Read %d - DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
@@ -514,6 +528,10 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
       volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
       if(debug) printf("%s: Cycle %d Read %d - DELAY AT 0V: End v[%d]=%.6fV\n",
         mod, cycleIdx+1, readIdx+1, segIdx, 0.0);
+      measOffMinTime[readProbeIdx] = readDelayStart + ratio * measDelay;
+      measOffMaxTime[readProbeIdx] = readDelayStart + measDelay * 0.9;
+      if(debug) printf("%s: Cycle %d Read %d offset window[%d] = (%g, %g)\n",
+        mod, cycleIdx+1, readIdx+1, readProbeIdx, measOffMinTime[readProbeIdx], measOffMaxTime[readProbeIdx]);
     }
   }
   
@@ -564,7 +582,19 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
 
 /* ------end of all pulses----------  */
 
-  used_rate = ret_getRate(ttime, max_points, &used_pts, &npts);
+  // Find minimum segment time for optimal rate selection
+  double min_seg_time_found = 1.0;  // Start with a large value
+  for(i = 0; i < NewTimesSize; i++)
+  {
+    if(times[i] > 0.0 && times[i] < min_seg_time_found)
+    {
+      min_seg_time_found = times[i];
+    }
+  }
+  if(debug) printf("%s: Minimum segment time in waveform: %.2e s\n", mod, min_seg_time_found);
+
+  // Use enhanced rate selection that considers minimum segment time
+  used_rate = ret_getRateWithMinSeg(ttime, max_points, min_seg_time_found, &used_pts, &npts);
   if(debug) printf("%s: for requested time:%g and max_points:%d number of points to allocate:%d\n",
    mod, ttime, max_points, used_pts);
 
@@ -662,53 +692,86 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
       // Get probe measurements (initial read + reads after each pulse)
       // *******************
       int ProbeResNumb=0;
+      int validProbeCount = 0;  // Count of successfully extracted probes
       for (ProbeResNumb=0; ProbeResNumb<recordedProbeCount;ProbeResNumb++)  
       {
-        // Get current at measurement probe
-        double probeCurrent = 0.0;
-        stat = ret_find_value(IMret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeCurrent);
-        if(debug) printf("\nProbe Number: %d \n %s: Average Current=%g in time interval (seconds): %g and %g\n", 
-          ProbeResNumb, mod, probeCurrent, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb]);
+        // Get current from MEASURE channel (channel 2) during the measurement window
+        double probeMeasCurrent = 0.0;
+        stat = ret_find_value(IMret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeMeasCurrent);
+        if(debug) printf("\nProbe Number: %d \n %s: Measure channel current=%g in time interval (seconds): %g and %g\n", 
+          ProbeResNumb, mod, probeMeasCurrent, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb]);
         if(stat < 0)
         {
-          if(debug)printf("%s: Error in finding probe current\n", mod);
-          stat = -92;
-          goto RETS;
+          // Skip this probe instead of failing - invalid time window
+          printf("%s: WARNING: Skipping probe %d - error in finding probe current (stat=%d)\n", mod, ProbeResNumb, stat);
+          printf("%s:   Time window: [%.6e, %.6e] s (may be outside data range [%.6e, %.6e] s)\n",
+            mod, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], Tret[0], Tret[numpts-1]);
+          continue;  // Skip to next probe
         }
 
-        // Get voltage at measurement probe FIRST (needed for resistance calculation)
+        double probeMeasOffsetCurrent = 0.0;
+        stat = ret_find_value(IMret, Tret, numpts, measOffMinTime[ProbeResNumb], measOffMaxTime[ProbeResNumb], &probeMeasOffsetCurrent);
+        if(stat < 0)
+        {
+          // Skip this probe instead of failing - invalid offset window
+          printf("%s: WARNING: Skipping probe %d - error in finding probe offset current (stat=%d)\n", mod, ProbeResNumb, stat);
+          printf("%s:   Offset window: [%.6e, %.6e] s (may be outside data range [%.6e, %.6e] s)\n",
+            mod, measOffMinTime[ProbeResNumb], measOffMaxTime[ProbeResNumb], Tret[0], Tret[numpts-1]);
+          continue;  // Skip to next probe
+        }
+        if(debug) printf("%s: Probe %d offset current=%g in time interval (seconds): %g and %g\n",
+          mod, ProbeResNumb, probeMeasOffsetCurrent, measOffMinTime[ProbeResNumb], measOffMaxTime[ProbeResNumb]);
+
+        double netProbeCurrent = probeMeasCurrent - probeMeasOffsetCurrent;
+
+        // Get voltage from FORCE channel (channel 1) for the same window
         double probeVoltage = 0.0;
-        stat = ret_find_value(VMret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeVoltage);
+        stat = ret_find_value(VFret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeVoltage);
         if(stat < 0)
         {
-          if(debug)printf("%s: Error in finding probe voltage value\n", mod);
-          stat = -93;
-          goto RETS;
+          // Skip this probe instead of failing - invalid voltage window
+          printf("%s: WARNING: Skipping probe %d - error in finding probe voltage (stat=%d)\n", mod, ProbeResNumb, stat);
+          printf("%s:   Time window: [%.6e, %.6e] s (may be outside data range [%.6e, %.6e] s)\n",
+            mod, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], Tret[0], Tret[numpts-1]);
+          continue;  // Skip to next probe
         }
-        setV[ProbeResNumb] = probeVoltage;  // Store voltage
-        if(debug)printf("%s: setV[%d] = %g V\n", mod, ProbeResNumb, probeVoltage);
+        
+        // All values found successfully - store them
+        setV[validProbeCount] = probeVoltage;  // Store voltage (using validProbeCount for output array)
+        if(debug)printf("%s: setV[%d] = %g V\n", mod, validProbeCount, probeVoltage);
 
-        // Calculate resistance: R = V / I (use actual measured voltage, not measV)
-        if (fabs(probeCurrent) > 1e-12)  // Avoid division by zero
+        // Calculate resistance: R = V / (I - Ioffset)
+        if (fabs(netProbeCurrent) > 1e-12)  // Avoid division by zero
         {
-          double resistance = fabs(probeVoltage / probeCurrent);
+          double resistance = fabs(probeVoltage / netProbeCurrent);
           if(resistance > 1e4/IRange) 
             resistance = 1e4/IRange;
-          resetR[ProbeResNumb] = resistance;  // Store resistance (reusing resetR array)
-          if(debug)printf("%s: Probe %d resistance = %g Ohms (V=%g V, I=%g A)\n", mod, ProbeResNumb, resistance, probeVoltage, probeCurrent);
+          resetR[validProbeCount] = resistance;  // Store resistance (using validProbeCount for output array)
+          if(debug)printf("%s: Probe %d resistance = %g Ohms (V=%g V, I=%g A, Ioff=%g A)\n", 
+            mod, ProbeResNumb, resistance, probeVoltage, netProbeCurrent, probeMeasOffsetCurrent);
         }
         else
         {
-          resetR[ProbeResNumb] = 1e4/IRange;  // Very high resistance
+          resetR[validProbeCount] = 1e4/IRange;  // Very high resistance
           if(debug)printf("%s: Probe %d current too small, setting resistance to max\n", mod, ProbeResNumb);
         }
 
         // Store current
-        setI[ProbeResNumb] = probeCurrent;  // Store current
-        if(debug)printf("%s: setI[%d] = %g A\n", mod, ProbeResNumb, probeCurrent);
+        setI[validProbeCount] = netProbeCurrent;  // Store offset-compensated measurement-channel current
+        if(debug)printf("%s: setI[%d] = %g A (net, raw=%g A, offset=%g A)\n", 
+          mod, validProbeCount, netProbeCurrent, probeMeasCurrent, probeMeasOffsetCurrent);
 
         // Return pulse times as an array
-        PulseTimes[ProbeResNumb]=(measMaxTime[ProbeResNumb]+measMinTime[ProbeResNumb])/2;
+        PulseTimes[validProbeCount]=(measMaxTime[ProbeResNumb]+measMinTime[ProbeResNumb])/2;
+        
+        validProbeCount++;  // Increment valid probe count
+      }
+      
+      // Update recordedProbeCount to reflect only valid probes
+      if(validProbeCount < recordedProbeCount)
+      {
+        printf("%s: WARNING: Only %d of %d probes were successfully extracted\n", mod, validProbeCount, recordedProbeCount);
+        recordedProbeCount = validProbeCount;
       }
 
 int looper;
@@ -726,6 +789,8 @@ int looper;
   if(volts != NULL) free(volts);
   if(measMinTime != NULL) free(measMinTime);
   if(measMaxTime != NULL) free(measMaxTime);
+  if(measOffMinTime != NULL) free(measOffMinTime);
+  if(measOffMaxTime != NULL) free(measOffMaxTime);
   FreeArraysInterleaved();
   return stat;
 }

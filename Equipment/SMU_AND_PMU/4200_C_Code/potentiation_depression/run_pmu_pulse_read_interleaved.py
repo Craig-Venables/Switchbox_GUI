@@ -1,36 +1,40 @@
-"""PMU Pulse-Read Interleaved Measurement Script for Keithley 4200A-SCS.
+"""PMU Potentiation-Depression Measurement Script for Keithley 4200A-SCS.
+
+"error in finding probe current"
 
 Purpose:
 --------
-This script configures and executes interleaved pulse-read measurements on memristor devices
+This script configures and executes potentiation-depression cycling measurements on memristor devices
 using the Keithley 4200A-SCS Programmable Measurement Unit (PMU). It generates
-a waveform sequence that:
-1. Takes an initial baseline resistance measurement
-2. For each cycle: Applies a programming pulse → Immediately measures resistance
+a waveform sequence that alternates between potentiation (positive pulses) and depression (negative pulses).
 
-This pattern is useful for pulse-read-repeat tests where you want to measure the device
-state immediately after each programming pulse.
+This pattern is used for testing device response to alternating positive and negative programming pulses,
+useful for studying potentiation (conductance increase) and depression (conductance decrease) behavior.
 
 Waveform Structure:
 ------------------
-The generated waveform consists of two main sections:
+The generated waveform consists of cycle pairs:
 
-1. Initial Read Measurement:
-   - Baseline resistance read before any pulses
-   - Pulse: rise to measV → hold at measV (measWidth) → fall to 0V → delay
-   - Used to establish the initial device state
-
-2. Interleaved (Pulse → Read) Cycles (NumPulses):
-   - For each cycle:
-     * PULSE: RISE → TOP (PulseWidth) → FALL → DELAY
-       - Fast transition from 0V to PulseV (PulseRiseTime)
-       - Flat top at PulseV for duration PulseWidth
-       - Fast transition from PulseV to 0V (PulseFallTime)
-       - Delay at 0V before read (PulseDelay)
-     * READ: RISE → TOP (measWidth) → FALL → DELAY
+For each cycle pair (NumCycles pairs):
+  1. Potentiation Cycle:
+     - Read measurement (baseline before pulses)
+     - NumPulsesPerGroup pulses in sequence (positive PulseV):
+       - Each pulse: RISE → TOP (PulseWidth) → FALL → DELAY
+       - Fast transition from 0V to +PulseV → hold at +PulseV → fall to 0V → delay
+     - NumReads reads in sequence:
+       - Each read: RISE → TOP (measWidth) → FALL → DELAY
        - Transition to measV → hold at measV (measWidth) → fall to 0V → delay
-   - Each pulse is immediately followed by a read measurement
-   - Designed to track device state changes after each programming pulse
+       - One measurement per read
+  
+  2. Depression Cycle:
+     - Read measurement (baseline before pulses)
+     - NumPulsesPerGroup pulses in sequence (negative -PulseV):
+       - Each pulse: RISE → TOP (PulseWidth) → FALL → DELAY
+       - Fast transition from 0V to -PulseV → hold at -PulseV → fall to 0V → delay
+     - NumReads reads in sequence:
+       - Each read: RISE → TOP (measWidth) → FALL → DELAY
+       - Transition to measV → hold at measV (measWidth) → fall to 0V → delay
+       - One measurement per read
 
 Output Data:
 -----------
@@ -40,13 +44,20 @@ The script returns arrays containing:
 - Timestamps for each measurement
 
 The output arrays must be sized to accommodate:
-  Total measurements = 1 (initial) + NumPulses (after each pulse) = NumPulses + 1
+  Total measurements = 2*NumCycles + 2*NumCycles*NumReads
+  = 2*NumCycles*(1 + NumReads)
+  (one read per potentiation + one read per depression + reads after pulses)
 
 Key Parameters:
 --------------
+Cycle Parameters:
+  --num-cycles: Number of cycle pairs (M) - repurposed from num-initial-meas-pulses (1-100)
+  --num-reads: Number of reads per cycle (N) - repurposed from num-pulses (1-100)
+  --num-pulses-per-group: Number of pulses per cycle (N) - repurposed from num-pulses (1-100)
+
 Pulse Parameters:
-  --num-pulses: Number of (pulse, read) cycles (1-100)
-  --pulse-v: Pulse voltage amplitude (-20 to 20V)
+  --pulse-v: Pulse voltage amplitude (positive for potentiation, negative for depression) (-20 to 20V)
+    Note: Depression cycles use -PulseV automatically
   --pulse-width: Flat top duration of pulse (2e-8 to 1s)
   --pulse-rise-time: Rise time for pulse edge (2e-8 to 1s, typically 1e-7s)
   --pulse-fall-time: Fall time for pulse edge (2e-8 to 1s, typically 1e-7s)
@@ -59,10 +70,12 @@ Measurement Parameters:
 
 Usage Example:
 -------------
-Basic pulse-read-repeat with 10 cycles:
+Basic pattern with 3 cycle pairs, 2 reads per cycle, 2 pulses per cycle:
 
     python run_pmu_pulse_read_interleaved.py --gpib-address GPIB0::17::INSTR \
-        --num-pulses 10 \
+        --num-cycles 3 \
+        --num-reads 2 \
+        --num-pulses-per-group 2 \
         --pulse-v 4.0 \
         --pulse-width 1e-6 \
         --pulse-rise-time 1e-7 \
@@ -73,21 +86,23 @@ Basic pulse-read-repeat with 10 cycles:
 
 Dry Run (print command without executing):
 
-    python run_pmu_pulse_read_interleaved.py --dry-run --num-pulses 10
+    python run_pmu_pulse_read_interleaved.py --dry-run --num-cycles 3 --num-reads 2 --num-pulses-per-group 2
 
 Technical Details:
 -----------------
-- The script builds an `EX` command that calls the C module `pmu_pulse_read_interleaved`
+- The script builds an `EX` command that calls the C module `pmu_potentiation_depression`
 - Communication is via KXCI (Keithley eXternal Control Interface) over GPIB
 - The C module uses `seg_arb_sequence` to generate the waveform segments
 - Each pulse is defined with explicit START and END voltage points to ensure
   clean square waveforms with flat tops
+- Potentiation cycles use +PulseV, depression cycles use -PulseV
 - The waveform is executed on PMU channel 1 (force) and channel 2 (measure)
   for dual-channel measurements
+- Parameters are repurposed: NumInitialMeasPulses→NumCycles, NumPulses→NumReads, NumbMeasPulses→NumPulsesPerGroup
 
 See Also:
 ---------
-- pmu_pulse_read_interleaved.c: C module implementing the waveform generation
+- pmu_potentiation_depression.c: C module implementing the waveform generation
 - retention_pulse_ilimit_dual_channel.c: Low-level PMU control functions
 """
 
@@ -248,7 +263,7 @@ def format_param(value: float | int | str) -> str:
 @dataclass
 class PulseReadInterleavedConfig:
     rise_time: float = 1e-7
-    reset_v: float = 1.5
+    reset_v: float = 2
     reset_width: float = 1e-6
     reset_delay: float = 5e-7
     meas_v: float = 0.3
@@ -266,19 +281,20 @@ class PulseReadInterleavedConfig:
     out1_name: str = "VF"
     out2_name: str = "T"
     out2_size: int = 200
-    num_pulses: int = 10  # number of (pulse, read) cycles
-    num_initial_meas_pulses: int = 1  # not used, kept for compatibility (must be 1)
-    num_pulses_seq: int = 1  # not used, kept for compatibility (must be 1)
+    num_cycles: int = 3  # M - number of cycles (repurposed from num_initial_meas_pulses)
+    num_reads: int = 2  # N - number of reads per cycle (repurposed from num_pulses)
+    num_pulses_per_group: int = 2  # N - number of pulses per cycle (repurposed from num_pulses)
     pulse_width: float = 1e-6
     pulse_v: float = 4.0
     pulse_rise_time: float = 1e-7  # rise time for pulses
     pulse_fall_time: float = 1e-7  # fall time for pulses (should match rise for clean box)
-    pulse_delay: float = 0.1e-6
+    pulse_delay: float = 1e-6
     clarius_debug: int = 1
 
     def total_probe_count(self) -> int:
-        """Total measurements = 1 (initial) + NumPulses (after each pulse)"""
-        return self.num_pulses + 1
+        """Total measurements = 2*NumCycles + 2*NumCycles*NumReads = 2*NumCycles*(1 + NumReads)
+        (one read per potentiation + one read per depression + reads after pulses)"""
+        return 2 * self.num_cycles * (1 + self.num_reads)
 
     def validate(self) -> None:
         limits: Dict[str, tuple[float, float]] = {
@@ -295,7 +311,7 @@ class PulseReadInterleavedConfig:
             "set_start_v": (-20.0, 20.0),
             "set_stop_v": (-20.0, 20.0),
             "i_range": (100e-9, 0.8),
-            "max_points": (12, 1_000_000),
+            "max_points": (12, 30000),
         }
 
         for field_name, (lo, hi) in limits.items():
@@ -303,8 +319,12 @@ class PulseReadInterleavedConfig:
             if value < lo or value > hi:
                 raise ValueError(f"{field_name}={value} outside [{lo}, {hi}]")
 
-        if not (1 <= self.num_pulses <= 100):
-            raise ValueError("num_pulses must be within [1, 100]")
+        if not (1 <= self.num_cycles <= 100):
+            raise ValueError("num_cycles must be within [1, 100]")
+        if not (1 <= self.num_reads <= 100):
+            raise ValueError("num_reads must be within [1, 100]")
+        if not (1 <= self.num_pulses_per_group <= 100):
+            raise ValueError("num_pulses_per_group must be within [1, 100]")
         if not (2e-8 <= self.pulse_width <= 1.0):
             raise ValueError("pulse_width must be within [2e-8, 1.0]")
         if not (-20.0 <= self.pulse_v <= 20.0):
@@ -360,9 +380,9 @@ def build_ex_command(cfg: PulseReadInterleavedConfig) -> str:
         cfg.out2_name,
         "",
         format_param(common_size),
-        format_param(1),  # NumbMeasPulses (not used, kept for compatibility)
-        format_param(1),  # NumInitialMeasPulses (not used, kept for compatibility)
-        format_param(cfg.num_pulses),  # NumPulses - number of (pulse, read) cycles
+        format_param(cfg.num_pulses_per_group),  # NumbMeasPulses → NumPulsesPerGroup
+        format_param(cfg.num_cycles),  # NumInitialMeasPulses → NumCycles
+        format_param(cfg.num_reads),  # NumPulses → NumReads
         format_param(cfg.pulse_width),
         format_param(cfg.pulse_v),
         format_param(cfg.pulse_rise_time),
@@ -371,7 +391,7 @@ def build_ex_command(cfg: PulseReadInterleavedConfig) -> str:
         format_param(cfg.clarius_debug),
     ]
 
-    return f"EX A_Read_Pulse_read pmu_pulse_read_interleaved({','.join(params)})"
+    return f"EX A_Poteniation_Depression pmu_potentiation_depression({','.join(params)})"
 
 
 def _compute_probe_times(cfg: PulseReadInterleavedConfig) -> List[float]:
@@ -388,28 +408,57 @@ def _compute_probe_times(cfg: PulseReadInterleavedConfig) -> List[float]:
     ttime += cfg.reset_delay
     ttime += cfg.rise_time
 
-    # Initial read measurement
-    add_measurement(ttime)
-    ttime += cfg.meas_width
-    ttime += cfg.rise_time
-    ttime += cfg.meas_delay
-    ttime += cfg.rise_time
-
-    # Interleaved (Pulse → Read) cycles
-    for _ in range(cfg.num_pulses):
-        # Pulse: RISE → TOP → FALL → DELAY
-        ttime += cfg.pulse_rise_time  # Rise to pulse
-        ttime += cfg.pulse_width  # Pulse width (flat top)
-        ttime += cfg.pulse_fall_time  # Fall from pulse
-        ttime += cfg.pulse_delay  # Delay before read
-        
-        # Read: RISE → TOP → FALL → DELAY
+    # Cycle pairs: ((Read, (Pulse)xn, (Read)xn), -(Read, (Pulse)xn, (Read)xn)) × NumCycles
+    for cycle_pair_idx in range(cfg.num_cycles):
+        # Potentiation cycle: Read → (Pulse)xn → (Read)xn
+        # Potentiation: Initial read
         ttime += cfg.rise_time  # Rise to measV
         add_measurement(ttime)  # Measurement during measWidth
         ttime += cfg.meas_width  # Measurement width
         ttime += cfg.set_fall_time  # Fall delay at measV
         ttime += cfg.rise_time  # Fall to 0V
         ttime += cfg.meas_delay  # Delay after read
+        
+        # Potentiation: NumPulsesPerGroup pulses in sequence (positive)
+        for _ in range(cfg.num_pulses_per_group):
+            ttime += cfg.pulse_rise_time  # Rise to pulse
+            ttime += cfg.pulse_width  # Pulse width (flat top)
+            ttime += cfg.pulse_fall_time  # Fall from pulse
+            ttime += cfg.pulse_delay  # Delay after pulse
+        
+        # Potentiation: NumReads reads in sequence
+        for _ in range(cfg.num_reads):
+            ttime += cfg.rise_time  # Rise to measV
+            add_measurement(ttime)  # Measurement during measWidth
+            ttime += cfg.meas_width  # Measurement width
+            ttime += cfg.set_fall_time  # Fall delay at measV
+            ttime += cfg.rise_time  # Fall to 0V
+            ttime += cfg.meas_delay  # Delay after read
+        
+        # Depression cycle: Read → (Pulse)xn → (Read)xn (negative pulses)
+        # Depression: Initial read
+        ttime += cfg.rise_time  # Rise to measV
+        add_measurement(ttime)  # Measurement during measWidth
+        ttime += cfg.meas_width  # Measurement width
+        ttime += cfg.set_fall_time  # Fall delay at measV
+        ttime += cfg.rise_time  # Fall to 0V
+        ttime += cfg.meas_delay  # Delay after read
+        
+        # Depression: NumPulsesPerGroup pulses in sequence (negative)
+        for _ in range(cfg.num_pulses_per_group):
+            ttime += cfg.pulse_rise_time  # Rise to pulse
+            ttime += cfg.pulse_width  # Pulse width (flat top)
+            ttime += cfg.pulse_fall_time  # Fall from pulse
+            ttime += cfg.pulse_delay  # Delay after pulse
+        
+        # Depression: NumReads reads in sequence
+        for _ in range(cfg.num_reads):
+            ttime += cfg.rise_time  # Rise to measV
+            add_measurement(ttime)  # Measurement during measWidth
+            ttime += cfg.meas_width  # Measurement width
+            ttime += cfg.set_fall_time  # Fall delay at measV
+            ttime += cfg.rise_time  # Fall to 0V
+            ttime += cfg.meas_delay  # Delay after read
 
     return centres
 
@@ -489,7 +538,7 @@ def run_measurement(cfg: PulseReadInterleavedConfig, address: str, timeout: floa
                     plt.plot(df["time_s"], df["resistance_ohm"], marker="o")
                     plt.xlabel("Time (s)")
                     plt.ylabel("Resistance (Ohm)")
-                    plt.title("PMU Pulse-Read Interleaved: Resistance vs Time")
+                    plt.title(f"PMU Potentiation-Depression: Resistance vs Time\n({cfg.num_cycles} cycle pairs, {cfg.num_reads} reads/cycle, {cfg.num_pulses_per_group} pulses/cycle)")
                     plt.grid(True)
                     plt.tight_layout()
                     plt.show()
@@ -518,15 +567,15 @@ def run_measurement(cfg: PulseReadInterleavedConfig, address: str, timeout: floa
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate and optionally run PMU pulse-read interleaved command")
+    parser = argparse.ArgumentParser(description="Generate and optionally run PMU potentiation-depression command")
 
     parser.add_argument("--gpib-address", default="GPIB0::17::INSTR", help="VISA resource string")
-    parser.add_argument("--timeout", type=float, default=30.0, help="Visa timeout in seconds")
+    parser.add_argument("--timeout", type=float, default=50.0, help="Visa timeout in seconds")
     parser.add_argument("--dry-run", action="store_true", help="Only print the command")
     parser.add_argument("--no-plot", action="store_true", help="Disable resistance plot even if matplotlib is available")
 
     # ============================================================================
-    # READ/MEASUREMENT PARAMETERS (for read operations: initial + in cycles)
+    # READ/MEASUREMENT PARAMETERS (for read operations in cycles)
     # ============================================================================
     parser.add_argument("--rise-time", type=float, default=1e-7,
                         help="Rise/fall time for read pulses (seconds) - used for transitions to/from meas-v")
@@ -540,7 +589,7 @@ def parse_arguments() -> argparse.Namespace:
                         help="Settling time at meas-v before fall (seconds) - optional delay at meas-v after measurement window")
     
     # ============================================================================
-    # MAIN SET PULSE PARAMETERS (for programming pulses in cycles)
+    # MAIN SET PULSE PARAMETERS (for programming pulses: initial + in cycles)
     # ============================================================================
     parser.add_argument("--pulse-v", type=float, default=2.0,
                         help="Pulse voltage amplitude (volts) - voltage for programming pulses")
@@ -550,14 +599,18 @@ def parse_arguments() -> argparse.Namespace:
                         help="Pulse rise time (seconds) - transition time from 0V to pulse-v")
     parser.add_argument("--pulse-fall-time", type=float, default=1e-7,
                         help="Pulse fall time (seconds) - transition time from pulse-v to 0V")
-    parser.add_argument("--pulse-delay", type=float, default=0.1e-6,
-                        help="Pulse delay (seconds) - delay at 0V after each pulse (before read)")
+    parser.add_argument("--pulse-delay", type=float, default=1e-6,
+                        help="Pulse delay (seconds) - delay at 0V after each pulse (before read or next pulse)")
     
     # ============================================================================
     # PATTERN CONTROL PARAMETERS
     # ============================================================================
-    parser.add_argument("--num-pulses", type=int, default=10,
-                        help="Number of (pulse, read) cycles (1-100)")
+    parser.add_argument("--num-cycles", type=int, default=5,
+                        help="Number of cycles (M) - repurposed from num-initial-meas-pulses (1-100)")
+    parser.add_argument("--num-reads", type=int, default=5,
+                        help="Number of reads per cycle (N) - repurposed from num-pulses (1-100)")
+    parser.add_argument("--num-pulses-per-group", type=int, default=10,
+                        help="Number of pulses per cycle (N) - repurposed from num-pulses (1-100)")
     
     # ============================================================================
     # LEGACY/UNUSED PARAMETERS (kept for compatibility with C module interface)
@@ -582,10 +635,10 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # INSTRUMENT CONFIGURATION PARAMETERS
     # ============================================================================
-    parser.add_argument("--i-range", type=float, default=1e-6,
+    parser.add_argument("--i-range", type=float, default=1e-4,
                         help="Current range (amps) - measurement range for both channels")
     parser.add_argument("--max-points", type=int, default=10000,
-                        help="Maximum data points (per channel) to collect during waveform (12-1,000,000)")
+                        help="Maximum data points - maximum samples to collect during waveform")
     parser.add_argument("--iteration", type=int, default=1,
                         help="Iteration number - which iteration to report (for multi-iteration sweeps)")
     
@@ -631,9 +684,9 @@ def main() -> None:
         out1_name=args.out1_name,
         out2_name=args.out2_name,
         out2_size=args.out2_size,
-        num_pulses=args.num_pulses,
-        num_initial_meas_pulses=1,  # Not used, kept for compatibility
-        num_pulses_seq=1,  # Not used, kept for compatibility
+        num_cycles=args.num_cycles,
+        num_reads=args.num_reads,
+        num_pulses_per_group=args.num_pulses_per_group,
         pulse_width=args.pulse_width,
         pulse_v=args.pulse_v,
         pulse_rise_time=args.pulse_rise_time,

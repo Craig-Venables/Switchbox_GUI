@@ -150,8 +150,14 @@ TEST_FUNCTIONS = {
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "num_cycles": {"default": 100, "label": "Number of Cycles", "type": "int"},
+            "num_cycles": {"default": 10, "label": "Number of Cycles", "type": "int"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            # 4200A-specific read pulse parameters (only shown for 4200A)
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_delay": {"default": 1.0, "label": "Read Delay (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            # Debug output (4200A only, on by default)
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output (Print data after each pulse) [4200A only]", "type": "bool", "4200a_only": True},
         },
         "plot_type": "time_series",
     },
@@ -193,6 +199,8 @@ TEST_FUNCTIONS = {
             "num_cycles": {"default": 20, "label": "Number of Cycles", "type": "int"},
             "delay_between_cycles": {"default": 10.0, "label": "Delay Between Cycles (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            # Debug output (4200A only, on by default)
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output (Print data after each pulse) [4200A only]", "type": "bool", "4200a_only": True},
         },
         "plot_type": "time_series",
     },
@@ -257,6 +265,8 @@ TEST_FUNCTIONS = {
             "num_post_reads": {"default": 0, "label": "Post-Pulse Reads (0=disabled)", "type": "int"},
             "post_read_interval": {"default": 1.0, "label": "Post-Read Interval (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            # Debug output (4200A only, on by default)
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output (Print data after each pulse) [4200A only]", "type": "bool", "4200a_only": True},
         },
         "plot_type": "time_series",
     },
@@ -273,6 +283,8 @@ TEST_FUNCTIONS = {
             "num_post_reads": {"default": 0, "label": "Post-Pulse Reads (0=disabled)", "type": "int"},
             "post_read_interval": {"default": 1.0, "label": "Post-Read Interval (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            # Debug output (4200A only, on by default)
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output (Print data after each pulse) [4200A only]", "type": "bool", "4200a_only": True},
         },
         "plot_type": "time_series",
     },
@@ -457,7 +469,7 @@ class TSPTestingGUI(tk.Toplevel):
     Automatically routes tests to appropriate system based on device address.
     """
     
-    def __init__(self, master, device_address: str = "USB0::0x05E6::0x2450::04496615::INSTR", provider=None):
+    def __init__(self, master, device_address: str = "GPIB0::17::INSTR", provider=None):
         super().__init__(master)
         self.title("Multi-System Pulse Testing")
         self.geometry("1400x900")
@@ -551,16 +563,37 @@ class TSPTestingGUI(tk.Toplevel):
         self.create_plot_section(right_panel)
     
     def create_connection_section(self, parent):
-        """Connection controls"""
+        """Connection controls with collapsible functionality"""
         frame = tk.LabelFrame(parent, text="Connection", padx=5, pady=5)
         frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Context display
+        # Create inner frame that can be collapsed
+        self.conn_inner_frame = tk.Frame(frame)
+        self.conn_inner_frame.pack(fill=tk.X)
+        
+        # Store collapsed state
+        self.conn_collapsed = tk.BooleanVar(value=False)
+        
+        # Header frame with collapse button
+        header_frame = tk.Frame(frame)
+        header_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        # Collapse/Expand button
+        self.conn_collapse_btn = tk.Button(header_frame, text="▼", width=3, 
+                                          command=self._toggle_connection_section,
+                                          font=("TkDefaultFont", 8), relief=tk.FLAT)
+        self.conn_collapse_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Context display (moved to header so it's always visible)
         self.context_var = tk.StringVar(value=f"Sample: {self.sample_name}  |  Device: {self.device_label}")
-        tk.Label(frame, textvariable=self.context_var, font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(0, 5))
+        tk.Label(header_frame, textvariable=self.context_var, font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT, anchor="w")
+        
+        # Status (also moved to header for visibility)
+        self.conn_status_var = tk.StringVar(value="Disconnected")
+        tk.Label(header_frame, textvariable=self.conn_status_var, fg="red", font=("TkDefaultFont", 8)).pack(side=tk.RIGHT, padx=(5, 0))
         
         # System selection (FIRST - above device)
-        system_frame = tk.Frame(frame)
+        system_frame = tk.Frame(self.conn_inner_frame)
         system_frame.pack(fill=tk.X, pady=2)
         tk.Label(system_frame, text="System:").pack(side=tk.LEFT)
         
@@ -570,7 +603,7 @@ class TSPTestingGUI(tk.Toplevel):
         if detected_system:
             self.system_var.set(detected_system)
         else:
-            self.system_var.set("keithley2450")  # Default
+            self.system_var.set("keithley4200a")  # Default (changed from keithley2450 to keithley4200a)
         
         system_combo = ttk.Combobox(system_frame, textvariable=self.system_var,
                                    values=["keithley2450", "keithley2450_sim", "keithley4200a"],
@@ -585,7 +618,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.system_var.trace_add("write", lambda *args: self._on_system_changed())
         
         # Device address with dropdown (SECOND - below system)
-        addr_frame = tk.Frame(frame)
+        addr_frame = tk.Frame(self.conn_inner_frame)
         addr_frame.pack(fill=tk.X, pady=(5, 2))
         tk.Label(addr_frame, text="Device:").pack(side=tk.LEFT)
         
@@ -620,7 +653,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.addr_var.trace_add("write", lambda *args: self._update_system_detection())
         
         # Terminal selection
-        term_frame = tk.Frame(frame)
+        term_frame = tk.Frame(self.conn_inner_frame)
         term_frame.pack(fill=tk.X, pady=(5, 2))
         tk.Label(term_frame, text="Terminals:").pack(side=tk.LEFT)
         self.terminals_var = tk.StringVar()
@@ -633,17 +666,13 @@ class TSPTestingGUI(tk.Toplevel):
                       value="rear", command=self.save_terminal_default).pack(side=tk.LEFT, padx=5)
         
         # Connect button
-        btn_frame = tk.Frame(frame)
+        btn_frame = tk.Frame(self.conn_inner_frame)
         btn_frame.pack(fill=tk.X, pady=5)
         tk.Button(btn_frame, text="Connect", command=self.connect_device, bg="green", fg="white").pack(side=tk.LEFT, padx=2)
         tk.Button(btn_frame, text="Disconnect", command=self.disconnect_device).pack(side=tk.LEFT, padx=2)
         
-        # Status
-        self.conn_status_var = tk.StringVar(value="Disconnected")
-        tk.Label(frame, textvariable=self.conn_status_var, fg="red").pack(anchor="w")
-        
         # Save location toggle (small, inside connection box)
-        save_frame = tk.Frame(frame)
+        save_frame = tk.Frame(self.conn_inner_frame)
         save_frame.pack(fill=tk.X, pady=(8, 0))
         
         tk.Checkbutton(save_frame, text="Simple Save:", variable=self.use_simple_save_var,
@@ -655,6 +684,19 @@ class TSPTestingGUI(tk.Toplevel):
         
         tk.Button(save_frame, text="📁", command=self._browse_simple_save, 
                  state="disabled", width=2, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=1)
+    
+    def _toggle_connection_section(self):
+        """Toggle collapse/expand of connection section"""
+        if self.conn_collapsed.get():
+            # Expand
+            self.conn_inner_frame.pack(fill=tk.X)
+            self.conn_collapse_btn.config(text="▼")
+            self.conn_collapsed.set(False)
+        else:
+            # Collapse
+            self.conn_inner_frame.pack_forget()
+            self.conn_collapse_btn.config(text="▶")
+            self.conn_collapsed.set(True)
     
     def create_test_selection_section(self, parent):
         """Test type selection"""
@@ -720,13 +762,20 @@ class TSPTestingGUI(tk.Toplevel):
         tk.Button(preset_frame, text="🗑️ Del", command=self.delete_preset, 
                  font=("TkDefaultFont", 8), width=6).pack(side=tk.LEFT, padx=2)
         
-        # Scrollable frame
-        canvas = tk.Canvas(frame, height=300)
+        # Scrollable frame with increased height
+        canvas = tk.Canvas(frame, height=450)  # Height set to 450 pixels to show more parameters
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
         self.params_frame = tk.Frame(canvas)
         
+        # Configure canvas window width to match canvas width
+        def update_canvas_window_width(event=None):
+            canvas_width = canvas.winfo_width()
+            if canvas_width > 1:  # Only update if canvas has been rendered
+                canvas.itemconfig(canvas_window, width=canvas_width)
+        
         self.params_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=self.params_frame, anchor="nw")
+        canvas_window = canvas.create_window((0, 0), window=self.params_frame, anchor="nw")
+        canvas.bind("<Configure>", update_canvas_window_width)
         canvas.configure(yscrollcommand=scrollbar.set)
         
         canvas.pack(side="left", fill="both", expand=True)
@@ -1289,7 +1338,53 @@ class TSPTestingGUI(tk.Toplevel):
             'delay_between_levels': 1000.0,  # 1000 µs = 1 ms
         }
         
+        # Categorize parameters into sections
+        pulse_params = []
+        read_params = []
+        general_params = []
+        other_params = []
+        
+        # Define parameter categories
+        pulse_keywords = ['pulse', 'set_voltage', 'reset_voltage', 'laser_voltage']
+        read_keywords = ['read', 'meas']
+        general_keywords = ['num_cycles', 'num_pulses', 'num_reads', 'steps', 'delay_between_cycles', 
+                           'delay_between', 'delay_between_widths', 'delay_between_voltages', 'delay_between_levels']
+        other_keywords = ['clim', 'enable_debug', 'sample_rate', 'volts_source', 'current_measure', 
+                         'pulse_widths', 'pulse_voltage_step']
+        
         for param_name, param_info in params.items():
+            # Skip 4200A-only parameters if not using 4200A
+            if param_info.get("4200a_only", False) and not is_4200a:
+                continue
+            
+            # Categorize parameter
+            param_lower = param_name.lower()
+            if any(keyword in param_lower for keyword in pulse_keywords):
+                pulse_params.append((param_name, param_info))
+            elif any(keyword in param_lower for keyword in read_keywords):
+                read_params.append((param_name, param_info))
+            elif any(keyword in param_lower for keyword in general_keywords):
+                general_params.append((param_name, param_info))
+            else:
+                other_params.append((param_name, param_info))
+        
+        # Helper function to add a parameter row
+        def add_param_row(param_name, param_info, current_row):
+            # Handle checkbox/boolean parameters
+            if param_info.get("type") == "bool" or param_info.get("type") == "checkbox":
+                default_value = param_info.get("default", False)
+                var = tk.BooleanVar(value=default_value)
+                checkbox = tk.Checkbutton(self.params_frame, text=param_info["label"], variable=var)
+                checkbox.grid(row=current_row, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+                # Store checkbox variable
+                self.param_vars[param_name] = {
+                    "var": var,
+                    "type": "bool",
+                    "is_time_param": False,
+                    "original_label": param_info["label"]
+                }
+                return current_row + 1
+            
             # Adjust label and default for 4200A time parameters
             label = param_info["label"]
             default_value = param_info["default"]
@@ -1307,12 +1402,12 @@ class TSPTestingGUI(tk.Toplevel):
             
             # Label
             tk.Label(self.params_frame, text=label, anchor="w").grid(
-                row=row, column=0, sticky="w", padx=5, pady=2)
+                row=current_row, column=0, sticky="w", padx=5, pady=2)
             
             # Entry
             var = tk.StringVar(value=str(default_value))
             entry = tk.Entry(self.params_frame, textvariable=var, width=20)
-            entry.grid(row=row, column=1, sticky="ew", padx=5, pady=2)
+            entry.grid(row=current_row, column=1, sticky="ew", padx=5, pady=2)
             
             # Bind entry to update diagram when changed
             var.trace_add("write", lambda *args: self.update_pulse_diagram())
@@ -1324,7 +1419,45 @@ class TSPTestingGUI(tk.Toplevel):
                 "is_time_param": param_name in time_params,
                 "original_label": param_info["label"]
             }
-            row += 1
+            return current_row + 1
+        
+        # Helper function to add a section header
+        def add_section_header(title, current_row):
+            # Add separator line
+            separator = tk.Frame(self.params_frame, height=2, bg="gray", relief=tk.SUNKEN)
+            separator.grid(row=current_row, column=0, columnspan=2, sticky="ew", padx=5, pady=(8, 4))
+            current_row += 1
+            # Add section title
+            header = tk.Label(self.params_frame, text=title, font=("TkDefaultFont", 9, "bold"), 
+                            anchor="w", bg="#e0e0e0", relief=tk.RAISED, bd=1)
+            header.grid(row=current_row, column=0, columnspan=2, sticky="ew", padx=5, pady=(0, 4))
+            current_row += 1
+            return current_row
+        
+        # Display parameters in organized sections
+        # Pulse Parameters Section
+        if pulse_params:
+            row = add_section_header("⚡ Pulse Parameters", row)
+            for param_name, param_info in pulse_params:
+                row = add_param_row(param_name, param_info, row)
+        
+        # Read Parameters Section
+        if read_params:
+            row = add_section_header("📖 Read Parameters", row)
+            for param_name, param_info in read_params:
+                row = add_param_row(param_name, param_info, row)
+        
+        # General/Cycle Parameters Section
+        if general_params:
+            row = add_section_header("🔄 Cycle & Timing Parameters", row)
+            for param_name, param_info in general_params:
+                row = add_param_row(param_name, param_info, row)
+        
+        # Other Parameters Section
+        if other_params:
+            row = add_section_header("⚙️ Other Parameters", row)
+            for param_name, param_info in other_params:
+                row = add_param_row(param_name, param_info, row)
         
         self.params_frame.columnconfigure(1, weight=1)
         
@@ -1335,10 +1468,13 @@ class TSPTestingGUI(tk.Toplevel):
     def get_test_parameters(self):
         """Extract and validate parameters"""
         params = {}
-        # Time parameters that need conversion
+        # Time parameters that need conversion to seconds for internal use
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
                       'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
                       'reset_width', 'delay_between_voltages', 'delay_between_levels']
+        
+        # Read pulse parameters for 4200A (stay in µs, passed directly to function)
+        read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
         
         # Check if current system is 4200A (values are in µs, need to convert to seconds)
         is_4200a = self.current_system_name in ('keithley4200a',)
@@ -1349,24 +1485,35 @@ class TSPTestingGUI(tk.Toplevel):
             is_time_param = param_info.get("is_time_param", False)
             
             try:
-                value_str = var.get()
-                if param_type == "int":
+                if param_type == "bool":
+                    # Boolean/checkbox parameter
+                    params[param_name] = var.get()
+                elif param_type == "int":
+                    value_str = var.get()
                     params[param_name] = int(value_str)
                 elif param_type == "float":
+                    value_str = var.get()
                     value = float(value_str)
+                    # Read pulse parameters for 4200A: keep in µs (function expects µs)
+                    if param_name in read_pulse_params and is_4200a:
+                        params[param_name] = value  # Keep in µs
                     # Convert time parameters to seconds
-                    if is_time_param:
+                    elif is_time_param:
                         if is_4200a:
                             # 4200A: values are in µs, convert to seconds
                             value = value / 1e6  # µs → s
                         else:
                             # 2450: values are in ms, convert to seconds
                             value = value / 1000.0  # ms → s
-                    params[param_name] = value
+                        params[param_name] = value
+                    else:
+                        params[param_name] = value
                 elif param_type == "list":
+                    value_str = var.get()
                     # Parse comma-separated list
                     params[param_name] = [float(x.strip()) for x in value_str.split(",")]
                 else:
+                    value_str = var.get()
                     params[param_name] = value_str
             except Exception as e:
                 raise ValueError(f"Invalid value for {param_name}: {e}")
@@ -1544,8 +1691,25 @@ class TSPTestingGUI(tk.Toplevel):
         test_name = self.last_results['test_name']
         params = self.last_results.get('params', {})
         
-        self.ax.plot(self.last_results['timestamps'], 
-                     self.last_results['resistances'], 'o-', markersize=3)
+        timestamps = self.last_results.get('timestamps', [])
+        resistances = self.last_results.get('resistances', [])
+        
+        # Filter out invalid values (inf, nan, negative)
+        valid_data = [(t, r) for t, r in zip(timestamps, resistances) 
+                     if r > 0 and not (r == float('inf') or r != r)]
+        
+        if not valid_data:
+            self.ax.text(0.5, 0.5, 'No valid data to plot\n(All values are invalid or negative)', 
+                        ha='center', va='center', transform=self.ax.transAxes)
+            self.ax.set_xlabel('Time (s)')
+            self.ax.set_ylabel('Resistance (Ω)')
+            self.ax.set_title(f'{test_name}')
+            self.ax.grid(True, alpha=0.3)
+            return
+        
+        valid_times, valid_resistances = zip(*valid_data)
+        
+        self.ax.plot(valid_times, valid_resistances, 'o-', markersize=3)
         
         # Add red dotted line for potentiation/depression tests with post-reads
         if test_name in ["Potentiation Only", "Depression Only"]:
@@ -1556,8 +1720,8 @@ class TSPTestingGUI(tk.Toplevel):
                 # Post-reads start at idx num_pulses + 1
                 # Find the timestamp where pulses end (right after the last pulse read)
                 pulse_end_idx = num_pulses  # Index of last pulse read (idx 0 is initial, 1-N are pulse reads)
-                if pulse_end_idx < len(self.last_results['timestamps']):
-                    pulse_end_time = self.last_results['timestamps'][pulse_end_idx]
+                if pulse_end_idx < len(timestamps):
+                    pulse_end_time = timestamps[pulse_end_idx]
                     self.ax.axvline(x=pulse_end_time, color='red', linestyle='--', 
                                    linewidth=2, alpha=0.7, label='Pulses End → Post-reads Start')
                     self.ax.legend()
@@ -1566,7 +1730,10 @@ class TSPTestingGUI(tk.Toplevel):
         self.ax.set_ylabel('Resistance (Ω)')
         self.ax.set_title(self.last_results['test_name'])
         self.ax.grid(True, alpha=0.3)
-        self.ax.set_yscale('log')
+        
+        # Only set log scale if there are positive values
+        if valid_resistances:
+            self.ax.set_yscale('log')
     
     def _plot_range_finder(self):
         """Plot resistance vs current range"""
@@ -1778,7 +1945,12 @@ class TSPTestingGUI(tk.Toplevel):
         self.ax.set_ylabel('Resistance (Ω)')
         self.ax.set_title(f'{self.last_results["test_name"]} - Relaxation')
         self.ax.grid(True, alpha=0.3)
-        self.ax.set_yscale('log')
+        
+        # Only set log scale if there are positive values
+        resistances = self.last_results.get('resistances', [])
+        valid_resistances = [r for r in resistances if r > 0 and not (r == float('inf') or r != r)]
+        if valid_resistances:
+            self.ax.set_yscale('log')
         
         # Mark initial read and pulse/read transitions if possible
         self.ax.axvline(x=self.last_results['timestamps'][0], color='blue', 
@@ -2490,7 +2662,16 @@ class TSPTestingGUI(tk.Toplevel):
         if not hasattr(self, 'test_var'):
             return
         
+        # Clear axis completely - remove any existing twin axes (for laser and read)
         self.diagram_ax.clear()
+        # Remove any existing secondary axes (twinx axes) from laser and read
+        for ax in self.diagram_fig.get_axes():
+            if ax != self.diagram_ax:
+                try:
+                    self.diagram_fig.delaxes(ax)
+                except:
+                    pass
+        
         test_name = self.test_var.get()
         
         if test_name not in TEST_FUNCTIONS:
@@ -2578,37 +2759,68 @@ class TSPTestingGUI(tk.Toplevel):
         p_v = params.get('pulse_voltage', 1.5)
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
+        delay = params.get('delay_between', 10e-3)
         cycles = min(params.get('num_cycles', 100), 5)  # Show max 5 cycles
         
+        # Use proper read width - check if 4200A-specific parameters are provided
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        if is_4200a:
+            # For 4200A, use read_width parameter if provided (in µs, convert to seconds)
+            read_width = params.get('read_width', 0.5) * 1e-6  # Default 0.5 µs → seconds
+            read_rise = params.get('read_rise_time', 0.1) * 1e-6  # Default 0.1 µs → seconds
+            read_delay_after = params.get('read_delay', 1.0) * 1e-6  # Default 1.0 µs → seconds
+        else:
+            # For 2450, use ms-based defaults
+            read_width = 1e-3  # 1ms for 2450
+            read_rise = 0.1e-3  # 0.1ms rise time
+            read_delay_after = 0.1e-3  # 0.1ms delay
+        
         # Initial read before any pulses
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        read_start = t + read_rise  # Rise time to read voltage
+        read_end = read_start + read_width
+        read_center = (read_start + read_end) / 2
+        read_times.append(read_center)
+        # Draw read pulse: 0 → rise → read_width → fall → 0
+        times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+        voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+        t = read_end + read_rise + read_delay_after  # After read completes
         
         for i in range(cycles):
             # Pulse
-            times.extend([t, t, t+p_w, t+p_w])
+            pulse_start = t
+            pulse_end = pulse_start + p_w
+            times.extend([pulse_start, pulse_start, pulse_end, pulse_end])
             voltages.extend([0, p_v, p_v, 0])
-            t += p_w + 0.0001
-            # Read
-            read_t = t + p_w*0.25  # Mark center of read pulse
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.5, t+p_w*0.5])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.5 + params.get('delay_between', 10e-3)
+            t = pulse_end + delay * 0.1  # Small gap after pulse
+            
+            # Read after pulse
+            read_start = t + read_rise  # Rise time to read voltage
+            read_end = read_start + read_width
+            read_center = (read_start + read_end) / 2
+            read_times.append(read_center)
+            # Draw read pulse: 0 → rise → read_width → fall → 0
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+            t = read_end + read_rise + delay  # Delay before next cycle
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'b-', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3)
-        # Mark read points
+        # Convert to ms for display
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'b-', linewidth=2, label='Voltage')
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='blue')
+        
+        # Mark read points with visible markers
         for rt in read_times:
-            self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
+            self.diagram_ax.plot(rt*1e3, r_v, 'ro', markersize=8, markeredgewidth=2, 
+                               markerfacecolor='red', markeredgecolor='darkred', 
+                               label='Read' if rt == read_times[0] else '')
+        
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Pattern: Initial Read → (Pulse→Read)×{cycles}', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0, not -0.1
     
     def _draw_multi_pulse_then_read(self, params):
         """Draw: Initial Read → (Pulse×N → Read×M) × Cycles"""
@@ -2622,12 +2834,37 @@ class TSPTestingGUI(tk.Toplevel):
         n_reads = min(params.get('num_reads', 1), 5)
         cycles = min(params.get('num_cycles', 20), 2)
         
-        # Initial read before any pulses
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        # Check if 4200A (use realistic timing) or 2450 (use ms-based timing)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        if is_4200a:
+            # For 4200A: use realistic timing matching C code
+            # Initial read: riseTime + measWidth + setFallTime + riseTime + measDelay
+            # Get parameters (already in seconds for 4200A from get_test_parameters)
+            read_rise = params.get('read_rise_time', 0.1e-6)  # Default 0.1µs = 0.1e-6s
+            read_width = params.get('read_width', 0.5e-6)  # Default 0.5µs = 0.5e-6s
+            set_fall_time = 1e-7  # Default fall delay
+            # Use a small delay after initial read (not delay_between_reads, which is for between reads in a cycle)
+            delay_after_initial_read = 1e-6  # 1µs delay after initial read before cycles start
+            
+            # Initial read pulse
+            read_start = t + read_rise
+            read_end = read_start + read_width
+            read_center = (read_start + read_end) / 2
+            read_times.append(read_center)
+            # Draw: 0 → rise → width → fall_delay → fall → delay
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + set_fall_time, 
+                         read_end + set_fall_time, read_end + set_fall_time + read_rise, 
+                         read_end + set_fall_time + read_rise, read_end + set_fall_time + read_rise + delay_after_initial_read,
+                         read_end + set_fall_time + read_rise + delay_after_initial_read])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, r_v, r_v, 0, 0, 0])
+            t = read_end + set_fall_time + read_rise + delay_after_initial_read
+        else:
+            # For 2450: use ms-based timing (simplified)
+            read_t = t + p_w*0.15
+            read_times.append(read_t)
+            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
+            voltages.extend([0, r_v, r_v, 0])
+            t += p_w*0.3 + 0.0001
         
         for cycle in range(cycles):
             # Multiple pulses
@@ -2643,8 +2880,9 @@ class TSPTestingGUI(tk.Toplevel):
                 voltages.extend([0, r_v, r_v, 0])
                 t += p_w*0.5 + (params.get('delay_between_reads', 10e-3) if i < n_reads-1 else params.get('delay_between_cycles', 10e-3))
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'purple', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='purple')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'purple', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='purple')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
@@ -2652,6 +2890,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(f'Pattern: Initial Read → {n_pulses}×Pulse→{n_reads}×Read ×{cycles}', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_width_sweep(self, params, with_pulse_measurement=False):
         """Draw width sweep pattern"""
@@ -2684,8 +2924,9 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += width*0.3 + width*2
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'orange', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='orange')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'orange', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='orange')
         # Regular reads
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
@@ -2698,6 +2939,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(title, fontsize=10)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_pot_dep_cycle(self, params):
         """Draw potentiation-depression cycle with initial read, repeated for multiple cycles"""
@@ -2742,10 +2985,11 @@ class TSPTestingGUI(tk.Toplevel):
                 voltages.extend([0, r_v, r_v, 0])
                 t += p_w*0.3 + params.get('delay_between', 10e-3)
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'red', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, 
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'red', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, 
                                      where=np.array(voltages)>=0, color='green', label='SET')
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3,
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3,
                                      where=np.array(voltages)<0, color='red', label='RESET')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
@@ -2755,6 +2999,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.legend(fontsize=8)
         self.diagram_ax.grid(True, alpha=0.3)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_potentiation_only(self, params):
         """Draw potentiation only with initial read"""
@@ -2797,8 +3043,9 @@ class TSPTestingGUI(tk.Toplevel):
                 voltages.extend([0, r_v, r_v, 0])
                 t += 0.001
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'green', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='green')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'green', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='green')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         title = f'Potentiation: Initial Read → {n} SET pulses'
@@ -2809,6 +3056,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, set_v*1.2)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_depression_only(self, params):
         """Draw depression only with initial read"""
@@ -2851,8 +3100,9 @@ class TSPTestingGUI(tk.Toplevel):
                 voltages.extend([0, r_v, r_v, 0])
                 t += 0.001
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'red', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='red')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'red', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='red')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         title = f'Depression: Initial Read → {n} RESET pulses'
@@ -2863,6 +3113,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(reset_v*1.2, 0.5)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_endurance(self, params):
         """Draw endurance test with initial read"""
@@ -2902,14 +3154,17 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += p_w*0.3 + params.get('delay_between', 10e-3)
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'brown', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='brown')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'brown', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='brown')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Endurance: Initial Read → {cycles} SET/RESET cycles', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_pulse_multi_read(self, params):
         """Draw initial read → pulse followed by multiple reads"""
@@ -2943,8 +3198,9 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += p_w*0.3 + params.get('delay_between_reads', 100e-3)
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'cyan', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='cyan')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'cyan', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='cyan')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
@@ -2952,6 +3208,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(f'Initial Read → {n_pulses}×Pulse → {n_reads} Reads', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, p_v*1.2)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_multi_read_only(self, params):
         """Draw multiple reads only"""
@@ -2968,8 +3226,9 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += 0.001 + params.get('delay_between', 100e-3)
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'gray', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='gray')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'gray', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='gray')
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
         self.diagram_ax.set_xlabel('Time (ms)')
@@ -2977,6 +3236,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(f'Only Reads: {n_reads} measurements', fontsize=10)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.1, r_v*1.3)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_relaxation(self, params, with_pulse_measurement=False):
         """Draw relaxation pattern"""
@@ -3014,8 +3275,9 @@ class TSPTestingGUI(tk.Toplevel):
             voltages.extend([0, r_v, r_v, 0])
             t += p_w*0.3 + params.get('delay_between_reads', 100e-6)
         
-        self.diagram_ax.plot(np.array(times)*1e3, voltages, 'magenta', linewidth=2)
-        self.diagram_ax.fill_between(np.array(times)*1e3, 0, voltages, alpha=0.3, color='magenta')
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'magenta', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='magenta')
         # Regular reads
         for rt in read_times:
             self.diagram_ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
@@ -3028,6 +3290,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
         self.diagram_ax.set_ylim(-0.2, p_v*1.2)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_voltage_sweep(self, params):
         """Draw: For each voltage: Initial Read → (Pulse → Read) × N → Reset"""
@@ -3437,33 +3701,37 @@ class TSPTestingGUI(tk.Toplevel):
         """Add visual warnings for parameters near hardware limits"""
         warnings = []
         
-        # Check pulse width (min 1ms = 0.001s)
-        if 'pulse_width' in params:
-            pw = params['pulse_width']
-            if pw < 1e-3:
-                warnings.append(f"⚠ Pulse width {pw*1e3:.2f}ms < 1ms min")
+        # Skip warnings for 4200A (no 1ms minimum limit)
+        is_4200a = self.current_system_name in ('keithley4200a',)
         
-        # Check delay between pulses (min 1ms)
-        if 'delay_between' in params:
-            delay = params['delay_between']
-            if delay < 1e-3:
-                warnings.append(f"⚠ Delay {delay*1e3:.2f}ms < 1ms min")
+        if not is_4200a:
+            # Check pulse width (min 1ms = 0.001s) - only for 2450
+            if 'pulse_width' in params:
+                pw = params['pulse_width']
+                if pw < 1e-3:
+                    warnings.append(f"⚠ Pulse width {pw*1e3:.2f}ms < 1ms min")
+            
+            # Check delay between pulses (min 1ms) - only for 2450
+            if 'delay_between' in params:
+                delay = params['delay_between']
+                if delay < 1e-3:
+                    warnings.append(f"⚠ Delay {delay*1e3:.2f}ms < 1ms min")
+            
+            if 'delay_between_pulses' in params:
+                delay = params['delay_between_pulses']
+                if delay < 1e-3:
+                    warnings.append(f"⚠ Pulse delay {delay*1e3:.2f}ms < 1ms min")
+            
+            # Check pulse widths list - only for 2450
+            if 'pulse_widths' in params:
+                widths = params['pulse_widths']
+                if isinstance(widths, list):
+                    for w in widths:
+                        if w < 1e-3:
+                            warnings.append(f"⚠ Width {w*1e3:.2f}ms < 1ms min")
+                            break
         
-        if 'delay_between_pulses' in params:
-            delay = params['delay_between_pulses']
-            if delay < 1e-3:
-                warnings.append(f"⚠ Pulse delay {delay*1e3:.2f}ms < 1ms min")
-        
-        # Check pulse widths list
-        if 'pulse_widths' in params:
-            widths = params['pulse_widths']
-            if isinstance(widths, list):
-                for w in widths:
-                    if w < 1e-3:
-                        warnings.append(f"⚠ Width {w*1e3:.2f}ms < 1ms min")
-                        break
-        
-        # Display warnings on diagram
+        # Display warnings on diagram (only if there are any)
         if warnings:
             warning_text = "\n".join(warnings)
             self.diagram_ax.text(0.02, 0.98, warning_text, 

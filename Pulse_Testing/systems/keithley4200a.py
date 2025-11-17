@@ -20,7 +20,7 @@ try:
     MAX_VOLTAGE = getattr(keithley4200_kxci_scripts, 'MAX_VOLTAGE', 40.0)
     MIN_CURRENT_RANGE = getattr(keithley4200_kxci_scripts, 'MIN_CURRENT_RANGE', 100e-9)
     MAX_CURRENT_RANGE = getattr(keithley4200_kxci_scripts, 'MAX_CURRENT_RANGE', 0.8)
-    MAX_MAX_POINTS = getattr(keithley4200_kxci_scripts, 'MAX_MAX_POINTS', 30000)
+    MAX_MAX_POINTS = getattr(keithley4200_kxci_scripts, 'MAX_MAX_POINTS', 1_000_000)
 except AttributeError:
     # Fallback if not available - import directly
     from Equipment.SMU_AND_PMU.keithley4200.kxci_scripts import (
@@ -32,7 +32,7 @@ except AttributeError:
     MAX_VOLTAGE = 40.0
     MIN_CURRENT_RANGE = 100e-9
     MAX_CURRENT_RANGE = 0.8
-    MAX_MAX_POINTS = 30000
+    MAX_MAX_POINTS = 1_000_000  # Updated to match kxci_scripts.py
 
 
 class Keithley4200ASystem(BaseMeasurementSystem):
@@ -70,9 +70,9 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             'max_voltage': MAX_VOLTAGE,           # +20V
             'min_current_limit': MIN_CURRENT_RANGE,  # 100nA
             'max_current_limit': MAX_CURRENT_RANGE,  # 0.8A
-            'max_points': MAX_MAX_POINTS,        # 30,000 (C module hard limit)
+            'max_points': MAX_MAX_POINTS,        # 1,000,000 (C module hard limit, updated)
             'min_sampling_rate': 200000,         # samples/second (C module requirement)
-            'max_measurement_time': 0.15,        # ~150ms (calculated from max_points/min_rate)
+            'max_measurement_time': 5000.0,      # ~5,000 seconds (calculated from max_points/min_rate, updated)
         }
     
     def connect(self, address: str, **kwargs) -> bool:
@@ -159,6 +159,8 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             params['pulse_width'] = params['pulse_width'] * 1e6  # s → µs
         if 'delay_between' in params:
             params['delay_between'] = params['delay_between'] * 1e6  # s → µs
+        # Read pulse parameters are already in µs (passed directly from GUI)
+        # No conversion needed for: read_width, read_delay, read_rise_time
         return self._scripts.pulse_read_repeat(**params)
     
     def pulse_then_read(self, **params) -> Dict[str, Any]:

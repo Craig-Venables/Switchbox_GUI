@@ -21,8 +21,6 @@ from gui.sample_gui import SampleGUI
 # clean up led and laser intergration 
 
 
-
-
 #build specific laser gui, this homes the laser you then just select the device and it will go to said device,we need to find a way to make sure its in the correct position for this 
 #
 
@@ -33,11 +31,6 @@ from gui.sample_gui import SampleGUI
 
 #temp gui
 
-###
-# IMPORTANT:make look nicer,the graphs look hideousREA
-###
-
-# consider moving this into qt6
 
 """ Classes for the Gui"""
 

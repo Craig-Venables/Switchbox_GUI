@@ -13,7 +13,7 @@
 		MeasureCh,	long,	Input,	2,	1,	2
 		MeasureVRange,	double,	Input,	5,	5,	40
 		MeasureIRange,	double,	Input,	1e-2,	100e-9,	.8
-		max_pts,	int,	Input,	10000,	12,	30000
+		max_pts,	int,	Input,	10000,	12,	1000000
 		MeasureBias,	double,	Input,	0.0,	-20,	20
 		Volts,	D_ARRAY_T,	Input,	0.0,	-20,	20
 		volts_size,	int,	Input,	100,	3,	2048
@@ -754,7 +754,7 @@ __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int
   int n = 1;
   int rate_found = 0;
   
-  int max_pts = 30000;
+  int max_pts = 1000000;
   int default_rate = 200000000;
   int max_devider = 1000;
 

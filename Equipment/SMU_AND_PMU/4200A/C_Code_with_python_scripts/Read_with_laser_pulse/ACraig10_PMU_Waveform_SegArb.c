@@ -1,8 +1,8 @@
 /* USRLIB MODULE INFORMATION
 
-	MODULE NAME: Read_With_Laser_Pulse_SegArb
+	MODULE NAME: ACraig10_PMU_Waveform_SegArb
 	MODULE RETURN TYPE: int 
-	NUMBER OF PARMS: 53
+	NUMBER OF PARMS: 55
 	ARGUMENTS:
 		width,	double,	Input,	500e-9,	40e-9,	.999999
 		rise,	double,	Input,	100e-9,	20e-9,	.033
@@ -59,12 +59,12 @@
 		Ch2MeasStop_size,	int,	Input,	10,	3,	2048
 		Ch2LoopCount,	double,	Input,	1.0,	1.0,	100000.0
 		ClariusDebug,	int,	Input,	0,	0,	1
-INCLUDES:
+	INCLUDES:
 #include "keithley.h"
 	END USRLIB MODULE INFORMATION
 */
 /* USRLIB MODULE HELP DESCRIPTION
-Read_With_Laser_Pulse_SegArb: PMU waveform capture on CH1 with seg_arb waveform on CH2 (KXCI compatible)
+ACraig10_PMU_Waveform_SegArb: PMU waveform capture on CH1 with seg_arb waveform on CH2 (KXCI compatible)
 
 This module combines:
 - CH1: Simple pulse commands for continuous waveform measurement (voltage/current vs time)
@@ -74,30 +74,6 @@ Uses pulse_fetch() instead of pulse_measrt() for KXCI compatibility.
 
 CH1: Measures DUT voltage and current with waveform capture using simple pulse commands
 CH2: Optional seg_arb waveform (no measurement) for complex pulse sequences
-
-MEASUREMENT WINDOW (40-80% of Pulse Width):
-===========================================
-When acqType=1 (average mode), the module extracts one averaged measurement per pulse
-from a specific time window within each pulse. This window is set to 40-80% of the
-pulse width, measured from the start of the pulse flat-top (after rise time).
-
-Why 40-80%?
-- Avoids transition regions: The first 40% excludes the rise time transition and
-  any settling/ringing that may occur at the start of the pulse
-- Avoids fall transition: The last 20% (80-100%) excludes the fall time transition
-  and any pre-fall settling effects
-- Stable region: The 40-80% window captures the most stable, flat portion of the
-  pulse where voltage and current have fully settled
-
-Example with 1µs pulse width:
-- Pulse starts at t=0 (after delay + rise)
-- Measurement window: 0.4µs to 0.8µs (40-80% of 1µs)
-- All samples within this window are averaged to produce one value per pulse
-- This gives accurate resistance measurements by avoiding transient effects
-
-The measurement window is hardcoded in the C code at:
-  measurementStartFrac = 0.4  (40% of pulse width)
-  measurementEndFrac = 0.8    (80% of pulse width)
 
 KEY DIFFERENCES FROM ACraig9:
 - CH2 uses seg_arb_sequence/seg_arb_waveform instead of simple pulse commands
@@ -131,39 +107,9 @@ NOTE: CH2 should be enabled (Ch2Enable=1) even if not using it - disabling CH2 m
 	END USRLIB MODULE HELP DESCRIPTION */
 /* USRLIB MODULE PARAMETER LIST */
 #include "keithley.h"
-#include <math.h>  // For fmod, floor, ceil
-#include <stdlib.h>  // For calloc, free
-
-BOOL LPTIsInCurrentConfiguration(char* hrid);
 
 /* USRLIB MODULE MAIN FUNCTION */
-int Read_With_Laser_Pulse_SegArb( 
-    double width, double rise, double fall, double delay, double period, 
-    double voltsSourceRng, double currentMeasureRng, double DUTRes, 
-    double startV, double stopV, double stepV, double baseV, 
-    int acqType, int LLEComp, double preDataPct, double postDataPct, 
-    int pulseAvgCnt, int burstCount, double SampleRate, int PMUMode, 
-    int chan, char *PMU_ID, 
-    double *V_Meas, int size_V_Meas, 
-    double *I_Meas, int size_I_Meas, 
-    double *T_Stamp, int size_T_Stamp, 
-    int Ch2Enable, double Ch2VRange, int Ch2NumSegments,
-    double *Ch2StartV, int Ch2StartV_size,
-    double *Ch2StopV, int Ch2StopV_size,
-    double *Ch2SegTime, int Ch2SegTime_size,
-    long *Ch2SSRCtrl, int Ch2SSRCtrl_size,
-    long *Ch2SegTrigOut, int Ch2SegTrigOut_size,
-    long *Ch2MeasType, int Ch2MeasType_size,
-    double *Ch2MeasStart, int Ch2MeasStart_size,
-    double *Ch2MeasStop, int Ch2MeasStop_size,
-    double Ch2LoopCount,
-    double Ch2Vlow,
-    double Ch2Vhigh,
-    double Ch2Width,
-    double Ch2Rise,
-    double Ch2Fall,
-    double Ch2Period,
-    int ClariusDebug )
+int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double delay, double period, double voltsSourceRng, double currentMeasureRng, double DUTRes, double startV, double stopV, double stepV, double baseV, int acqType, int LLEComp, double preDataPct, double postDataPct, int pulseAvgCnt, int burstCount, double SampleRate, int PMUMode, int chan, char *PMU_ID, double *V_Meas, int size_V_Meas, double *I_Meas, int size_I_Meas, double *T_Stamp, int size_T_Stamp, int Ch2Enable, double Ch2VRange, double Ch2Vlow, double Ch2Vhigh, double Ch2Width, double Ch2Rise, double Ch2Fall, double Ch2Period, int Ch2NumSegments, double *Ch2StartV, int Ch2StartV_size, double *Ch2StopV, int Ch2StopV_size, double *Ch2SegTime, int Ch2SegTime_size, int *Ch2SSRCtrl, int Ch2SSRCtrl_size, int *Ch2SegTrigOut, int Ch2SegTrigOut_size, int *Ch2MeasType, int Ch2MeasType_size, double *Ch2MeasStart, int Ch2MeasStart_size, double *Ch2MeasStop, int Ch2MeasStop_size, double Ch2LoopCount, int ClariusDebug )
 {
 /* USRLIB MODULE CODE */
     int debug = 0;
@@ -182,7 +128,7 @@ int Read_With_Laser_Pulse_SegArb(
     double *waveformT = NULL;
 
     if (ClariusDebug == 1) { debug = 1; } else { debug = 0; }
-    if(debug) printf("\n\nRead_With_Laser_Pulse_SegArb: starts\n");
+    if(debug) printf("\n\nACraig10_PMU_Waveform_SegArb: starts\n");
 
     if ( !LPTIsInCurrentConfiguration(PMU_ID) )
     {
@@ -995,10 +941,9 @@ int Read_With_Laser_Pulse_SegArb(
     
     // Allocate temporary buffers for full waveform
     // Use expected samples, not pulse_chan_status (which can be unreliable)
-    // Hardware limit: 1,000,000 samples per A/D test (Keithley 4200A-SCS 4225-PMU specification)
     int maxSamples = expectedSamples;
     if (maxSamples < 100) maxSamples = 100;  // Minimum buffer size
-    if (maxSamples > 1000000) maxSamples = 1000000;  // Maximum buffer size (hardware limit: 1M samples)
+    if (maxSamples > 100000) maxSamples = 1000000;  // Maximum buffer size:  changed 0 added to make it million
     
     waveformV = (double *)calloc(maxSamples, sizeof(double));
     waveformI = (double *)calloc(maxSamples, sizeof(double));
@@ -1024,6 +969,10 @@ int Read_With_Laser_Pulse_SegArb(
     }
     
     // Fetch waveform data - use maxSamples-1 as StopIndex (pulse_fetch is inclusive)
+    // IMPORTANT: pulse_fetch returns MEASURED voltage and current from the specified channel
+    // For single-channel mode (CH1), this is the measured voltage at the DUT and current through the DUT
+    // For dual-channel mode, you would fetch separately from ForceCh and MeasureCh
+    if(debug) printf("Fetching data from CH%d (single-channel mode: force + measure)\n", chan);
     status = pulse_fetch(pulserId, chan, 0, maxSamples-1, waveformV, waveformI, waveformT, NULL);
     if (status)
     {
@@ -1042,42 +991,134 @@ int Read_With_Laser_Pulse_SegArb(
         numWaveformSamples++;
     }
     
-    if(debug) printf("Fetched %d waveform samples, extracting averaged values per pulse...\n", numWaveformSamples);
+    if(debug) 
+    {
+        printf("Fetched %d waveform samples, extracting averaged values per pulse...\n", numWaveformSamples);
+        printf("\n[DEBUG] Data acquisition summary:\n");
+        printf("  Channel: CH%d (single-channel mode: CH1 both forces and measures)\n", chan);
+        printf("  Measurement type: meastype=2 (waveform measurement enabled in seg_arb)\n");
+        printf("  Current measurement range: %.6e A (%.1f µA)\n", currentMeasureRng, currentMeasureRng*1e6);
+        printf("  pulse_load(DUTRes=%.0f): Internal load impedance setting\n", DUTRes);
+        printf("  waveformV[]: MEASURED voltage at DUT terminal (from pulse_fetch)\n");
+        printf("  waveformI[]: MEASURED current through DUT (from pulse_fetch)\n");
+        
+        if(numWaveformSamples > 0)
+        {
+            // Check current statistics
+            double minI = waveformI[0], maxI = waveformI[0], sumI = 0.0;
+            for(i = 0; i < numWaveformSamples; i++)
+            {
+                if(waveformI[i] < minI) minI = waveformI[i];
+                if(waveformI[i] > maxI) maxI = waveformI[i];
+                sumI += waveformI[i];
+            }
+            double avgI = sumI / numWaveformSamples;
+            double currentRange = maxI - minI;
+            
+            printf("\n[DEBUG] Current statistics:\n");
+            printf("  Min current: %.6e A (%.3f µA)\n", minI, minI*1e6);
+            printf("  Max current: %.6e A (%.3f µA)\n", maxI, maxI*1e6);
+            printf("  Avg current: %.6e A (%.3f µA)\n", avgI, avgI*1e6);
+            printf("  Current range (max-min): %.6e A (%.3f nA)\n", currentRange, currentRange*1e9);
+            printf("  Measurement range: %.6e A (%.1f µA)\n", currentMeasureRng, currentMeasureRng*1e6);
+            
+            // Check if current is suspiciously close to range limit
+            if(fabs(avgI) > 0.8 * currentMeasureRng)
+            {
+                printf("  ⚠️  WARNING: Current (%.3f µA) is >80%% of range (%.1f µA)!\n", avgI*1e6, currentMeasureRng*1e6);
+                printf("     This suggests current might be range-limited/saturated!\n");
+                printf("     Try a LOWER current range to see if current changes.\n");
+            }
+            
+            if(currentRange < 1e-12)
+            {
+                printf("  ⚠️  WARNING: Current shows NO variation (range < 1pA)!\n");
+                printf("     All samples are identical: %.6e A\n", avgI);
+                printf("     This suggests current might be:\n");
+                printf("     - Range-limited/saturated at range limit\n");
+                printf("     - Measurement artifact, not real DUT current\n");
+                printf("     - Leakage current being measured\n");
+            }
+            
+            printf("\n  First sample: V=%.6f V, I=%.6e A (%.3f µA), t=%.6e s\n", 
+                   waveformV[0], waveformI[0], waveformI[0]*1e6, waveformT[0]);
+            printf("  Sample 10: V=%.6f V, I=%.6e A (%.3f µA), t=%.6e s\n", 
+                   (numWaveformSamples > 10) ? waveformV[10] : 0.0,
+                   (numWaveformSamples > 10) ? waveformI[10] : 0.0,
+                   (numWaveformSamples > 10) ? waveformI[10]*1e6 : 0.0,
+                   (numWaveformSamples > 10) ? waveformT[10] : 0.0);
+        }
+        
+        printf("\n  ⚠️  SINGLE-CHANNEL MODE CURRENT MEASUREMENT LIMITATION:\n");
+        printf("     This script uses CH1 for BOTH forcing and measuring (single-channel mode)\n");
+        printf("     because CH2 is needed for the laser pulse.\n");
+        printf("     \n");
+        printf("     ISSUE: Current appears to scale with range setting, suggesting range saturation:\n");
+        printf("     - 100nA range → ~108nA current (108%% of range)\n");
+        printf("     - 1µA range → ~1.09µA current (109%% of range)\n");
+        printf("     This indicates current is being clamped at range limit, not real DUT current!\n");
+        printf("     \n");
+        printf("     RECOMMENDATION:\n");
+        printf("     - If possible, use dual-channel mode (CH1 force, CH2 measure) like other scripts\n");
+        printf("     - If CH2 must be used for laser, consider:\n");
+        printf("       1. Using a different setup where laser doesn't need CH2\n");
+        printf("       2. Accepting that single-channel current may be range-limited\n");
+        printf("       3. Verifying connections (CH1 Force/Measure to DUT, CH1 Sense/Ground)\n");
+        printf("     \n");
+        printf("     Minimum valid current range: 100nA (1e-7 A)\n");
+        printf("     Maximum valid current range: 0.8 A\n");
+    }
+    
+    // Calculate baseline/offset current when voltage is near zero (for offset compensation)
+    // This is critical for accurate measurements with open circuits or high-impedance devices
+    double baseline_current_offset = 0.0;
+    int baseline_count = 0;
+    double baseline_current_sum = 0.0;
+    
+    for(i = 0; i < numWaveformSamples; i++)
+    {
+        // Measure offset during zero-volt periods (voltage < 0.1V)
+        if(fabs(waveformV[i]) < 0.1)
+        {
+            baseline_current_sum += waveformI[i];
+            baseline_count++;
+        }
+    }
+    
+    if(baseline_count > 0)
+    {
+        baseline_current_offset = baseline_current_sum / baseline_count;
+        if(debug)
+        {
+            printf("\n[DEBUG] Offset compensation:\n");
+            printf("  Baseline current (when |V| < 0.1V): %.6e A (from %d samples)\n", baseline_current_offset, baseline_count);
+            if(fabs(baseline_current_offset) > 1e-9)
+            {
+                printf("  ⚠️  Non-zero baseline current detected - will compensate\n");
+            }
+        }
+    }
+    else
+    {
+        if(debug) printf("[DEBUG] Warning: No zero-volt samples found for baseline measurement\n");
+    }
     
     // Debug: Print first few raw samples to check what we're getting
     if(debug && numWaveformSamples > 5)
     {
-        printf("\n[DEBUG] First 5 raw waveform samples:\n");
-        printf("  Sample  V_measured(V)  I_measured(A)  Time(s)\n");
+        printf("\n[DEBUG] First 5 raw waveform samples (before offset compensation):\n");
+        printf("  Sample  V_measured(V)  I_measured(A)  I_compensated(A)  Time(s)\n");
         for(i = 0; i < 5 && i < numWaveformSamples; i++)
         {
-            printf("  %d      %.6f       %.6e    %.6e\n", i, waveformV[i], waveformI[i], waveformT[i]);
-        }
-        // Check for baseline/offset current when voltage is near zero
-        int baseline_count = 0;
-        double baseline_current_sum = 0.0;
-        for(i = 0; i < numWaveformSamples; i++)
-        {
-            if(fabs(waveformV[i]) < 0.1)  // When voltage is near zero
-            {
-                baseline_current_sum += waveformI[i];
-                baseline_count++;
-            }
-        }
-        if(baseline_count > 0)
-        {
-            double baseline_current = baseline_current_sum / baseline_count;
-            printf("\n[DEBUG] Baseline current (when |V| < 0.1V): %.6e A (from %d samples)\n", baseline_current, baseline_count);
-            if(fabs(baseline_current) > 1e-9)
-            {
-                printf("[DEBUG] ⚠️  WARNING: Non-zero baseline current detected! This may indicate offset/leakage.\n");
-            }
+            double compensated_current = waveformI[i] - baseline_current_offset;
+            printf("  %d      %.6f       %.6e    %.6e    %.6e\n", 
+                   i, waveformV[i], waveformI[i], compensated_current, waveformT[i]);
         }
     }
     
     // Extract one averaged value per pulse (from 40-80% of pulse width)
     int outputIdx = 0;
-    double measurementStartFrac = 0.4;
+    double measurementStartFrac = 0.5;
     double measurementEndFrac = 0.8;
     double voltageThreshold = fabs(startV) * 0.5;
     
@@ -1105,14 +1146,15 @@ int Read_With_Laser_Pulse_SegArb(
             if (measEndSample > pulseEndIdx) measEndSample = pulseEndIdx;
             if (measStartSample < pulseStartIdx) measStartSample = pulseStartIdx;
             
-            // Average samples in measurement window
+            // Average samples in measurement window (with offset compensation)
             double sumV = 0.0, sumI = 0.0, sumT = 0.0;
             int count = 0;
             
             for (j = measStartSample; j <= measEndSample && j < numWaveformSamples; j++)
             {
                 sumV += waveformV[j];
-                sumI += waveformI[j];
+                // Subtract baseline/offset current for accurate measurement
+                sumI += (waveformI[j] - baseline_current_offset);
                 sumT += waveformT[j];
                 count++;
             }
@@ -1120,8 +1162,21 @@ int Read_With_Laser_Pulse_SegArb(
             if (count > 0)
             {
                 V_Meas[outputIdx] = sumV / count;
-                I_Meas[outputIdx] = sumI / count;
+                I_Meas[outputIdx] = sumI / count;  // Already compensated
                 T_Stamp[outputIdx] = sumT / count;
+                
+                if(debug && outputIdx < 5)
+                {
+                    double raw_avg_current = 0.0;
+                    for (j = measStartSample; j <= measEndSample && j < numWaveformSamples; j++)
+                    {
+                        raw_avg_current += waveformI[j];
+                    }
+                    raw_avg_current /= count;
+                    printf("[DEBUG] Pulse %d: V=%.6f V, I_raw=%.6e A, I_offset=%.6e A, I_net=%.6e A\n",
+                           outputIdx, V_Meas[outputIdx], raw_avg_current, baseline_current_offset, I_Meas[outputIdx]);
+                }
+                
                 outputIdx++;
             }
             
@@ -1167,7 +1222,8 @@ int Read_With_Laser_Pulse_SegArb(
                 if (waveformT[i] >= measStartTime && waveformT[i] <= measEndTime)
                 {
                     sumV += waveformV[i];
-                    sumI += waveformI[i];
+                    // Subtract baseline/offset current for accurate measurement
+                    sumI += (waveformI[i] - baseline_current_offset);
                     sumT += waveformT[i];
                     count++;
                 }
@@ -1176,7 +1232,7 @@ int Read_With_Laser_Pulse_SegArb(
             if (count > 0)
             {
                 V_Meas[outputIdx] = sumV / count;
-                I_Meas[outputIdx] = sumI / count;
+                I_Meas[outputIdx] = sumI / count;  // Already compensated
                 T_Stamp[outputIdx] = sumT / count;
                 outputIdx++;
             }
@@ -1198,10 +1254,10 @@ int Read_With_Laser_Pulse_SegArb(
     if(debug) 
     {
         printf("Extracted %d averaged measurements (one per pulse from 40-80%% window).\n", outputIdx);
-        printf("Read_With_Laser_Pulse_SegArb: complete, returning to KXCI\n");
+        printf("ACraig10_PMU_Waveform_SegArb: complete, returning to KXCI\n");
     }
 
     return 0;
 /* USRLIB MODULE END  */
-} 		/* End Read_With_Laser_Pulse_SegArb.c */
+} 		/* End ACraig10_PMU_Waveform_SegArb.c */
 

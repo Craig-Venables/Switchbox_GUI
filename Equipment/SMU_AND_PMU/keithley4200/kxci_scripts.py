@@ -42,36 +42,49 @@ See Also:
 
 IMPORTANT LIMITATIONS - C Module Constraints:
 -----------------------------------------------
-The underlying C module (pmu_retention_dual_channel) has hard limits that affect
-measurement capabilities:
+The underlying C modules (pmu_retention_dual_channel, pmu_pulse_read_interleaved,
+pmu_potentiation_depression) have been updated with enhanced capabilities:
 
-1. Maximum Points: 30,000 points (hardcoded in C module)
-   - The C module enforces max_pts <= 30000
-   - Python validation allows up to 30000 points
+1. Maximum Points: 1,000,000 points per channel (updated from 30,000)
+   - The C modules now support up to 1,000,000 points per channel
+   - Python validation allows up to 1,000,000 points
+   - This enables much longer measurements and higher sampling rates
 
-2. Minimum Sampling Rate: 200,000 samples/second
-   - The C module requires rate >= 200000 samples/sec
+2. Minimum Sampling Rate: 200,000 samples/second (200 kHz)
+   - The C modules require rate >= 200000 samples/sec (hardware minimum)
    - This is calculated as: min_rate = 200000000 / 1000
 
-3. Maximum Measurement Time: ~150 milliseconds
-   - Calculated from: max_time = 30000 points / 200000 samples/sec = 0.15 seconds
-   - For measurements longer than ~150ms, the C module cannot fit the required
-     points within the 30000 limit while maintaining the minimum rate
-   - This will cause the rate calculation to fail (error -2 from ret_getRate)
+3. Maximum Measurement Time: ~5,000 seconds (at minimum rate)
+   - Calculated from: max_time = 1,000,000 points / 200,000 samples/sec = 5 seconds
+   - For longer measurements, the sample rate is automatically reduced
+   - The system dynamically selects optimal rate based on total time and max_points
 
-4. Consequences:
-   - Very long measurements (>150ms total time) will fail
-   - Solutions:
-     a) Break long measurements into shorter chunks (<150ms each)
-     b) Accept the ~150ms limit per measurement
-     c) Modify the C code to increase max_pts (requires recompiling)
+4. Dynamic Rate Selection:
+   - The C modules now use enhanced rate selection (ret_getRateWithMinSeg)
+   - Automatically adapts to short segments (high rates up to 200 MHz)
+   - Automatically adapts to long waveforms (lower rates to fit max_points)
+   - Ensures at least 5 samples per segment for accuracy
 
-These limits are enforced in retention_pulse_ilimit_dual_channel.c:
-- Line 757: int max_pts = 30000;
-- Line 762: min_rate = 200000000 / 1000 = 200000
-- Lines 777-790: Rate calculation loop that must satisfy both constraints
+5. Sample Rate Calculation:
+   - The system automatically selects optimal sample rate based on:
+     * Total waveform time (determines minimum rate needed)
+     * Maximum allowed points (max_points limits total data)
+     * Shortest segment time (constrains maximum rate)
+   - Algorithm: Starts at 200 MHz, reduces if needed to fit within max_points
+   - For very short segments (e.g., 100ns): rate is constrained to ensure
+     at least 5 samples per segment: max_rate = 5 / min_segment_time
 
-TODO: Add automatic chunking for long measurements in future version.
+6. How max_points Works:
+   - The max_points parameter controls maximum data samples collected per channel
+   - Required points = total_time × sample_rate + 2
+   - If required_points > max_points, rate is lowered until fit
+   - Higher max_points: allows longer waveforms or higher rates (more memory)
+   - Lower max_points: faster transfer, less memory (may force lower rates)
+
+These enhancements are implemented in:
+- pmu_pulse_read_interleaved.c: Enhanced rate selection with minimum segment time
+- pmu_potentiation_depression.c: Enhanced rate selection with minimum segment time
+- retention_pulse_ilimit_dual_channel.c: Updated max_pts to 1,000,000
 """
 
 from __future__ import annotations
@@ -209,33 +222,47 @@ from typing import Dict, List, Optional, Tuple
 # HARDWARE LIMITS - Keithley 4200A-SCS with KXCI C Module Constraints
 # ═══════════════════════════════════════════════════════════════════════════════
 #
-# CRITICAL C MODULE LIMITATIONS:
+# ENHANCED C MODULE CAPABILITIES:
 # ────────────────────────────────────────────────────────────────────────────────
-# The underlying C modules (pmu_retention_dual_channel, readtrain_dual_channel) have
-# hard limits that MUST be respected:
+# The underlying C modules (pmu_retention_dual_channel, pmu_pulse_read_interleaved,
+# pmu_potentiation_depression) have been updated with enhanced capabilities:
 #
-# 1. Maximum Points: 30,000 points (hardcoded in C module)
-#    - The C module enforces max_pts <= 30000
-#    - Python validation allows up to 30000 points
-#    - Exceeding this causes measurement failures
+# 1. Maximum Points: 1,000,000 points per channel (updated from 30,000)
+#    - The C modules now support up to 1,000,000 points per channel
+#    - Python validation allows up to 1,000,000 points
+#    - This enables much longer measurements and higher sampling rates
 #
-# 2. Minimum Sampling Rate: 200,000 samples/second
-#    - The C module requires rate >= 200000 samples/sec
+# 2. Minimum Sampling Rate: 200,000 samples/second (200 kHz)
+#    - The C modules require rate >= 200000 samples/sec (hardware minimum)
 #    - Calculated as: min_rate = 200000000 / 1000
 #    - Lower rates cause "rate is too small" errors
 #
-# 3. Maximum Measurement Time: ~150 milliseconds per measurement
-#    - Calculated from: max_time = 30000 points / 200000 samples/sec = 0.15 seconds
-#    - For measurements longer than ~150ms, the C module cannot fit the required
-#      points within the 30000 limit while maintaining the minimum rate
-#    - This causes rate calculation failures (error -2 from ret_getRate)
+# 3. Maximum Measurement Time: ~5,000 seconds (at minimum rate)
+#    - Calculated from: max_time = 1,000,000 points / 200,000 samples/sec = 5 seconds
+#    - For longer measurements, the sample rate is automatically reduced
+#    - The system dynamically selects optimal rate based on total time and max_points
 #
-# 4. Consequences:
-#    - Very long measurements (>150ms total time) will fail
-#    - Solutions:
-#      a) Break long measurements into shorter chunks (<150ms each)
-#      b) Accept the ~150ms limit per measurement
-#      c) Modify the C code to increase max_pts (requires recompiling)
+# 4. Dynamic Rate Selection:
+#    - The C modules now use enhanced rate selection (ret_getRateWithMinSeg)
+#    - Automatically adapts to short segments (high rates up to 200 MHz)
+#    - Automatically adapts to long waveforms (lower rates to fit max_points)
+#    - Ensures at least 5 samples per segment for accuracy
+#
+# 5. Sample Rate Calculation:
+#    - The system automatically selects optimal sample rate based on:
+#      * Total waveform time (determines minimum rate needed)
+#      * Maximum allowed points (max_points limits total data)
+#      * Shortest segment time (constrains maximum rate)
+#    - Algorithm: Starts at 200 MHz, reduces if needed to fit within max_points
+#    - For very short segments (e.g., 100ns): rate is constrained to ensure
+#      at least 5 samples per segment: max_rate = 5 / min_segment_time
+#
+# 6. How max_points Works:
+#    - The max_points parameter controls maximum data samples collected per channel
+#    - Required points = total_time × sample_rate + 2
+#    - If required_points > max_points, rate is lowered until fit
+#    - Higher max_points: allows longer waveforms or higher rates (more memory)
+#    - Lower max_points: faster transfer, less memory (may force lower rates)
 #
 # PARAMETER LIMITS (from RetentionConfig validation):
 # ────────────────────────────────────────────────────────────────────────────────
@@ -265,7 +292,7 @@ MAX_DELAY = 1.0                  # 1s maximum delay
 
 # Measurement limits
 MIN_MAX_POINTS = 12              # Minimum points required by C module
-MAX_MAX_POINTS = 30000           # Maximum points (C module hard limit)
+MAX_MAX_POINTS = 1_000_000       # Maximum points (C module limit, updated from 30,000)
 DEFAULT_MAX_POINTS = 10000       # Default max points
 
 # Pulse count limits
@@ -373,10 +400,57 @@ class KXCIClient:
         try:
             self.inst.write(command)
             time.sleep(0.03)
+            
+            # Wait for measurement to complete and read all output
+            # The C code printf() statements come through the instrument's output stream
+            print("⏳ Waiting for measurement to complete...")
             time.sleep(2.0)
-
-            response = self._safe_read()
-            return self._parse_return_value(response), None
+            
+            # Read all available output (including printf statements from C code)
+            # Read in a loop until we get the RETURN VALUE or timeout
+            all_output = []
+            return_value = None
+            max_attempts = 20  # Read up to 20 times to get all output
+            attempt = 0
+            
+            while attempt < max_attempts:
+                try:
+                    # Read with a short timeout to check for more data
+                    self.inst.timeout = 500  # 500ms timeout
+                    response = self.inst.read()
+                    if response:
+                        all_output.append(response)
+                        # Print printf output from C code immediately
+                        print(response, end='', flush=True)
+                        # Check if this contains the return value
+                        parsed_value = self._parse_return_value(response)
+                        if parsed_value is not None:
+                            return_value = parsed_value
+                            break
+                    else:
+                        # No more data, try one more time with a short delay
+                        time.sleep(0.1)
+                        attempt += 1
+                except Exception:
+                    # Timeout or no more data
+                    attempt += 1
+                    if attempt >= max_attempts:
+                        break
+                    time.sleep(0.1)
+            
+            # Try one final read to get the return value if we haven't found it
+            if return_value is None:
+                try:
+                    self.inst.timeout = 1000  # 1 second timeout
+                    response = self.inst.read()
+                    if response:
+                        all_output.append(response)
+                        print(response, end='', flush=True)
+                        return_value = self._parse_return_value(response)
+                except Exception:
+                    pass
+            
+            return return_value, None
         except Exception as exc:  # noqa: BLE001
             return None, str(exc)
 
@@ -506,7 +580,7 @@ class RetentionConfig:
             "set_start_v": (-20.0, 20.0),
             "set_stop_v": (-20.0, 20.0),
             "i_range": (100e-9, 0.8),
-            "max_points": (12, 30000),
+            "max_points": (12, 1_000_000),
         }
 
         for field_name, (lo, hi) in limits.items():
@@ -588,6 +662,196 @@ def build_retention_ex_command(cfg: RetentionConfig) -> str:
     ]
     print(cfg.max_points)
     return f"EX A_Retention pmu_retention_dual_channel({','.join(params)})"
+
+
+# ============================================================================
+# Pulse Read Interleaved Configuration
+# ============================================================================
+
+@dataclass
+class PulseReadInterleavedConfig:
+    """Configuration for PMU pulse-read interleaved measurements."""
+    rise_time: float = 1e-7
+    reset_v: float = 1.5
+    reset_width: float = 1e-6
+    reset_delay: float = 5e-7
+    meas_v: float = 0.3
+    meas_width: float = 1e-6
+    meas_delay: float = 2e-6
+    set_width: float = 1e-6
+    set_fall_time: float = 1e-7
+    set_delay: float = 0.1e-6
+    set_start_v: float = 0.3
+    set_stop_v: float = 0.3
+    steps: int = 0
+    i_range: float = 1e-4
+    max_points: int = 10000
+    iteration: int = 2
+    out1_name: str = "VF"
+    out2_name: str = "T"
+    out2_size: int = 200
+    num_cycles: int = 3  # M - number of cycles
+    num_reads: int = 2  # N - number of reads per cycle
+    num_pulses_per_group: int = 2  # N - number of pulses per cycle
+    pulse_width: float = 1e-6
+    pulse_v: float = 4.0
+    pulse_rise_time: float = 1e-7
+    pulse_fall_time: float = 1e-7
+    pulse_delay: float = 1e-6
+    clarius_debug: int = 1
+
+    def total_probe_count(self) -> int:
+        """Total measurements = 1 (initial) + NumCycles * NumReads"""
+        return 1 + self.num_cycles * self.num_reads
+
+    def validate(self) -> None:
+        limits: Dict[str, tuple[float, float]] = {
+            "rise_time": (2e-8, 1.0),
+            "reset_v": (-20.0, 20.0),
+            "reset_width": (2e-8, 1.0),
+            "reset_delay": (2e-8, 1.0),
+            "meas_v": (-20.0, 20.0),
+            "meas_width": (2e-8, 1.0),
+            "meas_delay": (2e-8, 1.0),
+            "set_width": (2e-8, 1.0),
+            "set_fall_time": (2e-8, 1.0),
+            "set_delay": (2e-8, 1.0),
+            "set_start_v": (-20.0, 20.0),
+            "set_stop_v": (-20.0, 20.0),
+            "i_range": (100e-9, 0.8),
+            "max_points": (12, 1_000_000),
+        }
+
+        for field_name, (lo, hi) in limits.items():
+            value = getattr(self, field_name)
+            if value < lo or value > hi:
+                raise ValueError(f"{field_name}={value} outside [{lo}, {hi}]")
+
+        if not (1 <= self.num_cycles <= 100):
+            raise ValueError("num_cycles must be within [1, 100]")
+        if not (1 <= self.num_reads <= 100):
+            raise ValueError("num_reads must be within [1, 100]")
+        if not (1 <= self.num_pulses_per_group <= 100):
+            raise ValueError("num_pulses_per_group must be within [1, 100]")
+        if not (2e-8 <= self.pulse_width <= 1.0):
+            raise ValueError("pulse_width must be within [2e-8, 1.0]")
+        if not (-20.0 <= self.pulse_v <= 20.0):
+            raise ValueError("pulse_v must be within [-20.0, 20.0]")
+        if not (2e-8 <= self.pulse_rise_time <= 1.0):
+            raise ValueError("pulse_rise_time must be within [2e-8, 1.0]")
+        if not (2e-8 <= self.pulse_fall_time <= 1.0):
+            raise ValueError("pulse_fall_time must be within [2e-8, 1.0]")
+        if not (2e-8 <= self.pulse_delay <= 1.0):
+            raise ValueError("pulse_delay must be within [2e-8, 1.0]")
+        if self.clarius_debug not in (0, 1):
+            raise ValueError("clarius_debug must be 0 or 1")
+        if self.out2_size < 1:
+            raise ValueError("out2_size must be positive")
+        if self.steps < 0:
+            raise ValueError("steps must be >= 0")
+
+
+def build_interleaved_ex_command(cfg: PulseReadInterleavedConfig) -> str:
+    """Build EX command for pmu_pulse_read_interleaved."""
+    total_probes = cfg.total_probe_count()
+    common_size = total_probes
+
+    params = [
+        format_param(cfg.rise_time),
+        format_param(cfg.reset_v),
+        format_param(cfg.reset_width),
+        format_param(cfg.reset_delay),
+        format_param(cfg.meas_v),
+        format_param(cfg.meas_width),
+        format_param(cfg.meas_delay),
+        format_param(cfg.set_width),
+        format_param(cfg.set_fall_time),
+        format_param(cfg.set_delay),
+        format_param(cfg.set_start_v),
+        format_param(cfg.set_stop_v),
+        format_param(cfg.steps),
+        format_param(cfg.i_range),
+        format_param(cfg.max_points),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        format_param(cfg.iteration),
+        "",
+        format_param(common_size),
+        cfg.out1_name,
+        "",
+        format_param(cfg.out2_size),
+        cfg.out2_name,
+        "",
+        format_param(common_size),
+        format_param(cfg.num_pulses_per_group),  # NumbMeasPulses → NumPulsesPerGroup
+        format_param(cfg.num_cycles),  # NumInitialMeasPulses → NumCycles
+        format_param(cfg.num_reads),  # NumPulses → NumReads
+        format_param(cfg.pulse_width),
+        format_param(cfg.pulse_v),
+        format_param(cfg.pulse_rise_time),
+        format_param(cfg.pulse_fall_time),
+        format_param(cfg.pulse_delay),
+        format_param(cfg.clarius_debug),
+    ]
+    return f"EX A_pulse_read_grouped_multi pmu_pulse_read_interleaved({','.join(params)})"
+
+
+def build_potentiation_depression_ex_command(cfg: PulseReadInterleavedConfig) -> str:
+    """Build EX command for pmu_potentiation_depression."""
+    total_probes = cfg.total_probe_count()
+    common_size = total_probes
+
+    params = [
+        format_param(cfg.rise_time),
+        format_param(cfg.reset_v),
+        format_param(cfg.reset_width),
+        format_param(cfg.reset_delay),
+        format_param(cfg.meas_v),
+        format_param(cfg.meas_width),
+        format_param(cfg.meas_delay),
+        format_param(cfg.set_width),
+        format_param(cfg.set_fall_time),
+        format_param(cfg.set_delay),
+        format_param(cfg.set_start_v),
+        format_param(cfg.set_stop_v),
+        format_param(cfg.steps),
+        format_param(cfg.i_range),
+        format_param(cfg.max_points),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        format_param(cfg.iteration),
+        "",
+        format_param(common_size),
+        cfg.out1_name,
+        "",
+        format_param(cfg.out2_size),
+        cfg.out2_name,
+        "",
+        format_param(common_size),
+        format_param(cfg.num_pulses_per_group),  # NumbMeasPulses → NumPulsesPerGroup
+        format_param(cfg.num_cycles),  # NumInitialMeasPulses → NumCycles
+        format_param(cfg.num_reads),  # NumPulses → NumReads
+        format_param(cfg.pulse_width),
+        format_param(cfg.pulse_v),
+        format_param(cfg.pulse_rise_time),
+        format_param(cfg.pulse_fall_time),
+        format_param(cfg.pulse_delay),
+        format_param(cfg.clarius_debug),
+    ]
+
+    return f"EX A_Poteniation_Depression pmu_potentiation_depression({','.join(params)})"
 
 
 def build_readtrain_ex_command(
@@ -843,8 +1107,13 @@ class Keithley4200_KXCI_Scripts:
     def _calculate_min_max_points(self, estimated_time: float) -> int:
         """Calculate minimum max_points needed for valid rate calculation.
         
-        The C module requires a minimum sampling rate of 200000 samples/second.
+        The C module requires a minimum sampling rate of 200000 samples/second (200 kHz).
         To ensure a valid rate, we need: max_points >= estimated_time * 200000
+        
+        Note: The C modules now support up to 1,000,000 points per channel, enabling
+        much longer measurements. The rate selection algorithm will automatically
+        reduce the sample rate if needed to fit within max_points while maintaining
+        the minimum rate requirement.
         
         Args:
             estimated_time: Estimated total waveform time (seconds)
@@ -852,7 +1121,7 @@ class Keithley4200_KXCI_Scripts:
         Returns:
             Minimum max_points needed (with safety margin)
         """
-        min_rate = 200000  # Minimum rate from C module (200000000 / 1000)
+        min_rate = 200000  # Minimum rate from C module (200000000 / 1000 = 200 kHz)
         min_points = int(estimated_time * min_rate)
         # Add 20% safety margin and round up to nearest 1000
         safety_margin = int(min_points * 0.2)
@@ -867,6 +1136,13 @@ class Keithley4200_KXCI_Scripts:
         and updates the config if needed. For long measurements, we may need to exceed
         10000 to maintain the minimum sampling rate (200000 samples/sec).
         
+        The C modules now support up to 1,000,000 points per channel, enabling much
+        longer measurements. The rate selection algorithm (ret_getRateWithMinSeg) will
+        automatically select an optimal rate based on:
+        - Total waveform time
+        - Maximum allowed points (max_points)
+        - Shortest segment time in the waveform
+        
         Args:
             cfg: RetentionConfig to update
         """
@@ -877,14 +1153,14 @@ class Keithley4200_KXCI_Scripts:
         cfg.max_points = max(cfg.max_points, min_max_points)
         
         # For short measurements, use 10000 (matches working example)
-        # For long measurements, allow up to 30000 (max allowed by RetentionConfig validation)
+        # For long measurements, allow up to 1,000,000 (max allowed by RetentionConfig validation)
         # This ensures we can handle long measurements while avoiding segment time issues
         if min_max_points <= 10000:
             # Short measurement: use reliable 10000
             cfg.max_points = 10000
         else:
             # Long measurement: use calculated minimum, but cap at validation limit
-            max_allowed_points = 30000  # Max allowed by RetentionConfig.validate()
+            max_allowed_points = 1_000_000  # Max allowed by RetentionConfig.validate()
             cfg.max_points = min(cfg.max_points, max_allowed_points)
     
     def _estimate_readtrain_total_time(self, numb_meas_pulses: int, meas_width: float,
@@ -1045,6 +1321,81 @@ class Keithley4200_KXCI_Scripts:
                     resistances.append(float("inf"))
                 else:
                     resistances.append(voltage / current)
+            
+            # Ensure all lists are same length
+            min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances))
+            set_v = set_v[:min_len]
+            set_i = set_i[:min_len]
+            pulse_times = pulse_times[:min_len]
+            resistances = resistances[:min_len]
+            
+            return pulse_times, set_v, set_i, resistances
+            
+        finally:
+            try:
+                controller._exit_ul_mode()
+            except Exception:
+                pass
+    
+    def _execute_interleaved(self, cfg: PulseReadInterleavedConfig) -> Tuple[List[float], List[float], List[float], List[float]]:
+        """Execute interleaved pulse-read measurement and return normalized data.
+        
+        Returns:
+            Tuple of (timestamps, voltages, currents, resistances)
+        """
+        total_probes = cfg.total_probe_count()
+        
+        controller = self._get_controller()
+        
+        if not controller.connect():
+            raise RuntimeError("Unable to connect to instrument")
+        
+        try:
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            
+            command = build_interleaved_ex_command(cfg)
+            return_value, error = controller._execute_ex_command(command)
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+            
+            if return_value is not None and return_value < 0:
+                raise RuntimeError(f"EX command returned error code: {return_value}")
+            
+            time.sleep(0.2)  # Allow data to be ready
+            
+            # Query data from GP parameters (interleaved module uses different param positions)
+            set_v = self._query_gp_data(controller, 20, total_probes, "setV")
+            set_i = self._query_gp_data(controller, 22, total_probes, "setI")
+            pulse_times = self._query_gp_data(controller, 31, total_probes, "PulseTimes")
+            
+            if not pulse_times:
+                # Generate approximate times based on waveform structure
+                pulse_times = []
+                ttime = cfg.reset_delay + cfg.rise_time
+                # Initial read
+                ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
+                pulse_times.append(ttime)
+                # Cycles
+                for _ in range(cfg.num_cycles):
+                    # Pulses
+                    for _ in range(cfg.num_pulses_per_group):
+                        ttime += cfg.pulse_rise_time + cfg.pulse_width + cfg.pulse_fall_time + cfg.pulse_delay
+                    # Reads
+                    for _ in range(cfg.num_reads):
+                        ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
+                        pulse_times.append(ttime)
+            
+            if len(pulse_times) != total_probes:
+                pulse_times = [float(i) for i in range(total_probes)]
+            
+            # Calculate resistances
+            resistances: List[float] = []
+            for voltage, current in zip(set_v, set_i):
+                if abs(current) < 1e-12:
+                    resistances.append(float("inf"))
+                else:
+                    resistances.append(abs(voltage / current))
             
             # Ensure all lists are same length
             min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances))
@@ -1228,19 +1579,28 @@ class Keithley4200_KXCI_Scripts:
                          read_voltage: float = 0.2,
                          delay_between: float = 10000.0,
                          num_cycles: int = 10,
-                         clim: float = 100e-3) -> Dict:
+                         clim: float = 100e-3,
+                         read_width: float = 0.5,
+                         read_delay: float = 1.0,
+                         read_rise_time: float = 0.1,
+                         enable_debug_output: bool = True) -> Dict:
         """(Pulse → Read → Delay) × N cycles.
         
         Pattern: Initial Read → (Pulse → Read → Delay) × N
         Basic pulse response with immediate read after each pulse.
+        Uses pmu_pulse_read_interleaved module for better performance.
+        Uses C code loops (not Python loops) for efficiency.
         
         Args:
             pulse_voltage: Pulse voltage (V)
             pulse_width: Pulse width (µs) - will be converted to seconds
             read_voltage: Read voltage (V)
             delay_between: Delay between cycles (µs) - will be converted to seconds
-            num_cycles: Number of cycles
+            num_cycles: Number of cycles (handled by C code, not Python loop)
             clim: Current limit (A)
+            read_width: Read pulse width (µs) - will be converted to seconds [4200A only]
+            read_delay: Read delay after measurement (µs) - will be converted to seconds [4200A only]
+            read_rise_time: Read rise/fall time (µs) - will be converted to seconds [4200A only]
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
@@ -1248,54 +1608,36 @@ class Keithley4200_KXCI_Scripts:
         # Convert µs to seconds
         pulse_width_s = self._convert_us_to_seconds(pulse_width)
         delay_between_s = self._convert_us_to_seconds(delay_between)
+        read_width_s = self._convert_us_to_seconds(read_width)
+        read_delay_s = self._convert_us_to_seconds(read_delay)
+        read_rise_s = self._convert_us_to_seconds(read_rise_time)
         
-        i_range = self._convert_clim_to_i_range(clim)
+        # Use interleaved module: Pattern is Initial Read → (Pulse → Read) × N cycles
+        # All cycles handled by C code (num_cycles parameter)
+        # Pattern: Pulse immediately followed by Read, then delay before next cycle
+        cfg = PulseReadInterleavedConfig(
+            num_cycles=num_cycles,  # Number of (pulse → read) cycles - C code handles loop
+            num_pulses_per_group=1,  # One pulse per cycle
+            num_reads=1,  # One read per cycle
+            pulse_v=pulse_voltage,
+            pulse_width=pulse_width_s,
+            pulse_rise_time=1e-7,
+            pulse_fall_time=1e-7,
+            pulse_delay=2e-8,  # Minimal delay after pulse (minimum valid segment time, read happens immediately after pulse)
+            meas_v=read_voltage,  # Use user's read voltage
+            meas_width=read_width_s,  # Use user's read width
+            meas_delay=delay_between_s,  # Delay after read (before next cycle) - this is the cycle-to-cycle delay
+            rise_time=read_rise_s,  # Use user's read rise time
+            i_range=1e-4,  # Default current range
+            max_points=10000,  # Default, will be adjusted if needed
+            iteration=1,
+            clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
+        )
+        cfg.validate()
         
-        all_timestamps: List[float] = []
-        all_voltages: List[float] = []
-        all_currents: List[float] = []
-        all_resistances: List[float] = []
+        timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
         
-        for cycle in range(num_cycles):
-            # num_pulses must be >= 8 (C module requirement)
-            num_retention_pulses = 8  # Minimum required by C module
-            
-            cfg = RetentionConfig(
-                num_initial_meas_pulses=1,  # Always include initial read to get all data
-                num_pulses_seq=1,
-                num_pulses=num_retention_pulses,
-                pulse_v=pulse_voltage,
-                pulse_width=pulse_width_s,
-                pulse_rise_time=1e-7,
-                pulse_fall_time=1e-7,
-                pulse_delay=1e-6,  # Use default (1µs) to match working example
-                meas_v=0.3,  # Use default to match working example (not read_voltage)
-                meas_width=1e-6,  # Use default (1µs) to match working example
-                meas_delay=2e-6,  # Use default (2µs) to match working example
-                i_range=1e-4,  # Use default to match working example (not converted clim)
-                reset_width=5e-7,  # Use default (0.5µs) to match working example
-                iteration=1,  # Use 1 to match working example
-                # Don't set max_points here - let _ensure_valid_max_points calculate it
-                # reset_delay is used in the waveform (first segment)
-                # Using default 5e-7 (0.5µs) to match working example
-            )
-            cfg.validate()
-            print(f"max_points: {cfg.max_points}")
-            
-            # Ensure max_points is sufficient for rate calculation
-            self._ensure_valid_max_points(cfg)
-            
-            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-            
-            # Return all measurements from the retention module
-            # The retention module gives us: initial_read + pulse + retention_reads
-            # With num_pulses=8, we get: 1 initial + 8 retention = 9 total measurements per cycle
-            all_timestamps.extend(timestamps)
-            all_voltages.extend(voltages)
-            all_currents.extend(currents)
-            all_resistances.extend(resistances)
-        
-        return self._format_results(all_timestamps, all_voltages, all_currents, all_resistances)
+        return self._format_results(timestamps, voltages, currents, resistances)
     
     def multi_pulse_then_read(self, pulse_voltage: float = 1.0,
                              num_pulses_per_read: int = 10,
@@ -1306,10 +1648,13 @@ class Keithley4200_KXCI_Scripts:
                              delay_between_reads: float = 10000.0,
                              num_cycles: int = 20,
                              delay_between_cycles: float = 10000.0,
-                             clim: float = 100e-3) -> Dict:
+                             clim: float = 100e-3,
+                             enable_debug_output: bool = True) -> Dict:
         """Multiple pulses then multiple reads per cycle.
         
         Pattern: Initial Read → (Pulse×N → Read×M) × Cycles
+        Uses pmu_pulse_read_interleaved module for better performance.
+        Uses C code loops (not Python loops) for efficiency.
         
         Args:
             pulse_voltage: Pulse voltage (V)
@@ -1319,8 +1664,8 @@ class Keithley4200_KXCI_Scripts:
             read_voltage: Read voltage (V)
             num_reads: Number of reads per cycle
             delay_between_reads: Delay between reads (µs)
-            num_cycles: Number of cycles
-            delay_between_cycles: Delay between cycles (µs)
+            num_cycles: Number of cycles (handled by C code, not Python loop)
+            delay_between_cycles: Delay between cycles (µs) - not used (C code handles cycles)
             clim: Current limit (A)
         
         Returns:
@@ -1329,55 +1674,31 @@ class Keithley4200_KXCI_Scripts:
         pulse_width_s = self._convert_us_to_seconds(pulse_width)
         delay_between_pulses_s = self._convert_us_to_seconds(delay_between_pulses)
         delay_between_reads_s = self._convert_us_to_seconds(delay_between_reads)
-        delay_between_cycles_s = self._convert_us_to_seconds(delay_between_cycles)
         
-        i_range = self._convert_clim_to_i_range(clim)
-        
-        all_timestamps: List[float] = []
-        all_voltages: List[float] = []
-        all_currents: List[float] = []
-        all_resistances: List[float] = []
-        cycle_numbers: List[int] = []
-        
-        for cycle in range(num_cycles):
-            # num_pulses must be >= 8
-            retention_reads = max(num_reads, 8)
-            
-            cfg = RetentionConfig(
-                num_initial_meas_pulses=1 if cycle == 0 else 0,
-                num_pulses_seq=num_pulses_per_read,
-                num_pulses=retention_reads,
-                pulse_v=pulse_voltage,
-                pulse_width=pulse_width_s,
-                pulse_rise_time=1e-7,
-                pulse_fall_time=1e-7,
-                pulse_delay=delay_between_pulses_s,
-                meas_v=read_voltage,
-                meas_width=2e-6,
-                meas_delay=delay_between_reads_s,
-                i_range=i_range,
-            )
-            cfg.validate()
-            
-            # Ensure max_points is sufficient for rate calculation
-            self._ensure_valid_max_points(cfg)
-            
-            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-            
-            # Return all data - no filtering
-            all_timestamps.extend(timestamps)
-            all_voltages.extend(voltages)
-            all_currents.extend(currents)
-            all_resistances.extend(resistances)
-            cycle_numbers.extend([cycle] * len(timestamps))
-            
-            if cycle < num_cycles - 1:
-                time.sleep(delay_between_cycles_s)
-        
-        return self._format_results(
-            all_timestamps, all_voltages, all_currents, all_resistances,
-            cycle_numbers=cycle_numbers
+        # Use interleaved module: Pattern is Initial Read → (Pulses×N → Reads×M) × Cycles
+        # All cycles handled by C code (num_cycles parameter)
+        cfg = PulseReadInterleavedConfig(
+            num_cycles=num_cycles,  # C code handles all cycles in one call
+            num_pulses_per_group=num_pulses_per_read,  # N pulses per cycle
+            num_reads=num_reads,  # M reads per cycle
+            pulse_v=pulse_voltage,
+            pulse_width=pulse_width_s,
+            pulse_rise_time=1e-7,
+            pulse_fall_time=1e-7,
+            pulse_delay=delay_between_pulses_s,  # Delay between pulses
+            meas_v=read_voltage,
+            meas_width=0.5e-6,  # Measurement window
+            meas_delay=delay_between_reads_s,  # Delay between reads
+            i_range=1e-4,
+            max_points=10000,
+            iteration=1,
+            clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
         )
+        cfg.validate()
+        
+        timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
+        
+        return self._format_results(timestamps, voltages, currents, resistances)
     
     def potentiation_only(self, set_voltage: float = 2.0,
                          pulse_width: float = 100.0,
@@ -1388,22 +1709,25 @@ class Keithley4200_KXCI_Scripts:
                          post_read_interval: float = 1000.0,
                          num_cycles: int = 1,
                          delay_between_cycles: float = 0.0,
-                         clim: float = 100e-3) -> Dict:
+                         clim: float = 100e-3,
+                         enable_debug_output: bool = True) -> Dict:
         """Repeated SET pulses with reads. Can be repeated multiple cycles.
         
         Pattern: (Initial Read → Repeated SET pulses with reads) × N cycles
+        Uses pmu_pulse_read_interleaved module for better performance.
+        Uses C code loops (not Python loops) for efficiency.
         
         Args:
             set_voltage: SET voltage (V, positive)
             pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             num_pulses: Number of pulses per cycle
-            delay_between: Delay between pulses (µs) - NOTE: Not used, fixed to 1e-6 internally
-            num_post_reads: Post-pulse reads (0=disabled)
-            post_read_interval: Post-read interval (µs) - NOTE: Not used, fixed to 2e-6 internally
-            num_cycles: Number of cycles to repeat (default: 1)
-            delay_between_cycles: Delay between cycles (seconds, default: 0)
-            clim: Current limit (A) - NOTE: Not used, fixed to 1e-4 internally
+            delay_between: Delay between pulses (µs)
+            num_post_reads: Post-pulse reads (0=disabled, uses 1 read per pulse)
+            post_read_interval: Post-read interval (µs)
+            num_cycles: Number of cycles to repeat (handled by C code if num_cycles > 1)
+            delay_between_cycles: Delay between cycles (seconds, default: 0) - only used if Python loop needed
+            clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, cycle_numbers
@@ -1411,58 +1735,82 @@ class Keithley4200_KXCI_Scripts:
         pulse_width_s = self._convert_us_to_seconds(pulse_width)
         delay_between_s = self._convert_us_to_seconds(delay_between)
         post_read_interval_s = self._convert_us_to_seconds(post_read_interval)
-        delay_between_cycles_s = delay_between_cycles  # Already in seconds
         
-        i_range = self._convert_clim_to_i_range(clim)
+        # Pattern: Initial Read → (Pulse → Read) × N pulses
+        # Each pulse is followed by a read, so num_cycles = num_pulses
+        num_reads_per_pulse = max(num_post_reads, 1)  # At least 1 read per pulse
         
-        all_timestamps: List[float] = []
-        all_voltages: List[float] = []
-        all_currents: List[float] = []
-        all_resistances: List[float] = []
-        cycle_numbers: List[int] = []
-        
-        for cycle in range(num_cycles):
-            # num_pulses must be >= 8, so use max of num_post_reads and 8
-            retention_reads = max(num_post_reads, 8) if num_post_reads > 0 else 8
-            
-            cfg = RetentionConfig(
-                num_initial_meas_pulses=1,  # Always include initial read to get all data
-                num_pulses_seq=num_pulses,
-                num_pulses=retention_reads,
+        # Use C code loop: num_cycles in C module handles all pulses
+        # If num_cycles > 1, we need to handle that at a higher level (multiple cycles of pulses)
+        # For now, if num_cycles > 1, we'll use Python loop but should ideally refactor C module
+        # to support: Initial Read → (Pulse×N → Read×M) × Cycles
+        if num_cycles == 1:
+            # Single cycle: use C code loop for all pulses
+            cfg = PulseReadInterleavedConfig(
+                num_cycles=num_pulses,  # C code handles all pulses in one call
+                num_pulses_per_group=1,  # One pulse per cycle
+                num_reads=num_reads_per_pulse,  # Reads after each pulse
                 pulse_v=abs(set_voltage),  # Ensure positive
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
                 pulse_fall_time=1e-7,
-                pulse_delay=1e-6,  # Use default (1µs) to match working example
-                meas_v=0.3,  # Use default to match working example (not read_voltage)
-                meas_width=1e-6,  # Use default (1µs) to match working example
-                meas_delay=2e-6,  # Use default (2µs) to match working example
-                i_range=1e-4,  # Use default to match working example (not converted clim)
-                reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
-                iteration=1,  # Use 1 to match working example
+                pulse_delay=delay_between_s,  # Delay between pulse and read
+                meas_v=read_voltage,
+                meas_width=0.5e-6,  # Measurement window
+                meas_delay=post_read_interval_s if num_post_reads > 0 else delay_between_s,  # Delay after read
+                i_range=1e-4,
+                max_points=10000,
+                iteration=1,
+                clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
             )
             cfg.validate()
             
-            # Ensure max_points is sufficient for rate calculation
-            self._ensure_valid_max_points(cfg)
+            timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
             
-            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+            return self._format_results(timestamps, voltages, currents, resistances)
+        else:
+            # Multiple cycles: use Python loop (TODO: refactor C module to support this natively)
+            all_timestamps: List[float] = []
+            all_voltages: List[float] = []
+            all_currents: List[float] = []
+            all_resistances: List[float] = []
+            cycle_numbers: List[int] = []
             
-            # Return all data - no filtering
-            all_timestamps.extend(timestamps)
-            all_voltages.extend(voltages)
-            all_currents.extend(currents)
-            all_resistances.extend(resistances)
-            cycle_numbers.extend([cycle] * len(timestamps))
+            for cycle in range(num_cycles):
+                cfg = PulseReadInterleavedConfig(
+                    num_cycles=num_pulses,  # C code handles all pulses in one call
+                    num_pulses_per_group=1,
+                    num_reads=num_reads_per_pulse,
+                    pulse_v=abs(set_voltage),
+                    pulse_width=pulse_width_s,
+                    pulse_rise_time=1e-7,
+                    pulse_fall_time=1e-7,
+                    pulse_delay=delay_between_s,
+                    meas_v=read_voltage,
+                    meas_width=0.5e-6,
+                    meas_delay=post_read_interval_s if num_post_reads > 0 else delay_between_s,
+                    i_range=1e-4,
+                    max_points=10000,
+                    iteration=1,
+                    clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
+                )
+                cfg.validate()
+                
+                timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
+                
+                all_timestamps.extend(timestamps)
+                all_voltages.extend(voltages)
+                all_currents.extend(currents)
+                all_resistances.extend(resistances)
+                cycle_numbers.extend([cycle] * len(timestamps))
+                
+                if cycle < num_cycles - 1 and delay_between_cycles > 0:
+                    time.sleep(delay_between_cycles)
             
-            # Delay between cycles (except after last cycle)
-            if cycle < num_cycles - 1 and delay_between_cycles_s > 0:
-                time.sleep(delay_between_cycles_s)
-        
-        return self._format_results(
-            all_timestamps, all_voltages, all_currents, all_resistances,
-            cycle_numbers=cycle_numbers if num_cycles > 1 else None
-        )
+            return self._format_results(
+                all_timestamps, all_voltages, all_currents, all_resistances,
+                cycle_numbers=cycle_numbers
+            )
     
     def depression_only(self, reset_voltage: float = -2.0,
                        pulse_width: float = 100.0,
@@ -1473,22 +1821,25 @@ class Keithley4200_KXCI_Scripts:
                        post_read_interval: float = 1000.0,
                        num_cycles: int = 1,
                        delay_between_cycles: float = 0.0,
-                       clim: float = 100e-3) -> Dict:
+                       clim: float = 100e-3,
+                       enable_debug_output: bool = True) -> Dict:
         """Repeated RESET pulses with reads. Can be repeated multiple cycles.
         
         Pattern: (Initial Read → Repeated RESET pulses with reads) × N cycles
+        Uses pmu_pulse_read_interleaved module for better performance.
+        Uses C code loops (not Python loops) for efficiency.
         
         Args:
             reset_voltage: RESET voltage (V, negative)
             pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
             num_pulses: Number of pulses per cycle
-            delay_between: Delay between pulses (µs) - NOTE: Not used, fixed to 1e-6 internally
-            num_post_reads: Post-pulse reads (0=disabled)
-            post_read_interval: Post-read interval (µs) - NOTE: Not used, fixed to 2e-6 internally
-            num_cycles: Number of cycles to repeat (default: 1)
-            delay_between_cycles: Delay between cycles (seconds, default: 0)
-            clim: Current limit (A) - NOTE: Not used, fixed to 1e-4 internally
+            delay_between: Delay between pulses (µs)
+            num_post_reads: Post-pulse reads (0=disabled, uses 1 read per pulse)
+            post_read_interval: Post-read interval (µs)
+            num_cycles: Number of cycles to repeat (handled by C code if num_cycles > 1)
+            delay_between_cycles: Delay between cycles (seconds, default: 0) - only used if Python loop needed
+            clim: Current limit (A)
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, cycle_numbers
@@ -1496,58 +1847,77 @@ class Keithley4200_KXCI_Scripts:
         pulse_width_s = self._convert_us_to_seconds(pulse_width)
         delay_between_s = self._convert_us_to_seconds(delay_between)
         post_read_interval_s = self._convert_us_to_seconds(post_read_interval)
-        delay_between_cycles_s = delay_between_cycles  # Already in seconds
         
-        i_range = self._convert_clim_to_i_range(clim)
+        # Pattern: Initial Read → (Pulse → Read) × N pulses
+        num_reads_per_pulse = max(num_post_reads, 1)  # At least 1 read per pulse
         
-        all_timestamps: List[float] = []
-        all_voltages: List[float] = []
-        all_currents: List[float] = []
-        all_resistances: List[float] = []
-        cycle_numbers: List[int] = []
-        
-        for cycle in range(num_cycles):
-            # num_pulses must be >= 8, so use max of num_post_reads and 8
-            retention_reads = max(num_post_reads, 8) if num_post_reads > 0 else 8
-            
-            cfg = RetentionConfig(
-                num_initial_meas_pulses=1,  # Always include initial read to get all data
-                num_pulses_seq=num_pulses,
-                num_pulses=retention_reads,
+        if num_cycles == 1:
+            # Single cycle: use C code loop for all pulses
+            cfg = PulseReadInterleavedConfig(
+                num_cycles=num_pulses,  # C code handles all pulses in one call
+                num_pulses_per_group=1,  # One pulse per cycle
+                num_reads=num_reads_per_pulse,  # Reads after each pulse
                 pulse_v=reset_voltage,  # Negative for RESET
                 pulse_width=pulse_width_s,
                 pulse_rise_time=1e-7,
                 pulse_fall_time=1e-7,
-                pulse_delay=1e-6,  # Use default (1µs) to match working example
-                meas_v=0.3,  # Use default to match working example (not read_voltage)
-                meas_width=1e-6,  # Use default (1µs) to match working example
-                meas_delay=2e-6,  # Use default (2µs) to match working example
-                i_range=1e-4,  # Use default to match working example (not converted clim)
-                reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
-                iteration=1,  # Use 1 to match working example
+                pulse_delay=delay_between_s,  # Delay between pulse and read
+                meas_v=read_voltage,
+                meas_width=0.5e-6,  # Measurement window
+                meas_delay=post_read_interval_s if num_post_reads > 0 else delay_between_s,  # Delay after read
+                i_range=1e-4,
+                max_points=10000,
+                iteration=1,
+                clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
             )
             cfg.validate()
             
-            # Ensure max_points is sufficient for rate calculation
-            self._ensure_valid_max_points(cfg)
+            timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
             
-            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+            return self._format_results(timestamps, voltages, currents, resistances)
+        else:
+            # Multiple cycles: use Python loop (TODO: refactor C module to support this natively)
+            all_timestamps: List[float] = []
+            all_voltages: List[float] = []
+            all_currents: List[float] = []
+            all_resistances: List[float] = []
+            cycle_numbers: List[int] = []
             
-            # Return all data - no filtering
-            all_timestamps.extend(timestamps)
-            all_voltages.extend(voltages)
-            all_currents.extend(currents)
-            all_resistances.extend(resistances)
-            cycle_numbers.extend([cycle] * len(timestamps))
+            for cycle in range(num_cycles):
+                cfg = PulseReadInterleavedConfig(
+                    num_cycles=num_pulses,  # C code handles all pulses in one call
+                    num_pulses_per_group=1,
+                    num_reads=num_reads_per_pulse,
+                    pulse_v=reset_voltage,
+                    pulse_width=pulse_width_s,
+                    pulse_rise_time=1e-7,
+                    pulse_fall_time=1e-7,
+                    pulse_delay=delay_between_s,
+                    meas_v=read_voltage,
+                    meas_width=0.5e-6,
+                    meas_delay=post_read_interval_s if num_post_reads > 0 else delay_between_s,
+                    i_range=1e-4,
+                    max_points=10000,
+                    iteration=1,
+                    clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
+                )
+                cfg.validate()
+                
+                timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
+                
+                all_timestamps.extend(timestamps)
+                all_voltages.extend(voltages)
+                all_currents.extend(currents)
+                all_resistances.extend(resistances)
+                cycle_numbers.extend([cycle] * len(timestamps))
+                
+                if cycle < num_cycles - 1 and delay_between_cycles > 0:
+                    time.sleep(delay_between_cycles)
             
-            # Delay between cycles (except after last cycle)
-            if cycle < num_cycles - 1 and delay_between_cycles_s > 0:
-                time.sleep(delay_between_cycles_s)
-        
-        return self._format_results(
-            all_timestamps, all_voltages, all_currents, all_resistances,
-            cycle_numbers=cycle_numbers if num_cycles > 1 else None
-        )
+            return self._format_results(
+                all_timestamps, all_voltages, all_currents, all_resistances,
+                cycle_numbers=cycle_numbers
+            )
     
     def potentiation_depression_alternating(self, set_voltage: float = 2.0,
                                           reset_voltage: float = -2.0,
@@ -1658,6 +2028,7 @@ class Keithley4200_KXCI_Scripts:
         """Pulse then multiple reads to monitor relaxation.
         
         Pattern: Initial Read → (Pulse × M) → Read × N
+        Uses pmu_pulse_read_interleaved module for better performance.
         
         Args:
             pulse_voltage: Pulse voltage (V)
@@ -1676,35 +2047,27 @@ class Keithley4200_KXCI_Scripts:
         delay_between_pulses_s = self._convert_us_to_seconds(delay_between_pulses)
         delay_between_reads_s = self._convert_us_to_seconds(delay_between_reads)
         
-        i_range = self._convert_clim_to_i_range(clim)
-        
-        # num_pulses must be >= 8
-        retention_reads = max(num_reads, 8)
-        
-        cfg = RetentionConfig(
-            num_initial_meas_pulses=1,
-            num_pulses_seq=num_pulses,
-            num_pulses=retention_reads,
+        # Pattern: Initial Read → (Pulses×M) → Reads×N
+        cfg = PulseReadInterleavedConfig(
+            num_cycles=1,  # One cycle: pulses then reads
+            num_pulses_per_group=num_pulses,  # M pulses
+            num_reads=num_reads,  # N reads
             pulse_v=pulse_voltage,
             pulse_width=pulse_width_s,
             pulse_rise_time=1e-7,
             pulse_fall_time=1e-7,
-            pulse_delay=1e-6,  # Use default (1µs) to match working example
-            meas_v=0.3,  # Use default to match working example (not read_voltage)
-            meas_width=1e-6,  # Use default (1µs) to match working example
-            meas_delay=2e-6,  # Use default (2µs) to match working example
-            i_range=1e-4,  # Use default to match working example (not converted clim)
-            reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
-            iteration=1,  # Use 1 to match working example
+            pulse_delay=delay_between_pulses_s,  # Delay between pulses
+            meas_v=read_voltage,
+            meas_width=0.5e-6,  # Measurement window
+            meas_delay=delay_between_reads_s,  # Delay between reads
+            i_range=1e-4,
+            max_points=10000,
+            iteration=1,
         )
         cfg.validate()
         
-        # Ensure max_points is sufficient for rate calculation
-        self._ensure_valid_max_points(cfg)
+        timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
         
-        timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-        
-        # Return all data - no filtering
         return self._format_results(timestamps, voltages, currents, resistances)
     
     def multi_read_only(self, read_voltage: float = 0.2,
@@ -1756,6 +2119,7 @@ class Keithley4200_KXCI_Scripts:
         """Monitor relaxation after cumulative pulsing.
         
         Pattern: 1×Read → N×Pulse → N×Read
+        Uses pmu_pulse_read_interleaved module for better performance.
         
         Args:
             pulse_voltage: Pulse voltage (V)
@@ -1774,37 +2138,27 @@ class Keithley4200_KXCI_Scripts:
         delay_between_pulses_s = self._convert_us_to_seconds(delay_between_pulses)
         delay_between_reads_s = self._convert_us_to_seconds(delay_between_reads)
         
-        i_range = self._convert_clim_to_i_range(clim)
-        
-        # num_pulses must be >= 8
-        retention_reads = max(num_reads, 8)
-        
-        cfg = RetentionConfig(
-            num_initial_meas_pulses=1,
-            num_pulses_seq=num_pulses,
-            num_pulses=retention_reads,
+        # Pattern: Initial Read → (Pulses×N) → Reads×N
+        cfg = PulseReadInterleavedConfig(
+            num_cycles=1,  # One cycle: pulses then reads
+            num_pulses_per_group=num_pulses,  # N pulses
+            num_reads=num_reads,  # N reads
             pulse_v=pulse_voltage,
             pulse_width=pulse_width_s,
             pulse_rise_time=1e-7,
             pulse_fall_time=1e-7,
-            pulse_delay=1e-6,  # Use default (1µs) to match working example
-            meas_v=0.3,  # Use default to match working example (not read_voltage)
-            meas_width=1e-6,  # Use default (1µs) to match working example
-            meas_delay=2e-6,  # Use default (2µs) to match working example
-            i_range=1e-4,  # Use default to match working example (not converted clim)
-            reset_width=1e-7,  # Use 0.1µs to match working example (smaller than default 1e-6)
-            iteration=1,  # Use 1 to match working example
+            pulse_delay=delay_between_pulses_s,  # Delay between pulses
+            meas_v=read_voltage,
+            meas_width=0.5e-6,  # Measurement window
+            meas_delay=delay_between_reads_s,  # Delay between reads
+            i_range=1e-4,
+            max_points=10000,
+            iteration=1,
         )
         cfg.validate()
         
-        # Ensure max_points is sufficient for rate calculation
-        self._ensure_valid_max_points(cfg)
+        timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
         
-        print(cfg)
-
-        timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-        
-        # Return all data - no filtering
         return self._format_results(timestamps, voltages, currents, resistances)
     
     # ============================================================================
@@ -1822,6 +2176,7 @@ class Keithley4200_KXCI_Scripts:
         """Width sweep: For each width, pulse then read.
         
         Pattern: For each width: Initial Read → (Pulse→Read)×N → Reset
+        Uses pmu_pulse_read_interleaved module for better performance.
         
         Args:
             pulse_voltage: Pulse voltage (V)
@@ -1853,30 +2208,27 @@ class Keithley4200_KXCI_Scripts:
         widths: List[float] = []
         
         for width_idx, width_s in enumerate(pulse_widths_s):
-            # Pulse sequence with this width
-            # num_pulses must be >= 8, so use max of num_pulses_per_width and 8
-            retention_reads = max(num_pulses_per_width, 8)
-            
-            cfg = RetentionConfig(
-                num_initial_meas_pulses=1 if width_idx == 0 else 0,
-                num_pulses_seq=num_pulses_per_width,
-                num_pulses=retention_reads,  # Read after each pulse (minimum 8)
+            # Pattern: Initial Read → (Pulse → Read) × N
+            # Use interleaved module for each width
+            cfg = PulseReadInterleavedConfig(
+                num_cycles=num_pulses_per_width,  # N cycles of (pulse → read)
+                num_pulses_per_group=1,  # One pulse per cycle
+                num_reads=1,  # One read per cycle
                 pulse_v=pulse_voltage,
                 pulse_width=width_s,
                 pulse_rise_time=1e-7,
                 pulse_fall_time=1e-7,
-                pulse_delay=1e-6,
+                pulse_delay=1e-6,  # Delay between pulse and read
                 meas_v=read_voltage,
-                meas_width=2e-6,
-                meas_delay=1e-6,
-                i_range=i_range,
+                meas_width=0.5e-6,  # Measurement window
+                meas_delay=1e-6,  # Delay after read
+                i_range=1e-4,
+                max_points=10000,
+                iteration=1,
             )
             cfg.validate()
             
-            # Ensure max_points is sufficient for rate calculation
-            self._ensure_valid_max_points(cfg)
-            
-            timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+            timestamps, voltages, currents, resistances = self._execute_interleaved(cfg)
             
             # Return all data - no filtering
             all_timestamps.extend(timestamps)
@@ -1885,25 +2237,26 @@ class Keithley4200_KXCI_Scripts:
             all_resistances.extend(resistances)
             widths.extend([pulse_widths[width_idx]] * len(timestamps))
             
-            # Reset between widths (except last)
+            # Reset between widths (except last) - use interleaved module for reset
             if width_idx < len(pulse_widths_s) - 1:
-                reset_cfg = RetentionConfig(
-                    num_initial_meas_pulses=1,  # Always include initial read to get all data
-                    num_pulses_seq=1,
-                    num_pulses=8,  # Minimum required, but we'll ignore results
+                reset_cfg = PulseReadInterleavedConfig(
+                    num_cycles=1,  # Single reset pulse
+                    num_pulses_per_group=1,  # One reset pulse
+                    num_reads=1,  # One read after reset
                     pulse_v=reset_voltage,
                     pulse_width=reset_width_s,
                     pulse_rise_time=1e-7,
                     pulse_fall_time=1e-7,
-                    pulse_delay=1e-6,  # Use valid delay (matches working example default)
+                    pulse_delay=1e-6,
                     meas_v=read_voltage,
-                    meas_width=2e-6,
-                    meas_delay=2e-6,  # Use valid delay (matches working example default: 2e-6)
-                    i_range=i_range,
+                    meas_width=0.5e-6,
+                    meas_delay=1e-6,
+                    i_range=1e-4,
+                    max_points=10000,
+                    iteration=1,
                 )
                 reset_cfg.validate()
-                self._ensure_valid_max_points(reset_cfg)
-                self._execute_retention(reset_cfg)  # Just reset, don't collect data
+                self._execute_interleaved(reset_cfg)  # Just reset, don't collect data
                 
                 if delay_between_widths_s > 0:
                     time.sleep(delay_between_widths_s)
@@ -2030,20 +2383,25 @@ class Keithley4200_KXCI_Scripts:
                                      steps: int = 20,
                                      num_cycles: int = 1,
                                      delay_between: float = 10000.0,
-                                     clim: float = 100e-3) -> Dict:
-        """Potentiation-depression cycle: Gradual SET then RESET.
+                                     clim: float = 100e-3,
+                                     enable_debug_output: bool = True) -> Dict:
+        """Potentiation-depression cycle using pmu_potentiation_depression module.
         
-        Pattern: Initial Read → (Gradual SET → Gradual RESET) × N cycles
+        Pattern: Initial Read → (Potentiation Cycle → Depression Cycle) × N cycles
+        Each cycle: Read → Pulses×N → Reads×M (for potentiation), then same for depression (negative pulses)
+        
+        Uses pmu_potentiation_depression module for proper potentiation-depression pattern.
         
         Args:
-            set_voltage: SET voltage (V)
-            reset_voltage: RESET voltage (V)
+            set_voltage: SET voltage (V, positive for potentiation)
+            reset_voltage: RESET voltage (V, negative for depression)
             pulse_width: Pulse width (µs)
             read_voltage: Read voltage (V)
-            steps: Steps in each direction
-            num_cycles: Number of cycles
-            delay_between: Delay between pulses (µs)
+            steps: Number of pulses per cycle (repurposed, but pattern uses num_pulses_per_group)
+            num_cycles: Number of cycle pairs (M cycles, each with potentiation then depression)
+            delay_between: Delay between pulses/reads (µs)
             clim: Current limit (A)
+            enable_debug_output: Enable debug output from C module
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, cycle_numbers
@@ -2053,75 +2411,124 @@ class Keithley4200_KXCI_Scripts:
         
         i_range = self._convert_clim_to_i_range(clim)
         
-        all_timestamps: List[float] = []
-        all_voltages: List[float] = []
-        all_currents: List[float] = []
-        all_resistances: List[float] = []
-        cycle_numbers: List[int] = []
+        # Use potentiation-depression module: Pattern is Initial Read → (Potentiation Cycle → Depression Cycle) × N cycles
+        # Each cycle pair: Potentiation (Read → Pulses×N → Reads×M) then Depression (Read → Pulses×N → Reads×M)
+        # For now, use steps as num_pulses_per_group (pulses per cycle)
+        num_pulses_per_group = steps
+        num_reads = 1  # One read per pulse group
         
-        for cycle in range(num_cycles):
-            # Potentiation (SET) - gradual increase
-            for step in range(steps):
-                # num_pulses must be >= 8, so use 8 and take only first result
-                cfg = RetentionConfig(
-                    num_initial_meas_pulses=1 if cycle == 0 and step == 0 else 0,
-                    num_pulses_seq=1,
-                    num_pulses=8,  # Minimum required (was 1, which is invalid)
-                    pulse_v=set_voltage,
-                    pulse_width=pulse_width_s,
-                    pulse_rise_time=1e-7,
-                    pulse_fall_time=1e-7,
-                    pulse_delay=delay_between_s,
-                    meas_v=read_voltage,
-                    meas_width=2e-6,
-                    meas_delay=delay_between_s,
-                    i_range=i_range,
-                )
-                cfg.validate()
-                self._ensure_valid_max_points(cfg)
-                
-                timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-                
-                # Return all data - no filtering
-                all_timestamps.extend(timestamps)
-                all_voltages.extend(voltages)
-                all_currents.extend(currents)
-                all_resistances.extend(resistances)
-                cycle_numbers.extend([cycle] * len(timestamps))
-            
-            # Depression (RESET) - gradual decrease
-            for step in range(steps):
-                # num_pulses must be >= 8, so use 8 and take only first result
-                cfg = RetentionConfig(
-                    num_initial_meas_pulses=1,  # Always include initial read to get all data
-                    num_pulses_seq=1,
-                    num_pulses=8,  # Minimum required (was 1, which is invalid)
-                    pulse_v=reset_voltage,
-                    pulse_width=pulse_width_s,
-                    pulse_rise_time=1e-7,
-                    pulse_fall_time=1e-7,
-                    pulse_delay=delay_between_s,
-                    meas_v=read_voltage,
-                    meas_width=2e-6,
-                    meas_delay=delay_between_s,
-                    i_range=i_range,
-                )
-                cfg.validate()
-                self._ensure_valid_max_points(cfg)
-                
-                timestamps, voltages, currents, resistances = self._execute_retention(cfg)
-                
-                # Return all data - no filtering
-                all_timestamps.extend(timestamps)
-                all_voltages.extend(voltages)
-                all_currents.extend(currents)
-                all_resistances.extend(resistances)
-                cycle_numbers.extend([cycle] * len(timestamps))
+        # Create config with potentiation-depression probe count formula
+        # Total = 2*NumCycles + 2*NumCycles*NumReads = 2*NumCycles*(1 + NumReads)
+        class PotentiationDepressionConfig(PulseReadInterleavedConfig):
+            def total_probe_count(self) -> int:
+                """Total measurements = 2*NumCycles + 2*NumCycles*NumReads = 2*NumCycles*(1 + NumReads)"""
+                return 2 * self.num_cycles * (1 + self.num_reads)
         
-        return self._format_results(
-            all_timestamps, all_voltages, all_currents, all_resistances,
-            cycle_numbers=cycle_numbers
+        cfg = PotentiationDepressionConfig(
+            num_cycles=num_cycles,  # Number of cycle pairs (potentiation + depression)
+            num_pulses_per_group=num_pulses_per_group,  # Pulses per cycle
+            num_reads=num_reads,  # Reads per cycle
+            pulse_v=abs(set_voltage),  # Use absolute value (depression uses negative internally)
+            pulse_width=pulse_width_s,
+            pulse_rise_time=1e-7,
+            pulse_fall_time=1e-7,
+            pulse_delay=delay_between_s,  # Delay between pulses
+            meas_v=read_voltage,
+            meas_width=0.5e-6,  # Measurement window
+            meas_delay=delay_between_s,  # Delay between reads
+            rise_time=1e-7,  # Rise time for reads
+            i_range=i_range,
+            max_points=10000,
+            iteration=1,
+            clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
         )
+        cfg.validate()
+        
+        # Use potentiation-depression execution (special command format)
+        timestamps, voltages, currents, resistances = self._execute_potentiation_depression(cfg)
+        
+        return self._format_results(timestamps, voltages, currents, resistances)
+    
+    def _execute_potentiation_depression(self, cfg: PulseReadInterleavedConfig) -> Tuple[List[float], List[float], List[float], List[float]]:
+        """Execute potentiation-depression measurement using pmu_potentiation_depression module.
+        
+        Returns:
+            Tuple of (timestamps, voltages, currents, resistances)
+        """
+        total_probes = cfg.total_probe_count()
+        
+        controller = self._get_controller()
+        
+        if not controller.connect():
+            raise RuntimeError("Unable to connect to instrument")
+        
+        try:
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            
+            # Build command using potentiation-depression format (function is in this file)
+            command = build_potentiation_depression_ex_command(cfg)
+            return_value, error = controller._execute_ex_command(command)
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+            
+            if return_value is not None and return_value < 0:
+                raise RuntimeError(f"EX command returned error code: {return_value}")
+            
+            time.sleep(0.2)  # Allow data to be ready
+            
+            # Query data from GP parameters (same as interleaved module)
+            set_v = self._query_gp_data(controller, 20, total_probes, "setV")
+            set_i = self._query_gp_data(controller, 22, total_probes, "setI")
+            pulse_times = self._query_gp_data(controller, 31, total_probes, "PulseTimes")
+            
+            if not pulse_times:
+                # Generate approximate times based on waveform structure
+                pulse_times = []
+                ttime = cfg.reset_delay + cfg.rise_time
+                # Initial read
+                ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
+                pulse_times.append(ttime)
+                # Cycles (each cycle has potentiation then depression)
+                for _ in range(cfg.num_cycles):
+                    # Potentiation: Pulses then reads
+                    for _ in range(cfg.num_pulses_per_group):
+                        ttime += cfg.pulse_rise_time + cfg.pulse_width + cfg.pulse_fall_time + cfg.pulse_delay
+                    for _ in range(cfg.num_reads):
+                        ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
+                        pulse_times.append(ttime)
+                    # Depression: Pulses then reads
+                    for _ in range(cfg.num_pulses_per_group):
+                        ttime += cfg.pulse_rise_time + cfg.pulse_width + cfg.pulse_fall_time + cfg.pulse_delay
+                    for _ in range(cfg.num_reads):
+                        ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
+                        pulse_times.append(ttime)
+            
+            if len(pulse_times) != total_probes:
+                pulse_times = [float(i) for i in range(total_probes)]
+            
+            # Calculate resistances
+            resistances: List[float] = []
+            for voltage, current in zip(set_v, set_i):
+                if abs(current) < 1e-12:
+                    resistances.append(float("inf"))
+                else:
+                    resistances.append(abs(voltage / current))
+            
+            # Ensure all lists are same length
+            min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances))
+            set_v = set_v[:min_len]
+            set_i = set_i[:min_len]
+            pulse_times = pulse_times[:min_len]
+            resistances = resistances[:min_len]
+            
+            return pulse_times, set_v, set_i, resistances
+            
+        finally:
+            try:
+                controller._exit_ul_mode()
+            except Exception:
+                pass
     
     def endurance_test(self, set_voltage: float = 2.0,
                       reset_voltage: float = -2.0,

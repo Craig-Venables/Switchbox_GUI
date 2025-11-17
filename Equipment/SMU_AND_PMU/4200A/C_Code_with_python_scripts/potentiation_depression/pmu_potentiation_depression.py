@@ -9,6 +9,32 @@ a waveform sequence that alternates between potentiation (positive pulses) and d
 This pattern is used for testing device response to alternating positive and negative programming pulses,
 useful for studying potentiation (conductance increase) and depression (conductance decrease) behavior.
 
+How It Works:
+------------
+The script communicates with the Keithley 4200A-SCS via GPIB using the KXCI (Keithley
+eXternal Control Interface) protocol. It:
+
+1. Builds a configuration object (PulseReadInterleavedConfig) from command-line arguments
+   or programmatic parameters
+2. Validates all parameters against instrument limits
+3. Constructs an EX command string that calls the compiled C module
+   `pmu_potentiation_depression` on the instrument
+4. Enters UL (User Library) mode and sends the EX command
+5. Retrieves measurement data via GP parameter queries:
+   - Param 18: Return code from C module
+   - Param 20: Voltage values (setV array)
+   - Param 22: Current values (setI array, offset-compensated)
+   - Param 25: Output 1 signal (VF, IF, VM, IM, or T)
+   - Param 31: Measurement timestamps (PulseTimes array)
+6. Calculates resistance from voltage and current: R = V / I
+7. Displays results in a formatted table and optionally plots resistance vs time
+
+The C module performs the actual waveform generation using `seg_arb_sequence` to create
+square pulses with flat tops. Current measurements are taken from the MEASURE channel
+(channel 2, IMret buffer) which provides properly scaled microampere values, while voltage
+is read from the FORCE channel (channel 1, VFret buffer). Offset compensation subtracts
+leakage current measured during a zero-volt delay window after each read.
+
 Waveform Structure:
 ------------------
 The generated waveform consists of cycle pairs:
@@ -37,8 +63,9 @@ For each cycle pair (NumCycles pairs):
 Output Data:
 -----------
 The script returns arrays containing:
-- Resistance values at each measurement point
-- Voltage and current values at measurement windows
+- Resistance values at each measurement point (calculated from V/I)
+- Voltage values sampled during each read window (from FORCE channel)
+- Offset-compensated current values (from MEASURE channel, with leakage subtracted)
 - Timestamps for each measurement
 
 The output arrays must be sized to accommodate:
@@ -54,37 +81,85 @@ Cycle Parameters:
   --num-pulses-per-group: Number of pulses per cycle (N) - repurposed from num-pulses (1-100)
 
 Pulse Parameters:
-  --pulse-v: Pulse voltage amplitude (positive for potentiation, negative for depression) (-20 to 20V)
+  --pulse-v: Pulse voltage amplitude (positive for potentiation, negative for depression) (-20 to 20V, default: 1.5V)
     Note: Depression cycles use -PulseV automatically
-  --pulse-width: Flat top duration of pulse (2e-8 to 1s)
-  --pulse-rise-time: Rise time for pulse edge (2e-8 to 1s, typically 1e-7s)
-  --pulse-fall-time: Fall time for pulse edge (2e-8 to 1s, typically 1e-7s)
-  --pulse-delay: Delay between pulse and read (2e-8 to 1s)
+  --pulse-width: Flat top duration of pulse (2e-8 to 1s, default: 0.5e-6s)
+  --pulse-rise-time: Rise time for pulse edge (2e-8 to 1s, default: 1e-7s, minimum ~100ns for typical sample rates)
+  --pulse-fall-time: Fall time for pulse edge (2e-8 to 1s, default: 1e-7s, minimum ~100ns for typical sample rates)
+  --pulse-delay: Delay between pulse and read (2e-8 to 1s, default: 1e-6s)
 
 Measurement Parameters:
-  --meas-v: Measurement voltage (-20 to 20V, typically 0.3-0.5V)
-  --meas-width: Measurement pulse width (2e-8 to 1s)
-  --meas-delay: Delay after read measurement (2e-8 to 1s)
+  --meas-v: Measurement voltage (-20 to 20V, default: 1.5V)
+  --meas-width: Measurement pulse width (2e-8 to 1s, default: 0.5e-6s)
+  --meas-delay: Delay after read measurement (2e-8 to 1s, default: 1e-6s)
+               This delay also contains the offset window used to remove leakage current
+  --rise-time: Rise/fall time for read pulses (2e-8 to 1s, default: 1e-7s, minimum ~100ns for typical sample rates)
 
-Usage Example:
--------------
-Basic pattern with 3 cycle pairs, 2 reads per cycle, 2 pulses per cycle:
+Instrument Configuration:
+  --i-range: Current range in amps (100e-9 to 0.8, default: 0.01)
+  --max-points: Maximum data points per channel (12 to 1,000,000, default: 10000)
 
-    python run_pmu_pulse_read_interleaved.py --gpib-address GPIB0::17::INSTR \
-        --num-cycles 3 \
-        --num-reads 2 \
-        --num-pulses-per-group 2 \
-        --pulse-v 4.0 \
-        --pulse-width 1e-6 \
+Usage Examples:
+--------------
+Command-line usage:
+
+    python pmu_potentiation_depression.py --gpib-address GPIB0::17::INSTR \
+        --num-cycles 5 \
+        --num-reads 5 \
+        --num-pulses-per-group 1 \
+        --pulse-v 1.5 \
+        --pulse-width 0.5e-6 \
         --pulse-rise-time 1e-7 \
         --pulse-fall-time 1e-7 \
         --pulse-delay 1e-6 \
-        --meas-v 0.3 \
-        --meas-width 2e-6
+        --meas-v 1.5 \
+        --meas-width 0.5e-6 \
+        --meas-delay 1e-6 \
+        --rise-time 1e-7 \
+        --i-range 0.01
 
 Dry Run (print command without executing):
 
-    python run_pmu_pulse_read_interleaved.py --dry-run --num-cycles 3 --num-reads 2 --num-pulses-per-group 2
+    python pmu_potentiation_depression.py --dry-run --num-cycles 5 --num-reads 5
+
+Python programmatic usage:
+
+    from pmu_potentiation_depression import PulseReadInterleavedConfig, run_measurement
+
+    # Create configuration
+    cfg = PulseReadInterleavedConfig(
+        num_cycles=5,
+        num_reads=5,
+        num_pulses_per_group=1,
+        pulse_v=1.5,
+        pulse_width=0.5e-6,
+        pulse_rise_time=1e-7,
+        pulse_fall_time=1e-7,
+        pulse_delay=1e-6,
+        meas_v=1.5,
+        meas_width=0.5e-6,
+        meas_delay=1e-6,
+        rise_time=1e-7,
+        i_range=0.01,
+        max_points=1000000,
+        clarius_debug=1
+    )
+
+    # Validate configuration
+    cfg.validate()
+
+    # Run measurement
+    run_measurement(
+        cfg,
+        address="GPIB0::17::INSTR",
+        timeout=30.0,
+        enable_plot=True
+    )
+
+    # Or build and inspect the command first:
+    from pmu_potentiation_depression import build_ex_command
+    command = build_ex_command(cfg)
+    print(f"Generated command: {command}")
 
 Technical Details:
 -----------------
@@ -96,7 +171,11 @@ Technical Details:
 - Potentiation cycles use +PulseV, depression cycles use -PulseV
 - The waveform is executed on PMU channel 1 (force) and channel 2 (measure)
   for dual-channel measurements
-- Parameters are repurposed: NumInitialMeasPulses→NumCycles, NumPulses→NumReads, NumbMeasPulses→NumPulsesPerGroup
+- Current is read from MEASURE channel (IMret) which provides scaled microampere values
+- Voltage is read from FORCE channel (VFret) to get the actual pulse amplitude
+- Offset compensation samples leakage current during zero-volt delay windows
+- Parameters are repurposed: NumInitialMeasPulses→NumCycles, NumPulses→NumReads, 
+  NumbMeasPulses→NumPulsesPerGroup
 
 See Also:
 ---------
@@ -309,7 +388,7 @@ class PulseReadInterleavedConfig:
             "set_start_v": (-20.0, 20.0),
             "set_stop_v": (-20.0, 20.0),
             "i_range": (100e-9, 0.8),
-            "max_points": (12, 30000),
+            "max_points": (12, 1_000_000),
         }
 
         for field_name, (lo, hi) in limits.items():
@@ -576,12 +655,12 @@ def parse_arguments() -> argparse.Namespace:
     # READ/MEASUREMENT PARAMETERS (for read operations in cycles)
     # ============================================================================
     parser.add_argument("--rise-time", type=float, default=1e-7,
-                        help="Rise/fall time for read pulses (seconds) - used for transitions to/from meas-v")
-    parser.add_argument("--meas-v", type=float, default=0.3,
+                        help="Rise/fall time for read pulses (seconds) - used for transitions to/from meas-v (minimum ~100ns for typical sample rates)")
+    parser.add_argument("--meas-v", type=float, default=1.5,
                         help="Read/measurement voltage (volts) - voltage applied during read operations")
-    parser.add_argument("--meas-width", type=float, default=0.1e-6,
+    parser.add_argument("--meas-width", type=float, default=0.5e-6,
                         help="Read pulse width (seconds) - duration at meas-v for resistance measurement")
-    parser.add_argument("--meas-delay", type=float, default=2e-6,
+    parser.add_argument("--meas-delay", type=float, default=1e-6,
                         help="Delay after read measurement (seconds) - delay at 0V after each read")
     parser.add_argument("--set-fall-time", type=float, default=1e-7,
                         help="Settling time at meas-v before fall (seconds) - optional delay at meas-v after measurement window")
@@ -589,14 +668,14 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # MAIN SET PULSE PARAMETERS (for programming pulses: initial + in cycles)
     # ============================================================================
-    parser.add_argument("--pulse-v", type=float, default=2.0,
+    parser.add_argument("--pulse-v", type=float, default=1.5,
                         help="Pulse voltage amplitude (volts) - voltage for programming pulses")
-    parser.add_argument("--pulse-width", type=float, default=1e-6,
+    parser.add_argument("--pulse-width", type=float, default=0.5e-6,
                         help="Pulse width (seconds) - flat top duration at pulse-v")
     parser.add_argument("--pulse-rise-time", type=float, default=1e-7,
-                        help="Pulse rise time (seconds) - transition time from 0V to pulse-v")
+                        help="Pulse rise time (seconds) - transition time from 0V to pulse-v (minimum ~100ns for typical sample rates)")
     parser.add_argument("--pulse-fall-time", type=float, default=1e-7,
-                        help="Pulse fall time (seconds) - transition time from pulse-v to 0V")
+                        help="Pulse fall time (seconds) - transition time from pulse-v to 0V (minimum ~100ns for typical sample rates)")
     parser.add_argument("--pulse-delay", type=float, default=1e-6,
                         help="Pulse delay (seconds) - delay at 0V after each pulse (before read or next pulse)")
     
@@ -633,10 +712,10 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # INSTRUMENT CONFIGURATION PARAMETERS
     # ============================================================================
-    parser.add_argument("--i-range", type=float, default=1e-4,
+    parser.add_argument("--i-range", type=float, default=0.01,
                         help="Current range (amps) - measurement range for both channels")
     parser.add_argument("--max-points", type=int, default=10000,
-                        help="Maximum data points - maximum samples to collect during waveform")
+                        help="Maximum data points (per channel) to collect during waveform (12-1,000,000)")
     parser.add_argument("--iteration", type=int, default=1,
                         help="Iteration number - which iteration to report (for multi-iteration sweeps)")
     
