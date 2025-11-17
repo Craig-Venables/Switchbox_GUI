@@ -11,6 +11,32 @@ a waveform sequence that:
 This pattern allows independent control over the number of reads and pulses per cycle,
 useful for testing device response to multiple programming pulses followed by multiple reads.
 
+How It Works:
+------------
+The script communicates with the Keithley 4200A-SCS via GPIB using the KXCI (Keithley
+eXternal Control Interface) protocol. It:
+
+1. Builds a configuration object (PulseReadInterleavedConfig) from command-line arguments
+   or programmatic parameters
+2. Validates all parameters against instrument limits
+3. Constructs an EX command string that calls the compiled C module
+   `pmu_pulse_read_interleaved` on the instrument
+4. Enters UL (User Library) mode and sends the EX command
+5. Retrieves measurement data via GP parameter queries:
+   - Param 18: Return code from C module
+   - Param 20: Voltage values (setV array)
+   - Param 22: Current values (setI array, offset-compensated)
+   - Param 25: Output 1 signal (VF, IF, VM, IM, or T)
+   - Param 31: Measurement timestamps (PulseTimes array)
+6. Calculates resistance from voltage and current: R = V / I
+7. Displays results in a formatted table and optionally plots resistance vs time
+
+The C module performs the actual waveform generation using `seg_arb_sequence` to create
+square pulses with flat tops. Current measurements are taken from the MEASURE channel
+(channel 2, IMret buffer) which provides properly scaled microampere values, while voltage
+is read from the FORCE channel (channel 1, VFret buffer). Offset compensation subtracts
+leakage current measured during a zero-volt delay window after each read.
+
 Waveform Structure:
 ------------------
 The generated waveform consists of two main sections:
@@ -35,8 +61,9 @@ The generated waveform consists of two main sections:
 Output Data:
 -----------
 The script returns arrays containing:
-- Resistance values at each measurement point
-- Voltage and current values at measurement windows
+- Resistance values at each measurement point (calculated from V/I)
+- Voltage values sampled during each read window (from FORCE channel)
+- Offset-compensated current values (from MEASURE channel, with leakage subtracted)
 - Timestamps for each measurement
 
 The output arrays must be sized to accommodate:
@@ -50,36 +77,127 @@ Cycle Parameters:
   --num-pulses-per-group: Number of pulses per cycle (N) - repurposed from num-pulses (1-100)
 
 Pulse Parameters:
-  --pulse-v: Pulse voltage amplitude (-20 to 20V)
-  --pulse-width: Flat top duration of pulse (2e-8 to 1s)
-  --pulse-rise-time: Rise time for pulse edge (2e-8 to 1s, typically 1e-7s)
-  --pulse-fall-time: Fall time for pulse edge (2e-8 to 1s, typically 1e-7s)
-  --pulse-delay: Delay between pulse and read (2e-8 to 1s)
+  --pulse-v: Pulse voltage amplitude (-20 to 20V, default: 1.5V)
+  --pulse-width: Flat top duration of pulse (2e-8 to 1s, default: 0.5e-6s)
+  --pulse-rise-time: Rise time for pulse edge (2e-8 to 1s, default: 3e-8s)
+  --pulse-fall-time: Fall time for pulse edge (2e-8 to 1s, default: 3e-8s)
+  --pulse-delay: Delay between pulse and read (2e-8 to 1s, default: 1e-6s)
 
 Measurement Parameters:
-  --meas-v: Measurement voltage (-20 to 20V, typically 0.3-0.5V)
-  --meas-width: Measurement pulse width (2e-8 to 1s)
-  --meas-delay: Delay after read measurement (2e-8 to 1s)
+  --meas-v: Measurement voltage (-20 to 20V, default: 1.5V)
+  --meas-width: Measurement pulse width (2e-8 to 1s, default: 0.5e-6s)
+  --meas-delay: Delay after read measurement (2e-8 to 1s, default: 1e-6s)
+               This delay also contains the offset window used to remove leakage current
+  --rise-time: Rise/fall time for read pulses (2e-8 to 1s, default: 3e-8s)
 
-Usage Example:
--------------
-Basic pattern with 3 cycles, 2 reads per cycle, 2 pulses per cycle:
+Instrument Configuration:
+  --i-range: Current range in amps (100e-9 to 0.8, default: 0.01)
+  --max-points: Maximum data points per channel (12 to 1,000,000, default: 10000)
+  
+  Note on max_points:
+  ------------------
+  The max_points parameter controls the maximum number of data samples collected per channel
+  during the waveform execution. This parameter, along with the total waveform time, determines
+  the sample rate automatically selected by the instrument.
+  
+  How max_points works:
+  ---------------------
+  1. Sample Rate Selection:
+     - The instrument automatically selects an optimal sample rate based on:
+       * Total waveform time (calculated from all pulse/read cycles)
+       * Maximum allowed points (max_points)
+       * Shortest segment time in the waveform (minimum pulse/read width)
+     - The algorithm starts with the maximum rate (200 MHz) and reduces it if needed to fit
+       within max_points, while ensuring at least 5 samples per segment for accuracy
+     - For short waveforms with short segments: uses high rates (up to 200 MHz) for detailed
+       sampling
+     - For long waveforms: uses lower rates to fit within max_points limit
+  
+  2. Calculation:
+     - Required points = total_time × sample_rate + 2
+     - If required_points > max_points, the rate is lowered until required_points <= max_points
+     - If a segment is very short (e.g., 100ns), the rate is constrained to ensure at least
+       5 samples per segment: max_rate = 5 / min_segment_time
+  
+  3. Practical Limits:
+     - Minimum: 12 points (hardware requirement)
+     - Maximum: 1,000,000 points per channel
+     - For dual-channel measurements, total memory = 2 × max_points
+     - Typical usage: 10,000-100,000 points for most measurements
+  
+  4. Trade-offs:
+     - Higher max_points: allows longer waveforms or higher sampling rates, but uses more
+       memory and takes longer to transfer data
+     - Lower max_points: faster data transfer and less memory usage, but may force lower
+       sampling rates or limit waveform duration
+  
+  5. Error Conditions:
+     - If waveform cannot fit within max_points even at minimum rate (200 kHz), an error
+       is returned indicating the waveform is too long
+     - If a segment is too short for any valid rate (requires < 20ns), an error is returned
+       indicating the segment time is too small
 
-    python run_pmu_pulse_read_interleaved.py --gpib-address GPIB0::17::INSTR \
-        --num-cycles 3 \
-        --num-reads 2 \
-        --num-pulses-per-group 2 \
-        --pulse-v 4.0 \
-        --pulse-width 1e-6 \
-        --pulse-rise-time 1e-7 \
-        --pulse-fall-time 1e-7 \
+Usage Examples:
+--------------
+Command-line usage:
+
+    python pmu_pulse_read_interleaved.py --gpib-address GPIB0::17::INSTR \
+        --num-cycles 5 \
+        --num-reads 5 \
+        --num-pulses-per-group 1 \
+        --pulse-v 1.5 \
+        --pulse-width 0.5e-6 \
+        --pulse-rise-time 3e-8 \
+        --pulse-fall-time 3e-8 \
         --pulse-delay 1e-6 \
-        --meas-v 0.3 \
-        --meas-width 2e-6
+        --meas-v 1.5 \
+        --meas-width 0.5e-6 \
+        --meas-delay 1e-6 \
+        --rise-time 3e-8 \
+        --i-range 0.01
 
 Dry Run (print command without executing):
 
-    python run_pmu_pulse_read_interleaved.py --dry-run --num-cycles 3 --num-reads 2 --num-pulses-per-group 2
+    python pmu_pulse_read_interleaved.py --dry-run --num-cycles 5 --num-reads 5
+
+Python programmatic usage:
+
+    from pmu_pulse_read_interleaved import PulseReadInterleavedConfig, run_measurement
+
+    # Create configuration
+    cfg = PulseReadInterleavedConfig(
+        num_cycles=5,
+        num_reads=5,
+        num_pulses_per_group=1,
+        pulse_v=1.5,
+        pulse_width=0.5e-6,
+        pulse_rise_time=3e-8,
+        pulse_fall_time=3e-8,
+        pulse_delay=1e-6,
+        meas_v=1.5,
+        meas_width=0.5e-6,
+        meas_delay=1e-6,
+        rise_time=3e-8,
+        i_range=0.01,
+        max_points=1000000,
+        clarius_debug=1
+    )
+
+    # Validate configuration
+    cfg.validate()
+
+    # Run measurement
+    run_measurement(
+        cfg,
+        address="GPIB0::17::INSTR",
+        timeout=30.0,
+        enable_plot=True
+    )
+
+    # Or build and inspect the command first:
+    from pmu_pulse_read_interleaved import build_ex_command
+    command = build_ex_command(cfg)
+    print(f"Generated command: {command}")
 
 Technical Details:
 -----------------
@@ -90,7 +208,11 @@ Technical Details:
   clean square waveforms with flat tops
 - The waveform is executed on PMU channel 1 (force) and channel 2 (measure)
   for dual-channel measurements
-- Parameters are repurposed: NumInitialMeasPulses→NumCycles, NumPulses→NumReads, NumbMeasPulses→NumPulsesPerGroup
+- Current is read from MEASURE channel (IMret) which provides scaled microampere values
+- Voltage is read from FORCE channel (VFret) to get the actual pulse amplitude
+- Offset compensation samples leakage current during zero-volt delay windows
+- Parameters are repurposed: NumInitialMeasPulses→NumCycles, NumPulses→NumReads, 
+  NumbMeasPulses→NumPulsesPerGroup
 
 See Also:
 ---------
@@ -302,7 +424,7 @@ class PulseReadInterleavedConfig:
             "set_start_v": (-20.0, 20.0),
             "set_stop_v": (-20.0, 20.0),
             "i_range": (100e-9, 0.8),
-            "max_points": (12, 30000),
+            "max_points": (12, 1_000_000),
         }
 
         for field_name, (lo, hi) in limits.items():
@@ -542,13 +664,13 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # READ/MEASUREMENT PARAMETERS (for read operations in cycles)
     # ============================================================================
-    parser.add_argument("--rise-time", type=float, default=1e-7,
+    parser.add_argument("--rise-time", type=float, default=3e-8,
                         help="Rise/fall time for read pulses (seconds) - used for transitions to/from meas-v")
-    parser.add_argument("--meas-v", type=float, default=0.3,
+    parser.add_argument("--meas-v", type=float, default=0.5,
                         help="Read/measurement voltage (volts) - voltage applied during read operations")
-    parser.add_argument("--meas-width", type=float, default=0.1e-6,
+    parser.add_argument("--meas-width", type=float, default=0.5e-6,
                         help="Read pulse width (seconds) - duration at meas-v for resistance measurement")
-    parser.add_argument("--meas-delay", type=float, default=2e-6,
+    parser.add_argument("--meas-delay", type=float, default=1e-6,
                         help="Delay after read measurement (seconds) - delay at 0V after each read")
     parser.add_argument("--set-fall-time", type=float, default=1e-7,
                         help="Settling time at meas-v before fall (seconds) - optional delay at meas-v after measurement window")
@@ -556,13 +678,13 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # MAIN SET PULSE PARAMETERS (for programming pulses: initial + in cycles)
     # ============================================================================
-    parser.add_argument("--pulse-v", type=float, default=2.0,
+    parser.add_argument("--pulse-v", type=float, default=1.5,
                         help="Pulse voltage amplitude (volts) - voltage for programming pulses")
-    parser.add_argument("--pulse-width", type=float, default=1e-6,
+    parser.add_argument("--pulse-width", type=float, default=0.5e-6,
                         help="Pulse width (seconds) - flat top duration at pulse-v")
-    parser.add_argument("--pulse-rise-time", type=float, default=1e-7,
+    parser.add_argument("--pulse-rise-time", type=float, default=3e-8,
                         help="Pulse rise time (seconds) - transition time from 0V to pulse-v")
-    parser.add_argument("--pulse-fall-time", type=float, default=1e-7,
+    parser.add_argument("--pulse-fall-time", type=float, default=3e-8,
                         help="Pulse fall time (seconds) - transition time from pulse-v to 0V")
     parser.add_argument("--pulse-delay", type=float, default=1e-6,
                         help="Pulse delay (seconds) - delay at 0V after each pulse (before read or next pulse)")
@@ -570,11 +692,11 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # PATTERN CONTROL PARAMETERS
     # ============================================================================
-    parser.add_argument("--num-cycles", type=int, default=5,
+    parser.add_argument("--num-cycles", type=int, default=2,
                         help="Number of cycles (M) - repurposed from num-initial-meas-pulses (1-100)")
-    parser.add_argument("--num-reads", type=int, default=5,
+    parser.add_argument("--num-reads", type=int, default=1,
                         help="Number of reads per cycle (N) - repurposed from num-pulses (1-100)")
-    parser.add_argument("--num-pulses-per-group", type=int, default=10,
+    parser.add_argument("--num-pulses-per-group", type=int, default=1,
                         help="Number of pulses per cycle (N) - repurposed from num-pulses (1-100)")
     
     # ============================================================================
@@ -586,7 +708,7 @@ def parse_arguments() -> argparse.Namespace:
                         help="[Unused] Legacy parameter - kept for C module compatibility")
     parser.add_argument("--reset-delay", type=float, default=5e-7,
                         help="[Unused] Legacy parameter - kept for C module compatibility")
-    parser.add_argument("--set-width", type=float, default=1e-6,
+    parser.add_argument("--set-width", type=float, default=0.5e-6,
                         help="[Unused] Legacy parameter - kept for C module compatibility")
     parser.add_argument("--set-delay", type=float, default=1e-6,
                         help="[Unused] Legacy parameter - kept for C module compatibility")
@@ -600,10 +722,10 @@ def parse_arguments() -> argparse.Namespace:
     # ============================================================================
     # INSTRUMENT CONFIGURATION PARAMETERS
     # ============================================================================
-    parser.add_argument("--i-range", type=float, default=1e-4,
+    parser.add_argument("--i-range", type=float, default=0.01,
                         help="Current range (amps) - measurement range for both channels")
     parser.add_argument("--max-points", type=int, default=10000,
-                        help="Maximum data points - maximum samples to collect during waveform")
+                        help="Maximum data points (per channel) to collect during waveform (12-1,000,000)")
     parser.add_argument("--iteration", type=int, default=1,
                         help="Iteration number - which iteration to report (for multi-iteration sweeps)")
     

@@ -150,7 +150,7 @@ For example:
 | Parameter | Description | Range | Default |
 |-----------|-------------|-------|---------|
 | `--i-range` | Current measurement range | 100e-9 to 0.8 A | 1e-4 A |
-| `--max-points` | Maximum data points to collect | 12-30000 | 10000 |
+| `--max-points` | Maximum data points to collect | 12-1,000,000 | 10000 |
 | `--gpib-address` | VISA resource string | - | GPIB0::17::INSTR |
 | `--timeout` | VISA timeout in seconds | - | 30.0 s |
 
@@ -789,18 +789,50 @@ Python parses and stores in lists/arrays
 ### Performance Considerations
 
 **Sampling Rate Calculation:**
-The `ret_getRate()` function calculates optimal sampling rate:
+The `ret_getRateWithMinSeg()` function calculates optimal sampling rate automatically:
 ```c
-used_rate = ret_getRate(ttime, max_points, &allocate_pts, &NumDataPts);
+used_rate = ret_getRateWithMinSeg(ttime, max_points, min_seg_time_found, &allocate_pts, &NumDataPts);
 ```
-- Balances total time vs. maximum points constraint
-- Ensures sufficient resolution for measurement windows
-- Default maximum rate: 200 MHz (divisible down to minimum 200 kHz)
-- Algorithm:
-  1. Start with maximum rate (200 MHz)
-  2. Divide rate by increasing factors until `ttime × rate < max_points`
-  3. Allocate `ttime × rate + 2` points (safety margin)
-  4. Return actual number of points collected
+
+This function automatically selects an optimal sample rate based on three factors:
+1. **Total waveform time** (`ttime`): Determines minimum rate needed to fit within `max_points`
+2. **Maximum allowed points** (`max_points`): Limits total data points collected per channel
+3. **Minimum segment time** (`min_seg_time_found`): Constrains maximum rate to ensure at least 5 samples per segment
+
+**Algorithm**:
+1. Find the shortest segment in the waveform (e.g., minimum pulse/read width)
+2. Calculate maximum allowed rate: `max_rate = 5 / min_seg_time` (need at least 5 samples per segment)
+3. Start with minimum of default rate (200 MHz) and `max_rate` if constrained
+4. Calculate required points: `required_points = total_time × sample_rate + 2`
+5. If `required_points > max_points`, lower the rate by increasing divider until `required_points <= max_points`
+6. Never exceed `max_rate` if segment time constraint exists
+7. Never go below minimum rate (200 kHz)
+
+**How max_points Works**:
+- The `max_points` parameter controls the maximum number of data samples collected per channel during waveform execution
+- This parameter, along with the total waveform time, determines the sample rate automatically selected by the instrument
+- For short waveforms with short segments: uses high rates (up to 200 MHz) for detailed sampling
+- For long waveforms: uses lower rates to fit within `max_points` limit
+- Very short segments (e.g., 100ns): automatically selects appropriate rate to support them
+
+**Calculation Details**:
+- Required points = `total_time × sample_rate + 2`
+- If `required_points > max_points`, the rate is lowered until `required_points <= max_points`
+- If a segment is very short (e.g., 100ns), the rate is constrained to ensure at least 5 samples per segment: `max_rate = 5 / min_segment_time`
+
+**Practical Limits**:
+- **Minimum**: 12 points (hardware requirement)
+- **Maximum**: 1,000,000 points per channel
+- **Dual-channel**: Total memory = 2 × `max_points`
+- **Typical usage**: 10,000-100,000 points for most measurements
+
+**Trade-offs**:
+- **Higher max_points**: Allows longer waveforms or higher sampling rates, but uses more memory and takes longer to transfer data
+- **Lower max_points**: Faster data transfer and less memory usage, but may force lower sampling rates or limit waveform duration
+
+**Error Conditions**:
+- If waveform cannot fit within `max_points` even at minimum rate (200 kHz), an error is returned indicating the waveform is too long
+- If a segment is too short for any valid rate (requires < 20ns), an error is returned indicating the segment time is too small
 
 **Data Reduction:**
 - Raw data may contain thousands of points (e.g., 10,000 points)
@@ -899,8 +931,16 @@ Total measurements = 1 + NumCycles × NumReads
 
 | Parameter | Minimum | Maximum | Default |
 |-----------|---------|---------|---------|
-| **max_points** | 12 | 30000 | 10000 |
-| **Sample rate** | Calculated | 200 MHz | Auto-calculated |
+| **max_points** | 12 | 1,000,000 | 10000 |
+| **Sample rate** | Calculated (min 200 kHz) | 200 MHz | Auto-calculated |
+
+**Note on max_points**:
+The `max_points` parameter is the maximum number of data samples collected per channel during the waveform execution. The instrument automatically selects an optimal sample rate based on:
+- Total waveform time (determines minimum rate to fit within `max_points`)
+- Maximum allowed points (`max_points` limits total data points)
+- Shortest segment time (constrains maximum rate to ensure at least 5 samples per segment)
+
+For short waveforms with short segments, the system uses high rates (up to 200 MHz) for detailed sampling. For long waveforms, it uses lower rates to fit within `max_points` limit. See the "Sample Rate Calculation" section below for details.
 
 **Sampling Rate Calculation**:
 - System automatically calculates optimal rate based on total waveform time
@@ -917,7 +957,7 @@ Total measurements = 1 + NumCycles × NumReads
 
 **Measurement Arrays**:
 - Allocated based on sampling rate and total time
-- Typical size: 10,000 points (can be up to 30,000)
+- Typical size: 10,000 points (can be up to 1,000,000)
 - Memory freed after data extraction
 
 **Output Arrays**:

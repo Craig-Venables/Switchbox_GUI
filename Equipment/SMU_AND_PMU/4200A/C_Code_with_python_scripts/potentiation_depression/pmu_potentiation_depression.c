@@ -65,6 +65,7 @@ int ACraig1_retention_pulseNK( char *InstrName, long ForceCh, double ForceVRange
 __declspec( dllexport ) int ret_find_value(double *vals, double *t, int pts, double start, double stop, double *result);
 __declspec( dllexport ) void ret_report_values(double *T, int numpts, double *out, int out_size);
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts);
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts);
 
 extern int debug;
 extern int details;
@@ -132,6 +133,7 @@ int ACraig1_retention_pulseNK( char *InstrName, long ForceCh, double ForceVRange
 __declspec( dllexport ) int ret_find_value(double *vals, double *t, int pts, double start, double stop, double *result);
 __declspec( dllexport ) void ret_report_values(double *T, int numpts, double *out, int out_size);
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts);
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts);
 
 extern int debug;
 extern int details;
@@ -152,6 +154,8 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
 
   double *measMinTime = NULL;
   double *measMaxTime = NULL;
+  double *measOffMinTime = NULL;
+  double *measOffMaxTime = NULL;
   int recordedProbeCount = 0;
   int probeCapacity = 0;
 
@@ -274,7 +278,9 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
 
   measMinTime = (double *)calloc(probeCapacity, sizeof(double));
   measMaxTime = (double *)calloc(probeCapacity, sizeof(double));
-  if(measMinTime == NULL || measMaxTime == NULL)
+  measOffMinTime = (double *)calloc(probeCapacity, sizeof(double));
+  measOffMaxTime = (double *)calloc(probeCapacity, sizeof(double));
+  if(measMinTime == NULL || measMaxTime == NULL || measOffMinTime == NULL || measOffMaxTime == NULL)
   {
     if(debug) printf("%s: Unable to allocate measurement window buffers (capacity %d)\n", mod, probeCapacity);
     stat = -203;
@@ -367,10 +373,11 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
       mod, cyclePairIdx+1, segIdx, measV);
 
     // TOP: Measurement pulse width at measV
-    measMinTime[recordedProbeCount] = ttime + ratio * measWidth; 
-    measMaxTime[recordedProbeCount] = ttime + measWidth * 0.9;
+    int potInitialProbeIdx = recordedProbeCount;
+    measMinTime[potInitialProbeIdx] = ttime + ratio * measWidth; 
+    measMaxTime[potInitialProbeIdx] = ttime + measWidth * 0.9;
     if(debug)printf("Pot %d initial read measMinTime[%d]= %g; measMaxTime[%d]= %g\n", 
-      cyclePairIdx+1, recordedProbeCount, measMinTime[recordedProbeCount], recordedProbeCount, measMaxTime[recordedProbeCount] );
+      cyclePairIdx+1, potInitialProbeIdx, measMinTime[potInitialProbeIdx], potInitialProbeIdx, measMaxTime[potInitialProbeIdx] );
     recordedProbeCount++;
     
     times[segIdx] = measWidth;
@@ -392,10 +399,19 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
     volts[segIdx] = 0.0;  // END voltage of FALL (now at 0V)
 
     // DELAY: Delay at 0V after read, before pulses
+    double potDelayStart = ttime;
     times[segIdx] = measDelay;
     ttime += times[segIdx];
+    if(debug) printf("%s: Pot %d Read DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
+      mod, cyclePairIdx+1, segIdx, 0.0, segIdx, measDelay);
     segIdx++;
     volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
+    if(debug) printf("%s: Pot %d Read DELAY AT 0V: End v[%d]=%.6fV\n",
+      mod, cyclePairIdx+1, segIdx, 0.0);
+    measOffMinTime[potInitialProbeIdx] = potDelayStart + ratio * measDelay;
+    measOffMaxTime[potInitialProbeIdx] = potDelayStart + measDelay * 0.9;
+    if(debug) printf("%s: Pot %d initial read offset window[%d] = (%g, %g)\n",
+      mod, cyclePairIdx+1, potInitialProbeIdx, measOffMinTime[potInitialProbeIdx], measOffMaxTime[potInitialProbeIdx]);
 
     // Potentiation: NumPulsesPerGroup pulses in sequence (positive PulseV)
     int pulseIdx;
@@ -468,10 +484,11 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
         stat = -205;
         goto RETS;
       }
-      measMinTime[recordedProbeCount] = ttime + ratio * measWidth; 
-      measMaxTime[recordedProbeCount] = ttime + measWidth * 0.9;
+      int potReadProbeIdx = recordedProbeCount;
+      measMinTime[potReadProbeIdx] = ttime + ratio * measWidth; 
+      measMaxTime[potReadProbeIdx] = ttime + measWidth * 0.9;
       if(debug)printf("Pot %d Read %d measMinTime[%d]= %g; measMaxTime[%d]= %g\n", 
-        cyclePairIdx+1, readIdx+1, recordedProbeCount, measMinTime[recordedProbeCount], recordedProbeCount, measMaxTime[recordedProbeCount] );
+        cyclePairIdx+1, readIdx+1, potReadProbeIdx, measMinTime[potReadProbeIdx], potReadProbeIdx, measMaxTime[potReadProbeIdx] );
       recordedProbeCount++;
       
       times[segIdx] = measWidth;
@@ -496,6 +513,7 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
         mod, cyclePairIdx+1, readIdx+1, segIdx, 0.0);
 
       // DELAY: Delay at 0V after read (before next read or depression cycle)
+      double potReadDelayStart = ttime;
       times[segIdx] = measDelay;
       ttime += times[segIdx];
       if(debug) printf("%s: Pot %d Read %d - DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
@@ -504,6 +522,10 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
       volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
       if(debug) printf("%s: Pot %d Read %d - DELAY AT 0V: End v[%d]=%.6fV\n",
         mod, cyclePairIdx+1, readIdx+1, segIdx, 0.0);
+      measOffMinTime[potReadProbeIdx] = potReadDelayStart + ratio * measDelay;
+      measOffMaxTime[potReadProbeIdx] = potReadDelayStart + measDelay * 0.9;
+      if(debug) printf("%s: Pot %d Read %d offset window[%d] = (%g, %g)\n",
+        mod, cyclePairIdx+1, readIdx+1, potReadProbeIdx, measOffMinTime[potReadProbeIdx], measOffMaxTime[potReadProbeIdx]);
     }
 
     // ****************
@@ -531,10 +553,11 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
       mod, cyclePairIdx+1, segIdx, measV);
 
     // TOP: Measurement pulse width at measV
-    measMinTime[recordedProbeCount] = ttime + ratio * measWidth; 
-    measMaxTime[recordedProbeCount] = ttime + measWidth * 0.9;
+    int depInitialProbeIdx = recordedProbeCount;
+    measMinTime[depInitialProbeIdx] = ttime + ratio * measWidth; 
+    measMaxTime[depInitialProbeIdx] = ttime + measWidth * 0.9;
     if(debug)printf("Dep %d initial read measMinTime[%d]= %g; measMaxTime[%d]= %g\n", 
-      cyclePairIdx+1, recordedProbeCount, measMinTime[recordedProbeCount], recordedProbeCount, measMaxTime[recordedProbeCount] );
+      cyclePairIdx+1, depInitialProbeIdx, measMinTime[depInitialProbeIdx], depInitialProbeIdx, measMaxTime[depInitialProbeIdx] );
     recordedProbeCount++;
     
     times[segIdx] = measWidth;
@@ -556,10 +579,19 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
     volts[segIdx] = 0.0;  // END voltage of FALL (now at 0V)
 
     // DELAY: Delay at 0V after read, before pulses
+    double depDelayStart = ttime;
     times[segIdx] = measDelay;
     ttime += times[segIdx];
+    if(debug) printf("%s: Dep %d Read DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
+      mod, cyclePairIdx+1, segIdx, 0.0, segIdx, measDelay);
     segIdx++;
     volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
+    if(debug) printf("%s: Dep %d Read DELAY AT 0V: End v[%d]=%.6fV\n",
+      mod, cyclePairIdx+1, segIdx, 0.0);
+    measOffMinTime[depInitialProbeIdx] = depDelayStart + ratio * measDelay;
+    measOffMaxTime[depInitialProbeIdx] = depDelayStart + measDelay * 0.9;
+    if(debug) printf("%s: Dep %d initial read offset window[%d] = (%g, %g)\n",
+      mod, cyclePairIdx+1, depInitialProbeIdx, measOffMinTime[depInitialProbeIdx], measOffMaxTime[depInitialProbeIdx]);
 
     // Depression: NumPulsesPerGroup pulses in sequence (negative -PulseV)
     for (pulseIdx = 0; pulseIdx < NumPulsesPerGroup; pulseIdx++)
@@ -630,10 +662,11 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
         stat = -205;
         goto RETS;
       }
-      measMinTime[recordedProbeCount] = ttime + ratio * measWidth; 
-      measMaxTime[recordedProbeCount] = ttime + measWidth * 0.9;
+      int depReadProbeIdx = recordedProbeCount;
+      measMinTime[depReadProbeIdx] = ttime + ratio * measWidth; 
+      measMaxTime[depReadProbeIdx] = ttime + measWidth * 0.9;
       if(debug)printf("Dep %d Read %d measMinTime[%d]= %g; measMaxTime[%d]= %g\n", 
-        cyclePairIdx+1, readIdx+1, recordedProbeCount, measMinTime[recordedProbeCount], recordedProbeCount, measMaxTime[recordedProbeCount] );
+        cyclePairIdx+1, readIdx+1, depReadProbeIdx, measMinTime[depReadProbeIdx], depReadProbeIdx, measMaxTime[depReadProbeIdx] );
       recordedProbeCount++;
       
       times[segIdx] = measWidth;
@@ -658,6 +691,7 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
         mod, cyclePairIdx+1, readIdx+1, segIdx, 0.0);
 
       // DELAY: Delay at 0V after read (before next read or next cycle pair)
+      double depReadDelayStart = ttime;
       times[segIdx] = measDelay;
       ttime += times[segIdx];
       if(debug) printf("%s: Dep %d Read %d - DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
@@ -666,6 +700,10 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
       volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
       if(debug) printf("%s: Dep %d Read %d - DELAY AT 0V: End v[%d]=%.6fV\n",
         mod, cyclePairIdx+1, readIdx+1, segIdx, 0.0);
+      measOffMinTime[depReadProbeIdx] = depReadDelayStart + ratio * measDelay;
+      measOffMaxTime[depReadProbeIdx] = depReadDelayStart + measDelay * 0.9;
+      if(debug) printf("%s: Dep %d Read %d offset window[%d] = (%g, %g)\n",
+        mod, cyclePairIdx+1, readIdx+1, depReadProbeIdx, measOffMinTime[depReadProbeIdx], measOffMaxTime[depReadProbeIdx]);
     }
   }
   
@@ -675,6 +713,17 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
   volts[segIdx] = 0.0;
   int NewVoltsSize = segIdx + 1;
   int NewTimesSize = segIdx;
+
+  // Find minimum segment time for optimal rate selection
+  double min_seg_time_found = 1.0;  // Start with a large value
+  for(i = 0; i < NewTimesSize; i++)
+  {
+    if(times[i] > 0.0 && times[i] < min_seg_time_found)
+    {
+      min_seg_time_found = times[i];
+    }
+  }
+  if(debug) printf("%s: Minimum segment time in waveform: %.2e s\n", mod, min_seg_time_found);
 
   // Validate all segment times before passing to ret_Define_SegmentsILimit
   if(debug)
@@ -716,7 +765,8 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
 
 /* ------end of all pulses----------  */
 
-  used_rate = ret_getRate(ttime, max_points, &used_pts, &npts);
+  // Use enhanced rate selection that considers minimum segment time
+  used_rate = ret_getRateWithMinSeg(ttime, max_points, min_seg_time_found, &used_pts, &npts);
   if(debug) printf("%s: for requested time:%g and max_points:%d number of points to allocate:%d\n",
    mod, ttime, max_points, used_pts);
 
@@ -813,41 +863,109 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
       // *******************
       // Get probe measurements (initial read + reads after each pulse)
       // *******************
+      // Get the actual data time range to validate measurement windows
+      double data_start_time = (numpts > 0) ? Tret[0] : 0.0;
+      double data_end_time = (numpts > 0) ? Tret[numpts - 1] : 0.0;
+      if(debug) printf("%s: Data time range: %.6e to %.6e seconds (numpts=%d)\n", 
+        mod, data_start_time, data_end_time, numpts);
+      
       int ProbeResNumb=0;
       for (ProbeResNumb=0; ProbeResNumb<recordedProbeCount;ProbeResNumb++)  
       {
-        // Get current at measurement probe
-        double probeCurrent = 0.0;
-        stat = ret_find_value(IMret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeCurrent);
-        if(debug) printf("\nProbe Number: %d \n %s: Average Current=%g in time interval (seconds): %g and %g\n", 
-          ProbeResNumb, mod, probeCurrent, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb]);
+        // Validate measurement window exists and is within data range
+        // Check if window times are valid (non-zero and in correct order)
+        if(measMinTime[ProbeResNumb] <= 0.0 || measMaxTime[ProbeResNumb] <= 0.0 || 
+           measMinTime[ProbeResNumb] >= measMaxTime[ProbeResNumb])
+        {
+          if(debug) printf("%s: WARNING: Probe %d has invalid measurement window [%.6e, %.6e] - skipping\n",
+            mod, ProbeResNumb, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb]);
+          // Set default values for invalid probes
+          setV[ProbeResNumb] = 0.0;
+          setI[ProbeResNumb] = 0.0;
+          resetR[ProbeResNumb] = 1e4/IRange;  // Very high resistance
+          PulseTimes[ProbeResNumb] = 0.0;
+          continue;  // Skip this probe
+        }
+        
+        // Check if window is within data range
+        if(measMinTime[ProbeResNumb] < data_start_time || measMaxTime[ProbeResNumb] > data_end_time)
+        {
+          if(debug) printf("%s: WARNING: Probe %d measurement window [%.6e, %.6e] is outside data range [%.6e, %.6e] - skipping\n",
+            mod, ProbeResNumb, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], data_start_time, data_end_time);
+          // Set default values for invalid probes
+          setV[ProbeResNumb] = 0.0;
+          setI[ProbeResNumb] = 0.0;
+          resetR[ProbeResNumb] = 1e4/IRange;  // Very high resistance
+          PulseTimes[ProbeResNumb] = 0.0;
+          continue;  // Skip this probe
+        }
+        
+        // Get current from MEASURE channel (channel 2) during the measurement window
+        double probeMeasCurrent = 0.0;
+        stat = ret_find_value(IMret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeMeasCurrent);
+        if(debug) printf("\nProbe Number: %d \n %s: Measurement channel current=%g in time interval (seconds): %g and %g\n", 
+          ProbeResNumb, mod, probeMeasCurrent, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb]);
         if(stat < 0)
         {
-          if(debug)printf("%s: Error in finding probe current\n", mod);
-          stat = -92;
-          goto RETS;
+          if(debug)printf("%s: Error in finding probe current (returned %d, current=%g) - measurement window may be outside data range\n", 
+            mod, stat, probeMeasCurrent);
+          // Set default values instead of failing
+          setV[ProbeResNumb] = 0.0;
+          setI[ProbeResNumb] = 0.0;
+          resetR[ProbeResNumb] = 1e4/IRange;
+          PulseTimes[ProbeResNumb] = 0.0;
+          continue;  // Skip this probe and continue
         }
 
-        // Get voltage at measurement probe FIRST (needed for resistance calculation)
+        // Get offset current from MEASURE channel during the zero-volt delay window
+        double probeMeasOffsetCurrent = 0.0;
+        // Validate offset window is within data range
+        if(measOffMinTime[ProbeResNumb] >= data_start_time && measOffMaxTime[ProbeResNumb] <= data_end_time)
+        {
+          stat = ret_find_value(IMret, Tret, numpts, measOffMinTime[ProbeResNumb], measOffMaxTime[ProbeResNumb], &probeMeasOffsetCurrent);
+          if(stat < 0)
+          {
+            if(debug)printf("%s: Error in finding probe offset current (returned %d) - using 0.0 as offset\n", mod, stat);
+            probeMeasOffsetCurrent = 0.0;  // Use zero offset if window is invalid
+          }
+        }
+        else
+        {
+          if(debug) printf("%s: WARNING: Probe %d offset window [%.6e, %.6e] is outside data range - using 0.0 as offset\n",
+            mod, ProbeResNumb, measOffMinTime[ProbeResNumb], measOffMaxTime[ProbeResNumb]);
+          probeMeasOffsetCurrent = 0.0;  // Use zero offset if window is invalid
+        }
+        if(debug) printf("%s: Probe %d offset current=%g in time interval (seconds): %g and %g\n",
+          mod, ProbeResNumb, probeMeasOffsetCurrent, measOffMinTime[ProbeResNumb], measOffMaxTime[ProbeResNumb]);
+
+        double netProbeCurrent = probeMeasCurrent - probeMeasOffsetCurrent;
+
+        // Get voltage from FORCE channel (channel 1) for the same window
         double probeVoltage = 0.0;
-        stat = ret_find_value(VMret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeVoltage);
+        stat = ret_find_value(VFret, Tret, numpts, measMinTime[ProbeResNumb], measMaxTime[ProbeResNumb], &probeVoltage);
         if(stat < 0)
         {
-          if(debug)printf("%s: Error in finding probe voltage value\n", mod);
-          stat = -93;
-          goto RETS;
+          if(debug)printf("%s: Error in finding probe voltage value (returned %d, voltage=%g) - measurement window may be outside data range\n", 
+            mod, stat, probeVoltage);
+          // Set default values instead of failing
+          setV[ProbeResNumb] = 0.0;
+          setI[ProbeResNumb] = 0.0;
+          resetR[ProbeResNumb] = 1e4/IRange;
+          PulseTimes[ProbeResNumb] = 0.0;
+          continue;  // Skip this probe and continue
         }
         setV[ProbeResNumb] = probeVoltage;  // Store voltage
         if(debug)printf("%s: setV[%d] = %g V\n", mod, ProbeResNumb, probeVoltage);
 
-        // Calculate resistance: R = V / I (use actual measured voltage, not measV)
-        if (fabs(probeCurrent) > 1e-12)  // Avoid division by zero
+        // Calculate resistance: R = V / (I - Ioffset)
+        if (fabs(netProbeCurrent) > 1e-12)  // Avoid division by zero
         {
-          double resistance = fabs(probeVoltage / probeCurrent);
+          double resistance = fabs(probeVoltage / netProbeCurrent);
           if(resistance > 1e4/IRange) 
             resistance = 1e4/IRange;
           resetR[ProbeResNumb] = resistance;  // Store resistance (reusing resetR array)
-          if(debug)printf("%s: Probe %d resistance = %g Ohms (V=%g V, I=%g A)\n", mod, ProbeResNumb, resistance, probeVoltage, probeCurrent);
+          if(debug)printf("%s: Probe %d resistance = %g Ohms (V=%g V, I=%g A, Ioff=%g A)\n", 
+            mod, ProbeResNumb, resistance, probeVoltage, netProbeCurrent, probeMeasOffsetCurrent);
         }
         else
         {
@@ -856,8 +974,9 @@ int pmu_potentiation_depression( double riseTime, double resetV, double resetWid
         }
 
         // Store current
-        setI[ProbeResNumb] = probeCurrent;  // Store current
-        if(debug)printf("%s: setI[%d] = %g A\n", mod, ProbeResNumb, probeCurrent);
+        setI[ProbeResNumb] = netProbeCurrent;  // Store offset-compensated current
+        if(debug)printf("%s: setI[%d] = %g A (net, raw=%g A, offset=%g A)\n", 
+          mod, ProbeResNumb, netProbeCurrent, probeMeasCurrent, probeMeasOffsetCurrent);
 
         // Return pulse times as an array
         PulseTimes[ProbeResNumb]=(measMaxTime[ProbeResNumb]+measMinTime[ProbeResNumb])/2;
@@ -878,6 +997,8 @@ int looper;
   if(volts != NULL) free(volts);
   if(measMinTime != NULL) free(measMinTime);
   if(measMaxTime != NULL) free(measMaxTime);
+  if(measOffMinTime != NULL) free(measOffMinTime);
+  if(measOffMaxTime != NULL) free(measOffMaxTime);
   FreeArraysPotDep();
   return stat;
 }

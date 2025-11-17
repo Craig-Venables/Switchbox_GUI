@@ -12,6 +12,30 @@ KEY ADVANTAGE OVER ACraig9:
 - CH2 uses seg_arb, so you can pulse at any period you want
 - Both channels execute together but operate independently
 
+⚠️  SINGLE-CHANNEL MODE CURRENT MEASUREMENT LIMITATION:
+═══════════════════════════════════════════════════════════════════════════════
+This script uses CH1 for BOTH forcing and measuring (single-channel mode)
+because CH2 is needed for the laser pulse. This differs from other scripts
+(e.g., pmu_pulse_read_interleaved) which use dual-channel mode:
+- Dual-channel: CH1 (force), CH2 (measure) → Accurate current measurement
+- Single-channel: CH1 (force + measure) → May have range saturation issues
+
+OBSERVED ISSUE: Current measurements appear to scale with range setting,
+suggesting range saturation rather than actual DUT current:
+- 100nA range → ~108nA current (108% of range, saturated)
+- 1µA range → ~1.09µA current (109% of range, saturated)
+
+This indicates current is being clamped at the range limit, not real measured
+current. For accurate current measurement, consider:
+1. Using dual-channel mode if CH2 can be freed up for measurement
+2. Verifying physical connections (CH1 Force/Measure to DUT, CH1 Sense/Ground)
+3. Using this script primarily for voltage monitoring rather than resistance
+
+Current range limits:
+- Minimum: 100nA (1e-7 A) - Below this returns error -122
+- Maximum: 0.8 A
+- Default: 100nA (1e-7 A)
+
 MEASUREMENT WINDOW (40-80% of Pulse Width):
 ===========================================
 When --acq-type=1 (average mode, default), the C module extracts one averaged
@@ -449,8 +473,30 @@ def run_measurement(args, enable_plot: bool) -> None:
             print("\n[ERROR] No data returned!")
             return
 
-        # Calculate resistance
+        # Diagnostic output: Check raw current values
         import numpy as np
+        print("\n[DIAGNOSTIC] Current measurement analysis:")
+        print(f"  Total samples: {len(current)}")
+        print(f"  Current range: [{np.min(current):.3e}, {np.max(current):.3e}] A")
+        print(f"  Current mean: {np.mean(current):.3e} A")
+        print(f"  Current std: {np.std(current):.3e} A")
+        print(f"  Non-zero currents: {np.sum(np.abs(current) > 1e-12)} / {len(current)}")
+        
+        # Check if there's current when voltage is near zero (baseline/offset check)
+        low_voltage_mask = np.abs(voltage) < 0.1
+        if np.any(low_voltage_mask):
+            baseline_current = np.mean(np.array(current)[low_voltage_mask])
+            print(f"  Baseline current (when |V| < 0.1V): {baseline_current:.3e} A")
+            print(f"  This suggests offset/leakage: {'YES' if abs(baseline_current) > 1e-9 else 'NO'}")
+        
+        # Check if current is actually changing
+        unique_currents = len(np.unique(np.round(current, decimals=12)))
+        print(f"  Unique current values (rounded to 1pA): {unique_currents}")
+        if unique_currents < 5:
+            print("  ⚠️  WARNING: Current values show very little variation!")
+            print("     This suggests the measurement may not be sensitive to device changes.")
+
+        # Calculate resistance
         resistance = []
         for v, i in zip(voltage, current):
             if abs(i) > 1e-12:
@@ -560,7 +606,7 @@ Examples:
 
     # CH1 range and measurement parameters
     parser.add_argument("--volts-source-rng", type=float, default=10.0, help="CH1 voltage source range (V)")
-    parser.add_argument("--current-measure-rng", type=float, default=0.00001, help="CH1 current measure range (A, default 10µA)")
+    parser.add_argument("--current-measure-rng", type=float, default=0.0000001, help="CH1 current measure range (A, default 100nA). Minimum: 100nA (1e-7), Maximum: 0.8A. ⚠️ Single-channel mode may show range saturation - current may scale with range setting rather than actual DUT current")
     parser.add_argument("--dut-res", type=float, default=1e6, help="DUT resistance (Ohm)")
     parser.add_argument("--sample-rate", type=float, default=200e6, help="Sample rate (Sa/s)")
     parser.add_argument("--pulse-avg-cnt", type=int, default=1, help="Pulse averaging count")

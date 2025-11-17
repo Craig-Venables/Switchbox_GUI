@@ -60,6 +60,7 @@ double ret_Define_SegmentsILimit(double *v, double *t, int pts, double bias);
 BOOL LPTIsInCurrentConfiguration(char* hrid);
 
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts) ;
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts) ;
 
 int debug = 0;
 int details = 0;
@@ -241,6 +242,7 @@ double ret_Define_SegmentsILimit(double *v, double *t, int pts, double bias);
 BOOL LPTIsInCurrentConfiguration(char* hrid);
 
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts) ;
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts) ;
 
 int debug = 0;
 int details = 0;
@@ -283,10 +285,22 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
    //Define Seqments:
   ttime = ret_Define_SegmentsILimit(Volts, Times, volts_size - 1, MeasureBias);
 
+  // Find minimum segment time for optimal rate selection
+  double min_seg_time_found = 1.0;  // Start with a large value
+  for(i = 0; i < times_size; i++)
+  {
+    if(Times[i] > 0.0 && Times[i] < min_seg_time_found)
+    {
+      min_seg_time_found = Times[i];
+    }
+  }
+  if(debug) printf("%s: Minimum segment time in waveform: %.2e s\n", mod, min_seg_time_found);
+
   //determine required number of points and required rate
   //number of points should not exceed user defined max_pts and function max: MAXPTS (10000)
+  // Use enhanced rate selection that considers minimum segment time
 
-  used_rate = ret_getRate(ttime, max_pts, &allocate_pts, &NumDataPts);
+  used_rate = ret_getRateWithMinSeg(ttime, max_pts, min_seg_time_found, &allocate_pts, &NumDataPts);
   if(0 > used_rate)
   {
      if(debug) printf("%s: used rate is invalid!\n", mod);
@@ -420,9 +434,52 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
   // problem is here with segtime
 
   // Validate segment times before calling seg_arb_sequence
-  // Minimum segment time for Keithley 4200A is typically 2e-8 seconds (20 ns)
-  const double min_seg_time = 2e-8;  // Minimum segment time in seconds
-  const double max_seg_time = 3600.0;  // Maximum segment time (1 hour)
+  // Minimum segment time must be sufficient for the selected sample rate
+  // Need at least 4-5 samples per segment for reliable measurement
+  // This is DYNAMIC: adapts to sample rate automatically
+  //   - High sample rates (e.g., 200 MHz): allows very short segments (~25ns)
+  //   - Low sample rates (e.g., 10 kHz): allows longer segments (~500µs)
+  //   - Maximum segment time: 3600s (1 hour) - no practical limit for long measurements
+  // The rate is automatically selected by ret_getRateWithMinSeg() based on total waveform time,
+  //   max_points, AND minimum segment time, optimizing for short waveforms (high rate) or long waveforms (low rate)
+  const double absolute_min_seg_time = 2e-8;  // Absolute minimum: 20 ns (hardware limit)
+  const double sample_period = 1.0 / (double)used_rate;  // Sample period in seconds
+  const double rate_min_seg_time = 5.0 * sample_period;  // Need at least 5 samples per segment
+  // The rate was selected via ret_getRateWithMinSeg() to support min_seg_time_found
+  // For validation, we should use the actual minimum segment time found in the waveform,
+  // since that's what exists and the rate selection should have ensured compatibility.
+  // However, we must ensure it's at least the absolute hardware minimum (20ns)
+  double validation_min = absolute_min_seg_time;
+  if(min_seg_time_found > 0.0)
+  {
+    // Use the actual minimum found, but ensure it's >= absolute minimum
+    validation_min = (min_seg_time_found > absolute_min_seg_time) ? min_seg_time_found : absolute_min_seg_time;
+    
+    // Warn if rate-based minimum is higher than actual minimum (rate may have been constrained)
+    double rate_based_min = (rate_min_seg_time > absolute_min_seg_time) ? rate_min_seg_time : absolute_min_seg_time;
+    if(rate_based_min > min_seg_time_found)
+    {
+      if(debug) printf("%s: WARNING: Rate-based min (%.2e s) > actual min segment (%.2e s) - rate may be constrained by total time\n",
+        mod, rate_based_min, min_seg_time_found);
+      // Even though rate-based min is higher, we validate against actual minimum
+      // because the rate selection should have ensured the rate supports it
+      // (if it doesn't, that's a rate selection bug, but we'll catch it in hardware)
+    }
+  }
+  else
+  {
+    // No minimum found, use rate-based minimum
+    validation_min = (rate_min_seg_time > absolute_min_seg_time) ? rate_min_seg_time : absolute_min_seg_time;
+  }
+  const double min_seg_time = validation_min;
+  const double max_seg_time = 3600.0;  // Maximum segment time: 1 hour (no practical limit)
+  
+  if (debug)
+  {
+    printf("%s: Sample rate: %d Hz, sample period: %.2e s, rate-based min segment time: %.2e s\n",
+      mod, used_rate, sample_period, rate_min_seg_time);
+    printf("%s: Using minimum segment time: %.2e s\n", mod, min_seg_time);
+  }
   int invalid_seg = -1;
   double invalid_time = 0.0;
   int increm;
@@ -746,18 +803,26 @@ double ret_Define_SegmentsILimit(double *v, double *t, int pts, double bias)
 
 __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int *npts) 
 {
+  // Call the enhanced version with no minimum segment time constraint
+  return ret_getRateWithMinSeg(ttime, maxpts, 0.0, apts, npts);
+}
+
+// Enhanced version that considers minimum segment time for optimal rate selection
+__declspec( dllexport ) int ret_getRateWithMinSeg(double ttime, int maxpts, double min_seg_time, int *apts, int *npts) 
+{
   char mod [] = "ret_getRate";
   int usedrate;
   int usedpts;
   int min_rate;
+  int max_rate_from_seg = 0;
 
   int n = 1;
   int rate_found = 0;
   
-  int max_pts = 30000;
+  int max_pts = 1000000;
   int default_rate = 200000000;
   int max_devider = 1000;
-
+  
   
   min_rate = (int) default_rate/max_devider;
 
@@ -771,22 +836,84 @@ __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int
       goto RD;
   }
 
+  // If minimum segment time is provided, calculate maximum allowed rate
+  // Need at least 5 samples per segment: min_seg_time >= 5 * sample_period
+  // So: sample_period <= min_seg_time / 5
+  // And: max_rate <= 1 / (min_seg_time / 5) = 5 / min_seg_time
+  if(min_seg_time > 0.0)
+  {
+    max_rate_from_seg = (int)(5.0 / min_seg_time);
+    if(max_rate_from_seg > default_rate)
+      max_rate_from_seg = default_rate;
+    if(max_rate_from_seg < min_rate)
+      max_rate_from_seg = min_rate;
+    
+    if(debug) printf("%s: Minimum segment time: %.2e s, maximum rate constraint: %d Hz\n", 
+      mod, min_seg_time, max_rate_from_seg);
+  }
+
   //let's calculate the rate first
   usedrate = default_rate;
+  
+  // If we have a segment time constraint, start with the lower of default_rate and max_rate_from_seg
+  if(max_rate_from_seg > 0 && max_rate_from_seg < default_rate)
+  {
+    usedrate = max_rate_from_seg;
+    // Find the divider that gives us this rate or lower
+    n = (int)((double)default_rate / (double)max_rate_from_seg);
+    if(n < 1) n = 1;
+  }
 
   while(rate_found == 0 && n < max_devider * 2)
   {
         usedrate = (int) (default_rate/n);
+        
+        // CRITICAL: Never exceed the maximum rate allowed by minimum segment time
+        // If we need a lower rate for total time, that's fine, but we can't go higher
+        if(max_rate_from_seg > 0 && usedrate > max_rate_from_seg)
+        {
+          // Rate too high for minimum segment time - this should not happen if we started correctly
+          // But if total time forces us to try higher rates, we must cap it
+          usedrate = max_rate_from_seg;
+          // Ensure we don't go below minimum rate
+          if(usedrate < min_rate)
+          {
+            if(debug) printf("%s: ERROR: Cannot satisfy constraints - min_seg_time requires rate <= %d Hz, but min_rate is %d Hz\n",
+              mod, max_rate_from_seg, min_rate);
+            usedrate = -3;  // Error: conflicting constraints
+            goto RD;
+          }
+        }
+        
         usedpts = (int)(ttime * usedrate + 2);
         if(usedpts < maxpts)
         {
+            // Verify this rate works for minimum segment time (should always be true due to check above)
+            if(max_rate_from_seg > 0 && usedrate > max_rate_from_seg)
+            {
+              // This shouldn't happen, but if it does, try next lower rate
+              n++;
+              continue;
+            }
             rate_found = 1;
             break;
         }
         else
         {
+            // Total time constraint requires lower rate - increment n to try lower rate
             n++;
+            // But ensure we don't violate segment time constraint on next iteration
+            // (the check at top of loop will handle this)
         }
+  }
+  
+  // Final check: if we found a rate but it violates segment time constraint, that's an error
+  if(rate_found && max_rate_from_seg > 0 && usedrate > max_rate_from_seg)
+  {
+    if(debug) printf("%s: ERROR: Selected rate %d Hz violates minimum segment time constraint (max allowed: %d Hz)\n",
+      mod, usedrate, max_rate_from_seg);
+    usedrate = -3;
+    goto RD;
   }
 
   if(usedrate < min_rate)
@@ -800,7 +927,17 @@ __declspec( dllexport ) int ret_getRate(double ttime, int maxpts, int *apts, int
   *npts = (int) (ttime * usedrate + 0.5);
 
   RD:
-  if(debug)printf("%s: used rate: %d used pts: %d allocate pts: %d maximum points: %d\n", mod, usedrate, *npts, *apts, maxpts);
+  if(debug)
+  {
+    printf("%s: used rate: %d used pts: %d allocate pts: %d maximum points: %d\n", mod, usedrate, *npts, *apts, maxpts);
+    if(min_seg_time > 0.0)
+    {
+      double sample_period = 1.0 / (double)usedrate;
+      double actual_min_seg_time = 5.0 * sample_period;
+      printf("%s: sample period: %.2e s, minimum segment time supported: %.2e s\n", 
+        mod, sample_period, actual_min_seg_time);
+    }
+  }
 
   return usedrate;
 /* USRLIB MODULE END  */
