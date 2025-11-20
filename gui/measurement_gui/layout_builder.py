@@ -1636,7 +1636,7 @@ class MeasurementGUILayoutBuilder:
                      font=self.FONT_MAIN, width=15).grid(row=3, column=1, sticky='ew', pady=5, padx=(10, 10))
             
             gui.optical_led_frame.columnconfigure(1, weight=1)
-            gui.optical_led_frame.pack(fill='x')
+            # Frame is already positioned using grid() in _build_optical_section, don't pack it again
             
         elif opt_type == 'Laser':
             # Laser configuration
@@ -1678,7 +1678,7 @@ class MeasurementGUILayoutBuilder:
                      font=self.FONT_MAIN, width=15).grid(row=5, column=3, sticky='ew', pady=5, padx=(10, 10))
             
             gui.optical_laser_frame.columnconfigure(1, weight=1)
-            gui.optical_laser_frame.pack(fill='x')
+            # Frame is already positioned using grid() in _build_optical_section, don't pack it again
     
     # ------------------------------------------------------------------
     # TAB 4: Custom Measurements (full interface)

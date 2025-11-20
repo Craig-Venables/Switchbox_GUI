@@ -398,22 +398,28 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
     }
     
     // Build CH1 segments
-    // For seg_arb waveform measurement, use meastype=2 and measure full segment duration
+    // For seg_arb waveform measurement, use appropriate PULSE_MEAS_* constants
     // Following working example: measstart=0, measstop=segtime for each segment
     int idx = 0;
+    // Determine measurement type based on acqType:
+    // - acqType == 1: PULSE_MEAS_WFM_BURST (Waveform per Burst - averages all repeated waveforms together)
+    // - acqType == 0: PULSE_MEAS_WFM_PER (Waveform per Period - discrete waveforms, one per period)
+    // NOTE: Both are WAVEFORM measurements (full sampled data), NOT spot mean (single value per segment)
+    // For spot mean, we would use PULSE_MEAS_SMEAN_BURST or PULSE_MEAS_SMEAN_PER instead
+    long waveform_meas_type = (acqType == 1) ? PULSE_MEAS_WFM_BURST : PULSE_MEAS_WFM_PER; 
     
     // Segment 0: Pre-delay (at baseV) - no measurement
     // If delay is 0, use minimum segment time to avoid invalid parameter
     double seg0_time = (delay > 0) ? delay : min_seg_time;
     ch1_startv[idx] = baseV; ch1_stopv[idx] = baseV; ch1_segtime[idx] = seg0_time;
     ch1_ssrctrl[idx] = 1; ch1_segtrigout[idx] = 1;  // First segment triggers
-    ch1_meastype[idx] = 0; ch1_measstart[idx] = 0.0; ch1_measstop[idx] = 0.0;  // No measurement
+    ch1_meastype[idx] = PULSE_MEAS_NONE; ch1_measstart[idx] = 0.0; ch1_measstop[idx] = 0.0;  // No measurement
     idx++;
     
     // Segment 1: Rise (baseV -> startV) - measure full segment
     ch1_startv[idx] = baseV; ch1_stopv[idx] = startV; ch1_segtime[idx] = rise;
     ch1_ssrctrl[idx] = 1; ch1_segtrigout[idx] = 0;
-    ch1_meastype[idx] = 2;  // Waveform measurement (type 2, not 3!)
+    ch1_meastype[idx] = waveform_meas_type;
     ch1_measstart[idx] = 0.0;  // Start of segment
     ch1_measstop[idx] = rise;  // End of segment (full duration)
     idx++;
@@ -421,7 +427,7 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
     // Segment 2: Width (at startV) - measure full segment (this is where 40-80% window will be extracted)
     ch1_startv[idx] = startV; ch1_stopv[idx] = startV; ch1_segtime[idx] = width;
     ch1_ssrctrl[idx] = 1; ch1_segtrigout[idx] = 0;
-    ch1_meastype[idx] = 2;  // Waveform measurement (type 2, not 3!)
+    ch1_meastype[idx] = waveform_meas_type;
     ch1_measstart[idx] = 0.0;  // Start of segment
     ch1_measstop[idx] = width;  // End of segment (full duration)
     idx++;
@@ -429,7 +435,7 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
     // Segment 3: Fall (startV -> baseV) - measure full segment
     ch1_startv[idx] = startV; ch1_stopv[idx] = baseV; ch1_segtime[idx] = fall;
     ch1_ssrctrl[idx] = 1; ch1_segtrigout[idx] = 0;
-    ch1_meastype[idx] = 2;  // Waveform measurement (type 2, not 3!)
+    ch1_meastype[idx] = waveform_meas_type;
     ch1_measstart[idx] = 0.0;  // Start of segment
     ch1_measstop[idx] = fall;  // End of segment (full duration)
     idx++;
@@ -439,13 +445,13 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
     double seg4_time = (ch1_post_delay > 0) ? ch1_post_delay : min_seg_time;
     ch1_startv[idx] = baseV; ch1_stopv[idx] = baseV; ch1_segtime[idx] = seg4_time;
     ch1_ssrctrl[idx] = 1; ch1_segtrigout[idx] = 0;  // Relays closed
-    ch1_meastype[idx] = 0; ch1_measstart[idx] = 0.0; ch1_measstop[idx] = 0.0;
+    ch1_meastype[idx] = PULSE_MEAS_NONE; ch1_measstart[idx] = 0.0; ch1_measstop[idx] = 0.0;
     idx++;
     
     // Segment 5: Final segment - ensure we end at 0V with relays closed
     ch1_startv[idx] = baseV; ch1_stopv[idx] = 0.0; ch1_segtime[idx] = min_seg_time;
     ch1_ssrctrl[idx] = 1; ch1_segtrigout[idx] = 0;  // Relays closed
-    ch1_meastype[idx] = 0; ch1_measstart[idx] = 0.0; ch1_measstop[idx] = 0.0;
+    ch1_meastype[idx] = PULSE_MEAS_NONE; ch1_measstart[idx] = 0.0; ch1_measstop[idx] = 0.0;
     
     if(debug) 
     {
@@ -521,6 +527,21 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
         printf("CH1 seg_arb configured: %d segments, loop count=%d\n", ch1_num_segments, burstCount);
         printf("  Total CH1 duration: %.6g s (%d pulses @ %.6g s period)\n", 
                burstCount * period, burstCount, period);
+    }
+    
+    // Also set load resistance to help PMU optimize current measurement
+    if (!LLEComp || !PMUMode)
+    {
+        status = pulse_load(pulserId, chan, DUTRes);
+        if (status)
+        {
+            if(debug) printf("WARNING: pulse_load CH1 failed: %d (may affect current measurement)\n", status);
+            // Don't return error, as pulse_load might not be critical for all configurations
+        }
+        else if(debug)
+        {
+            printf("Configured CH1 load resistance: %.2e Ohms (helps optimize current measurement)\n", DUTRes);
+        }
     }
     
     // Free CH1 segment arrays (seg_arb_sequence has copied data to hardware)
@@ -886,6 +907,17 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
         }
     }
 
+    // CRITICAL: In seg_arb mode, measurement is controlled by meastype[] in seg_arb_sequence()
+    // DO NOT call pulse_meas_wfm() or pulse_meas_sm() - these are for simple pulse mode only
+    // The Python minimum working example confirms: seg_arb uses meas_type[] array, not pulse_meas_*()
+    // Our meastype[] is already set to PULSE_MEAS_WFM_PER or PULSE_MEAS_WFM_BURST for measured segments
+    // and PULSE_MEAS_NONE for non-measured segments, which is correct.
+    if(debug) 
+    {
+        printf("Seg_arb mode: Measurement controlled by meastype[] in seg_arb_sequence()\n");
+        printf("  NOT using pulse_meas_wfm() - that's for simple pulse mode only\n");
+    }
+    
     // Set test execute mode to Simple or Advanced
     if (PMUMode ==0)
         TestMode = PULSE_MODE_SIMPLE;
@@ -895,7 +927,7 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
     if(debug) printf("About to execute: TestMode=%d, CH1 burstCount=%d, CH2 enabled=%d\n", TestMode, burstCount, Ch2Enable);
     
     // Execute both channels together
-    if(debug) printf("Executing pulses (CH1 simple + CH2 seg_arb)...\n");
+    if(debug) printf("Executing pulses (CH1 seg_arb + CH2 seg_arb)...\n");
     status = pulse_exec(TestMode);
     if (status)
     {
@@ -1021,6 +1053,26 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
             printf("  Avg current: %.6e A (%.3f µA)\n", avgI, avgI*1e6);
             printf("  Current range (max-min): %.6e A (%.3f nA)\n", currentRange, currentRange*1e9);
             printf("  Measurement range: %.6e A (%.1f µA)\n", currentMeasureRng, currentMeasureRng*1e6);
+            
+            // Calculate expected current for a 100kΩ resistor at 1V
+            double expected_current_100k = 1.0 / 100000.0;  // 10µA
+            printf("\n[DEBUG] Expected vs Measured Current:\n");
+            printf("  For 100kΩ @ 1V: Expected = %.3f µA\n", expected_current_100k*1e6);
+            printf("  Measured average = %.3f µA\n", avgI*1e6);
+            printf("  Ratio (measured/expected) = %.1f\n", avgI / expected_current_100k);
+            
+            if(fabs(avgI) > 10.0 * expected_current_100k)
+            {
+                printf("  ⚠️  CRITICAL: Measured current is >10x expected for 100kΩ!\n");
+                printf("     This strongly suggests pulse_fetch() in single-channel seg_arb mode\n");
+                printf("     is returning SOURCE/FORCED current, not MEASURED DUT current!\n");
+                printf("     \n");
+                printf("     SOLUTION: Single-channel seg_arb mode may not support accurate\n");
+                printf("     current measurement. Consider:\n");
+                printf("     1. Using dual-channel mode (CH1 force, CH2 measure) if possible\n");
+                printf("     2. Using simple pulse mode instead of seg_arb for CH1\n");
+                printf("     3. Verifying physical connections (4-wire vs 2-wire)\n");
+            }
             
             // Check if current is suspiciously close to range limit
             if(fabs(avgI) > 0.8 * currentMeasureRng)

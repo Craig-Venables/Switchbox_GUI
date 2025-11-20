@@ -140,6 +140,20 @@ from gui.measurement_gui.plot_panels import MeasurementPlotPanels
 from gui.measurement_gui.plot_updaters import PlotUpdaters
 from gui.pulse_testing_gui import TSPTestingGUI
 
+# Import cyclical IV sweep functions for 4200A (conditional import)
+# Using importlib to avoid issues with directory names starting with numbers
+try:
+    import importlib
+    _smu_iv_sweep_module = importlib.import_module('Equipment.SMU_AND_PMU.4200A.C_Code_with_python_scripts.A_Iv_Sweep.run_smu_vi_sweep')
+    KXCIClient = _smu_iv_sweep_module.KXCIClient
+    build_ex_command = _smu_iv_sweep_module.build_ex_command
+    format_param = _smu_iv_sweep_module.format_param
+except (ImportError, AttributeError):
+    # Gracefully handle if module is not available
+    KXCIClient = None
+    build_ex_command = None
+    format_param = None
+
 # Optional dependencies --------------------------------------------------------
 try:  # PMU testing GUI is optional (requires PMU hardware stack)
     from PMU_Testing_GUI import PMUTestingGUI  # type: ignore
@@ -1276,7 +1290,7 @@ class MeasurementGUI:
         except Exception:
             self.optical = None
         
-        messagebox.showinfo("System Loaded", f"System '{system_name}' loaded successfully.")
+        # Removed "System Loaded Successfully" popup - it's misleading since connection hasn't been tested
     
     def save_system(self) -> None:
         """Save current configuration as a new system"""
@@ -1628,6 +1642,14 @@ class MeasurementGUI:
         self.ex_fh_voltage = tk.DoubleVar(value=0.2)
         self.ex_fh_duration = tk.DoubleVar(value=5.0)
         self.ex_fh_sample_dt = tk.DoubleVar(value=0.01)
+        # Cyclical IV Sweep (4200A-specific)
+        self.cyclical_vpos = tk.DoubleVar(value=2.0)      # Positive voltage (V)
+        self.cyclical_vneg = tk.DoubleVar(value=0.0)      # Negative voltage (V), 0 = auto-symmetric
+        self.cyclical_num_cycles = tk.IntVar(value=1)     # Number of cycles (1-1000)
+        self.cyclical_settle_time = tk.DoubleVar(value=0.001)  # Settling time (s), default 1ms
+        self.cyclical_ilimit = tk.DoubleVar(value=0.1)    # Current limit (A), default 0.1A
+        self.cyclical_integration_time = tk.DoubleVar(value=0.01)  # Integration time (PLC), default 0.01
+        self.cyclical_debug = tk.BooleanVar(value=True)   # Debug output (default ON)
 
         # DC Triangle configuration variables used by dynamic UI below
         # Sweep Mode and Sweep Type
@@ -1663,9 +1685,71 @@ class MeasurementGUI:
                 sweep_mode_menu.grid(row=r, column=1, sticky="ew"); r+=1
                 # Sweep Type directly below
                 tk.Label(self._excitation_params_frame, text="Sweep Type:", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
+                # Get current SMU type to conditionally show CYCLICAL option
+                smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+                sweep_type_values = ["FS", "PS", "NS"]
+                if smu_type == 'Keithley 4200A':
+                    sweep_type_values.append("CYCLICAL")  # Add cyclical option for 4200A only
                 sweep_type_menu = ttk.Combobox(self._excitation_params_frame, textvariable=self.sweep_type_var,
-                                               values=["FS", "PS", "NS"], state="readonly")
+                                               values=sweep_type_values, state="readonly")
                 sweep_type_menu.grid(row=r, column=1, sticky="ew"); r+=1
+                
+                # Cyclical-specific parameters (shown when sweep_type is CYCLICAL)
+                self._cyclical_params_frame = tk.Frame(self._excitation_params_frame, bg='#f0f0f0')
+                def update_cyclical_params_visibility(*_):
+                    sweep_type = self.sweep_type_var.get()
+                    if sweep_type == "CYCLICAL":
+                        # Show cyclical parameters
+                        self._cyclical_params_frame.grid(row=r, column=0, columnspan=2, sticky="ew", pady=(5,0))
+                        render_cyclical_params()
+                    else:
+                        # Hide cyclical parameters
+                        self._cyclical_params_frame.grid_remove()
+                
+                def render_cyclical_params():
+                    # Clear existing widgets
+                    for w in list(self._cyclical_params_frame.children.values()):
+                        try: w.destroy()
+                        except Exception: pass
+                    
+                    cr = 0
+                    tk.Label(self._cyclical_params_frame, text="Cyclical Sweep Parameters (4200A):", font=("Arial", 8, "bold"), bg='#f0f0f0', fg='blue').grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Pattern: (0V → +Vpos → Vneg → 0V) × NumCycles", fg="grey", bg='#f0f0f0', font=("Arial", 7)).grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Vpos (V):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_vpos, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Vneg (V, 0=auto-symmetric):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_vneg, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Num Cycles:", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_num_cycles, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Settle Time (s):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_settle_time, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="I Limit (A):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_ilimit, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Integration Time (PLC):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_integration_time, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Debug Output:", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Checkbutton(self._cyclical_params_frame, variable=self.cyclical_debug, bg='#f0f0f0').grid(row=cr, column=1, sticky="w"); cr+=1
+                    
+                    # Total points label (updates when cycles change)
+                    def update_total_points(*_):
+                        try:
+                            cycles = self.cyclical_num_cycles.get()
+                            total = cycles * 4
+                            for widget in reversed(list(self._cyclical_params_frame.children.values())):
+                                if isinstance(widget, tk.Label) and "Total points:" in widget.cget("text"):
+                                    widget.config(text=f"Total points: {total} (4 × {cycles} cycles)")
+                                    break
+                        except Exception:
+                            pass
+                    
+                    total_points_label = tk.Label(self._cyclical_params_frame, text=f"Total points: {self.cyclical_num_cycles.get() * 4} (4 × {self.cyclical_num_cycles.get()} cycles)", fg="grey", bg='#f0f0f0', font=("Arial", 7))
+                    total_points_label.grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
+                    self.cyclical_num_cycles.trace_add("write", update_total_points)
+                
+                sweep_type_menu.bind("<<ComboboxSelected>>", update_cyclical_params_visibility)
+                self.sweep_type_var.trace_add("write", update_cyclical_params_visibility)
+                # Initial render
+                update_cyclical_params_visibility()
 
                 # Dynamic params for mode (rendered in place of Step/Delay at rows 5 and 6 below)
                 # Prepare alternating widgets (created lazily when needed)
@@ -2739,53 +2823,108 @@ class MeasurementGUI:
 
                     # Route to appropriate measurement based on measurement_type
                     if measurement_type == "IV":
-                        # Optional per-sweep negative stop voltage: params override UI field
-                        neg_stop_v_param = None
-                        try:
-                            if 'neg_stop_v' in params:
-                                neg_stop_v_param = float(params.get('neg_stop_v'))
-                            elif 'Vneg' in params:
-                                neg_stop_v_param = float(params.get('Vneg'))
+                        # Check if this is a cyclical sweep (4200A only)
+                        if sweep_type == "CYCLICAL":
+                            if KXCIClient is None or build_ex_command is None:
+                                print("ERROR: Cyclical sweep requires KXCI client, but module is not available")
+                                messagebox.showerror("Module Not Available", 
+                                                    "Cyclical sweep requires the KXCI module.\n"
+                                                    "Please ensure the 4200A C module is properly installed.")
+                                continue
+                            
+                            smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
+                            if smu_type != 'Keithley 4200A':
+                                print(f"ERROR: Cyclical sweep (CYCLICAL) is only available for Keithley 4200A, not {smu_type}")
+                                messagebox.showerror("Invalid SMU Type", 
+                                                    f"Cyclical sweep is only available for Keithley 4200A.\n"
+                                                    f"Current SMU: {smu_type}\n"
+                                                    f"Please change SMU type or select a different sweep type.")
+                                continue
+                            
+                            # Get cyclical parameters from GUI variables or params
+                            if hasattr(self, 'cyclical_vpos'):
+                                vpos = self.cyclical_vpos.get()
+                                vneg = self.cyclical_vneg.get()
+                                num_cycles = self.cyclical_num_cycles.get()
+                                settle_time = self.cyclical_settle_time.get()
+                                ilimit = self.cyclical_ilimit.get()
+                                integration_time = self.cyclical_integration_time.get()
+                                debug = 1 if self.cyclical_debug.get() else 0
                             else:
-                                raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
-                                if raw_neg != "":
-                                    neg_stop_v_param = float(raw_neg)
-                        except Exception:
+                                # Fallback to params if GUI vars don't exist
+                                vpos = float(params.get("vpos", stop_v if stop_v > 0 else 2.0))
+                                vneg = float(params.get("vneg", 0.0))
+                                num_cycles = int(params.get("num_cycles", 1))
+                                settle_time = float(params.get("settle_time", step_delay if step_delay > 0 else 0.001))
+                                ilimit = float(params.get("ilimit", icc_val if icc_val > 0 else 0.1))
+                                integration_time = float(params.get("integration_time", 0.01))
+                                debug = 1 if _is_truthy(params.get("debug", True)) else 0
+                            
+                            def _on_point(v, i, t_s):
+                                self.v_arr_disp.append(v)
+                                self.c_arr_disp.append(i)
+                                self.t_arr_disp.append(t_s)
+                            
+                            # Execute cyclical sweep via 4200A system wrapper (manager pattern)
+                            v_arr, c_arr, timestamps = self._run_cyclical_iv_sweep_via_manager(
+                                vpos=vpos,
+                                vneg=vneg,
+                                num_cycles=num_cycles,
+                                settle_time=settle_time,
+                                ilimit=ilimit,
+                                integration_time=integration_time,
+                                debug=debug,
+                                on_point=_on_point
+                            )
+                        else:
+                            # Standard triangle IV sweep (FS/PS/NS)
+                            # Optional per-sweep negative stop voltage: params override UI field
                             neg_stop_v_param = None
-                        voltage_range = self.measurement_service.compute_voltage_range(
-                            start_v=start_v,
-                            stop_v=stop_v,
-                            step_v=step_v,
-                            sweep_type=sweep_type,
-                            mode=VoltageRangeMode.FIXED_STEP,
-                            neg_stop_v=neg_stop_v_param,
-                        )
-                        
-                        def _on_point(v, i, t_s):
-                            self.v_arr_disp.append(v)
-                            self.c_arr_disp.append(i)
-                            self.t_arr_disp.append(t_s)
-                        
-                        v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
-                            keithley=self.keithley,
-                            start_v=start_v,
-                            stop_v=stop_v,
-                            step_v=step_v,
-                            sweeps=sweeps,
-                            step_delay=step_delay,
-                            sweep_type=sweep_type,
-                            icc=icc_val,
-                            psu=getattr(self, 'psu', None),
-                            led=led,
-                            power=power,
-                            optical=getattr(self, 'optical', None),
-                            sequence=sequence,
-                            pause_s=pause,
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            source_mode=source_mode,
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=_on_point
-                        )
+                            try:
+                                if 'neg_stop_v' in params:
+                                    neg_stop_v_param = float(params.get('neg_stop_v'))
+                                elif 'Vneg' in params:
+                                    neg_stop_v_param = float(params.get('Vneg'))
+                                else:
+                                    raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
+                                    if raw_neg != "":
+                                        neg_stop_v_param = float(raw_neg)
+                            except Exception:
+                                neg_stop_v_param = None
+                            voltage_range = self.measurement_service.compute_voltage_range(
+                                start_v=start_v,
+                                stop_v=stop_v,
+                                step_v=step_v,
+                                sweep_type=sweep_type,
+                                mode=VoltageRangeMode.FIXED_STEP,
+                                neg_stop_v=neg_stop_v_param,
+                            )
+                            
+                            def _on_point(v, i, t_s):
+                                self.v_arr_disp.append(v)
+                                self.c_arr_disp.append(i)
+                                self.t_arr_disp.append(t_s)
+                            
+                            v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                                keithley=self.keithley,
+                                start_v=start_v,
+                                stop_v=stop_v,
+                                step_v=step_v,
+                                sweeps=sweeps,
+                                step_delay=step_delay,
+                                sweep_type=sweep_type,
+                                icc=icc_val,
+                                psu=getattr(self, 'psu', None),
+                                led=led,
+                                power=power,
+                                optical=getattr(self, 'optical', None),
+                                sequence=sequence,
+                                pause_s=pause,
+                                smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                                source_mode=source_mode,
+                                should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                                on_point=_on_point
+                            )
 
                     elif measurement_type == "Endurance":
                         set_v = float(self.end_set_v.get())
@@ -3033,6 +3172,271 @@ class MeasurementGUI:
             self.master.after(0, lambda: getattr(messagebox, kind)(*args, **kwargs))
         except Exception:
             pass
+
+    def _get_4200a_system_wrapper(self):
+        """Get or create a 4200A system wrapper instance for cyclical sweep.
+        
+        Returns:
+            Keithley4200ASystem instance or None if not available
+        
+        Note:
+            This method creates a temporary system wrapper instance that connects
+            to the instrument. The caller is responsible for cleanup (disconnection).
+        """
+        try:
+            from Pulse_Testing.systems.keithley4200a import Keithley4200ASystem
+            
+            # Get GPIB address from GUI
+            gpib_address = getattr(self, 'keithley_address', None) or getattr(self, 'keithley_address_var', None)
+            if gpib_address:
+                if hasattr(gpib_address, 'get'):
+                    gpib_address = gpib_address.get()
+            else:
+                gpib_address = "GPIB0::17::INSTR"  # Default
+            
+            # Create system wrapper instance
+            system = Keithley4200ASystem()
+            
+            # Connect to instrument
+            if system.connect(gpib_address, timeout=30.0):
+                return system
+            else:
+                print(f"WARNING: Failed to connect 4200A system wrapper at {gpib_address}")
+                return None
+        except ImportError:
+            print("WARNING: 4200A system wrapper not available (Pulse_Testing.systems.keithley4200a)")
+            return None
+        except Exception as e:
+            print(f"WARNING: Failed to create 4200A system wrapper: {e}")
+            return None
+    
+    def _run_cyclical_iv_sweep_via_manager(
+        self,
+        vpos: float,
+        vneg: float,
+        num_cycles: int,
+        settle_time: float,
+        ilimit: float,
+        integration_time: float,
+        debug: int,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """Run cyclical IV sweep via 4200A system wrapper (manager pattern).
+        
+        This method uses the 4200A system wrapper which encapsulates the KXCI
+        communication and provides a clean interface for the cyclical sweep.
+        The wrapper uses SMU1 for measurements (correct channel).
+        
+        Args:
+            vpos: Positive voltage (V)
+            vneg: Negative voltage (V), 0 = auto-symmetric
+            num_cycles: Number of cycles (1-1000)
+            settle_time: Settling time at each voltage point (s)
+            ilimit: Current compliance limit (A)
+            integration_time: Measurement integration time (PLC)
+            debug: Debug output flag (0 or 1)
+            on_point: Optional callback for each data point (v, i, t)
+        
+        Returns:
+            Tuple of (voltage_list, current_list, timestamp_list)
+        """
+        system = None
+        try:
+            # Get 4200A system wrapper
+            system = self._get_4200a_system_wrapper()
+            if system is None:
+                raise RuntimeError("Failed to get 4200A system wrapper - ensure 4200A is selected and connected")
+            
+            # Execute cyclical sweep via system wrapper
+            result = system.cyclical_iv_sweep(
+                vpos=vpos,
+                vneg=vneg,
+                num_cycles=num_cycles,
+                settle_time=settle_time,
+                ilimit=ilimit,
+                integration_time=integration_time,
+                debug=debug,
+            )
+            
+            # Extract data from result
+            voltage = result.get('voltage', [])
+            current = result.get('current', [])
+            timestamps = result.get('timestamp', [])
+            
+            # Call on_point callback if provided
+            if on_point is not None:
+                for v, i, t in zip(voltage, current, timestamps):
+                    if hasattr(self, 'stop_measurement_flag') and self.stop_measurement_flag:
+                        break
+                    try:
+                        on_point(v, i, t)
+                    except Exception as e:
+                        print(f"Warning: on_point callback failed: {e}")
+            
+            return (voltage, current, timestamps)
+            
+        except Exception as e:
+            error_msg = f"Cyclical IV sweep failed: {e}"
+            print(f"ERROR: {error_msg}")
+            messagebox.showerror("Cyclical IV Sweep Error", error_msg)
+            return ([], [], [])
+        finally:
+            # Cleanup: disconnect system wrapper
+            if system is not None:
+                try:
+                    system.disconnect()
+                except Exception:
+                    pass
+    
+    def _run_cyclical_iv_sweep_kxci(
+        self,
+        vpos: float,
+        vneg: float,
+        num_cycles: int,
+        settle_time: float,
+        ilimit: float,
+        integration_time: float,
+        debug: int,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Execute cyclical IV sweep using KXCI (Keithley 4200A only).
+        
+        Pattern: (0V → +Vpos → Vneg → 0V) × NumCycles
+        Total points = 4 × NumCycles
+        
+        Args:
+            vpos: Positive voltage (V)
+            vneg: Negative voltage (V), 0 = auto-symmetric with -vpos
+            num_cycles: Number of cycles to repeat
+            settle_time: Settling time at each voltage point (s)
+            ilimit: Current compliance limit (A)
+            integration_time: Measurement integration time (PLC)
+            debug: Debug output flag (0 or 1)
+            on_point: Optional callback for each measurement point (v, i, t)
+            
+        Returns:
+            Tuple of (voltage_array, current_array, timestamps)
+        """
+        # Get GPIB address from GUI
+        gpib_address = getattr(self, 'keithley_address_var', None)
+        if gpib_address is None or not hasattr(gpib_address, 'get'):
+            gpib_address_str = getattr(self, 'keithley_address', 'GPIB0::17::INSTR')
+        else:
+            gpib_address_str = gpib_address.get()
+        
+        # Validate parameters
+        if vpos < 0:
+            raise ValueError(f"Vpos ({vpos}) must be >= 0")
+        if vneg > 0:
+            raise ValueError(f"Vneg ({vneg}) must be <= 0 (use 0 for auto-symmetric)")
+        if not (1 <= num_cycles <= 1000):
+            raise ValueError(f"NumCycles ({num_cycles}) must be between 1 and 1000")
+        
+        # Calculate total points
+        num_points = 4 * num_cycles
+        
+        # Create KXCI client
+        controller = KXCIClient(gpib_address=gpib_address_str, timeout=30.0)
+        
+        try:
+            # Connect to instrument
+            if not controller.connect():
+                raise RuntimeError(f"Failed to connect to Keithley 4200A at {gpib_address_str}")
+            
+            # Enter UL mode
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            
+            # Build and execute EX command
+            command = build_ex_command(
+                vpos=vpos,
+                vneg=vneg,
+                num_cycles=num_cycles,
+                num_points=num_points,
+                settle_time=settle_time,
+                ilimit=ilimit,
+                integration_time=integration_time,
+                clarius_debug=debug,
+            )
+            
+            print(f"\n[Cyclical IV Sweep] Executing KXCI command:")
+            vneg_display = vneg if vneg != 0 else -vpos
+            print(f"  Pattern: (0V → +{vpos}V → {vneg_display}V → 0V) × {num_cycles} cycles")
+            print(f"  Total points: {num_points}")
+            print(f"  Settle time: {settle_time*1000:.1f} ms")
+            print(f"  Current limit: {ilimit:.2e} A")
+            print(f"  Integration time: {integration_time:.6f} PLC")
+            print(f"  Debug: {'ON' if debug else 'OFF'}")
+            
+            return_value, error = controller._execute_ex_command(command)
+            
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+            if return_value is not None and return_value < 0:
+                error_messages = {
+                    -1: "Invalid Vpos (must be >= 0) or Vneg (must be <= 0)",
+                    -2: "NumIPoints != NumVPoints (array size mismatch)",
+                    -3: "NumIPoints != 4 × NumCycles (array size must equal 4 × number of cycles)",
+                    -4: "Invalid array sizes (NumIPoints or NumVPoints < 4)",
+                    -5: "Invalid NumCycles (must be >= 1 and <= 1000)",
+                    -6: "forcev() failed (check SMU connection and voltage range)",
+                    -7: "measi() failed (check SMU connection)",
+                    -8: "limiti() failed (check current limit value)",
+                    -9: "setmode() failed (check SMU connection)",
+                }
+                msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
+                raise RuntimeError(f"EX command returned error code: {return_value} - {msg}")
+            
+            # Wait a bit for measurement to complete
+            time.sleep(0.5)
+            
+            # Query data from GP parameters
+            # GP parameter 6 = Vforce (6th parameter in function signature)
+            # GP parameter 4 = Imeas (4th parameter in function signature)
+            print(f"[Cyclical IV Sweep] Retrieving {num_points} data points...")
+            voltage = controller._query_gp(6, num_points)  # Vforce
+            current = controller._query_gp(4, num_points)  # Imeas
+            
+            print(f"[Cyclical IV Sweep] Received: {len(voltage)} voltage, {len(current)} current samples")
+            
+            # Ensure arrays are same length and filter out any trailing zeros
+            min_len = min(len(voltage), len(current))
+            voltage = voltage[:min_len]
+            current = current[:min_len]
+            
+            # Filter trailing zeros (C module may allocate more space than filled)
+            while min_len > 0 and voltage[min_len-1] == 0.0 and current[min_len-1] == 0.0:
+                min_len -= 1
+            if min_len < len(voltage):
+                voltage = voltage[:min_len]
+                current = current[:min_len]
+                print(f"[Cyclical IV Sweep] Filtered to {min_len} valid points (removed trailing zeros)")
+            
+            # Generate timestamps (estimate based on settle_time and number of points)
+            # Each point takes approximately settle_time + integration_time
+            time_per_point = settle_time + (integration_time * 0.01)  # Rough estimate: 1 PLC ≈ 0.01s
+            timestamps = [i * time_per_point for i in range(len(voltage))]
+            
+            # Call on_point callback if provided
+            if on_point is not None:
+                for v, i, t in zip(voltage, current, timestamps):
+                    if hasattr(self, 'stop_measurement_flag') and self.stop_measurement_flag:
+                        break
+                    try:
+                        on_point(v, i, t)
+                    except Exception as e:
+                        print(f"Warning: on_point callback failed: {e}")
+            
+            return (voltage, current, timestamps)
+            
+        finally:
+            # Cleanup: exit UL mode and disconnect
+            try:
+                controller._exit_ul_mode()
+                controller.disconnect()
+            except Exception:
+                pass
 
     def _safe_get_float(self, var: Any, name: str, default: Optional[float] = None) -> Optional[float]:
         try:

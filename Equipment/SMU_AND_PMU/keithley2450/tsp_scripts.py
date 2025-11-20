@@ -806,12 +806,19 @@ class Keithley2450_TSP_Scripts:
                                      steps: int = 20,
                                      num_cycles: int = 1,
                                      delay_between: float = 10e-3,
+                                     delay_between_pulses: Optional[float] = None,
+                                     delay_before_read: float = 10e-6,
                                      clim: float = 100e-3) -> Dict:
         """Full potentiation then depression cycle, repeated N times. FAST buffer-based.
         
         Pattern: Initial Read → (Potentiation → Depression) × num_cycles
         """
         print(f"Starting FAST potentiation-depression cycle: {num_cycles} cycle(s), {steps} steps each phase")
+        
+        if delay_between_pulses is None:
+            delay_between_pulses = delay_between
+        delay_between_pulses = max(delay_between_pulses, 0.0)
+        delay_before_read = max(delay_before_read, 0.0)
         
         start_time = time.time()
         total_measurements = 1 + (steps * 2 * num_cycles)  # Initial read + (pot + dep) × cycles
@@ -840,7 +847,8 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write(f'smu.source.level = {read_voltage}')
         self.tsp.device.write('smu.measure.read(defbuffer1)')
         self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write('delay(0.000010)')
+        if delay_before_read > 0:
+            self.tsp.device.write(f'delay({delay_before_read})')
         # Main cycle loop: (Potentiation → Depression) × num_cycles
         self.tsp.device.write(f'for cycle = 1, {num_cycles} do')
         # Potentiation phase
@@ -849,10 +857,11 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write(f'    delay({pulse_width})')
         self.tsp.device.write('    smu.source.level = 0')
         self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write(f'    if {delay_before_read:.9g} > 0 then delay({delay_before_read}) end')
         self.tsp.device.write(f'    smu.source.level = {read_voltage}')
         self.tsp.device.write('    smu.measure.read(defbuffer1)')
         self.tsp.device.write('    smu.source.level = 0')
-        self.tsp.device.write(f'    if step < {steps} then delay({delay_between}) end')
+        self.tsp.device.write(f'    if step < {steps} then delay({delay_between_pulses}) end')
         self.tsp.device.write('  end')
         # Depression phase
         self.tsp.device.write(f'  for step = 1, {steps} do')
@@ -860,10 +869,11 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write(f'    delay({pulse_width})')
         self.tsp.device.write('    smu.source.level = 0')
         self.tsp.device.write('    delay(0.000010)')
+        self.tsp.device.write(f'    if {delay_before_read:.9g} > 0 then delay({delay_before_read}) end')
         self.tsp.device.write(f'    smu.source.level = {read_voltage}')
         self.tsp.device.write('    smu.measure.read(defbuffer1)')
         self.tsp.device.write('    smu.source.level = 0')
-        self.tsp.device.write(f'    if step < {steps} then delay({delay_between}) end')
+        self.tsp.device.write(f'    if step < {steps} then delay({delay_between_pulses}) end')
         self.tsp.device.write('  end')
         self.tsp.device.write('end')
         self.tsp.device.write('smu.source.autorange = smu.ON')
@@ -876,7 +886,8 @@ class Keithley2450_TSP_Scripts:
         # Calculate expected duration for proper timeout
         # Pattern: Initial read + num_cycles × (potentiation + depression)
         # Each step: pulse_width + 0.00001 settle + read_time (~0.001) + delay_between
-        time_per_step = pulse_width + 0.00001 + 0.001 + delay_between
+        read_measure_time = 0.001
+        time_per_step = pulse_width + delay_before_read + read_measure_time + delay_between_pulses
         time_per_cycle = steps * 2 * time_per_step  # Potentiation + Depression
         expected_duration = 0.001 + num_cycles * time_per_cycle + 0.5  # Initial read + cycles + safety margin
         print(f"  Expected duration: {expected_duration:.2f}s")
@@ -946,7 +957,7 @@ class Keithley2450_TSP_Scripts:
                     steps_per_cycle = steps * 2  # Potentiation + Depression
                     step_in_cycle = step_idx % steps_per_cycle
                     phase = 'potentiation' if step_in_cycle < steps else 'depression'
-                    ts = 0.001 + step_idx * (pulse_width + 0.001 + delay_between)
+                    ts = 0.001 + step_idx * (pulse_width + delay_before_read + 0.001 + delay_between_pulses)
                 v = read_voltage
                 r = v / i if abs(i) > 1e-12 else 1e12
                 timestamps.append(ts)
@@ -968,6 +979,8 @@ class Keithley2450_TSP_Scripts:
                          read_voltage: float = 0.2,
                          num_pulses: int = 20,
                          delay_between: float = 10e-3,
+                         delay_between_pulses: Optional[float] = None,
+                         delay_before_read: float = 10e-6,
                          num_post_reads: int = 0,
                          post_read_interval: float = 1e-3,
                          clim: float = 100e-3) -> Dict:
@@ -1007,17 +1020,22 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write(f'smu.source.level = {read_voltage}')
         self.tsp.device.write('smu.measure.read(defbuffer1)')
         self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write('delay(0.000010)')
+        if delay_between_pulses is None:
+            delay_between_pulses = delay_between
+        delay_between_pulses = max(delay_between_pulses, 0.0)
+        delay_before_read = max(delay_before_read, 0.0)
+        if delay_before_read > 0:
+            self.tsp.device.write(f'delay({delay_before_read})')
         # Main pulse loop
         self.tsp.device.write(f'for pulse = 1, {num_pulses} do')
         self.tsp.device.write(f'  smu.source.level = {set_voltage}')
         self.tsp.device.write(f'  delay({pulse_width})')
         self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write('  delay(0.000010)')
+        self.tsp.device.write(f'  if {delay_before_read:.9g} > 0 then delay({delay_before_read}) end')
         self.tsp.device.write(f'  smu.source.level = {read_voltage}')
         self.tsp.device.write('  smu.measure.read(defbuffer1)')
         self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write(f'  if pulse < {num_pulses} then delay({delay_between}) end')
+        self.tsp.device.write(f'  if pulse < {num_pulses} then delay({delay_between_pulses}) end')
         self.tsp.device.write('end')
         # Post-pulse reads (optional)
         if post_reads_enabled:
@@ -1038,7 +1056,8 @@ class Keithley2450_TSP_Scripts:
         
         # Calculate expected duration for proper timeout
         # Pattern: Initial read + num_pulses × (pulse_width + settle + read_time + delay_between) + post_reads
-        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between  # Pulse + settle + read + delay
+        read_measure_time = 0.001
+        time_per_pulse = pulse_width + delay_before_read + read_measure_time + delay_between_pulses  # Pulse + settle + read + delay
         pulse_phase_time = num_pulses * time_per_pulse
         post_read_time = num_post_reads * (post_read_interval + 0.001) if post_reads_enabled else 0
         expected_duration = 0.001 + pulse_phase_time + post_read_time + 0.5  # Initial read + pulses + post_reads + safety margin
@@ -1090,7 +1109,7 @@ class Keithley2450_TSP_Scripts:
                     print(f"  Initial read: R = {r:.2e} Ω")
                 else:
                     pulse = idx - 1  # Pulse number (idx 0 is initial read)
-                    ts = 0.001 + pulse * (pulse_width + 0.001 + delay_between)
+                    ts = 0.001 + pulse * (pulse_width + delay_before_read + 0.001 + delay_between_pulses)
                     if (pulse + 1) % 5 == 0 or pulse == num_pulses - 1:
                         print(f"  Pulse {pulse+1}/{num_pulses}: R = {r:.2e} Ω")
                 timestamps.append(ts)
@@ -1109,6 +1128,8 @@ class Keithley2450_TSP_Scripts:
                        read_voltage: float = 0.2,
                        num_pulses: int = 20,
                        delay_between: float = 10e-3,
+                       delay_between_pulses: Optional[float] = None,
+                       delay_before_read: float = 10e-6,
                        num_post_reads: int = 0,
                        post_read_interval: float = 1e-3,
                        clim: float = 100e-3) -> Dict:
@@ -1148,17 +1169,22 @@ class Keithley2450_TSP_Scripts:
         self.tsp.device.write(f'smu.source.level = {read_voltage}')
         self.tsp.device.write('smu.measure.read(defbuffer1)')
         self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write('delay(0.000010)')
+        if delay_between_pulses is None:
+            delay_between_pulses = delay_between
+        delay_between_pulses = max(delay_between_pulses, 0.0)
+        delay_before_read = max(delay_before_read, 0.0)
+        if delay_before_read > 0:
+            self.tsp.device.write(f'delay({delay_before_read})')
         # Main pulse loop
         self.tsp.device.write(f'for pulse = 1, {num_pulses} do')
         self.tsp.device.write(f'  smu.source.level = {reset_voltage}')
         self.tsp.device.write(f'  delay({pulse_width})')
         self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write('  delay(0.000010)')
+        self.tsp.device.write(f'  if {delay_before_read:.9g} > 0 then delay({delay_before_read}) end')
         self.tsp.device.write(f'  smu.source.level = {read_voltage}')
         self.tsp.device.write('  smu.measure.read(defbuffer1)')
         self.tsp.device.write('  smu.source.level = 0')
-        self.tsp.device.write(f'  if pulse < {num_pulses} then delay({delay_between}) end')
+        self.tsp.device.write(f'  if pulse < {num_pulses} then delay({delay_between_pulses}) end')
         self.tsp.device.write('end')
         # Post-pulse reads (optional)
         if post_reads_enabled:
@@ -1179,7 +1205,8 @@ class Keithley2450_TSP_Scripts:
         
         # Calculate expected duration for proper timeout
         # Pattern: Initial read + num_pulses × (pulse_width + settle + read_time + delay_between) + post_reads
-        time_per_pulse = pulse_width + 0.00001 + 0.001 + delay_between  # Pulse + settle + read + delay
+        read_measure_time = 0.001
+        time_per_pulse = pulse_width + delay_before_read + read_measure_time + delay_between_pulses  # Pulse + settle + read + delay
         pulse_phase_time = num_pulses * time_per_pulse
         post_read_time = num_post_reads * (post_read_interval + 0.001) if post_reads_enabled else 0
         expected_duration = 0.001 + pulse_phase_time + post_read_time + 0.5  # Initial read + pulses + post_reads + safety margin
@@ -1231,7 +1258,7 @@ class Keithley2450_TSP_Scripts:
                     print(f"  Initial read: R = {r:.2e} Ω")
                 else:
                     pulse = idx - 1  # Pulse number (idx 0 is initial read)
-                    ts = 0.001 + pulse * (pulse_width + 0.001 + delay_between)
+                    ts = 0.001 + pulse * (pulse_width + delay_before_read + 0.001 + delay_between_pulses)
                     if (pulse + 1) % 5 == 0 or pulse == num_pulses - 1:
                         print(f"  Pulse {pulse+1}/{num_pulses}: R = {r:.2e} Ω")
                 timestamps.append(ts)
