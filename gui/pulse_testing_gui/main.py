@@ -72,6 +72,7 @@ File Structure:
 # Ensure project root is on sys.path for imports when running directly
 import sys
 from pathlib import Path
+import math
 
 # Get project root (go up from gui/pulse_testing_gui/ to project root)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]  # gui/pulse_testing_gui/main.py -> gui -> root
@@ -247,7 +248,10 @@ TEST_FUNCTIONS = {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "steps": {"default": 20, "label": "Steps (each direction)", "type": "int"},
             "num_cycles": {"default": 1, "label": "Number of Cycles", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "delay_between_cycles": {"default": 10.0, "label": "Delay Between Cycles (ms)", "type": "float"},
+            "delay_between_pulses": {"default": 10.0, "label": "Delay Between Pulses (ms)", "type": "float"},
+            "delay_before_read": {"default": 0.02, "label": "Delay Before Read (ms)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "pot_dep_cycle",
@@ -261,7 +265,10 @@ TEST_FUNCTIONS = {
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_pulses": {"default": 30, "label": "Number of Pulses", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "delay_between_cycles": {"default": 10.0, "label": "Delay Between Cycles (ms)", "type": "float"},
+            "delay_between_pulses": {"default": 10.0, "label": "Delay Between Pulses (ms)", "type": "float"},
+            "delay_before_read": {"default": 0.02, "label": "Delay Before Read (ms)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "num_post_reads": {"default": 0, "label": "Post-Pulse Reads (0=disabled)", "type": "int"},
             "post_read_interval": {"default": 1.0, "label": "Post-Read Interval (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
@@ -279,7 +286,10 @@ TEST_FUNCTIONS = {
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_pulses": {"default": 30, "label": "Number of Pulses", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
+            "delay_between_cycles": {"default": 10.0, "label": "Delay Between Cycles (ms)", "type": "float"},
+            "delay_between_pulses": {"default": 10.0, "label": "Delay Between Pulses (ms)", "type": "float"},
+            "delay_before_read": {"default": 0.02, "label": "Delay Before Read (ms)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "num_post_reads": {"default": 0, "label": "Post-Pulse Reads (0=disabled)", "type": "int"},
             "post_read_interval": {"default": 1.0, "label": "Post-Read Interval (ms)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
@@ -762,6 +772,17 @@ class TSPTestingGUI(tk.Toplevel):
         tk.Button(preset_frame, text="🗑️ Del", command=self.delete_preset, 
                  font=("TkDefaultFont", 8), width=6).pack(side=tk.LEFT, padx=2)
         
+        # Time unit dropdown on the right
+        unit_options = ["ns", "µs", "ms", "s"]
+        default_unit = "µs" if getattr(self, 'current_system_name', None) in ('keithley4200a',) else "ms"
+        self.time_unit_var = tk.StringVar(value=default_unit)
+        # Store previous unit to track changes
+        self.previous_unit = default_unit
+        unit_combo = ttk.Combobox(preset_frame, textvariable=self.time_unit_var, values=unit_options,
+                                  state="readonly", width=6, justify='center')
+        unit_combo.pack(side=tk.RIGHT, padx=(5, 0))
+        unit_combo.bind("<<ComboboxSelected>>", lambda e: self._on_unit_changed())
+        
         # Scrollable frame with increased height
         canvas = tk.Canvas(frame, height=450)  # Height set to 450 pixels to show more parameters
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
@@ -1170,6 +1191,13 @@ class TSPTestingGUI(tk.Toplevel):
             if connected_system in ('keithley2450', 'keithley2450_sim'):
                 self.log(f"✓ Terminals: {self.terminals_var.get().upper()}")
             
+            # Update unit selector based on connected system
+            if hasattr(self, 'time_unit_var'):
+                default_unit = "µs" if connected_system in ('keithley4200a',) else "ms"
+                self.previous_unit = getattr(self, 'previous_unit', default_unit)
+                self.time_unit_var.set(default_unit)
+                self.previous_unit = default_unit
+            
             # Update test list based on capabilities - this greys out unsupported tests
             self._update_test_list_capabilities()
             
@@ -1278,6 +1306,114 @@ class TSPTestingGUI(tk.Toplevel):
         # Update pulse diagram
         self.update_pulse_diagram()
     
+    def _on_unit_changed(self):
+        """Handle unit dropdown changes - preserve current values and convert units"""
+        # Determine if we're using 4200A (needed for conversion logic)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        
+        # Save current parameter values before repopulating
+        saved_values = {}
+        if hasattr(self, 'param_vars') and self.param_vars:
+            # Get the new unit (what was just selected)
+            if hasattr(self, 'time_unit_var'):
+                new_unit = self.time_unit_var.get()
+            else:
+                new_unit = 'µs' if is_4200a else 'ms'
+            
+            # Get the old unit (what it was before the change)
+            old_unit = getattr(self, 'previous_unit', None)
+            if old_unit is None:
+                # Fallback to system default
+                old_unit = 'µs' if is_4200a else 'ms'
+            
+            # Update previous_unit for next time
+            self.previous_unit = new_unit
+            
+            # Unit conversion factors to seconds
+            unit_to_seconds = {
+                'ns': 1e-9,
+                'µs': 1e-6,
+                'ms': 1e-3,
+                's': 1.0
+            }
+            
+            time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
+                          'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
+                          'post_read_interval', 'reset_width', 'delay_between_voltages', 
+                          'delay_between_levels']
+            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
+            
+            for param_name, param_info in self.param_vars.items():
+                try:
+                    var = param_info["var"]
+                    param_type = param_info["type"]
+                    is_time_param = param_info.get("is_time_param", False)
+                    
+                    if param_type == "float":
+                        value_str = var.get()
+                        if value_str:  # Only save if there's a value
+                            value = float(value_str)
+                            
+                            # Convert from old unit to new unit
+                            if param_name in read_pulse_params and is_4200a:
+                                # For 4200A read pulse params, they're always in µs
+                                # Convert: old_unit → seconds → µs → new_unit
+                                old_to_sec = unit_to_seconds.get(old_unit, 1e-3)
+                                sec_to_new = 1.0 / unit_to_seconds.get(new_unit, 1e-3)
+                                # If old unit was µs, value is already in µs
+                                if old_unit == 'µs':
+                                    value_in_us = value
+                                else:
+                                    # Convert from old unit to µs
+                                    value_in_seconds = value * old_to_sec
+                                    value_in_us = value_in_seconds / 1e-6
+                                # Convert from µs to new unit
+                                value_in_seconds = value_in_us * 1e-6
+                                saved_values[param_name] = value_in_seconds * sec_to_new
+                            elif param_name == 'delay_before_read' and is_4200a:
+                                # Similar handling for delay_before_read (always in µs for 4200A)
+                                if old_unit == 'µs':
+                                    value_in_us = value
+                                else:
+                                    old_to_sec = unit_to_seconds.get(old_unit, 1e-3)
+                                    value_in_seconds = value * old_to_sec
+                                    value_in_us = value_in_seconds / 1e-6
+                                # Convert from µs to new unit
+                                value_in_seconds = value_in_us * 1e-6
+                                sec_to_new = 1.0 / unit_to_seconds.get(new_unit, 1e-3)
+                                saved_values[param_name] = value_in_seconds * sec_to_new
+                            elif is_time_param or param_name in time_params:
+                                # Regular time parameter: convert from old unit to new unit
+                                old_to_sec = unit_to_seconds.get(old_unit, 1e-3)
+                                sec_to_new = 1.0 / unit_to_seconds.get(new_unit, 1e-3)
+                                value_in_seconds = value * old_to_sec
+                                saved_values[param_name] = value_in_seconds * sec_to_new
+                            else:
+                                saved_values[param_name] = value
+                    elif param_type == "int":
+                        value_str = var.get()
+                        if value_str:
+                            saved_values[param_name] = int(value_str)
+                    elif param_type == "bool":
+                        saved_values[param_name] = var.get()
+                except (ValueError, AttributeError):
+                    # Skip invalid values
+                    pass
+        
+        # Repopulate parameters (this will create new fields with defaults)
+        self.populate_parameters()
+        
+        # Restore saved values (converted to new unit)
+        if saved_values and hasattr(self, 'param_vars'):
+            for param_name, value in saved_values.items():
+                if param_name in self.param_vars:
+                    try:
+                        self.param_vars[param_name]["var"].set(str(value))
+                    except (KeyError, AttributeError):
+                        pass
+        
+        self.update_pulse_diagram()
+
     def populate_parameters(self):
         """Populate parameter inputs based on selected test"""
         # Check if test_var exists yet (might not during initial UI creation)
@@ -1321,23 +1457,55 @@ class TSPTestingGUI(tk.Toplevel):
         is_4200a = self.current_system_name in ('keithley4200a',)
         # Time parameters that should be in µs for 4200A
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
+                      'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 'post_read_interval',
                       'reset_width', 'delay_between_voltages', 'delay_between_levels']
         
         # Default values for 4200A (in µs) - different from 2450 defaults
         # For 4200A, we want 1 µs for pulse_width and delays, not 1000 µs (1 ms)
         defaults_4200a = {
-            'pulse_width': 1.0,  # 1 µs
-            'delay_between': 10.0,  # 10 µs
+            'pulse_width': 1.0,  # 1 µs (matches example: 1e-6 s = 1 µs)
+            'delay_between': 10.0,  # 10 µs (for pulse_read_repeat, matches example: 1e-6 s = 1 µs for pulse_delay)
+            'delay_between_cycles': 10.0,  # 10 µs
             'delay_between_pulses': 1.0,  # 1 µs
             'delay_between_reads': 10.0,  # 10 µs
-            'delay_between_cycles': 10.0,  # 10 µs
+            'delay_before_read': 0.02,  # 0.02 µs = 20 ns (minimum allowed by 4200A)
+            'read_width': 0.5,  # 0.5 µs (matches example: 0.5e-6 s = 0.5 µs)
+            'read_delay': 1.0,  # 1 µs (matches example: 1e-6 s = 1 µs)
+            'read_rise_time': 0.1,  # 0.1 µs (matches example: 1e-7 s = 0.1 µs)
             'post_read_interval': 1.0,  # 1 µs
             'reset_width': 1.0,  # 1 µs
             'delay_between_voltages': 1000.0,  # 1000 µs = 1 ms
             'delay_between_levels': 1000.0,  # 1000 µs = 1 ms
         }
-        
+
+        if hasattr(self, 'time_unit_var'):
+            selected_unit = self.time_unit_var.get()
+        else:
+            selected_unit = 'µs' if is_4200a else 'ms'
+
+        unit_to_seconds = {
+            'ns': 1e-9,
+            'µs': 1e-6,
+            'ms': 1e-3,
+            's': 1.0
+        }
+
+        def extract_unit(label):
+            import re
+            match = re.search(r'\(([^)]+)\)', label)
+            if not match:
+                return None
+            token = match.group(1).lower()
+            if 'ns' in token:
+                return 'ns'
+            if 'µs' in token or 'us' in token:
+                return 'µs'
+            if 'ms' in token:
+                return 'ms'
+            if 's' in token:
+                return 's'
+            return None
+
         # Categorize parameters into sections
         pulse_params = []
         read_params = []
@@ -1348,7 +1516,7 @@ class TSPTestingGUI(tk.Toplevel):
         pulse_keywords = ['pulse', 'set_voltage', 'reset_voltage', 'laser_voltage']
         read_keywords = ['read', 'meas']
         general_keywords = ['num_cycles', 'num_pulses', 'num_reads', 'steps', 'delay_between_cycles', 
-                           'delay_between', 'delay_between_widths', 'delay_between_voltages', 'delay_between_levels']
+                           'delay_between_widths', 'delay_between_voltages', 'delay_between_levels']
         other_keywords = ['clim', 'enable_debug', 'sample_rate', 'volts_source', 'current_measure', 
                          'pulse_widths', 'pulse_voltage_step']
         
@@ -1389,17 +1557,23 @@ class TSPTestingGUI(tk.Toplevel):
             label = param_info["label"]
             default_value = param_info["default"]
             
-            if is_4200a and param_name in time_params:
-                # Convert label from (ms) to (µs)
-                if "(ms)" in label:
-                    label = label.replace("(ms)", "(µs)")
-                # Use 4200A-specific defaults (in µs) if available, otherwise convert from ms
-                if param_name in defaults_4200a:
-                    default_value = defaults_4200a[param_name]
-                elif isinstance(default_value, (int, float)):
-                    # Fallback: convert from ms to µs (multiply by 1000)
-                    default_value = default_value * 1000.0
-            
+            if param_name in time_params:
+                import re
+                base_unit = extract_unit(label) or ('µs' if is_4200a else 'ms')
+                # Replace unit in parentheses, handling cases like "(ms)", "(µs)", "(ms) [4200A only]", etc.
+                if '(' in label:
+                    # Match pattern like "(ms)", "(µs)", "(ms) [4200A only]", etc.
+                    # Replace the first occurrence of unit in parentheses with the selected unit
+                    # This handles "Delay Before Read (ms)" -> "Delay Before Read (µs)"
+                    label = re.sub(r'\([^)]*\)', f'({selected_unit})', label, count=1)
+                else:
+                    label = f"{label} ({selected_unit})"
+                if isinstance(default_value, (int, float)):
+                    if is_4200a and param_name in defaults_4200a:
+                        base_seconds = defaults_4200a[param_name] * 1e-6
+                    else:
+                        base_seconds = default_value * unit_to_seconds.get(base_unit, 1.0)
+                    default_value = base_seconds / unit_to_seconds.get(selected_unit, 1e-3)
             # Label
             tk.Label(self.params_frame, text=label, anchor="w").grid(
                 row=current_row, column=0, sticky="w", padx=5, pady=2)
@@ -1468,16 +1642,37 @@ class TSPTestingGUI(tk.Toplevel):
     def get_test_parameters(self):
         """Extract and validate parameters"""
         params = {}
-        # Time parameters that need conversion to seconds for internal use
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
-                      'reset_width', 'delay_between_voltages', 'delay_between_levels']
+                      'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
+                      'post_read_interval', 'reset_width', 'delay_between_voltages', 
+                      'delay_between_levels']
         
-        # Read pulse parameters for 4200A (stay in µs, passed directly to function)
         read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
-        
-        # Check if current system is 4200A (values are in µs, need to convert to seconds)
+        laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
+        # Parameters that 4200A expects in µs (not seconds)
+        # These are converted to µs in the GUI, so the wrapper should NOT convert them again
+        params_4200a_in_us = ['pulse_width', 'delay_between_pulses', 'delay_between_cycles', 'delay_between', 
+                              'delay_between_reads', 'reset_width']
         is_4200a = self.current_system_name in ('keithley4200a',)
+        
+        if hasattr(self, 'time_unit_var'):
+            selected_unit = self.time_unit_var.get()
+        else:
+            selected_unit = 'µs' if is_4200a else 'ms'
+        
+        unit_to_seconds = {
+            'ns': 1e-9,
+            'µs': 1e-6,
+            'ms': 1e-3,
+            's': 1.0
+        }
+        
+        def to_seconds(value):
+            return value * unit_to_seconds.get(selected_unit, 1e-3)
+        
+        def to_microseconds(value):
+            factor = unit_to_seconds.get(selected_unit, 1e-3)
+            return (value * factor) / 1e-6
         
         for param_name, param_info in self.param_vars.items():
             var = param_info["var"]
@@ -1486,40 +1681,43 @@ class TSPTestingGUI(tk.Toplevel):
             
             try:
                 if param_type == "bool":
-                    # Boolean/checkbox parameter
                     params[param_name] = var.get()
                 elif param_type == "int":
-                    value_str = var.get()
-                    params[param_name] = int(value_str)
+                    params[param_name] = int(var.get())
                 elif param_type == "float":
-                    value_str = var.get()
-                    value = float(value_str)
-                    # Read pulse parameters for 4200A: keep in µs (function expects µs)
+                    value = float(var.get())
                     if param_name in read_pulse_params and is_4200a:
-                        params[param_name] = value  # Keep in µs
-                    # Convert time parameters to seconds
+                        params[param_name] = to_microseconds(value)
+                    elif param_name in laser_params and is_4200a:
+                        # Laser parameters are labeled in µs, convert to µs for 4200A
+                        params[param_name] = to_microseconds(value)
+                    elif param_name == 'delay_before_read' and is_4200a:
+                        # Convert to µs and enforce minimum of 0.02 µs (20 ns) for 4200A
+                        delay_us = to_microseconds(value)
+                        if delay_us < 0.02:
+                            delay_us = 0.02  # Minimum allowed by 4200A (2e-8 seconds = 20 ns)
+                        params[param_name] = delay_us
+                    elif param_name in params_4200a_in_us and is_4200a:
+                        # For 4200A, these parameters need to be in µs (will be converted to seconds in system wrapper)
+                        param_us = to_microseconds(value)
+                        # Enforce minimum of 0.02 µs (20 ns) for pulse_delay and similar parameters
+                        if param_name in ['delay_between_pulses', 'pulse_width'] and param_us < 0.02:
+                            param_us = 0.02  # Minimum allowed by 4200A (2e-8 seconds = 20 ns)
+                        params[param_name] = param_us
+                        # Debug: print conversion for verification
+                        print(f"[GUI] {param_name}: {value} {selected_unit} → {param_us:.2f} µs")
                     elif is_time_param:
-                        if is_4200a:
-                            # 4200A: values are in µs, convert to seconds
-                            value = value / 1e6  # µs → s
-                        else:
-                            # 2450: values are in ms, convert to seconds
-                            value = value / 1000.0  # ms → s
-                        params[param_name] = value
+                        params[param_name] = to_seconds(value)
                     else:
                         params[param_name] = value
                 elif param_type == "list":
-                    value_str = var.get()
-                    # Parse comma-separated list
-                    params[param_name] = [float(x.strip()) for x in value_str.split(",")]
+                    params[param_name] = [float(x.strip()) for x in var.get().split(",")]
                 else:
-                    value_str = var.get()
-                    params[param_name] = value_str
+                    params[param_name] = var.get()
             except Exception as e:
                 raise ValueError(f"Invalid value for {param_name}: {e}")
         
         return params
-    
     def run_test(self):
         """Start test in background thread"""
         if not self.system_wrapper.is_connected():
@@ -1694,9 +1892,19 @@ class TSPTestingGUI(tk.Toplevel):
         timestamps = self.last_results.get('timestamps', [])
         resistances = self.last_results.get('resistances', [])
         
-        # Filter out invalid values (inf, nan, negative)
-        valid_data = [(t, r) for t, r in zip(timestamps, resistances) 
-                     if r > 0 and not (r == float('inf') or r != r)]
+        # Filter out invalid values (NaN/inf/zero) and use magnitude so negative resistances still render
+        valid_data = []
+        for t, r in zip(timestamps, resistances):
+            if r is None:
+                continue
+            if r == 0:
+                continue
+            if math.isnan(r) or math.isinf(r):
+                continue
+            display_r = abs(r)
+            if display_r == 0:
+                continue
+            valid_data.append((t, display_r))
         
         if not valid_data:
             self.ax.text(0.5, 0.5, 'No valid data to plot\n(All values are invalid or negative)', 
@@ -2681,11 +2889,28 @@ class TSPTestingGUI(tk.Toplevel):
         
         try:
             # Get current parameters (with fallbacks)
-            # Check if current system is 4200A (values are in µs)
             is_4200a = self.current_system_name in ('keithley4200a',)
             time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                          'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
-                          'reset_width', 'delay_between_voltages', 'delay_between_levels']
+                          'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
+                          'post_read_interval', 'reset_width', 'delay_between_voltages', 
+                          'delay_between_levels']
+            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
+            laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
+            
+            # Get selected unit
+            if hasattr(self, 'time_unit_var'):
+                selected_unit = self.time_unit_var.get()
+            else:
+                selected_unit = "µs" if is_4200a else "ms"
+            
+            # Conversion factors to seconds
+            unit_to_seconds = {
+                "ns": 1e-9,
+                "µs": 1e-6,
+                "ms": 1e-3,
+                "s": 1.0
+            }
+            conversion_factor = unit_to_seconds.get(selected_unit, 1e-3)
             
             params = {}
             for key, info in self.param_vars.items():
@@ -2693,18 +2918,39 @@ class TSPTestingGUI(tk.Toplevel):
                     val = info["var"].get()
                     if info["type"] == "float":
                         value = float(val)
-                        # Convert µs to seconds for diagram (diagram expects seconds)
-                        if is_4200a and info.get("is_time_param", False):
-                            value = value / 1e6  # µs → s
-                        params[key] = value
+                        # Convert from selected unit to seconds for diagram (diagram expects seconds)
+                        is_time_param = info.get("is_time_param", False)
+                        if key in read_pulse_params and is_4200a:
+                            # For 4200A read pulse params, convert from selected unit to µs, then to seconds
+                            if selected_unit == "ns":
+                                params[key] = (value / 1000.0) * 1e-6
+                            elif selected_unit == "µs":
+                                params[key] = value * 1e-6
+                            elif selected_unit == "ms":
+                                params[key] = (value * 1000.0) * 1e-6
+                            elif selected_unit == "s":
+                                params[key] = (value * 1e6) * 1e-6
+                            else:
+                                params[key] = value * 1e-6
+                        elif key in laser_params or is_time_param or key in time_params:
+                            # Convert from selected unit to seconds
+                            params[key] = value * conversion_factor
+                        else:
+                            params[key] = value
                     elif info["type"] == "int":
                         params[key] = int(val)
                     elif info["type"] == "list":
                         params[key] = [float(x.strip()) for x in val.split(",")]
                     else:
                         params[key] = val
-                except:
-                    params[key] = 1.0  # Fallback value
+                except Exception as e:
+                    # Fallback value based on parameter type
+                    if info["type"] == "float":
+                        params[key] = 1.0
+                    elif info["type"] == "int":
+                        params[key] = 1
+                    else:
+                        params[key] = ""
             
             # Draw pattern based on test type
             if "Pulse-Read-Repeat" in test_name:
@@ -2762,18 +3008,18 @@ class TSPTestingGUI(tk.Toplevel):
         delay = params.get('delay_between', 10e-3)
         cycles = min(params.get('num_cycles', 100), 5)  # Show max 5 cycles
         
-        # Use proper read width - check if 4200A-specific parameters are provided
+        # Use proper read width - params are already in seconds from update_pulse_diagram
         is_4200a = self.current_system_name in ('keithley4200a',)
         if is_4200a:
-            # For 4200A, use read_width parameter if provided (in µs, convert to seconds)
-            read_width = params.get('read_width', 0.5) * 1e-6  # Default 0.5 µs → seconds
-            read_rise = params.get('read_rise_time', 0.1) * 1e-6  # Default 0.1 µs → seconds
-            read_delay_after = params.get('read_delay', 1.0) * 1e-6  # Default 1.0 µs → seconds
+            # For 4200A, use read_width parameter if provided (already converted to seconds)
+            read_width = params.get('read_width', 0.5e-6)  # Default 0.5 µs = 0.5e-6s
+            read_rise = params.get('read_rise_time', 0.1e-6)  # Default 0.1 µs = 0.1e-6s
+            read_delay_after = params.get('read_delay', 1.0e-6)  # Default 1.0 µs = 1.0e-6s
         else:
-            # For 2450, use ms-based defaults
-            read_width = 1e-3  # 1ms for 2450
-            read_rise = 0.1e-3  # 0.1ms rise time
-            read_delay_after = 0.1e-3  # 0.1ms delay
+            # For 2450, use ms-based defaults (already in seconds)
+            read_width = params.get('read_width', 1e-3)  # Default 1ms = 1e-3s
+            read_rise = params.get('read_rise_time', 0.1e-3)  # Default 0.1ms = 0.1e-3s
+            read_delay_after = params.get('read_delay', 0.1e-3)  # Default 0.1ms = 0.1e-3s
         
         # Initial read before any pulses
         read_start = t + read_rise  # Rise time to read voltage
@@ -2951,39 +3197,81 @@ class TSPTestingGUI(tk.Toplevel):
         reset_v = params.get('reset_voltage', -2.0)
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
-        steps = min(params.get('steps', 20), 5)
+        steps = params.get('steps', 20)  # Show all steps, not limited to 5
         num_cycles = min(params.get('num_cycles', 1), 3)  # Show max 3 cycles in diagram
         
+        # Get timing parameters (already in seconds from update_pulse_diagram)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        if is_4200a:
+            read_width = params.get('read_width', 0.5e-6)  # Already in seconds
+            read_rise = params.get('read_rise_time', 0.1e-6) if 'read_rise_time' in params else 0.1e-6
+        else:
+            read_width = params.get('read_width', 1e-3) if 'read_width' in params else 1e-3
+            read_rise = 0.1e-3
+        delay_before_read = params.get('delay_before_read', 10e-6)  # Already in seconds
+        delay_between_pulses = params.get('delay_between_pulses', 10e-3)
+        delay_between_cycles = params.get('delay_between_cycles', 10e-3)
+        
         # Initial read before any pulses
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        read_start = t + delay_before_read + read_rise
+        read_end = read_start + read_width
+        read_center = (read_start + read_end) / 2
+        read_times.append(read_center)
+        times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+        voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+        t = read_end + read_rise
         
         # Loop through cycles
         for cycle in range(num_cycles):
             # Potentiation (SET)
             for i in range(steps):
+                # Pulse
                 times.extend([t, t, t+p_w, t+p_w])
                 voltages.extend([0, set_v, set_v, 0])
-                t += p_w + 0.0001
-                read_t = t + p_w*0.15
-                read_times.append(read_t)
-                times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-                voltages.extend([0, r_v, r_v, 0])
-                t += p_w*0.3 + params.get('delay_between', 10e-3)
+                t += p_w
+                
+                # Delay before read
+                t += delay_before_read
+                
+                # Read after pulse
+                read_start = t + read_rise
+                read_end = read_start + read_width
+                read_center = (read_start + read_end) / 2
+                read_times.append(read_center)
+                times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+                voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+                t = read_end + read_rise
+                
+                # Wait before next pulse (if not last in this direction)
+                if i < steps - 1:
+                    t += delay_between_pulses
             
             # Depression (RESET)
             for i in range(steps):
+                # Pulse
                 times.extend([t, t, t+p_w, t+p_w])
                 voltages.extend([0, reset_v, reset_v, 0])
-                t += p_w + 0.0001
-                read_t = t + p_w*0.15
-                read_times.append(read_t)
-                times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-                voltages.extend([0, r_v, r_v, 0])
-                t += p_w*0.3 + params.get('delay_between', 10e-3)
+                t += p_w
+                
+                # Delay before read
+                t += delay_before_read
+                
+                # Read after pulse
+                read_start = t + read_rise
+                read_end = read_start + read_width
+                read_center = (read_start + read_end) / 2
+                read_times.append(read_center)
+                times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+                voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+                t = read_end + read_rise
+                
+                # Wait before next pulse (if not last in this direction)
+                if i < steps - 1:
+                    t += delay_between_pulses
+            
+            # Delay between cycles (between potentiation and depression, or between cycle pairs)
+            if cycle < num_cycles - 1:
+                t += delay_between_cycles
         
         times_ms = np.array(times) * 1e3
         self.diagram_ax.plot(times_ms, voltages, 'red', linewidth=2)
@@ -3010,24 +3298,50 @@ class TSPTestingGUI(tk.Toplevel):
         set_v = params.get('set_voltage', 2.0)
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
-        n = min(params.get('num_pulses', 30), 5)
+        n = params.get('num_pulses', 30)  # Show all pulses, not limited to 5
+        
+        # Get timing parameters (already in seconds from update_pulse_diagram)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        if is_4200a:
+            read_width = params.get('read_width', 0.5e-6)  # Already in seconds
+            read_rise = params.get('read_rise_time', 0.1e-6) if 'read_rise_time' in params else 0.1e-6
+        else:
+            read_width = params.get('read_width', 1e-3) if 'read_width' in params else 1e-3
+            read_rise = 0.1e-3
+        delay_before_read = params.get('delay_before_read', 10e-6)  # Already in seconds
+        delay_between_pulses = params.get('delay_between_pulses', 10e-3)
+        delay_between_cycles = params.get('delay_between_cycles', 10e-3)
         
         # Initial read before any pulses
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        read_start = t + delay_before_read + read_rise
+        read_end = read_start + read_width
+        read_center = (read_start + read_end) / 2
+        read_times.append(read_center)
+        times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+        voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+        t = read_end + read_rise
         
         for i in range(n):
+            # Pulse
             times.extend([t, t, t+p_w, t+p_w])
             voltages.extend([0, set_v, set_v, 0])
-            t += p_w + 0.0001
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between', 10e-3)
+            t += p_w
+            
+            # Delay before read
+            t += delay_before_read
+            
+            # Read after pulse
+            read_start = t + read_rise
+            read_end = read_start + read_width
+            read_center = (read_start + read_end) / 2
+            read_times.append(read_center)
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+            t = read_end + read_rise
+            
+            # Wait before next pulse (if not last)
+            if i < n - 1:
+                t += delay_between_pulses
         
         # Post-pulse reads (if enabled)
         num_post_reads = params.get('num_post_reads', 0)
@@ -3067,24 +3381,50 @@ class TSPTestingGUI(tk.Toplevel):
         reset_v = params.get('reset_voltage', -2.0)
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
-        n = min(params.get('num_pulses', 30), 5)
+        n = params.get('num_pulses', 30)  # Show all pulses, not limited to 5
+        
+        # Get timing parameters (already in seconds from update_pulse_diagram)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        if is_4200a:
+            read_width = params.get('read_width', 0.5e-6)  # Already in seconds
+            read_rise = params.get('read_rise_time', 0.1e-6) if 'read_rise_time' in params else 0.1e-6
+        else:
+            read_width = params.get('read_width', 1e-3) if 'read_width' in params else 1e-3
+            read_rise = 0.1e-3
+        delay_before_read = params.get('delay_before_read', 10e-6)  # Already in seconds
+        delay_between_pulses = params.get('delay_between_pulses', 10e-3)
+        delay_between_cycles = params.get('delay_between_cycles', 10e-3)
         
         # Initial read before any pulses
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        read_start = t + delay_before_read + read_rise
+        read_end = read_start + read_width
+        read_center = (read_start + read_end) / 2
+        read_times.append(read_center)
+        times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+        voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+        t = read_end + read_rise
         
         for i in range(n):
+            # Pulse
             times.extend([t, t, t+p_w, t+p_w])
             voltages.extend([0, reset_v, reset_v, 0])
-            t += p_w + 0.0001
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between', 10e-3)
+            t += p_w
+            
+            # Delay before read
+            t += delay_before_read
+            
+            # Read after pulse
+            read_start = t + read_rise
+            read_end = read_start + read_width
+            read_center = (read_start + read_end) / 2
+            read_times.append(read_center)
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+            t = read_end + read_rise
+            
+            # Wait before next pulse (if not last)
+            if i < n - 1:
+                t += delay_between_pulses
         
         # Post-pulse reads (if enabled)
         num_post_reads = params.get('num_post_reads', 0)
@@ -3539,46 +3879,31 @@ class TSPTestingGUI(tk.Toplevel):
             # Check if current system is 4200A (values are in µs)
             is_4200a = self.current_system_name in ('keithley4200a',)
             
-            # Extract and convert parameters (convert µs to seconds for visualizer)
+            # Extract parameters (already converted to seconds in update_pulse_diagram)
             read_voltage = params.get('read_voltage', 0.3)
-            read_width = params.get('read_width', 0.5)  # In µs
-            read_period = params.get('read_period', 2.0)  # In µs
+            read_width_s = params.get('read_width', 0.5e-6)  # Already in seconds
+            read_period_s = params.get('read_period', 2.0e-6)  # Already in seconds
             num_reads_total = params.get('num_reads', 500)  # Total number of reads for generation
             laser_voltage_high = params.get('laser_voltage_high', 1.5)
             laser_voltage_low = params.get('laser_voltage_low', 0.0)
-            laser_width = params.get('laser_width', 10.0)  # In µs
-            laser_delay = params.get('laser_delay', 5.0)  # In µs
-            laser_rise_time = params.get('laser_rise_time', 0.1)  # In µs
-            laser_fall_time = params.get('laser_fall_time', 0.1)  # In µs
-            
-            # Convert µs to seconds
-            if is_4200a:
-                read_width_s = read_width * 1e-6
-                read_period_s = read_period * 1e-6
-                laser_width_s = laser_width * 1e-6
-                laser_delay_s = laser_delay * 1e-6
-                laser_rise_time_s = laser_rise_time * 1e-6
-                laser_fall_time_s = laser_fall_time * 1e-6
-            else:
-                # 2450 uses ms, but this test is 4200A only typically
-                read_width_s = read_width * 1e-6
-                read_period_s = read_period * 1e-6
-                laser_width_s = laser_width * 1e-6
-                laser_delay_s = laser_delay * 1e-6
-                laser_rise_time_s = laser_rise_time * 1e-6
-                laser_fall_time_s = laser_fall_time * 1e-6
+            laser_width_s = params.get('laser_width', 10.0e-6)  # Already in seconds
+            laser_delay_s = params.get('laser_delay', 5.0e-6)  # Already in seconds
+            laser_rise_time_s = params.get('laser_rise_time', 0.1e-6)  # Already in seconds
+            laser_fall_time_s = params.get('laser_fall_time', 0.1e-6)  # Already in seconds
             
             # Calculate how many reads to show - ensure at least 20 reads are visible
             min_reads_to_show = 20
-            # Calculate laser end time
-            laser_end_time_us = laser_delay + laser_width + laser_fall_time
-            # Calculate time needed for 20 reads
-            time_for_20_reads_us = min_reads_to_show * read_period
+            # Calculate laser end time (in seconds)
+            laser_end_time_s = laser_delay_s + laser_width_s + laser_fall_time_s
+            # Calculate time needed for 20 reads (in seconds)
+            time_for_20_reads_s = min_reads_to_show * read_period_s
             
             # Use whichever is longer: 20 reads or full laser pulse (with some margin)
+            # Convert margin to seconds (5 µs = 5e-6 s)
+            margin_s = 5e-6
             num_reads_to_generate = max(
                 min_reads_to_show,
-                int((laser_end_time_us + 5) / read_period) + 5  # Show laser plus margin
+                int((laser_end_time_s + margin_s) / read_period_s) + 5  # Show laser plus margin
             )
             # But don't generate more than the total requested reads
             num_reads_to_generate = min(num_reads_to_generate, num_reads_total)
@@ -3667,7 +3992,8 @@ class TSPTestingGUI(tk.Toplevel):
             ax_voltage.grid(True, alpha=0.3)
             
             # Calculate x limits: show at least 20 reads OR full laser pulse (whichever is longer)
-            time_for_20_reads_us = min_reads_to_show * read_period
+            time_for_20_reads_s = min_reads_to_show * read_period_s
+            time_for_20_reads_us = time_for_20_reads_s * 1e6  # Convert to µs for display
             if laser_end_time_display_us > 0:
                 # Show whichever is longer: 20 reads or laser pulse + margin
                 max_time = max(time_for_20_reads_us, laser_end_time_display_us + 2)  # +2 µs margin after laser

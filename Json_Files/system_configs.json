@@ -33,6 +33,20 @@
             "defaults": { "level": 0.6 }
         }
     },
+    "Lab_Laser-4200A_C": {
+        "SMU_address": "GPIB0::17::INSTR",
+        "SMU Type": "Keithley 4200A",
+        "optical": {
+            "type": "Laser",
+            "driver": "Oxxius",
+            "address": "COM4",
+            "baud": 19200,
+            "units": "mW",
+            "limits": { "min": 0.0, "max": 10.0 },
+            "wavelength_nm": 405,
+            "defaults": { "level": 0.6 }
+        }
+    },
     "Lab_Laser-2450_TSP": {
         "SMU_address": "USB0::0x05E6::0x2450::04496615::INSTR",
         "SMU Type": "Keithley 2450",

@@ -606,7 +606,7 @@ Examples:
 
     # CH1 range and measurement parameters
     parser.add_argument("--volts-source-rng", type=float, default=10.0, help="CH1 voltage source range (V)")
-    parser.add_argument("--current-measure-rng", type=float, default=0.0000001, help="CH1 current measure range (A, default 100nA). Minimum: 100nA (1e-7), Maximum: 0.8A. ⚠️ Single-channel mode may show range saturation - current may scale with range setting rather than actual DUT current")
+    parser.add_argument("--current-measure-rng", type=float, default=1e-7, help="CH1 current measure range (A, default 100nA). Minimum: 100nA (1e-7), Maximum: 0.8A. ⚠️ Single-channel mode may show range saturation - current may scale with range setting rather than actual DUT current")
     parser.add_argument("--dut-res", type=float, default=1e6, help="DUT resistance (Ohm)")
     parser.add_argument("--sample-rate", type=float, default=200e6, help="Sample rate (Sa/s)")
     parser.add_argument("--pulse-avg-cnt", type=int, default=1, help="Pulse averaging count")

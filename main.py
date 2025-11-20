@@ -1,8 +1,7 @@
 import tkinter as tk
 from gui.sample_gui import SampleGUI
 
-# record data when checking for connection to see if the current increases over times
-# maybe cut off after a sharp increase is seen!
+
 #todo add non multiplexer device so that people can use it for just one device
 
 # TODO: Test Read_With_Laser_Pulse_SegArb buffer limit change (2025-01-XX)
@@ -14,21 +13,11 @@ from gui.sample_gui import SampleGUI
 # - Memory usage: ~24 MB for waveform buffers (3 arrays × 1M samples × 8 bytes)
 
 
-#ideas
+# change pulse with laser c program update on 4200
 
 
-# move the plots around a little bgger specific ones 
-# clean up led and laser intergration 
-
-
-#build specific laser gui, this homes the laser you then just select the device and it will go to said device,we need to find a way to make sure its in the correct position for this 
-#
-
-# upon testing with the switchbox you can save the heat map and load it in such that it knows which deivces dont work so you can skip them or apply high voltage too them 
-# this will be saved somewhere and you can choose the device when you load the system, if this is done samplename and additional save location should be greyed out as we know know the sample
-# but additonal info will still be there and added onto the end of the file name.
-# specific testing for a new device to create the heat map, this heat map will then show when loaded onto the initial gui.
-
+#build specific laser gui, this homes the laser you then just select the device and it will go to said device,we need to 
+# find a way to make sure its in the correct position for this 
 #temp gui
 
 
