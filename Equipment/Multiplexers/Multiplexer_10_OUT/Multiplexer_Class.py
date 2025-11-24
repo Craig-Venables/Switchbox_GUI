@@ -1,6 +1,14 @@
-import nidaqmx
 import time
-from nidaqmx.constants import LineGrouping
+
+# Optional nidaqmx import - required only for hardware mode
+try:
+    import nidaqmx
+    from nidaqmx.constants import LineGrouping
+    NIDAQMX_AVAILABLE = True
+except ImportError:
+    nidaqmx = None
+    LineGrouping = None
+    NIDAQMX_AVAILABLE = False
 
 """ Multiplexer class for controlling the multiplexer, Truth table is required to be boolean it cannot be 1,0!"""
 
@@ -42,6 +50,8 @@ class MultiplexerController:
         """
         Get device name, either from parameter or by finding first available device
         """
+        if not NIDAQMX_AVAILABLE:
+            raise RuntimeError("nidaqmx package not installed. Install it or use simulation_mode=True")
         try:
             system = nidaqmx.system.System.local()
             available_devices = [device.name for device in system.devices]
@@ -91,6 +101,8 @@ class MultiplexerController:
                     print(f"[SIMULATION]   EN={en}, A3={a3}, A2={a2}, A1={a1}, A0={a0}")
             else:
                 # Real hardware mode
+                if not NIDAQMX_AVAILABLE:
+                    raise RuntimeError("nidaqmx package not installed. Cannot use hardware mode without nidaqmx.")
                 with nidaqmx.Task() as task:
                     # Configure digital output lines
                     task.do_channels.add_do_chan(f"{self.device_name}/port0/line0:4", line_grouping=LineGrouping.CHAN_PER_LINE)
@@ -101,8 +113,11 @@ class MultiplexerController:
 
             self.current_channel = channel
 
-        except nidaqmx.DaqError as e:
-            raise ConnectionError(f"Failed to set channel: {e}")
+        except Exception as e:
+            if NIDAQMX_AVAILABLE and isinstance(e, nidaqmx.DaqError):
+                raise ConnectionError(f"Failed to set channel: {e}")
+            else:
+                raise
 
     def disable(self):
         """Disable the multiplexer by setting all lines to 0"""
