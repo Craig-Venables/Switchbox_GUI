@@ -1,2 +1,6 @@
 /Data_save_loc
 *.pyc
+
+# PyInstaller build outputs
+dist/
+build/
