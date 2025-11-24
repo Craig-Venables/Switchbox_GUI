@@ -118,7 +118,10 @@ sample_config = {
         "devices": [str(i) for i in range(1, 11)]},
     "Device_Array_10": {
         "sections": {"A": True},
-        "devices": [str(i) for i in range(1, 11)]}}
+        "devices": [str(i) for i in range(1, 11)]},
+    "15x15mm": {
+        "sections": {"A": True, "B": True, "C": True, "D": True},
+        "devices": [str(i) for i in range(1, 10)]}}
 
 multiplexer_types = {'Pyswitchbox': {}, 'Electronic_Mpx': {}}
 
@@ -2669,6 +2672,8 @@ class SampleGUI:
             image_path = BASE_DIR / "Helpers" / "Sample_Infomation" / "memristor.png"
         elif sample == 'Device_Array_10':
             image_path = BASE_DIR / "Helpers" / "Sample_Infomation" / "Multiplexer_10_OUT.jpg"
+        elif sample == '15x15mm':
+            image_path = BASE_DIR / "Helpers" / "Sample_Infomation" / "15mmx15mm.JPG"
 
         if image_path is None:
             self.log_terminal(f"No image path defined for sample: {sample}", "WARNING")
