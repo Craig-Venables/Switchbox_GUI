@@ -86,7 +86,7 @@ class Keithley4200A_KXCI:
     and retrieving measurement results.
     """
     
-    def __init__(self, gpib_address: str = "GPIB0::17::INSTR", timeout: float = 30.0):
+    def __init__(self, gpib_address: str = "GPIB0::17::INSTR", timeout: float = 30.0, debug: bool = False):
         """
         Initialize GPIB connection to Keithley 4200A.
         
@@ -99,6 +99,7 @@ class Keithley4200A_KXCI:
         self.rm: Optional[pyvisa.ResourceManager] = None
         self.inst: Optional[pyvisa.Resource] = None
         self._ul_mode_active = False
+        self._debug = bool(debug)
         
     def connect(self) -> bool:
         """
@@ -151,6 +152,10 @@ class Keithley4200A_KXCI:
     def close(self):
         """Alias for disconnect() for compatibility."""
         self.disconnect()
+    
+    def set_debug(self, enabled: bool) -> None:
+        """Enable or disable verbose KXCI logging."""
+        self._debug = bool(enabled)
     
     def _enter_ul_mode(self) -> bool:
         """
@@ -264,66 +269,79 @@ class Keithley4200A_KXCI:
         Returns:
             List of parsed float values
         """
-        print(f"\n[KXCI] Parsing GP response...")
-        print(f"[KXCI] Original response: {repr(response)}")
+        if self._debug:
+            print(f"\n[KXCI] Parsing GP response...")
+            print(f"[KXCI] Original response: {repr(response)}")
         
         # Remove "PARAM VALUE = " prefix if present
         original_response = response
         response = response.strip()
         
-        print(f"[KXCI] After strip: {repr(response)}")
+        if self._debug:
+            print(f"[KXCI] After strip: {repr(response)}")
         
         if "PARAM VALUE" in response.upper():
             # Format: "PARAM VALUE = value1;value2;..."
-            print(f"[KXCI] Found 'PARAM VALUE' in response")
+            if self._debug:
+                print(f"[KXCI] Found 'PARAM VALUE' in response")
             parts = response.split("=", 1)
             if len(parts) > 1:
                 response = parts[1].strip()
-                print(f"[KXCI] Extracted value part: {repr(response)}")
-            else:
+                if self._debug:
+                    print(f"[KXCI] Extracted value part: {repr(response)}")
+            elif self._debug:
                 print(f"[KXCI] 'PARAM VALUE' found but no '=' separator")
-        else:
+        elif self._debug:
             print(f"[KXCI] No 'PARAM VALUE' prefix found, using full response")
         
         # Check for semicolon separator
         if ';' in response:
-            print(f"[KXCI] Using semicolon separator")
+            if self._debug:
+                print(f"[KXCI] Using semicolon separator")
             separator = ';'
         elif ',' in response:
-            print(f"[KXCI] Using comma separator")
+            if self._debug:
+                print(f"[KXCI] Using comma separator")
             separator = ','
         else:
-            print(f"[KXCI] Single value (no separator found)")
+            if self._debug:
+                print(f"[KXCI] Single value (no separator found)")
             separator = None
         
         # Split by separator and parse as floats
         values = []
         if separator:
             split_values = response.split(separator)
-            print(f"[KXCI] Split into {len(split_values)} parts")
+            if self._debug:
+                print(f"[KXCI] Split into {len(split_values)} parts")
             for i, val_str in enumerate(split_values):
                 val_str = val_str.strip()
-                print(f"[KXCI] Part {i}: {repr(val_str)}")
+                if self._debug:
+                    print(f"[KXCI] Part {i}: {repr(val_str)}")
                 if val_str:
                     try:
                         parsed = float(val_str)
                         values.append(parsed)
-                        print(f"[KXCI]   -> Parsed as: {parsed}")
+                        if self._debug:
+                            print(f"[KXCI]   -> Parsed as: {parsed}")
                     except ValueError as e:
                         print(f"⚠️ Could not parse value {repr(val_str)}: {e}")
                 else:
-                    print(f"[KXCI]   -> Empty, skipping")
+                    if self._debug:
+                        print(f"[KXCI]   -> Empty, skipping")
         else:
             # Single value
             if response:
                 try:
                     parsed = float(response)
                     values.append(parsed)
-                    print(f"[KXCI] Parsed single value: {parsed}")
+                    if self._debug:
+                        print(f"[KXCI] Parsed single value: {parsed}")
                 except ValueError as e:
                     print(f"⚠️ Could not parse single value {repr(response)}: {e}")
         
-        print(f"[KXCI] Final parsed values count: {len(values)}")
+        if self._debug:
+            print(f"[KXCI] Final parsed values count: {len(values)}")
         
         return values
     
@@ -348,7 +366,8 @@ class Keithley4200A_KXCI:
             else:
                 cmd = f"GP {param_position} {num_values}"  # Still include count for consistency
             
-            print(f"\n[KXCI] Sending: {cmd}")
+            if self._debug:
+                print(f"\n[KXCI] Sending: {cmd}")
             self.inst.write(cmd)
             time.sleep(0.03)  # Wait 30ms between commands (from LabVIEW)
             
@@ -356,19 +375,21 @@ class Keithley4200A_KXCI:
             response = self.inst.read()
             
             # Print ALL raw response information
-            print(f"[KXCI] Received: {repr(response)}")
-            print(f"[KXCI] Response (raw): {response}")
-            print(f"[KXCI] Response length: {len(response)} characters")
-            print(f"[KXCI] Response type: {type(response).__name__}")
-            if response:
-                print(f"[KXCI] Response bytes: {response.encode('utf-8') if isinstance(response, str) else response}")
-                # Show first and last 100 chars if long
-                if len(response) > 200:
-                    print(f"[KXCI] First 100 chars: {response[:100]}")
-                    print(f"[KXCI] Last 100 chars: {response[-100:]}")
+            if self._debug:
+                print(f"[KXCI] Received: {repr(response)}")
+                print(f"[KXCI] Response (raw): {response}")
+                print(f"[KXCI] Response length: {len(response)} characters")
+                print(f"[KXCI] Response type: {type(response).__name__}")
+                if response:
+                    print(f"[KXCI] Response bytes: {response.encode('utf-8') if isinstance(response, str) else response}")
+                    # Show first and last 100 chars if long
+                    if len(response) > 200:
+                        print(f"[KXCI] First 100 chars: {response[:100]}")
+                        print(f"[KXCI] Last 100 chars: {response[-100:]}")
             
             values = self._parse_gp_response(response)
-            print(f"[KXCI] Parsed {len(values)} values: {values[:10] if len(values) > 10 else values}")
+            if self._debug:
+                print(f"[KXCI] Parsed {len(values)} values: {values[:10] if len(values) > 10 else values}")
             
             return values
             
@@ -378,7 +399,7 @@ class Keithley4200A_KXCI:
             traceback.print_exc()
             return []
     
-    def _execute_ex_command(self, command: str) -> Tuple[Optional[int], Optional[str]]:
+    def _execute_ex_command(self, command: str, wait_seconds: float = 2.0) -> Tuple[Optional[int], Optional[str]]:
         """
         Execute EX command and retrieve return value.
         
@@ -398,36 +419,40 @@ class Keithley4200A_KXCI:
                     raise RuntimeError("Failed to enter UL mode")
             
             # Send EX command
-            print(f"\n[KXCI] Sending EX command:")
-            print(f"[KXCI] Command: {command}")
-            print(f"[KXCI] Command length: {len(command)} characters")
+            if self._debug:
+                print(f"\n[KXCI] Sending EX command:")
+                print(f"[KXCI] Command: {command}")
+                print(f"[KXCI] Command length: {len(command)} characters")
             self.inst.write(command)
             time.sleep(0.03)  # Wait 30ms between commands (from LabVIEW)
             
             # Wait for measurement to complete (2000ms from LabVIEW)
-            print("⏳ Waiting for measurement to complete (2000ms)...")
-            time.sleep(2.0)
+            wait_seconds = max(0.01, wait_seconds)
+            if self._debug:
+                print(f"⏳ Waiting for measurement to complete ({wait_seconds:.3f}s)...")
+            time.sleep(wait_seconds)
             
             # Try to read return value
             # Format: "RETURN VALUE = <int>"
             # Return value 1 means measurement completed successfully
-            print(f"\n[KXCI] Attempting to read return value...")
+            if self._debug:
+                print(f"\n[KXCI] Attempting to read return value...")
             try:
                 response = self.inst.read()
                 
                 # Print ALL raw response information
-                print(f"[KXCI] Received: {repr(response)}")
-                print(f"[KXCI] Response (raw): {response}")
-                print(f"[KXCI] Response length: {len(response)} characters")
-                print(f"[KXCI] Response type: {type(response).__name__}")
-                if response:
-                    print(f"[KXCI] Response bytes: {response.encode('utf-8') if isinstance(response, str) else response}")
-                    # Show first and last 200 chars if long
-                    if len(response) > 400:
-                        print(f"[KXCI] First 200 chars: {response[:200]}")
-                        print(f"[KXCI] Last 200 chars: {response[-200:]}")
-                    else:
-                        print(f"[KXCI] Full response: {response}")
+                if self._debug:
+                    print(f"[KXCI] Received: {repr(response)}")
+                    print(f"[KXCI] Response (raw): {response}")
+                    print(f"[KXCI] Response length: {len(response)} characters")
+                    print(f"[KXCI] Response type: {type(response).__name__}")
+                    if response:
+                        print(f"[KXCI] Response bytes: {response.encode('utf-8') if isinstance(response, str) else response}")
+                        if len(response) > 400:
+                            print(f"[KXCI] First 200 chars: {response[:200]}")
+                            print(f"[KXCI] Last 200 chars: {response[-200:]}")
+                        else:
+                            print(f"[KXCI] Full response: {response}")
                 
                 # Parse return value (can be 1 or -1)
                 return_value = None
@@ -435,45 +460,50 @@ class Keithley4200A_KXCI:
                     match = re.search(r'RETURN VALUE\s*=\s*(-?\d+)', response, re.IGNORECASE)
                     if match:
                         return_value = int(match.group(1))
-                        if return_value == 1:
+                        if return_value == 1 and self._debug:
                             print(f"✓ Return value: {return_value} (measurement completed successfully)")
-                        elif return_value == -1:
+                        elif return_value == -1 and self._debug:
                             print(f"⚠️ Return value: {return_value} (measurement completed with error/warning)")
-                        else:
+                        elif self._debug:
                             print(f"⚠️ Return value: {return_value} (unexpected value, expected 1 or -1)")
-                else:
+                elif self._debug:
                     print(f"[KXCI] Response does not contain 'RETURN VALUE', full response above")
                 
                 return return_value, None
                 
             except pyvisa.errors.VisaIOError as e:
-                print(f"[KXCI] First read attempt failed: {e}")
+                if self._debug:
+                    print(f"[KXCI] First read attempt failed: {e}")
                 # After 2000ms wait, try reading the return value
                 try:
-                    print(f"[KXCI] Retrying read...")
+                    if self._debug:
+                        print(f"[KXCI] Retrying read...")
                     response = self.inst.read()
-                    print(f"[KXCI] Received on retry: {repr(response)}")
-                    print(f"[KXCI] Response (raw): {response}")
-                    print(f"[KXCI] Response length: {len(response)} characters")
+                    if self._debug:
+                        print(f"[KXCI] Received on retry: {repr(response)}")
+                        print(f"[KXCI] Response (raw): {response}")
+                        print(f"[KXCI] Response length: {len(response)} characters")
                     
                     if "RETURN VALUE" in response:
                         match = re.search(r'RETURN VALUE\s*=\s*(-?\d+)', response, re.IGNORECASE)
                         if match:
                             return_value = int(match.group(1))
-                            if return_value == 1:
+                            if return_value == 1 and self._debug:
                                 print(f"✓ Return value: {return_value} (measurement completed successfully)")
-                            elif return_value == -1:
+                            elif return_value == -1 and self._debug:
                                 print(f"⚠️ Return value: {return_value} (measurement completed with error/warning)")
-                            else:
+                            elif self._debug:
                                 print(f"⚠️ Return value: {return_value} (unexpected value, expected 1 or -1)")
                             return return_value, None
-                    else:
+                    elif self._debug:
                         print(f"[KXCI] Retry response does not contain 'RETURN VALUE', full response above")
                 except Exception as e2:
-                    print(f"[KXCI] Retry read also failed: {e2}")
+                    if self._debug:
+                        print(f"[KXCI] Retry read also failed: {e2}")
                 
                 # If we can't read return value, assume it might be available later via GP
-                print("⚠️ Could not read return value immediately, will check via GP commands")
+                if self._debug:
+                    print("⚠️ Could not read return value immediately, will check via GP commands")
                 return None, None
                 
         except Exception as e:

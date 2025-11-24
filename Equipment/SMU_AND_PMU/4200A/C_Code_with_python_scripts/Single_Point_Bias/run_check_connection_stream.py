@@ -1,22 +1,41 @@
-"""Continuous connection-check helper for the Keithley 4200A.
+"""Single-sample bias monitor for the Keithley 4200A.
 
-This script launches the `smu_check_connection` C module via KXCI to apply
-a fixed DC bias (default 0.2 V) and streams measurements back to the host
-until the user issues Ctrl+C. It is designed to integrate with the
-Connection Check GUI but can be run standalone for bench verification.
+This Python utility repeatedly launches the `smu_check_connection` UL module,
+waits for a single measurement to be collected, grabs that sample from the
+instrument via `GP 8` (voltage) and `GP 6` (current), and prints the result.
 
-Usage example:
+Implementation overview
+=======================
+1. The command is generated with ``build_check_connection_command`` and looks
+   like ``EX A_Check_Connection smu_check_connection(...)``.
+2. ``CheckConnectionStreamer.run_batch`` sends the EX command using
+   ``KXCIClient._execute_ex_command``. When the UL module finishes, we query
+   the output buffers (parameters 8 and 6) to retrieve the latest measurement.
+3. By default the script loops forever, issuing EX → GP → print as quickly as
+   allowed. This gives a near real-time feed while you probe or adjust a DUT.
+   Press Ctrl+C to stop the stream. Use ``--once`` to capture a single sample.
+4. The script depends on the shared ``KXCIClient`` from ``run_smu_vi_sweep``,
+   so it inherits the same visa connection handling, UL entry/exit, etc.
 
-    python run_check_connection_stream.py --bias-voltage 0.2 --sample-interval 0.05
+Command-line usage
+==================
+``python run_check_connection_stream.py [options]``
 
-Key behaviors:
-- Reuses the existing `KXCIClient` helper from `run_smu_vi_sweep.py`.
-- Starts the UL program without blocking so we can poll buffers via GP.
-- Stores streaming data inside instrument circular buffers (size configurable).
-- Gracefully stops by setting Control[0] = 1 before exiting UL mode.
+Key options:
+* ``--bias-voltage``: DC bias applied by the UL module (default 0.2V)
+* ``--sample-interval``: Delay between successive samples inside the UL module
+* ``--settle-time``: Initial settle delay after first forcing the bias
+* ``--ilimit`` / ``--integration-time``: Compliance and measurement settings
+* ``--once``: Take a single sample and exit (instead of continuous streaming)
+* ``--pause``: Delay between repeated EX commands when streaming (default 50ms)
+* ``--json``: Emit samples as JSON objects instead of human-readable text
 
-Each file in this repo must document itself and ship with some unit coverage;
-see `tests/test_check_connection_stream.py` for ring-buffer helper tests.
+Example
+=======
+```
+python run_check_connection_stream.py --bias-voltage 0.2 --sample-interval 0.2
+```
+prints lines like ``[01] V= 0.200012 V | I= 1.99e-06 A`` until you press Ctrl+C.
 """
 
 from __future__ import annotations
@@ -25,9 +44,8 @@ import argparse
 import json
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import List
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -36,7 +54,7 @@ if str(A_IV_SWEEP_DIR) not in sys.path:
     sys.path.insert(0, str(A_IV_SWEEP_DIR))
 
 try:
-    from run_smu_vi_sweep import KXCIClient, format_param  # type: ignore
+    from run_smu_vi_sweep import KXCIClient  # type: ignore
 except ImportError as exc:  # pragma: no cover
     raise RuntimeError(
         "Unable to import run_smu_vi_sweep helpers. "
@@ -44,119 +62,46 @@ except ImportError as exc:  # pragma: no cover
         "is present."
     ) from exc
 
-
-def build_check_connection_command(
-    bias_voltage: float,
-    sample_interval: float,
-    settle_time: float,
-    ilimit: float,
-    integration_time: float,
-    buffer_size: int,
-    max_samples: int,
-    clarius_debug: int,
-) -> str:
-    """Return the EX command string for smu_check_connection."""
-
-    params = [
-        format_param(bias_voltage),     # 1 BiasVoltage
-        format_param(sample_interval),  # 2 SampleInterval
-        format_param(settle_time),      # 3 SettleTime
-        format_param(ilimit),           # 4 Ilimit
-        format_param(integration_time), # 5 IntegrationTime
-        "",                             # 6 Ibuffer (D_ARRAY_T)
-        format_param(buffer_size),      # 7 NumISamples
-        "",                             # 8 Vbuffer (D_ARRAY_T)
-        format_param(buffer_size),      # 9 NumVSamples
-        format_param(max_samples),      # 10 MaxSamples
-        format_param(clarius_debug),    # 11 ClariusDebug
-    ]
-    return f"EX Single_Point_Bias smu_check_connection({','.join(params)})"
-
-
-def format_sp_command(param_position: int, values: Sequence[int]) -> str:
-    value_str = " ".join(str(int(v)) for v in values)
-    return f"SP {param_position} {value_str}"
-
-
-@dataclass
-class BufferSnapshot:
-    voltage: float
-    current: float
-    total_samples: int
-    write_index: int
-
-
-def latest_sample_from_buffers(
-    voltage: Sequence[float],
-    current: Sequence[float],
-    write_index: int,
-    total_samples: int,
-) -> BufferSnapshot:
-    """Return the most recent (V, I) pair from circular buffers."""
-
-    if total_samples <= 0 or not voltage or not current:
-        raise ValueError("No samples available")
-
-    buffer_size = min(len(voltage), len(current))
-    idx = (write_index - 1) % buffer_size
-    return BufferSnapshot(
-        voltage=voltage[idx],
-        current=current[idx],
-        total_samples=total_samples,
-        write_index=write_index,
-    )
+from connection_check_runner import build_check_connection_command, execute_single_sample
 
 
 class CheckConnectionStreamer:
-    def __init__(
-        self,
-        controller: KXCIClient,
-        buffer_size: int,
-    ) -> None:
+    def __init__(self, controller: KXCIClient, buffer_size: int) -> None:
         self.controller = controller
         self.buffer_size = buffer_size
 
-    def _write(self, command: str) -> None:
-        if self.controller.inst is None:
-            raise RuntimeError("Instrument not connected")
-        self.controller.inst.write(command)
+    def run_batch(self, config: dict, emit_json: bool) -> bool:
+        """Execute UL program once, then fetch/print the single latest sample.
 
-    def execute_and_read(self, command: str, emit_json: bool) -> None:
-        """Execute the module and read results after completion."""
-        self._write(command)
-        # Wait for module to complete (approximate time: max_samples * sample_interval)
-        time.sleep(0.1)  # Small delay to ensure command is processed
-        
-        # Read buffers after module completes
-        voltage = self.controller._query_gp(8, self.buffer_size)  # pylint: disable=protected-access
-        current = self.controller._query_gp(6, self.buffer_size)  # pylint: disable=protected-access
-        
-        # Find the last non-zero sample (circular buffer)
-        last_idx = 0
-        for i in range(self.buffer_size):
-            if abs(current[i]) > 1e-15 or abs(voltage[i]) > 1e-6:
-                last_idx = i
-        
+        Returns True if a sample was printed, False if the EX/GP requests failed.
+        """
+
+        try:
+            sample = execute_single_sample(
+                self.controller,
+                bias_voltage=config["bias"],
+                sample_interval=config["sample_interval"],
+                settle_time=config["settle_time"],
+                ilimit=config["ilimit"],
+                integration_time=config["integration_time"],
+                buffer_size=config["buffer_size"],
+                clarius_debug=config["debug"],
+            )
+        except Exception as exc:  # pragma: no cover
+            print(f"[WARN] Failed to retrieve sample: {exc}")
+            return False
+
         if emit_json:
-            print(
-                json.dumps(
-                    {
-                        "voltage": voltage[last_idx],
-                        "current": current[last_idx],
-                        "sample_index": last_idx,
-                    }
-                )
-            )
+            print(json.dumps(sample))
         else:
-            print(
-                f"V={voltage[last_idx]: .6f} V | "
-                f"I={current[last_idx]: .6e} A | idx={last_idx}"
-            )
+            print(f"[01] V={sample['voltage']: .6f} V | I={sample['current']: .6e} A")
+
+        return True
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Stream continuous bias measurements via smu_check_connection",
+        description="Looped EX/GP helper for smu_check_connection",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--gpib-address", default="GPIB0::17::INSTR")
@@ -166,33 +111,42 @@ def main() -> None:
     parser.add_argument("--settle-time", type=float, default=0.01)
     parser.add_argument("--ilimit", type=float, default=0.01)
     parser.add_argument("--integration-time", type=float, default=0.01)
-    parser.add_argument("--buffer-size", type=int, default=128)
-    parser.add_argument("--max-samples", type=int, default=1000, help="Number of samples to collect per run")
+    parser.add_argument("--buffer-size", type=int, default=8, help="Circular buffer size in the UL module")
+    parser.add_argument("--pause", type=float, default=0.05, help="Pause between batches when looping")
+    parser.add_argument("--once", action="store_true", help="Take a single sample then exit")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--json", action="store_true", help="Emit JSON lines")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--continuous", action="store_true", help="Run continuously (repeated calls)")
 
     args = parser.parse_args()
 
-    if args.buffer_size < 4:
-        parser.error("buffer-size must be >= 4")
-    if args.max_samples < 1:
-        parser.error("max-samples must be >= 1")
+    if args.buffer_size < 1:
+        parser.error("buffer-size must be >= 1")
+    if args.pause < 0:
+        parser.error("pause must be >= 0")
 
-    command = build_check_connection_command(
+    sample_config = {
+        "bias": args.bias_voltage,
+        "sample_interval": args.sample_interval,
+        "settle_time": args.settle_time,
+        "ilimit": args.ilimit,
+        "integration_time": args.integration_time,
+        "debug": 1 if args.debug else 0,
+        "buffer_size": args.buffer_size,
+    }
+    preview = build_check_connection_command(
         bias_voltage=args.bias_voltage,
         sample_interval=args.sample_interval,
         settle_time=args.settle_time,
         ilimit=args.ilimit,
         integration_time=args.integration_time,
         buffer_size=args.buffer_size,
-        max_samples=args.max_samples,
-        clarius_debug=1 if args.debug else 0,
+        max_samples=1,
+        clarius_debug=sample_config["debug"],
     )
 
     if args.dry_run:
-        print(command)
+        print(preview)
         return
 
     controller = KXCIClient(gpib_address=args.gpib_address, timeout=args.timeout)
@@ -203,25 +157,22 @@ def main() -> None:
         if not controller._enter_ul_mode():  # pylint: disable=protected-access
             raise RuntimeError("Failed to enter UL mode")
 
-        streamer = CheckConnectionStreamer(
-            controller=controller,
-            buffer_size=args.buffer_size,
-        )
+        streamer = CheckConnectionStreamer(controller=controller, buffer_size=args.buffer_size)
 
-        if args.continuous:
-            print("[INFO] Running continuously (Ctrl+C to stop)...")
-            try:
+        try:
+            if args.once:
+                streamer.run_batch(sample_config, emit_json=args.json)
+            else:
+                print("[INFO] Streaming measurements (Ctrl+C to stop)")
                 while True:
-                    streamer.execute_and_read(command, emit_json=args.json)
-                    time.sleep(0.1)  # Small delay between runs
-            except KeyboardInterrupt:
-                print("\n[INFO] Stopped by user")
-        else:
-            streamer.execute_and_read(command, emit_json=args.json)
-
-        response = controller._safe_read()  # pylint: disable=protected-access
-        if response:
-            print(f"\n[INFO] Instrument response: {response.strip()}")
+                    success = streamer.run_batch(sample_config, emit_json=args.json)
+                    if args.pause > 0:
+                        time.sleep(args.pause)
+                    if not success:
+                        # Small pause before retry to avoid hammering the bus on error
+                        time.sleep(max(args.pause, 0.1))
+        except KeyboardInterrupt:
+            print("\n[INFO] Stopped by user")
     finally:
         try:
             controller._exit_ul_mode()  # pylint: disable=protected-access

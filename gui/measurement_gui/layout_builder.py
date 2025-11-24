@@ -254,32 +254,44 @@ class MeasurementGUILayoutBuilder:
         if system_change_cb:
             system_change_cb(gui.system_var.get())
         
-        # Auto-connect disabled - user must manually connect
-        # self._auto_connect_instruments()  # Disabled
+        # Automatically connect to the selected system
+        self._auto_connect_instruments()
     
     def _auto_connect_instruments(self) -> None:
         """Automatically connect to instruments after system selection"""
         gui = self.gui
         
-        # Update status to connecting
-        if hasattr(gui, 'connection_status_label'):
-            gui.connection_status_label.config(text="● Connecting...", fg=self.COLOR_WARNING)
-            gui.master.update()
-        
-        # Connect Keithley/SMU
-        connect_keithley_cb = self.callbacks.get("connect_keithley")
-        if connect_keithley_cb:
-            try:
-                connect_keithley_cb()
-            except RuntimeError as e:
-                error_str = str(e)
-                if "IVControllerManager dependency not available" in error_str:
-                    print(f"⚠️  WARNING: Auto-connect Keithley failed - IVControllerManager dependency not available")
-                    print(f"   {error_str}")
-                else:
+        # Use MeasurementGUI helper if available (handles status updates/logging)
+        auto_connect_func = getattr(gui, "auto_connect_current_system", None)
+        used_custom_method = False
+        smu_connected = False
+        if callable(auto_connect_func):
+            used_custom_method = True
+            smu_connected = auto_connect_func()
+        else:
+            # Update status to connecting if no helper
+            if hasattr(gui, 'connection_status_label'):
+                gui.connection_status_label.config(text="● Connecting...", fg=self.COLOR_WARNING)
+                try:
+                    gui.master.update()
+                except Exception:
+                    pass
+            
+            # Connect Keithley/SMU
+            connect_keithley_cb = self.callbacks.get("connect_keithley")
+            if connect_keithley_cb:
+                try:
+                    connect_keithley_cb()
+                    smu_connected = getattr(gui, 'connected', False)
+                except RuntimeError as e:
+                    error_str = str(e)
+                    if "IVControllerManager dependency not available" in error_str:
+                        print(f"⚠️  WARNING: Auto-connect Keithley failed - IVControllerManager dependency not available")
+                        print(f"   {error_str}")
+                    else:
+                        print(f"⚠️  WARNING: Auto-connect Keithley failed: {e}")
+                except Exception as e:
                     print(f"⚠️  WARNING: Auto-connect Keithley failed: {e}")
-            except Exception as e:
-                print(f"⚠️  WARNING: Auto-connect Keithley failed: {e}")
         
         # Connect PSU if needed
         if hasattr(gui, 'psu_needed') and gui.psu_needed:
@@ -298,9 +310,9 @@ class MeasurementGUILayoutBuilder:
             except Exception as e:
                 print(f"Auto-connect Temp failed: {e}")
         
-        # Update status based on connection success
-        if hasattr(gui, 'connection_status_label'):
-            if hasattr(gui, 'connected') and gui.connected:
+        # Update status label if helper didn't already handle it
+        if not used_custom_method and hasattr(gui, 'connection_status_label'):
+            if smu_connected:
                 gui.connection_status_label.config(text="● Connected", fg=self.COLOR_SUCCESS)
             else:
                 gui.connection_status_label.config(text="● Connection Failed", fg=self.COLOR_ERROR)
@@ -1179,7 +1191,10 @@ class MeasurementGUILayoutBuilder:
         
         tk.Label(temp_frame, text="Type:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=0, column=0, sticky='w', pady=5)
         temp_types = ['Auto-Detect', 'Lakeshore 335', 'Oxford ITC4', 'None']
-        gui.temp_type_var = tk.StringVar(value=getattr(gui, "temp_controller_type", temp_types[0]))
+        default_temp_type = getattr(gui, "temp_controller_type", None)
+        if not default_temp_type or default_temp_type not in temp_types:
+            default_temp_type = 'None'
+        gui.temp_type_var = tk.StringVar(value=default_temp_type)
         gui.temp_type_combo = ttk.Combobox(temp_frame, textvariable=gui.temp_type_var, values=temp_types,
                                           font=self.FONT_MAIN, width=25, state='readonly')
         gui.temp_type_combo.grid(row=0, column=1, sticky='ew', pady=5, padx=(10, 10))
