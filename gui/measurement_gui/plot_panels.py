@@ -559,16 +559,117 @@ class MeasurementPlotPanels:
             self.canvases["all_iv"].draw()
             self.canvases["all_logiv"].draw()
 
-    def reset_for_new_run(self) -> None:
-        """Clear live buffers and summary axes so a new run starts clean."""
+    def reset_for_new_sweep(self, gui: Optional[object] = None) -> None:
+        """Clear only individual real-time graphs between sweeps (keeps combined graphs)."""
+        # Clear data buffers if GUI reference provided
+        if gui is not None:
+            if hasattr(gui, 'v_arr_disp'):
+                gui.v_arr_disp.clear()
+            if hasattr(gui, 'c_arr_disp'):
+                gui.c_arr_disp.clear()
+            if hasattr(gui, 't_arr_disp'):
+                gui.t_arr_disp.clear()
+            if hasattr(gui, 'c_arr_disp_abs'):
+                gui.c_arr_disp_abs.clear()
+        
+        # Clear axes and recreate lines for individual graphs
+        axis_configs = {
+            "rt_iv": ("Voltage (V)", "Current (A)", None, None),
+            "rt_logiv": ("Voltage (V)", "|Current| (A)", None, "log"),
+            "rt_logilogv": ("|Voltage| (V)", "|Current| (A)", "log", "log"),
+            "ct_rt": ("Time (s)", "Current (A)", None, None),
+            "tt_rt": ("Time (s)", "Temp (°C)", None, None),
+        }
+        
         for name in ["rt_iv", "rt_logiv", "rt_logilogv", "ct_rt", "tt_rt"]:
-            line = self.lines.get(name)
+            ax = self.axes.get(name)
             canvas = self.canvases.get(name)
-            if line is not None:
-                line.set_data([], [])
-                if canvas:
-                    canvas.draw()
+            if ax is None or canvas is None:
+                continue
+            
+            # Clear the entire axis
+            ax.clear()
+            
+            # Reapply styling
+            if name in axis_configs:
+                xlabel, ylabel, xscale, yscale = axis_configs[name]
+                self._style_axis(ax, xlabel, ylabel)
+                if xscale == "log":
+                    ax.set_xscale("log")
+                if yscale == "log":
+                    ax.set_yscale("log")
+            
+            # Recreate the line
+            if name == "tt_rt":
+                line, = ax.plot([], [], marker="x", markersize=3)
+            elif name == "rt_logilogv":
+                line, = ax.plot([], [], marker=".", color="r", markersize=3)
+            else:
+                line, = ax.plot([], [], marker=".", markersize=3)
+            
+            # Update the line reference
+            self.lines[name] = line
+            
+            # Redraw
+            canvas.draw()
 
+        self.last_sweep = ([], [])
+
+    def reset_for_new_run(self, gui: Optional[object] = None) -> None:
+        """Clear live buffers and summary axes so a new run starts clean."""
+        # Clear data buffers if GUI reference provided
+        if gui is not None:
+            if hasattr(gui, 'v_arr_disp'):
+                gui.v_arr_disp.clear()
+            if hasattr(gui, 'c_arr_disp'):
+                gui.c_arr_disp.clear()
+            if hasattr(gui, 't_arr_disp'):
+                gui.t_arr_disp.clear()
+            if hasattr(gui, 'c_arr_disp_abs'):
+                gui.c_arr_disp_abs.clear()
+        
+        # Clear individual graphs using ax.clear()
+        axis_configs = {
+            "rt_iv": ("Voltage (V)", "Current (A)", None, None),
+            "rt_logiv": ("Voltage (V)", "|Current| (A)", None, "log"),
+            "rt_logilogv": ("|Voltage| (V)", "|Current| (A)", "log", "log"),
+            "ct_rt": ("Time (s)", "Current (A)", None, None),
+            "tt_rt": ("Time (s)", "Temp (°C)", None, None),
+        }
+        
+        for name in ["rt_iv", "rt_logiv", "rt_logilogv", "ct_rt", "tt_rt"]:
+            ax = self.axes.get(name)
+            canvas = self.canvases.get(name)
+            if ax is None or canvas is None:
+                continue
+            
+            # Clear the entire axis
+            ax.clear()
+            
+            # Reapply styling
+            if name in axis_configs:
+                xlabel, ylabel, xscale, yscale = axis_configs[name]
+                self._style_axis(ax, xlabel, ylabel)
+                if xscale == "log":
+                    ax.set_xscale("log")
+                if yscale == "log":
+                    ax.set_yscale("log")
+            
+            # Recreate the line
+            if name == "tt_rt":
+                line, = ax.plot([], [], marker="x", markersize=3)
+            elif name == "rt_logilogv":
+                line, = ax.plot([], [], marker=".", color="r", markersize=3)
+            else:
+                line, = ax.plot([], [], marker=".", markersize=3)
+            
+            # Update the line reference
+            self.lines[name] = line
+            
+            # Redraw
+            canvas.draw()
+
+        # Clear combined graphs (all sweeps) for a completely new run
         for key in ["all_iv", "all_logiv"]:
             ax = self.axes.get(key)
             canvas = self.canvases.get(key)
@@ -593,6 +694,7 @@ class MeasurementPlotPanels:
         # Convenience aliases for legacy method names
         setattr(target, "graphs_show", self.graphs_show)
         setattr(target, "_reset_plots_for_new_run", self.reset_for_new_run)
+        setattr(target, "_reset_plots_for_new_sweep", self.reset_for_new_sweep)
         setattr(target, "clear_axis", self.clear_axis)
 
     # ------------------------------------------------------------------

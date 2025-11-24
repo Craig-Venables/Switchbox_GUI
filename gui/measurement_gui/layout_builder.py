@@ -873,11 +873,18 @@ class MeasurementGUILayoutBuilder:
             get_value = int(bool(current_value))
         gui.get_messaged_var = tk.IntVar(value=get_value)
         
-        ttk.Checkbutton(
+        def on_telegram_checkbox_change():
+            """Reset Telegram credentials when checkbox is toggled."""
+            if hasattr(gui, "telegram"):
+                gui.telegram.reset_credentials()
+        
+        telegram_checkbox = ttk.Checkbutton(
             content_frame,
             text="Enable Telegram Bot",
-            variable=gui.get_messaged_var
-        ).pack(anchor='w', pady=(0, 10))
+            variable=gui.get_messaged_var,
+            command=on_telegram_checkbox_change
+        )
+        telegram_checkbox.pack(anchor='w', pady=(0, 10))
         
         tk.Label(content_frame, text="Operator:", font=self.FONT_MAIN, bg=self.COLOR_BG).pack(anchor='w', pady=(0, 5))
         

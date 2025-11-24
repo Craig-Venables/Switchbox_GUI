@@ -36,14 +36,28 @@ class TelegramCoordinator:
     def is_enabled(self) -> bool:
         """Return ``True`` when Telegram messaging is fully configured."""
         try:
-            return bool(
-                getattr(self.gui, "get_messaged_var", None)
-                and self.gui.get_messaged_var.get() == 1
-                and getattr(self.gui, "token_var", None)
-                and getattr(self.gui, "chatid_var", None)
-                and self.gui.token_var.get().strip()
-                and self.gui.chatid_var.get().strip()
-            )
+            # Check if checkbox is enabled
+            get_messaged_var = getattr(self.gui, "get_messaged_var", None)
+            if not get_messaged_var:
+                return False
+            # Handle both IntVar and plain int/boolean
+            if hasattr(get_messaged_var, "get"):
+                if get_messaged_var.get() != 1:
+                    return False
+            elif get_messaged_var != 1:
+                return False
+            
+            # Check if token and chatid are set
+            token_var = getattr(self.gui, "token_var", None)
+            chatid_var = getattr(self.gui, "chatid_var", None)
+            if not token_var or not chatid_var:
+                return False
+            
+            # Get values (handle both StringVar and plain string)
+            token = token_var.get().strip() if hasattr(token_var, "get") else str(token_var).strip()
+            chat_id = chatid_var.get().strip() if hasattr(chatid_var, "get") else str(chatid_var).strip()
+            
+            return bool(token and chat_id)
         except Exception:
             return False
 
@@ -98,8 +112,18 @@ class TelegramCoordinator:
             try:
                 from Notifications import TelegramBot  # Local import to avoid hard dep at startup
 
-                token = self.gui.token_var.get().strip()
-                chat_id = self.gui.chatid_var.get().strip()
+                # Get values (handle both StringVar and plain string)
+                token_var = getattr(self.gui, "token_var", None)
+                chatid_var = getattr(self.gui, "chatid_var", None)
+                if not token_var or not chatid_var:
+                    return None
+                
+                token = token_var.get().strip() if hasattr(token_var, "get") else str(token_var).strip()
+                chat_id = chatid_var.get().strip() if hasattr(chatid_var, "get") else str(chatid_var).strip()
+                
+                if not token or not chat_id:
+                    return None
+                
                 self._bot = TelegramBot(token, chat_id)
             except Exception:
                 self._bot = None

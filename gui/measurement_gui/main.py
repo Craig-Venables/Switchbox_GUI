@@ -616,9 +616,10 @@ class MeasurementGUI:
         default_name = self.names[0] if self.names else ""
         profile = self.messaging_profiles.get(default_name, {})
 
-        self.token_var = profile.get("token", "")
-        self.chatid_var = profile.get("chatid", "")
-        self.get_messaged_var = 0
+        # Initialize as Tk StringVar objects (required by TelegramCoordinator)
+        self.token_var = tk.StringVar(value=profile.get("token", ""))
+        self.chatid_var = tk.StringVar(value=profile.get("chatid", ""))
+        self.get_messaged_var = tk.IntVar(value=0)
         self._selected_messaging_user = default_name
 
     def update_messaging_info(self, _event: Optional[Any] = None) -> None:
@@ -2662,7 +2663,7 @@ class MeasurementGUI:
             return
 
         # Reset graphs/buffers between runs
-        self._reset_plots_for_new_run()
+        self._reset_plots_for_new_run(self)
 
         if self.single_device_flag:
             response = messagebox.askquestion(
@@ -2763,6 +2764,10 @@ class MeasurementGUI:
 
                     self.measurment_number = key
                     print("Working on device -", device, ": Measurement -", key)
+
+                    # Clear individual graphs for this new sweep (keep combined graphs)
+                    if hasattr(self, '_reset_plots_for_new_sweep'):
+                        self._reset_plots_for_new_sweep(self)
 
                     # Runtime: pause between sweeps if requested
                     while getattr(self, 'pause_requested', False) and not self.stop_measurement_flag:
@@ -3528,7 +3533,7 @@ class MeasurementGUI:
             self._show_message_async("showwarning", "Warning", "Not connected to Keithley!")
             return
         # Reset graphs/buffers between runs
-        self._reset_plots_for_new_run()
+        self._reset_plots_for_new_run(self)
         self.measuring = True
 
         # Branch by excitation mode if available
