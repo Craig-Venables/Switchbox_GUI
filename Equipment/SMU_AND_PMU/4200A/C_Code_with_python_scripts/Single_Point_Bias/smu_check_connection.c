@@ -13,7 +13,7 @@
 		NumISamples,	int,	Input,	256,	4,	4096
 		Vbuffer,	D_ARRAY_T,	Output,	,	,	
 		NumVSamples,	int,	Input,	256,	4,	4096
-		MaxSamples,	int,	Input,	1000,	1,	100000
+		MaxSamples,	int,	Input,	0,	0,	1000000
 		ClariusDebug,	int,	Input,	0,	0,	1
 	INCLUDES:
 #include "keithley.h"
@@ -28,22 +28,25 @@
 Continuous SMU Bias Monitor
 ===========================
 
-Applies a fixed DC bias (default 0.2 V) and measures current for MaxSamples
-iterations. Measurements are stored in circular buffers (Ibuffer / Vbuffer).
-The module runs to completion and returns, allowing the host to poll buffers
-via GP commands after execution.
+Applies a fixed DC bias (default 0.2 V) and repetitively measures current while
+printing each data point to stdout in the format:
 
-The module performs MaxSamples measurements, storing them in circular buffers.
-If MaxSamples exceeds the buffer size, older samples are overwritten.
+    DATA <voltage> <current>
 
-Recommended host workflow:
-1. Execute EX command with desired MaxSamples (e.g., 1000 for continuous monitoring).
-2. Module runs to completion (takes approximately MaxSamples × SampleInterval seconds).
-3. After module returns, issue GP commands to read buffers.
-4. For continuous operation, repeatedly call the module with new MaxSamples values.
+These lines appear immediately in the KXCI console (and on the GPIB link), so an
+automation client can capture real-time readings without issuing GP commands
+while the UL program is still running.
 
-Note: This module must return to allow host interaction. For truly continuous
-operation, call it repeatedly from Python with appropriate MaxSamples values.
+Parameters:
+- `SampleInterval` controls how often the measurement loop runs (seconds).
+- `SettleTime` is a one-time wait after the bias is first applied.
+- `MaxSamples = 0` means run indefinitely; any positive value limits the number
+  of samples before the module exits automatically.
+
+Buffered Output:
+Measurements are still written into the supplied Ibuffer/Vbuffer circular
+buffers (NumISamples/NumVSamples) so that, after the module exits, the host can
+issue GP 6/8 to retrieve the latest samples if desired.
 
 END USRLIB MODULE HELP DESCRIPTION */
 
@@ -83,10 +86,11 @@ int smu_check_connection(double BiasVoltage,
     int status;
     int debug;
     int write_index = 0;
-    int sample_count = 0;
+    long sample_count = 0;
     double measured_current = 0.0;
     double measured_voltage = 0.0;
     const double compliance_threshold = Ilimit * 0.99;
+    long target_samples;
 
     debug = (ClariusDebug == 1) ? 1 : 0;
 
@@ -139,12 +143,7 @@ int smu_check_connection(double BiasVoltage,
         return -3;
     }
 
-    if (MaxSamples < 1)
-    {
-        if (debug)
-            printf("smu_check_connection ERROR: MaxSamples must be >= 1\n");
-        return -4;
-    }
+    target_samples = (MaxSamples <= 0) ? -1 : MaxSamples;
 
     /* Initialize buffers */
     memset(Ibuffer, 0, sizeof(double) * NumISamples);
@@ -176,7 +175,7 @@ int smu_check_connection(double BiasVoltage,
         printf("======================================================\n");
     }
 
-    for (sample_count = 0; sample_count < MaxSamples; sample_count++)
+    while ((target_samples < 0) || (sample_count < target_samples))
     {
         status = forcev(SMU1, BiasVoltage);
         if (status != 0)
@@ -220,13 +219,14 @@ int smu_check_connection(double BiasVoltage,
             write_index = 0;
         }
 
-        if (debug && (sample_count % 100 == 0 || sample_count == MaxSamples - 1))
-        {
-            printf("Sample %d/%d: V=%.6f V, I=%.6e A, idx=%d\n",
-                   sample_count + 1, MaxSamples, measured_voltage, measured_current, write_index);
-        }
+        printf("DATA %.6f %.6e\n", measured_voltage, measured_current);
+        fflush(stdout);
 
-        sleep_seconds(SampleInterval);
+        sample_count++;
+        if ((target_samples < 0) || (sample_count < target_samples))
+        {
+            sleep_seconds(SampleInterval);
+        }
     }
 
     forcev(SMU1, 0.0);

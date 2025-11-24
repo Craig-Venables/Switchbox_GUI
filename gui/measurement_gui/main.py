@@ -515,8 +515,6 @@ class MeasurementGUI:
         # connect to kiethley's
         # Set default to System 1 and trigger the change
         self.set_default_system()
-        self.connect_keithley()
-        #self.connect_keithley_psu()
 
         # Removed automated tests log frame
 
@@ -1113,7 +1111,7 @@ class MeasurementGUI:
         self.system_var = tk.StringVar()
         self.systems = self.load_systems()
         self.system_dropdown = tk.OptionMenu(frame, self.system_var,*self.systems,
-                                             command=self.on_system_change)
+                                             command=self._handle_system_selection)
         self.system_dropdown.grid(row=0, column=1, columnspan=2, sticky="ew")
 
         # GPIB Address - IV
@@ -1122,7 +1120,7 @@ class MeasurementGUI:
         self.keithley_address_var = tk.StringVar(value=self.keithley_address)
         self.iv_address_entry = tk.Entry(frame, textvariable=self.keithley_address_var)
         self.iv_address_entry.grid(row=1, column=1)
-        self.iv_connect_button = tk.Button(frame, text="Connect", command=self.connect_keithley)
+        self.iv_connect_button = tk.Button(frame, text="Connect", command=self.auto_connect_current_system)
         self.iv_connect_button.grid(row=1, column=2)
 
         # GPIB Address - PSU
@@ -1149,10 +1147,10 @@ class MeasurementGUI:
         default = "Lab Small"
         if default in systems:
             self.system_var.set(default)
-            self.on_system_change(default)  # Trigger the address updates
+            self._handle_system_selection(default)
         elif systems and systems[0] != "No systems available":
             self.system_var.set(systems[0])
-            self.on_system_change(systems[0])
+            self._handle_system_selection(systems[0])
 
     def load_systems(self) -> List[str]:
         """Load system configurations from JSON file"""
@@ -1215,10 +1213,14 @@ class MeasurementGUI:
         self.psu_visa_address = psu_address
         
         # Update Temp section
-        temp_type = config.get("temp_controller", "Auto-Detect")
+        temp_type = config.get("temp_controller")
+        if not temp_type or temp_type.strip() == "":
+            temp_type = "None"
         temp_address = config.get("temp_address", "")
+        if temp_type == "None":
+            temp_address = ""
         if hasattr(self, 'temp_type_var'):
-            self.temp_type_var.set(temp_type if temp_type else "Auto-Detect")
+            self.temp_type_var.set(temp_type)
         if hasattr(self, 'temp_address_var'):
             self.temp_address_var.set(temp_address)
         # Ensure address is in combobox values if using combobox
@@ -1226,9 +1228,9 @@ class MeasurementGUI:
             current_values = list(self.temp_address_combo['values'])
             if temp_address not in current_values:
                 self.temp_address_combo['values'] = tuple([temp_address] + list(current_values))
-        self.temp_controller_type = temp_type
+        self.temp_controller_type = temp_type if temp_type != "None" else ""
         self.temp_controller_address = temp_address
-        self.controller_type = temp_type or "Auto-Detect"
+        self.controller_type = temp_type
         self.controller_address = temp_address
         
         # Update optical section
@@ -1493,16 +1495,23 @@ class MeasurementGUI:
             self.update_component_state("psu", psu_address)
 
             # Update Temp section
+            temp_type = config.get("temp_controller")
+            if not temp_type or temp_type.strip() == "":
+                temp_type = "None"
             temp_address = config.get("temp_address", "")
+            if temp_type == "None":
+                temp_address = ""
+            if hasattr(self, 'temp_type_var'):
+                self.temp_type_var.set(temp_type)
             if hasattr(self, 'temp_address_var'):
                 self.temp_address_var.set(temp_address)
             self.temp_controller_address = temp_address
             self.update_component_state("temp", temp_address)
 
             # updater controller type
-            self.temp_controller_type = config.get("temp_controller", "")
-            self.controller_type = self.temp_controller_type or "Auto-Detect"
-            self.controller_address = temp_address or self.temp_controller_address
+            self.temp_controller_type = temp_type if temp_type != "None" else ""
+            self.controller_type = temp_type
+            self.controller_address = temp_address
 
             # smu type
             self.SMU_type = config.get("SMU Type", "")
@@ -1513,6 +1522,11 @@ class MeasurementGUI:
                 self.optical = create_optical_from_system_config(config)
             except Exception:
                 self.optical = None
+
+    def _handle_system_selection(self, selected_system: str) -> None:
+        """Callback for legacy system dropdown to auto-connect after selection."""
+        self.on_system_change(selected_system)
+        self.auto_connect_current_system()
 
 
     def update_component_state(self, component_type: str, address: str) -> None:
@@ -1573,6 +1587,61 @@ class MeasurementGUI:
             button.configure(state="normal")
         else:
             button.configure(state="disabled")
+
+    def auto_connect_current_system(self) -> bool:
+        """Attempt to connect to the currently selected SMU and update status label."""
+        keithley_address = ""
+        if hasattr(self, "keithley_address_var"):
+            try:
+                keithley_address = self.keithley_address_var.get().strip()
+            except Exception:
+                keithley_address = ""
+        if not keithley_address:
+            keithley_address = getattr(self, "keithley_address", "").strip()
+
+        smu_type = getattr(self, "SMU_type", "")
+        if not smu_type and hasattr(self, "smu_type_var"):
+            try:
+                smu_type = self.smu_type_var.get()
+            except Exception:
+                smu_type = ""
+        smu_type = smu_type or "Keithley 2401"
+
+        status_label = getattr(self, "connection_status_label", None)
+        success_color = getattr(self.layout_builder, "COLOR_SUCCESS", "green") if hasattr(self, "layout_builder") else "green"
+        error_color = getattr(self.layout_builder, "COLOR_ERROR", "red") if hasattr(self, "layout_builder") else "red"
+        warning_color = getattr(self.layout_builder, "COLOR_WARNING", "orange") if hasattr(self, "layout_builder") else "orange"
+
+        if not keithley_address:
+            print("⚠️  No SMU address configured; skipping auto-connect.")
+            if status_label:
+                status_label.config(text="● Address Required", fg=warning_color)
+            return False
+
+        if status_label:
+            status_label.config(text="● Connecting...", fg=warning_color)
+
+        print(f"Connecting to {smu_type} @ {keithley_address}...")
+        self.connect_keithley()
+
+        connected = getattr(self, "connected", False)
+        if connected:
+            idn = ""
+            try:
+                if hasattr(self.keithley, "get_idn"):
+                    idn = self.keithley.get_idn()
+            except Exception as exc:
+                print(f"⚠️  Warning: Unable to query IDN: {exc}")
+            status_text = idn or f"{smu_type} @ {keithley_address}"
+            print(f"✓ Connected: {status_text}")
+            if status_label:
+                status_label.config(text=f"● Connected: {status_text}", fg=success_color)
+            return True
+
+        print(f"❌ Connection failed for {smu_type} @ {keithley_address}")
+        if status_label:
+            status_label.config(text="● Connection Failed", fg=error_color)
+        return False
     def create_mode_selection(self,parent: tk.Misc) -> None:
         """Legacy wrapper retained for backward compatibility."""
         pass
@@ -2421,7 +2490,9 @@ class MeasurementGUI:
         if controller_type == "Auto-Detect":
             self.temp_controller = self.connections.create_temperature_controller(auto_detect=True)
         elif controller_type == "None":
-            self.temp_controller = self.connections.create_temperature_controller(auto_detect=False)
+            self.temp_controller = None
+            self.update_controller_status()
+            return
         else:
             if address == "Auto":
                 default_addresses = {

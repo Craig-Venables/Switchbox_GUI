@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import time
+from pathlib import Path
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
 # Lazy imports to avoid failing if dependencies are missing
@@ -11,9 +14,36 @@ if TYPE_CHECKING:
         Keithley2450_TSP,
         Keithley2450_TSP_Sim,
         HP4140BController,
-        Keithley4200AController,
         Keithley4200A_KXCI,
     )
+
+_connection_check_sample_helper = None
+try:
+    _runner_path = (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        / "SMU_AND_PMU"
+        / "4200A"
+        / "C_Code_with_python_scripts"
+        / "Single_Point_Bias"
+        / "connection_check_runner.py"
+    )
+    if _runner_path.exists():
+        spec = importlib.util.spec_from_file_location("connection_check_runner", _runner_path)
+        if spec and spec.loader:
+            _connection_check_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(_connection_check_module)  # type: ignore[attr-defined]
+            _connection_check_sample_helper = getattr(_connection_check_module, "execute_single_sample", None)
+            if _connection_check_sample_helper is None:
+                print("[connection_check] execute_single_sample not found in helper module")
+        else:
+            print("[connection_check] Unable to build module spec for connection_check_runner")
+    else:
+        print(f"[connection_check] Runner file missing: {_runner_path}")
+except Exception as exc:  # pragma: no cover
+    print(f"[connection_check] Failed to load helper: {exc}")
+    _connection_check_sample_helper = None
 
 
 class _Keithley4200A_KXCI_Wrapper:
@@ -64,6 +94,9 @@ class _Keithley4200A_KXCI_Wrapper:
                 f"Required C module helpers not available: {e}. "
                 "Cannot perform DC measurements without smu_ivsweep module."
             ) from e
+        
+        self._connection_check_helper = _connection_check_sample_helper
+        self._ensure_connection()
     
     # Unified API methods (matching Keithley4200AController interface)
     # Note: These methods call C modules via EX commands, not direct instrument commands
@@ -137,6 +170,47 @@ class _Keithley4200A_KXCI_Wrapper:
             print(f"[KXCI Wrapper] Warning: Failed to measure current: {e}")
             return float("nan")
     
+    def connection_check_sample(
+        self,
+        bias_voltage: float = 0.2,
+        sample_interval: float = 0.1,
+        settle_time: float = 0.01,
+        ilimit: Optional[float] = None,
+        integration_time: float = 0.01,
+        buffer_size: int = 8,
+    ) -> Dict[str, float]:
+        """
+        Take a single connection-check sample using smu_check_connection.
+        
+        Returns a dict with ``voltage`` and ``current`` fields. Intended for the
+        Connection Check GUI so it can stream readings without reimplementing the
+        EX/GP logic.
+        """
+        self._ensure_connection()
+
+        if self._connection_check_helper is None:
+            raise RuntimeError("Connection check helper is not available on this build.")
+        
+        ilimit_val = float(ilimit) if ilimit is not None else self._current_limit
+        was_in_ul = self._kxci._ul_mode_active
+        if not was_in_ul:
+            entered = self._kxci._enter_ul_mode()
+            if not entered:
+                raise RuntimeError("Failed to enter UL mode for connection check sample")
+        try:
+            return self._connection_check_helper(
+                self._kxci,
+                bias_voltage=bias_voltage,
+                sample_interval=sample_interval,
+                settle_time=settle_time,
+                ilimit=ilimit_val,
+                integration_time=integration_time,
+                buffer_size=buffer_size,
+            )
+        finally:
+            if not was_in_ul and self._kxci._ul_mode_active:
+                self._kxci._exit_ul_mode()
+    
     def _execute_single_point_measurement(self, voltage: float, ilimit: float) -> Dict[str, float]:
         """
         Execute a single-point measurement by calling smu_ivsweep C module.
@@ -152,6 +226,7 @@ class _Keithley4200A_KXCI_Wrapper:
         Returns:
             Dictionary with 'voltage' and 'current' keys
         """
+        self._ensure_connection()
         if voltage < 0:
             raise ValueError(f"Voltage must be >= 0 (got {voltage}V)")
         
@@ -255,6 +330,13 @@ class _Keithley4200A_KXCI_Wrapper:
         self.enable_output(False)
         if self._kxci:
             self._kxci.disconnect()
+
+    def _ensure_connection(self) -> None:
+        """Ensure the underlying KXCI controller is connected before issuing commands."""
+        if not self._kxci or self._kxci.inst:
+            return
+        if not self._kxci.connect():
+            raise RuntimeError("Failed to connect to Keithley 4200A via KXCI")
     
     def get_idn(self) -> str:
         """
@@ -263,10 +345,13 @@ class _Keithley4200A_KXCI_Wrapper:
         Follows the same pattern as TSP GUI: directly queries *IDN? from the
         instrument. Uses standard SCPI *IDN? command (not TSP) to verify
         connection and get instrument identification.
+        
+        If not connected, will attempt to connect first (lazy connection).
         """
-        # Check if controller exists and is connected
+        # Connect if not already connected (lazy connection)
         if not self._kxci.inst:
-            return "Keithley 4200A (Not Connected)"
+            if not self._kxci.connect():
+                return "Keithley 4200A (Not Connected)"
         
         try:
             # *IDN? is a standard SCPI command (not TSP) - works in normal mode
@@ -348,12 +433,7 @@ class IVControllerManager:
         except ImportError:
             HP4140BController = None
         
-        try:
-            from Equipment.SMU_AND_PMU import Keithley4200AController
-        except ImportError:
-            Keithley4200AController = None
-        
-        # Import KXCI controller for GPIB connections (NEW - preferred method)
+        # Import KXCI controller for GPIB connections (preferred method)
         try:
             from Equipment.SMU_AND_PMU import Keithley4200A_KXCI
         except ImportError:
@@ -385,13 +465,9 @@ class IVControllerManager:
                 'address_key': 'SMU_address',
             }
         
-        # For 4200A, we now support both GPIB (KXCI) and IP:port (LPT) connections
-        # GPIB is preferred for C module support, IP:port kept for backward compatibility
-        if Keithley4200A_KXCI is not None or Keithley4200AController is not None:
-            # Will be handled dynamically based on address format
+        if Keithley4200A_KXCI is not None:
             supported['Keithley 4200A'] = {
-                'class_kxci': Keithley4200A_KXCI,  # GPIB/KXCI controller (preferred)
-                'class_lpt': Keithley4200AController,  # IP:port/LPT controller (legacy, kept for compatibility)
+                'class': Keithley4200A_KXCI,
                 'address_key': 'SMU_address',
             }
         
@@ -425,34 +501,26 @@ class IVControllerManager:
                 f"Check that required dependencies are installed."
             )
         
-        # Special handling for 4200A: choose controller based on address format
-        # GPIB addresses -> use KXCI controller (preferred, supports C modules)
-        # IP:port addresses -> use LPT controller (legacy, kept for backward compatibility)
+        # Special handling for 4200A: always use the KXCI wrapper (GPIB required)
         if self.smu_type == 'Keithley 4200A':
-            is_gpib = self.address and self.address.upper().startswith('GPIB')
-            
-            if is_gpib:
-                # Use KXCI controller for GPIB addresses
-                controller_class = meta.get('class_kxci')
-                if controller_class is None:
-                    raise RuntimeError(
-                        f"KXCI controller for 4200A (GPIB) is not available. "
-                        f"Required dependencies may be missing. Check installation."
-                    )
-                # Create KXCI controller with GPIB address
-                kxci_inst = controller_class(gpib_address=self.address, timeout=30.0)
-                # Wrap it with DC measurement API
-                self.instrument = _Keithley4200A_KXCI_Wrapper(kxci_inst)
-            else:
-                # Use LPT controller for IP:port addresses (legacy support)
-                controller_class = meta.get('class_lpt')
-                if controller_class is None:
-                    raise RuntimeError(
-                        f"LPT controller for 4200A (IP:port) is not available. "
-                        f"Required dependencies may be missing. Check installation."
-                    )
-                # Create LPT controller with IP:port address
-                self.instrument = controller_class(self.address)
+            controller_class = meta.get('class')
+            if controller_class is None:
+                raise RuntimeError(
+                    "KXCI controller for 4200A is not available. "
+                    "Required dependencies may be missing. Check installation."
+                )
+            if not self.address or not self.address.upper().startswith('GPIB'):
+                raise ValueError(
+                    f"Keithley 4200A now requires a GPIB address (got '{self.address}'). "
+                    "Update system_configs.json to point to the GPIB resource."
+                )
+            kxci_inst = controller_class(gpib_address=self.address, timeout=30.0)
+            if hasattr(kxci_inst, "set_debug"):
+                kxci_inst.set_debug(False)
+            self.instrument = _Keithley4200A_KXCI_Wrapper(kxci_inst)
+            print("")
+            print("should be using the kxci wrapper!")
+            print("")
         else:
             # Standard controllers (2400, 2450, etc.)
             controller_class = meta['class']
@@ -488,6 +556,28 @@ class IVControllerManager:
     def enable_output(self, enable: bool = True):
         return self.instrument.enable_output(enable)
 
+    def connection_check_sample(
+        self,
+        bias_voltage: float = 0.2,
+        sample_interval: float = 0.1,
+        settle_time: float = 0.01,
+        ilimit: Optional[float] = None,
+        integration_time: float = 0.01,
+        buffer_size: int = 8,
+    ):
+        """Proxy connection-check helper if underlying instrument implements it."""
+        inst = getattr(self.instrument, "connection_check_sample", None)
+        if callable(inst):
+            return inst(
+                bias_voltage=bias_voltage,
+                sample_interval=sample_interval,
+                settle_time=settle_time,
+                ilimit=ilimit,
+                integration_time=integration_time,
+                buffer_size=buffer_size,
+            )
+        raise AttributeError("connection_check_sample is not available for this instrument")
+
     def shutdown(self):
         if hasattr(self.instrument, 'shutdown'):
             return self.instrument.shutdown()
@@ -501,15 +591,13 @@ class IVControllerManager:
         inst = getattr(self, 'instrument', None)
         if inst is None:
             return False
-        # Handle KXCI wrapper (GPIB connection) - verify with *IDN? query
+        # Handle KXCI wrapper (GPIB connection) - mark as connected if wrapper exists
+        # For 4200A via GPIB/KXCI, connection is lazy (happens on first use)
+        # So we consider it "connected" if the wrapper was successfully created
+        # The actual connection will be established when needed (get_idn(), measurements, etc.)
         if isinstance(inst, _Keithley4200A_KXCI_Wrapper):
-            try:
-                # Use get_idn() which sends *IDN? to verify connection
-                idn = inst.get_idn()
-                # If IDN contains "Not Connected", connection failed
-                return "Not Connected" not in idn
-            except Exception:
-                return False
+            # Wrapper exists = considered connected (lazy connection will happen when needed)
+            return True
         # Common attributes for our supported controllers
         if hasattr(inst, 'device'):
             return getattr(inst, 'device') is not None

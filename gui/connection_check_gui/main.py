@@ -61,6 +61,11 @@ import time
 import threading
 from typing import Any, List
 
+try:
+    import winsound
+except ImportError:  # pragma: no cover
+    winsound = None
+
 
 class CheckConnection:
     """Popup window that applies a bias and plots current in real-time."""
@@ -70,6 +75,8 @@ class CheckConnection:
         self.top.title("Connection Check - Pin Lowering Assistant")
         self.top.geometry("800x750")
         self.keithley = keithley
+        smu_type = str(getattr(self.keithley, "smu_type", "")).lower()
+        self._is_4200a = "4200a" in smu_type
         self.check_connection_window: bool = True
         self.noise_already: bool = False
         # Beep when absolute current reaches or exceeds this threshold (A)
@@ -291,26 +298,58 @@ class CheckConnection:
     def measurement_loop(self) -> None:
         """Worker thread: bias the device and stream current to the plot."""
         start_time = time.time()
-        # Apply a small bias and enable output
-        try:
-            self.keithley.set_voltage(0.2, 0.1)
-            self.keithley.enable_output(True)
-        except Exception as e:
-            print(f"Error setting up measurement: {e}")
-            return
+        helper = getattr(self.keithley, "connection_check_sample", None)
+        if not callable(helper) and hasattr(self.keithley, "instrument"):
+            inner = getattr(self.keithley.instrument, "connection_check_sample", None)
+            if callable(inner):
+                helper = inner
+        use_connection_helper = callable(helper)
+        print(
+            "[ConnectionCheck] keithley type:",
+            type(self.keithley),
+            "has connection helper:",
+            bool(use_connection_helper),
+        )
+        self._connection_helper_active = use_connection_helper
+        fallback_initialized = False
+
+        if use_connection_helper:
+            print("[ConnectionCheck] Using connection_check_sample helper (4200A path).")
+        else:
+            print("[ConnectionCheck] Using legacy set_voltage/measure_current path.")
+            try:
+                self.keithley.set_voltage(0.2, 0.1)
+                self.keithley.enable_output(True)
+                fallback_initialized = True
+            except Exception as exc:
+                print(f"Error setting up measurement: {exc}")
+                return
         
         time.sleep(0.5)
         self.previous_current = None
         while self.check_connection_window:
             try:
-                current_value = self.keithley.measure_current()
-                elapsed_time = time.time() - start_time
-                
-                # Handle both tuple (Keithley 4200A) and float (Keithley 2400/2450 TSP) returns
-                if isinstance(current_value, (tuple, list)):
-                    current = float(current_value[1])
+                if use_connection_helper and callable(helper):
+                    sample = helper()
+                    current = float(sample.get("current", 0.0))
+                    elapsed_time = time.time() - start_time
                 else:
-                    current = float(current_value) if current_value is not None else 0.0
+                    if not fallback_initialized:
+                        try:
+                            self.keithley.set_voltage(0.2, 0.1)
+                            self.keithley.enable_output(True)
+                            fallback_initialized = True
+                            print("[ConnectionCheck] Fallback path initialized.")
+                        except Exception as exc:
+                            print(f"Error initializing fallback path: {exc}")
+                            time.sleep(1.0)
+                            continue
+                    current_value = self.keithley.measure_current()
+                    elapsed_time = time.time() - start_time
+                    if isinstance(current_value, (tuple, list)):
+                        current = float(current_value[1])
+                    else:
+                        current = float(current_value) if current_value is not None else 0.0
                 
                 # Store data for plotting and saving
                 self.time_data.append(elapsed_time)
@@ -331,33 +370,65 @@ class CheckConnection:
 
                 self.previous_current = current
                 self.update_plot(self.time_data, self.current_data, current)
-                time.sleep(0.2)
+                time.sleep(0.05)
                 
             except Exception as e:
-                print(f"Error in measurement loop: {e}")
+                print(f"[ConnectionCheck] Error in measurement loop: {e}")
+                if use_connection_helper:
+                    print("[ConnectionCheck] Disabling helper and falling back to legacy path.")
+                    use_connection_helper = False
+                    self._connection_helper_active = False
+                    helper = None
+                    fallback_initialized = False
+                    try:
+                        self.keithley.set_voltage(0.2, 0.1)
+                        self.keithley.enable_output(True)
+                        fallback_initialized = True
+                        print("[ConnectionCheck] Legacy fallback initialized.")
+                    except Exception as sub_exc:
+                        print(f"[ConnectionCheck] Fallback init failed: {sub_exc}")
+                        time.sleep(1.0)
+                    continue
                 time.sleep(0.5)  # Wait before retrying
 
-        try:
-            self.keithley.shutdown()
-        except Exception:
-            pass
+        if not use_connection_helper:
+            try:
+                self.keithley.shutdown()
+            except Exception:
+                pass
 
     def on_spike_detected(self, continuous: bool = False) -> None:
         """Emit a beep via the instrument and mark spike as handled."""
+        played_hw_beep = False
         try:
             self.keithley.beep(400, 0.1 if continuous else 0.5)
+            played_hw_beep = True
             if continuous:
                 print(f"Continuous beep: I = {abs(self.current_data[-1]):.2e} A")
             else:
                 print(f"⚠️ Connection detected! I = {abs(self.current_data[-1]):.2e} A")
                 self.noise_already = True
-                # Update status on main thread
                 self.top.after(0, lambda: self.status_text.config(
                     text=f"✓ Connection detected at {abs(self.current_data[-1]):.2e} A", 
                     fg="#4CAF50"
                 ))
         except Exception as e:
-            print(f"Error making beep: {e}")
+            print(f"Error making instrument beep: {e}")
+        finally:
+            if self._is_4200a or not played_hw_beep:
+                self._play_system_beep(continuous)
+
+    def _play_system_beep(self, continuous: bool) -> None:
+        """Fallback beep using the host system (4200A has no hardware beep)."""
+        duration_ms = 100 if continuous else 300
+        frequency_hz = 1200 if continuous else 800
+        try:
+            if winsound is not None:
+                winsound.Beep(frequency_hz, duration_ms)
+            else:
+                print("\a", end="")
+        except Exception:
+            print("\a", end="")
 
     def update_plot(self, time_data: List[float], current_data: List[float], current: float) -> None:
         """Update the real-time plot with new data."""
@@ -396,10 +467,11 @@ class CheckConnection:
 
     def close_window(self) -> None:
         self.check_connection_window = False
-        try:
-            self.keithley.enable_output(False)
-        except Exception:
-            pass
+        if not getattr(self, "_connection_helper_active", False):
+            try:
+                self.keithley.enable_output(False)
+            except Exception:
+                pass
         self.top.destroy()
 
 if __name__ == "__main__":
