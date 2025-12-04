@@ -902,8 +902,11 @@ class MeasurementGUI:
         
         # TSP Testing button: opens Keithley 2450 TSP pulse testing GUI
         try:
-            self.tsp_btn = tk.Button(frame, text="2450 TSP Pulse Testing", 
-                                     command=lambda: TSPTestingGUI(self.master, provider=self))
+            self.tsp_btn = tk.Button(
+                frame,
+                text="2450 TSP Pulse Testing",
+                command=self.open_pulse_testing_gui,
+            )
             self.tsp_btn.grid(row=0, column=1, padx=(5, 5), pady=(2, 2), sticky='w')
             print("TSP_Testing_GUI loaded successfully")
         except Exception as e:
@@ -966,6 +969,48 @@ class MeasurementGUI:
                 self.manual_led_btn.config(text="LED OFF")
         except Exception:
             pass
+
+    def open_pulse_testing_gui(self) -> None:
+        """Launch the pulse testing GUI with current sample/context info."""
+        sample_name = None
+        if hasattr(self, "sample_name_var"):
+            try:
+                sample_name = self.sample_name_var.get().strip()
+            except Exception:
+                sample_name = None
+        if not sample_name and hasattr(self, "sample_gui") and self.sample_gui:
+            for attr in ("current_device_name", "current_sample_name", "sample_name"):
+                fallback = getattr(self.sample_gui, attr, None)
+                if fallback:
+                    sample_name = str(fallback).strip()
+                    break
+
+        device_label = getattr(self, "device_section_and_number", None)
+        custom_path = None
+        use_custom_var = getattr(self, "use_custom_save_var", None)
+        if use_custom_var and use_custom_var.get():
+            custom_loc = getattr(self, "custom_save_location", None)
+            if custom_loc:
+                custom_path = str(custom_loc)
+
+        address = getattr(self, "keithley_address", None)
+        if (not address) and hasattr(self, "keithley_address_var"):
+            try:
+                address = self.keithley_address_var.get().strip()
+            except Exception:
+                address = None
+
+        try:
+            TSPTestingGUI(
+                self.master,
+                device_address=address or "GPIB0::17::INSTR",
+                provider=self,
+                sample_name=sample_name,
+                device_label=device_label,
+                custom_save_base=custom_path,
+            )
+        except Exception as exc:
+            messagebox.showerror("Pulse Testing", f"Could not open Pulse Testing GUI:\n{exc}")
 
     def _start_custom_measurement_thread(self) -> None:
         """Start the custom measurement workflow in a background thread."""
@@ -3443,13 +3488,35 @@ class MeasurementGUI:
             print(f"  Settle time: {settle_time*1000:.1f} ms")
             print(f"  Current limit: {ilimit:.2e} A")
             print(f"  Integration time: {integration_time:.6f} PLC")
-            print(f"  Debug: {'ON' if debug else 'OFF'}")
+            print(f"  Debug: {'ON' if debug else 'OFF'} (value={debug}, type={type(debug).__name__})")
+            # Print full command (may be long, but useful for debugging)
+            if len(command) > 300:
+                print(f"  Command (first 150): {command[:150]}...")
+                print(f"  Command (last 150): ...{command[-150:]}")
+                # Also show the debug parameter part
+                if ",1)" in command or ",0)" in command:
+                    debug_pos = command.rfind(",")
+                    if debug_pos > 0:
+                        print(f"  Debug parameter in command: ...{command[debug_pos-5:debug_pos+5]}...")
+            else:
+                print(f"  Full command: {command}")
             
-            return_value, error = controller._execute_ex_command(command)
+            # Calculate wait time based on sweep parameters
+            # Time per point ≈ settle_time + (integration_time × 0.01s per PLC)
+            # Total time = (4 × num_cycles) × time_per_point × safety_factor
+            time_per_point = settle_time + (integration_time * 0.01)  # Rough: 1 PLC ≈ 0.01s
+            estimated_time = (4 * num_cycles) * time_per_point
+            wait_time = max(2.0, estimated_time * 1.5)  # Minimum 2s, add 50% safety margin
+            print(f"  Estimated sweep time: {estimated_time:.2f}s, waiting {wait_time:.2f}s...")
+            
+            return_value, error = controller._execute_ex_command(command, wait_seconds=wait_time)
             
             if error:
                 raise RuntimeError(f"EX command failed: {error}")
-            if return_value is not None and return_value < 0:
+            # smu_ivsweep returns 0 on success, negative values on error
+            if return_value == 0:
+                print(f"[Cyclical IV Sweep] Return value: 0 (success)")
+            elif return_value is not None and return_value < 0:
                 error_messages = {
                     -1: "Invalid Vpos (must be >= 0) or Vneg (must be <= 0)",
                     -2: "NumIPoints != NumVPoints (array size mismatch)",
@@ -3464,8 +3531,12 @@ class MeasurementGUI:
                 msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
                 raise RuntimeError(f"EX command returned error code: {return_value} - {msg}")
             
-            # Wait a bit for measurement to complete
-            time.sleep(0.5)
+            # Wait a bit more to ensure EX command is fully complete
+            time.sleep(0.3)
+            
+            # Exit UL mode before GP commands (GP commands must be sent in normal mode)
+            controller._exit_ul_mode()
+            time.sleep(0.5)  # Wait longer for mode transition to complete (GP commands need normal mode)
             
             # Query data from GP parameters
             # GP parameter 6 = Vforce (6th parameter in function signature)
@@ -3507,9 +3578,10 @@ class MeasurementGUI:
             return (voltage, current, timestamps)
             
         finally:
-            # Cleanup: exit UL mode and disconnect
+            # Cleanup: exit UL mode (if still active) and disconnect
             try:
-                controller._exit_ul_mode()
+                if controller._ul_mode_active:
+                    controller._exit_ul_mode()
                 controller.disconnect()
             except Exception:
                 pass

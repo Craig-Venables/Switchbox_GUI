@@ -917,7 +917,7 @@ int ACraig10_PMU_Waveform_SegArb( double width, double rise, double fall, double
         printf("Seg_arb mode: Measurement controlled by meastype[] in seg_arb_sequence()\n");
         printf("  NOT using pulse_meas_wfm() - that's for simple pulse mode only\n");
     }
-    
+
     // Set test execute mode to Simple or Advanced
     if (PMUMode ==0)
         TestMode = PULSE_MODE_SIMPLE;

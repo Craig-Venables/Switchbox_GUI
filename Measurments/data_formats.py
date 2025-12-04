@@ -587,7 +587,14 @@ class FileNamer:
             str: Formatted filename like "0-Pulse_Read_Repeat-1.5V_100us-20251029_143022.txt"
         """
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        test_clean = test_name.replace(" ", "_").replace("-", "_")
+        # Clean test name: remove emojis and special characters that can't be in filenames
+        # Keep only ASCII alphanumeric, spaces, hyphens, and underscores
+        import re
+        test_clean = re.sub(r'[^\w\s-]', '', test_name)  # Remove emojis and special chars
+        test_clean = test_clean.replace(" ", "_").replace("-", "_")
+        # Remove multiple underscores
+        test_clean = re.sub(r'_+', '_', test_clean)
+        test_clean = test_clean.strip('_')
         
         if test_details:
             return f"{index}-{test_clean}-{test_details}-{timestamp}.{extension}"
@@ -793,8 +800,13 @@ def save_tsp_measurement(
         
         # 3. Append to combined log
         log_path = filepath.parent / "tsp_test_log.txt"
-        with open(log_path, 'a') as f:
-            f.write(f"{metadata.get('timestamp', '')}, {metadata.get('test_name', '')}, "
+        with open(log_path, 'a', encoding='utf-8') as f:
+            # Sanitize test_name to avoid encoding issues
+            test_name = metadata.get('test_name', '')
+            # Remove emojis and special characters
+            import re
+            test_name_clean = re.sub(r'[^\w\s-]', '', test_name)
+            f.write(f"{metadata.get('timestamp', '')}, {test_name_clean}, "
                    f"{filepath.name}, points={len(data)}\n")
         
         return True

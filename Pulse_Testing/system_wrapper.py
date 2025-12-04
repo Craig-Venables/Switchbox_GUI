@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional, Type
 from .systems.base_system import BaseMeasurementSystem
 from .systems.keithley2450 import Keithley2450System
 from .systems.keithley4200a import Keithley4200ASystem
+from .systems.keithley2400 import Keithley2400System
 from .test_capabilities import is_test_supported
 from .utils.data_formatter import normalize_data, ensure_list_format
 
@@ -21,6 +22,7 @@ from .utils.data_formatter import normalize_data, ensure_list_format
 SYSTEM_CLASSES: Dict[str, Type[BaseMeasurementSystem]] = {
     'keithley2450': Keithley2450System,
     'keithley4200a': Keithley4200ASystem,
+    'keithley2400': Keithley2400System,
 }
 
 
@@ -54,6 +56,7 @@ def detect_system_from_address(address: str) -> Optional[str]:
     
     Detection logic:
     - USB/GPIB addresses containing "2450" → keithley2450
+    - GPIB addresses containing "2400" or "2401" → keithley2400
     - IP:port format (e.g., "192.168.0.10:8888") → keithley4200a
     - GPIB0::17::INSTR (common 4200A address) → keithley4200a
     - Other GPIB addresses → try to query instrument ID, fallback to keithley2450
@@ -65,6 +68,10 @@ def detect_system_from_address(address: str) -> Optional[str]:
     # Check for 2450 indicators
     if '2450' in address_lower:
         return 'keithley2450'
+    
+    # Check for 2400/2401 indicators (before 4200 check to avoid conflicts)
+    if '2400' in address_lower or '2401' in address_lower:
+        return 'keithley2400'
     
     # Check for 4200A indicators (IP:port format)
     if ':' in address and not address_lower.startswith(('usb', 'gpib', 'tcpip')):
@@ -119,6 +126,8 @@ def detect_system_from_address(address: str) -> Optional[str]:
                 return 'keithley4200a'
             elif '2450' in idn:
                 return 'keithley2450'
+            elif '2400' in idn or '2401' in idn:
+                return 'keithley2400'
         except Exception:
             # If query fails, fall through to default
             pass
@@ -180,6 +189,10 @@ class SystemWrapper:
             # Extract terminals parameter if present
             terminals = kwargs.pop('terminals', 'front')
             system_instance.connect(address, terminals=terminals, **kwargs)
+        elif system_name == 'keithley2400':
+            # Extract timeout parameter if present
+            timeout = kwargs.pop('timeout', 5.0)
+            system_instance.connect(address, timeout=timeout, **kwargs)
         else:
             # For other systems, pass all kwargs
             system_instance.connect(address, **kwargs)

@@ -325,6 +325,7 @@ TEST_FUNCTIONS = {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_reads": {"default": 50, "label": "Number of Reads", "type": "int"},
             "delay_between_reads": {"default": 100.0, "label": "Delay Between Reads (ms)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "time_series",
@@ -365,6 +366,7 @@ TEST_FUNCTIONS = {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_reads": {"default": 10, "label": "Number of Reads", "type": "int"},
             "delay_between_reads": {"default": 0.1, "label": "Delay Between Reads (ms)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "relaxation_reads",
@@ -381,93 +383,74 @@ TEST_FUNCTIONS = {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
             "num_reads": {"default": 10, "label": "Number of Reads", "type": "int"},
             "delay_between_reads": {"default": 0.1, "label": "Delay Between Reads (ms)", "type": "float"},
+            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "relaxation_all",
     },
     
-    "Voltage Amplitude Sweep": {
-        "function": "voltage_amplitude_sweep",
-        "description": "Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset\nTest different pulse voltages at fixed width (complementary to width sweep)",
+    # Removed from GUI selection (code still available):
+    # "Voltage Amplitude Sweep", "ISPP", "Switching Threshold Finder", 
+    # "Multilevel Programming", "Pulse Train with Varying Amplitudes"
+    
+    "⚠️ SMU Slow Pulse Measure": {
+        "function": "smu_slow_pulse_measure",
+        "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Single pulse → Measure resistance during pulse\nUse for very slow pulses (milliseconds to seconds), relaxation studies\nLimits: Pulse width 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
-            "pulse_voltage_start": {"default": 0.5, "label": "Start Voltage (V)", "type": "float"},
-            "pulse_voltage_stop": {"default": 2.5, "label": "Stop Voltage (V)", "type": "float"},
-            "pulse_voltage_step": {"default": 0.1, "label": "Voltage Step (V)", "type": "float"},
-            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "num_pulses_per_voltage": {"default": 5, "label": "Pulses Per Voltage", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "reset_voltage": {"default": -1.0, "label": "Reset Voltage (V)", "type": "float"},
-            "reset_width": {"default": 1.0, "label": "Reset Width (ms)", "type": "float"},
-            "delay_between_voltages": {"default": 1000.0, "label": "Delay Between Voltages (ms)", "type": "float"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            "pulse_voltage": {"default": 1.0, "label": "Pulse Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 0.1, "label": "Pulse Width (s) ⚠️ SECONDS (not ms/µs)", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
+            "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
+            "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
-        "plot_type": "voltage_sweep",
+        "plot_type": "time_series",
+        "4200a_only": True,  # Only available for 4200A
     },
     
-    "ISPP (Incremental Step Pulse Programming)": {
-        "function": "ispp_test",
-        "description": "Pattern: Start at low voltage, increase by step each pulse\nGradually increase voltage until switching occurs",
+    "⚠️ SMU Retention": {
+        "function": "smu_retention",
+        "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse → Read → RESET pulse → Read) × N cycles\nUse for retention studies with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
-            "start_voltage": {"default": 0.5, "label": "Start Voltage (V)", "type": "float"},
-            "voltage_step": {"default": 0.05, "label": "Voltage Step (V)", "type": "float"},
-            "max_voltage": {"default": 3.0, "label": "Max Voltage (V)", "type": "float"},
-            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "max_pulses": {"default": 100, "label": "Max Pulses", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
+            "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
+            "set_duration": {"default": 0.1, "label": "SET Duration (s) ⚠️ SECONDS", "type": "float"},
+            "reset_duration": {"default": 0.1, "label": "RESET Duration (s) ⚠️ SECONDS", "type": "float"},
+            "num_cycles": {"default": 10, "label": "Number of Cycles", "type": "int"},
+            "repeat_delay": {"default": 1.0, "label": "Repeat Delay (s) ⚠️ SECONDS", "type": "float"},
+            "probe_voltage": {"default": 0.2, "label": "Probe Voltage (V)", "type": "float"},
+            "probe_duration": {"default": 0.01, "label": "Probe Duration (s) ⚠️ SECONDS", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
+            "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
+            "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
-        "plot_type": "ispp",
+        "plot_type": "time_series",
+        "4200a_only": True,  # Only available for 4200A
     },
     
-    "Switching Threshold Finder": {
-        "function": "switching_threshold_test",
-        "description": "Pattern: Try increasing voltages, find minimum that causes switching\nFind minimum SET or RESET voltage",
+    "⚠️ SMU Retention (Pulse Measured)": {
+        "function": "smu_retention_with_pulse_measurement",
+        "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse+measure → Read → RESET pulse+measure → Read) × N cycles\nMeasures resistance DURING SET/RESET pulses (not just after)\nUse for retention studies with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
-            "direction": {"default": "set", "label": "Direction (set/reset)", "type": "str"},
-            "start_voltage": {"default": 0.5, "label": "Start Voltage (V)", "type": "float"},
-            "voltage_step": {"default": 0.05, "label": "Voltage Step (V)", "type": "float"},
-            "max_voltage": {"default": 3.0, "label": "Max Voltage (V)", "type": "float"},
-            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "num_pulses_per_voltage": {"default": 3, "label": "Pulses Per Voltage", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
+            "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
+            "set_duration": {"default": 0.1, "label": "SET Duration (s) ⚠️ SECONDS", "type": "float"},
+            "reset_duration": {"default": 0.1, "label": "RESET Duration (s) ⚠️ SECONDS", "type": "float"},
+            "num_cycles": {"default": 10, "label": "Number of Cycles", "type": "int"},
+            "repeat_delay": {"default": 1.0, "label": "Repeat Delay (s) ⚠️ SECONDS", "type": "float"},
+            "probe_voltage": {"default": 0.2, "label": "Probe Voltage (V)", "type": "float"},
+            "probe_duration": {"default": 0.01, "label": "Probe Duration (s) ⚠️ SECONDS", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
+            "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
+            "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
-        "plot_type": "threshold",
-    },
-    
-    "Multilevel Programming": {
-        "function": "multilevel_programming",
-        "description": "Pattern: For each level: Reset → Program with pulses → Read\nTarget specific resistance states for multilevel memory",
-        "params": {
-            "target_levels": {"default": "1,2,3,4,5", "label": "Target Levels (comma-separated)", "type": "list"},
-            "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
-            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "num_pulses_per_level": {"default": 5, "label": "Pulses Per Level", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "reset_voltage": {"default": -1.0, "label": "Reset Voltage (V)", "type": "float"},
-            "reset_width": {"default": 1.0, "label": "Reset Width (ms)", "type": "float"},
-            "delay_between_levels": {"default": 1000.0, "label": "Delay Between Levels (ms)", "type": "float"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
-        },
-        "plot_type": "multilevel",
-    },
-    
-    "Pulse Train with Varying Amplitudes": {
-        "function": "pulse_train_varying_amplitudes",
-        "description": "Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N\nAlternating or varying amplitude pulses",
-        "params": {
-            "pulse_voltages": {"default": "1.0,1.5,2.0,-1.0,-1.5,-2.0", "label": "Pulse Voltages (comma-separated, V)", "type": "list"},
-            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "num_repeats": {"default": 1, "label": "Number of Repeats", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
-        },
-        "plot_type": "pulse_train",
+        "plot_type": "time_series",
+        "4200a_only": True,  # Only available for 4200A
     },
 }
 
@@ -479,7 +462,15 @@ class TSPTestingGUI(tk.Toplevel):
     Automatically routes tests to appropriate system based on device address.
     """
     
-    def __init__(self, master, device_address: str = "GPIB0::17::INSTR", provider=None):
+    def __init__(
+        self,
+        master,
+        device_address: str = "GPIB0::17::INSTR",
+        provider=None,
+        sample_name: Optional[str] = None,
+        device_label: Optional[str] = None,
+        custom_save_base: Optional[Union[str, Path]] = None,
+    ):
         super().__init__(master)
         self.title("Multi-System Pulse Testing")
         self.geometry("1400x900")
@@ -489,7 +480,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.tsp = None
         self.test_scripts = None  # Legacy - kept for backward compatibility
         self.provider = provider
-        self.device_address = device_address
+        self.device_address = device_address or "GPIB0::17::INSTR"
         self.current_test = None
         self.test_running = False
         self.test_thread = None
@@ -499,21 +490,41 @@ class TSPTestingGUI(tk.Toplevel):
         self.system_wrapper = SystemWrapper()
         self.current_system_name = None  # Track which system is connected
         
-        # Context from provider
-        self.sample_name = "UnknownSample"
-        self.device_label = "A"
+        # Context from provider or caller
+        if isinstance(sample_name, str) and sample_name.strip():
+            self.sample_name = sample_name.strip()
+        else:
+            self.sample_name = "UnknownSample"
+        if isinstance(device_label, str) and device_label.strip():
+            self.device_label = device_label.strip()
+        else:
+            self.device_label = "UnknownDevice"
         
         # Save location - load from config
-        self.custom_base_path = self._load_custom_save_location()
+        if custom_save_base:
+            self.custom_base_path = Path(custom_save_base)
+            self._custom_base_from_provider = True
+        else:
+            self.custom_base_path = self._load_custom_save_location()
+            self._custom_base_from_provider = False
         
         # Simple save location (for TSP GUI independent mode)
-        self.use_simple_save_var = tk.BooleanVar()
+        self.use_simple_save_var = tk.BooleanVar(value=False)
         self.simple_save_path_var = tk.StringVar()
         self.simple_save_path = None
         self._load_simple_save_config()
+        if self._custom_base_from_provider:
+            self.use_simple_save_var.set(False)
+            self.simple_save_path = None
+            self.simple_save_path_var.set("")
+        
+        # Internal scheduling handles
+        self._context_poll_job = None
         
         # Create UI
         self.create_ui()
+        # Start syncing provider context (sample/device/custom path)
+        self._poll_context()
         
         # Auto-connect disabled - user must manually connect
     
@@ -616,7 +627,7 @@ class TSPTestingGUI(tk.Toplevel):
             self.system_var.set("keithley4200a")  # Default (changed from keithley2450 to keithley4200a)
         
         system_combo = ttk.Combobox(system_frame, textvariable=self.system_var,
-                                   values=["keithley2450", "keithley2450_sim", "keithley4200a"],
+                                   values=["keithley2450", "keithley2450_sim", "keithley4200a", "keithley2400"],
                                    state="readonly", width=20)
         system_combo.pack(side=tk.LEFT, padx=5)
         
@@ -896,7 +907,7 @@ class TSPTestingGUI(tk.Toplevel):
     def auto_connect(self):
         """Auto-connect on startup"""
         # Update context from provider (like PMU GUI does)
-        self._poll_context()
+        self._sync_context_from_provider()
         
         # Try to get device address from provider (if Measurement GUI has one)
         if self.provider:
@@ -914,39 +925,64 @@ class TSPTestingGUI(tk.Toplevel):
         # Try to connect
         self.connect_device()
     
-    def _poll_context(self):
-        """Poll provider for updated sample name and device (like PMU GUI)"""
+    def _sync_context_from_provider(self):
+        """Align sample/device context and save preferences with provider."""
         try:
             if self.provider is not None:
-                # Measurement_GUI has sample_name_var and final_device_letter/number
                 sn = getattr(self.provider, 'sample_name_var', None)
-                name = sn.get().strip() if sn is not None else None
-                letter = getattr(self.provider, 'final_device_letter', None)
-                number = getattr(self.provider, 'final_device_number', None)
+                name = None
+                if sn is not None and hasattr(sn, 'get'):
+                    try:
+                        name = sn.get().strip()
+                    except Exception:
+                        name = None
+                if not name and hasattr(self.provider, 'sample_gui') and self.provider.sample_gui:
+                    fallback = getattr(self.provider.sample_gui, 'current_device_name', None)
+                    if fallback:
+                        name = str(fallback).strip()
                 if name:
                     self.sample_name = name
-                if letter and number:
+
+                device_section = getattr(self.provider, 'device_section_and_number', None)
+                letter = getattr(self.provider, 'final_device_letter', None)
+                number = getattr(self.provider, 'final_device_number', None)
+                if device_section:
+                    self.device_label = str(device_section)
+                elif letter and number:
                     self.device_label = f"{letter}{number}"
-                
-                # Check if provider has custom save location enabled
+
                 use_custom = getattr(self.provider, 'use_custom_save_var', None)
-                if use_custom and use_custom.get():
+                use_custom_enabled = bool(use_custom and hasattr(use_custom, 'get') and use_custom.get())
+                if use_custom_enabled:
                     custom_path = getattr(self.provider, 'custom_save_location', None)
                     if custom_path:
-                        # Use Measurement GUI's custom save location
                         self.custom_base_path = Path(custom_path)
-                        # Extract sample name from the last part of the custom path
-                        # e.g., "C:\...\D80-0.1mgml-ITO-PMMA(2%)-Gold-s2" -> "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2"
                         sample_from_path = Path(custom_path).name
                         if sample_from_path:
                             self.sample_name = sample_from_path
-                        # Disable simple save mode when using Measurement GUI's custom location
                         self.use_simple_save_var.set(False)
-            self.context_var.set(f"Sample: {self.sample_name}  |  Device: {self.device_label}")
+                        self.simple_save_path = None
+                        self.simple_save_path_var.set("")
         except Exception:
             pass
-        # Poll every 500ms like PMU GUI
-        self.after(500, self._poll_context)
+        finally:
+            if hasattr(self, 'context_var'):
+                self.context_var.set(f"Sample: {self.sample_name}  |  Device: {self.device_label}")
+
+    def _poll_context(self):
+        """Poll provider for updated sample name and device (like PMU GUI)"""
+        self._sync_context_from_provider()
+        self._context_poll_job = self.after(500, self._poll_context)
+
+    def destroy(self):
+        """Ensure scheduled context polling stops when window closes."""
+        if self._context_poll_job:
+            try:
+                self.after_cancel(self._context_poll_job)
+            except Exception:
+                pass
+            self._context_poll_job = None
+        super().destroy()
     
     def _load_custom_save_location(self) -> Optional[Path]:
         """Load custom save location from config file"""
@@ -1243,7 +1279,22 @@ class TSPTestingGUI(tk.Toplevel):
             return  # GUI not fully initialized yet
         
         system_name = self.current_system_name if self.current_system_name else None
-        test_values = list(TEST_FUNCTIONS.keys())
+        is_4200a = (system_name == 'keithley4200a')
+        
+        # Filter test list based on system capabilities and 4200a_only flag
+        test_values = []
+        for test_name, test_info in TEST_FUNCTIONS.items():
+            # Check if test is marked as 4200A only
+            if test_info.get("4200a_only", False) and not is_4200a:
+                continue  # Skip this test if not 4200A
+            
+            # Check if test is supported by current system
+            test_function = test_info.get("function")
+            if system_name and test_function:
+                if not is_test_supported(system_name, test_function):
+                    continue  # Skip unsupported tests
+            
+            test_values.append(test_name)
         
         # Store current selection
         current_selection = self.test_var.get()
@@ -1748,6 +1799,9 @@ class TSPTestingGUI(tk.Toplevel):
             messagebox.showerror("Parameter Error", str(e))
             return
         
+        # Clear previous results so failures don't re-use stale data
+        self.last_results = None
+        
         # UI state
         self.test_running = True
         self.run_btn.config(state=tk.DISABLED)
@@ -1765,6 +1819,24 @@ class TSPTestingGUI(tk.Toplevel):
         try:
             # Get function name
             func_name = test_info["function"]
+            
+            # For SMU retention tests, add progress callback for real-time plotting
+            if func_name in ['smu_retention', 'smu_retention_with_pulse_measurement']:
+                def progress_callback(partial_results):
+                    """Callback to update plot in real-time"""
+                    try:
+                        # Update last_results with partial data
+                        self.last_results = partial_results
+                        self.last_results['test_name'] = self.test_var.get()
+                        self.last_results['params'] = params
+                        self.last_results['plot_type'] = test_info['plot_type']
+                        # Update plot on GUI thread
+                        self.after(0, self._plot_incremental)
+                    except Exception as e:
+                        # Don't log errors in callback to avoid spam
+                        pass
+                
+                params['progress_callback'] = progress_callback
             
             # Execute using system wrapper (routes to appropriate system)
             self.log(f"Executing {func_name} on {self.current_system_name}...")
@@ -1806,9 +1878,11 @@ class TSPTestingGUI(tk.Toplevel):
             self.after(0, plot_and_finish)
             
         except Exception as e:
+            self.last_results = None
             self.log(f"❌ Test error: {e}")
             import traceback
             traceback.print_exc()
+            self.after(0, lambda err=e: messagebox.showerror("Test Error", str(err)))
             self.after(0, self._test_finished)
     
     def stop_test(self):
@@ -1840,6 +1914,43 @@ class TSPTestingGUI(tk.Toplevel):
             self.log("ℹ Auto-save disabled - use Manual Save to save data")
         else:
             self.log("⚠ No data to save")
+    
+    def _plot_incremental(self):
+        """Update plot incrementally for real-time updates (e.g., SMU retention)"""
+        if not self.last_results:
+            return
+        try:
+            # Clear and replot with current data
+            self.ax.clear()
+            plot_type = self.last_results.get('plot_type', 'time_series')
+            
+            if plot_type == 'time_series':
+                self._plot_time_series()
+            elif plot_type == 'width_vs_resistance':
+                self._plot_width_sweep()
+            elif plot_type == 'pot_dep_cycle':
+                self._plot_pot_dep_cycle()
+            elif plot_type == 'relaxation_all':
+                self._plot_relaxation_all()
+            elif plot_type == 'relaxation':
+                self._plot_relaxation()
+            elif plot_type == 'voltage_sweep':
+                self._plot_voltage_sweep()
+            elif plot_type == 'ispp':
+                self._plot_ispp()
+            elif plot_type == 'threshold':
+                self._plot_threshold()
+            elif plot_type == 'multilevel':
+                self._plot_multilevel()
+            elif plot_type == 'pulse_train':
+                self._plot_pulse_train()
+            else:
+                self._plot_time_series()  # Default
+            
+            self.canvas.draw()
+        except Exception as e:
+            # Don't log errors during incremental updates to avoid spam
+            pass
     
     def plot_results(self):
         """Plot test results"""
@@ -1885,29 +1996,25 @@ class TSPTestingGUI(tk.Toplevel):
             self.log(f"Plot error: {e}")
     
     def _plot_time_series(self):
-        """Plot resistance vs time"""
+        """Plot resistance vs time - raw data, no filtering"""
         test_name = self.last_results['test_name']
         params = self.last_results.get('params', {})
         
         timestamps = self.last_results.get('timestamps', [])
         resistances = self.last_results.get('resistances', [])
         
-        # Filter out invalid values (NaN/inf/zero) and use magnitude so negative resistances still render
+        # Only filter out NaN/inf (keep zeros, negatives, and ALL other values including negative!)
         valid_data = []
         for t, r in zip(timestamps, resistances):
             if r is None:
                 continue
-            if r == 0:
-                continue
             if math.isnan(r) or math.isinf(r):
                 continue
-            display_r = abs(r)
-            if display_r == 0:
-                continue
-            valid_data.append((t, display_r))
+            # Keep ALL other values including negative ones - NO FILTERING!
+            valid_data.append((t, r))
         
         if not valid_data:
-            self.ax.text(0.5, 0.5, 'No valid data to plot\n(All values are invalid or negative)', 
+            self.ax.text(0.5, 0.5, 'No valid data to plot\n(All values are NaN or Inf)', 
                         ha='center', va='center', transform=self.ax.transAxes)
             self.ax.set_xlabel('Time (s)')
             self.ax.set_ylabel('Resistance (Ω)')
@@ -1917,7 +2024,134 @@ class TSPTestingGUI(tk.Toplevel):
         
         valid_times, valid_resistances = zip(*valid_data)
         
-        self.ax.plot(valid_times, valid_resistances, 'o-', markersize=3)
+        # Special handling for SMU Retention: plot SET and RESET separately with different colors
+        pulse_types = self.last_results.get('pulse_types', [])
+        if test_name in ["⚠️ SMU Retention", "⚠️ SMU Retention (Pulse Measured)"] and pulse_types:
+            # For smu_retention_with_pulse_measurement: plot all four types
+            if test_name == "⚠️ SMU Retention (Pulse Measured)":
+                # Plot all four types with different colors
+                set_pulse_indices = [i for i, pt in enumerate(pulse_types) if pt == "SET_PULSE"]
+                read_after_set_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_SET"]
+                reset_pulse_indices = [i for i, pt in enumerate(pulse_types) if pt == "RESET_PULSE"]
+                read_after_reset_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_RESET"]
+                
+                # Get all data - NO FILTERING, plot EVERYTHING including negative values
+                set_pulse_data = []
+                for i in set_pulse_indices:
+                    if i < len(timestamps) and i < len(resistances):
+                        set_pulse_data.append((timestamps[i], resistances[i]))
+                
+                read_after_set_data = []
+                for i in read_after_set_indices:
+                    if i < len(timestamps) and i < len(resistances):
+                        read_after_set_data.append((timestamps[i], resistances[i]))
+                
+                reset_pulse_data = []
+                for i in reset_pulse_indices:
+                    if i < len(timestamps) and i < len(resistances):
+                        reset_pulse_data.append((timestamps[i], resistances[i]))
+                
+                read_after_reset_data = []
+                for i in read_after_reset_indices:
+                    if i < len(timestamps) and i < len(resistances):
+                        read_after_reset_data.append((timestamps[i], resistances[i]))
+                
+                # Plot each type with different colors and markers
+                if set_pulse_data:
+                    set_pulse_times, set_pulse_res = zip(*set_pulse_data)
+                    self.ax.plot(set_pulse_times, set_pulse_res, 'o-', color='blue', markersize=5, 
+                               linewidth=2, label='SET Pulse (measured)', alpha=0.8)
+                
+                if read_after_set_data:
+                    read_set_times, read_set_res = zip(*read_after_set_data)
+                    self.ax.plot(read_set_times, read_set_res, 's-', color='cyan', markersize=4, 
+                               linewidth=1.5, label='Read after SET', alpha=0.7)
+                
+                if reset_pulse_data:
+                    reset_pulse_times, reset_pulse_res = zip(*reset_pulse_data)
+                    self.ax.plot(reset_pulse_times, reset_pulse_res, '^-', color='red', markersize=5, 
+                               linewidth=2, label='RESET Pulse (measured)', alpha=0.8)
+                
+                if read_after_reset_data:
+                    read_reset_times, read_reset_res = zip(*read_after_reset_data)
+                    self.ax.plot(read_reset_times, read_reset_res, 'v-', color='orange', markersize=4, 
+                               linewidth=1.5, label='Read after RESET', alpha=0.7)
+                
+                if set_pulse_data or read_after_set_data or reset_pulse_data or read_after_reset_data:
+                    self.ax.legend(loc='best')
+                    # Set labels and title
+                    self.ax.set_xlabel('Time (s)')
+                    self.ax.set_ylabel('Resistance (Ω)')
+                    self.ax.set_title(self.last_results['test_name'])
+                    self.ax.grid(True, alpha=0.3)
+                    
+                    # Use appropriate scale - if all positive use log, otherwise use linear
+                    all_res = ([r for _, r in set_pulse_data] + [r for _, r in read_after_set_data] +
+                              [r for _, r in reset_pulse_data] + [r for _, r in read_after_reset_data])
+                    if all_res:
+                        min_r = min(all_res)
+                        max_r = max(all_res)
+                        if min_r < 0 or max_r < 0:
+                            self.ax.set_yscale('linear')
+                        elif min_r > 0:
+                            self.ax.set_yscale('log')
+                        else:
+                            self.ax.set_yscale('symlog', linthresh=1e-6)
+                return
+            
+            # For regular smu_retention: only READ_AFTER_SET and READ_AFTER_RESET
+            set_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_SET"]
+            reset_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_RESET"]
+            
+            # Get all data for SET and RESET - NO FILTERING, plot EVERYTHING including negative values
+            set_data = []
+            for i in set_indices:
+                if i < len(timestamps) and i < len(resistances):
+                    # Plot ALL values, including negative ones - no filtering!
+                    set_data.append((timestamps[i], resistances[i]))
+            
+            reset_data = []
+            for i in reset_indices:
+                if i < len(timestamps) and i < len(resistances):
+                    # Plot ALL values, including negative ones - no filtering!
+                    reset_data.append((timestamps[i], resistances[i]))
+            
+            if set_data:
+                set_times, set_res = zip(*set_data)
+                self.ax.plot(set_times, set_res, 'o-', color='blue', markersize=5, 
+                           linewidth=2, label='SET (after SET pulse)', alpha=0.8)
+            
+            if reset_data:
+                reset_times, reset_res = zip(*reset_data)
+                self.ax.plot(reset_times, reset_res, 's-', color='red', markersize=5, 
+                           linewidth=2, label='RESET (after RESET pulse)', alpha=0.8)
+            
+            if set_data or reset_data:
+                self.ax.legend(loc='best')
+                # Set labels and title
+                self.ax.set_xlabel('Time (s)')
+                self.ax.set_ylabel('Resistance (Ω)')
+                self.ax.set_title(self.last_results['test_name'])
+                self.ax.grid(True, alpha=0.3)
+                
+                # Use appropriate scale - if all positive use log, otherwise use linear or symlog
+                all_res = [r for _, r in set_data] + [r for _, r in reset_data]
+                if all_res:
+                    min_r = min(all_res)
+                    max_r = max(all_res)
+                    # If we have negative values, use linear or symlog
+                    if min_r < 0 or max_r < 0:
+                        # Has negative values - use linear scale
+                        self.ax.set_yscale('linear')
+                    elif min_r > 0:
+                        # All positive - use log scale
+                        self.ax.set_yscale('log')
+                    else:
+                        # Mixed or zero - use symlog
+                        self.ax.set_yscale('symlog', linthresh=1e-6)
+        else:
+            # Default plotting for other tests
+            self.ax.plot(valid_times, valid_resistances, 'o-', markersize=3)
         
         # Add red dotted line for potentiation/depression tests with post-reads
         if test_name in ["Potentiation Only", "Depression Only"]:
@@ -1939,9 +2173,22 @@ class TSPTestingGUI(tk.Toplevel):
         self.ax.set_title(self.last_results['test_name'])
         self.ax.grid(True, alpha=0.3)
         
-        # Only set log scale if there are positive values
+        # Refresh canvas for real-time updates
+        self.canvas.draw()
+        
+        # Use log scale only if all values are positive, otherwise use linear or symlog
         if valid_resistances:
-            self.ax.set_yscale('log')
+            min_r = min(valid_resistances)
+            max_r = max(valid_resistances)
+            if min_r > 0:
+                # All positive - use log scale
+                self.ax.set_yscale('log')
+            elif max_r < 0:
+                # All negative - use log scale on absolute values
+                self.ax.set_yscale('log')
+            else:
+                # Mixed positive/negative - use symlog (symmetrical log) or linear
+                self.ax.set_yscale('symlog', linthresh=1e-6)
     
     def _plot_range_finder(self):
         """Plot resistance vs current range"""
@@ -2165,7 +2412,7 @@ class TSPTestingGUI(tk.Toplevel):
                         linestyle='--', alpha=0.3, label='Initial Read')
     
     def _plot_relaxation_reads(self):
-        """Plot read number vs resistance for relaxation_after_multi_pulse"""
+        """Plot read number vs resistance for relaxation_after_multi_pulse - raw data"""
         resistances = self.last_results['resistances']
         params = self.last_results.get('params', {})
         num_pulses = params.get('num_pulses', 10)
@@ -2173,12 +2420,29 @@ class TSPTestingGUI(tk.Toplevel):
         # First measurement is initial read (pulse 0), then num_reads after pulses
         pulse_numbers = list(range(len(resistances)))
         
-        self.ax.plot(pulse_numbers, resistances, 'o-', markersize=6, linewidth=2)
+        # Filter only NaN/inf, keep all other values including zeros and negatives
+        valid_data = [(i, r) for i, r in zip(pulse_numbers, resistances) 
+                     if r is not None and not (math.isnan(r) or math.isinf(r))]
+        
+        if valid_data:
+            valid_indices, valid_resistances = zip(*valid_data)
+            self.ax.plot(valid_indices, valid_resistances, 'o-', markersize=6, linewidth=2)
+        
         self.ax.set_xlabel('Read Number (0 = before pulses)')
         self.ax.set_ylabel('Resistance (Ω)')
         self.ax.set_title(f'{self.last_results["test_name"]}\nAfter {num_pulses} pulses')
         self.ax.grid(True, alpha=0.3)
-        self.ax.set_yscale('log')
+        
+        # Use appropriate scale based on data
+        if valid_data:
+            min_r = min(valid_resistances)
+            max_r = max(valid_resistances)
+            if min_r > 0:
+                self.ax.set_yscale('log')
+            elif max_r < 0:
+                self.ax.set_yscale('log')
+            else:
+                self.ax.set_yscale('symlog', linthresh=1e-6)
         
         # Mark the transition from initial read to post-pulse reads
         self.ax.axvline(x=0.5, color='red', linestyle='--', alpha=0.5, label=f'{num_pulses} pulses here')
@@ -2216,12 +2480,16 @@ class TSPTestingGUI(tk.Toplevel):
                 read_resistances.append(r)
                 pulse_resistances.append(None)
         
-        # Separate data into separate lists for plotting (filter out None values)
-        read_meas_nums = [i for i, r in zip(measurement_nums, read_resistances) if r is not None]
-        read_vals = [r for r in read_resistances if r is not None]
+        # Separate data into separate lists for plotting (filter out None and NaN/Inf only)
+        read_meas_nums = [i for i, r in zip(measurement_nums, read_resistances) 
+                         if r is not None and not (isinstance(r, float) and (math.isnan(r) or math.isinf(r)))]
+        read_vals = [r for r in read_resistances 
+                    if r is not None and not (isinstance(r, float) and (math.isnan(r) or math.isinf(r)))]
         
-        pulse_meas_nums = [i for i, p in zip(measurement_nums, pulse_resistances) if p is not None]
-        pulse_vals = [p for p in pulse_resistances if p is not None]
+        pulse_meas_nums = [i for i, p in zip(measurement_nums, pulse_resistances) 
+                          if p is not None and not (isinstance(p, float) and (math.isnan(p) or math.isinf(p)))]
+        pulse_vals = [p for p in pulse_resistances 
+                     if p is not None and not (isinstance(p, float) and (math.isnan(p) or math.isinf(p)))]
         
         # Debug output
         print(f"Plotting: {len(read_vals)} reads at indices {read_meas_nums[:5]}...")
@@ -2239,7 +2507,19 @@ class TSPTestingGUI(tk.Toplevel):
         self.ax.set_ylabel('Resistance (Ω)')
         self.ax.set_title(f'{self.last_results["test_name"]}\n{num_pulses} pulses @ {pulse_voltage}V with peak measurements')
         self.ax.grid(True, alpha=0.3)
-        self.ax.set_yscale('log')
+        
+        # Use appropriate scale based on data
+        all_vals = read_vals + pulse_vals
+        if all_vals:
+            min_r = min(all_vals)
+            max_r = max(all_vals)
+            if min_r > 0:
+                self.ax.set_yscale('log')
+            elif max_r < 0:
+                self.ax.set_yscale('log')
+            else:
+                self.ax.set_yscale('symlog', linthresh=1e-6)
+        
         self.ax.legend()
         
         # Mark the transition points
@@ -2441,69 +2721,78 @@ class TSPTestingGUI(tk.Toplevel):
         try:
             formatter = TSPDataFormatter()
             
-            # Check if using provider custom location - if so, skip sample name requirement
-            use_provider_custom = False
-            if self.provider is not None:
-                use_custom = getattr(self.provider, 'use_custom_save_var', None)
-                if use_custom and use_custom.get():
-                    custom_path = getattr(self.provider, 'custom_save_location', None)
-                    if custom_path:
-                        use_provider_custom = True
+            # PRIORITY 1: If provider (Measurement GUI) is available, use its default save structure
+            # This matches where SMU measurements are saved: [default_save_root]/[sample_name]/[section]/[device_number]/
+            use_provider_default = False
+            default_save_root = None
+            sample_name = None
+            device_section = None
             
-            # Check if simple save mode is enabled
-            if self.use_simple_save_var.get() and self.simple_save_path:
-                # Simple save: everything in one folder
-                save_dir = Path(self.simple_save_path)
+            if self.provider is not None:
+                # Get default save root (same as Measurement GUI uses for SMU measurements)
+                default_save_root = getattr(self.provider, 'default_save_root', None)
+                
+                # Get sample name from provider
+                sn = getattr(self.provider, 'sample_name_var', None)
+                if sn is not None:
+                    try:
+                        sample_name = sn.get().strip()
+                    except Exception:
+                        pass
+                
+                # Fallback: try sample_gui's current_device_name
+                if not sample_name and hasattr(self.provider, 'sample_gui') and self.provider.sample_gui:
+                    sample_name = getattr(self.provider.sample_gui, 'current_device_name', None)
+                
+                # Get device section and number
+                device_section = getattr(self.provider, 'device_section_and_number', None)
+                
+                # Check if we have all required info to use provider's default structure
+                if default_save_root and sample_name and device_section:
+                    use_provider_default = True
+            
+            # PRIORITY 2: Use provider's default save structure (matches SMU measurement location)
+            if use_provider_default and default_save_root and sample_name and device_section:
+                # Extract section (letter) and device number from device_section (e.g., "H4" -> "H" and "4")
+                section = device_section[0] if len(device_section) > 0 else "A"
+                device_num = device_section[1:] if len(device_section) > 1 else "1"
+                
+                # Build path: [default_save_root]/[sample_name]/[section]/[device_number]/Pulse_measurements
+                # This matches exactly where SMU measurements are saved
+                save_dir = Path(default_save_root) / sample_name.replace(" ", "_") / section / device_num / "Pulse_measurements"
                 save_dir.mkdir(parents=True, exist_ok=True)
                 
-                # Get next index for sequential numbering (simple mode)
-                # Find largest number prefix from existing files
+                # Get next index for sequential numbering
                 max_num = find_largest_number_in_folder(str(save_dir))
                 index = 0 if max_num is None else max_num + 1
+                
+                # Update device_label and sample_name for display
+                self.device_label = device_section
+                self.sample_name = sample_name
             else:
-                # Structured save: use FileNamer with custom base if configured
-                # Check if provider (Measurement GUI) has custom save location enabled
-                # (use_provider_custom already set above)
-                custom_path = None
-                device_section = None
-                
-                if use_provider_custom and self.provider is not None:
-                    custom_path = getattr(self.provider, 'custom_save_location', None)
-                    if custom_path:
-                        device_section = getattr(self.provider, 'device_section_and_number', None)
-                
-                if use_provider_custom and custom_path and device_section:
-                    # Use Measurement GUI's custom save location
-                    # Extract section (letter) and device number from device_section (e.g., "A1" -> "A" and "1")
-                    section = device_section[0] if len(device_section) > 0 else "A"
-                    device_num = device_section[1:] if len(device_section) > 1 else "1"
-                    
-                    # Build path: custom_location / section / device_number / Pulse_measurements
-                    save_dir = Path(custom_path) / section / device_num / "Pulse_measurements"
+                # PRIORITY 3: Check if simple save mode is enabled (only if no provider location)
+                if self.use_simple_save_var.get() and self.simple_save_path:
+                    # Simple save: everything in one folder (standalone mode only)
+                    save_dir = Path(self.simple_save_path)
                     save_dir.mkdir(parents=True, exist_ok=True)
                     
-                    # Get next index for sequential numbering
+                    # Get next index for sequential numbering (simple mode)
                     max_num = find_largest_number_in_folder(str(save_dir))
                     index = 0 if max_num is None else max_num + 1
-                    
-                    # Update device_label for display
-                    self.device_label = device_section
                 else:
-                    # Use default structure (FileNamer)
-                    # Only require sample_name if not using provider custom location
-                    if not use_provider_custom:
-                        # If sample name is still unknown, try to get from provider or use default
-                        if self.sample_name == "UnknownSample" and self.provider is not None:
-                            sn = getattr(self.provider, 'sample_name_var', None)
-                            if sn is not None:
-                                provider_sample_name = sn.get().strip()
-                                if provider_sample_name:
-                                    self.sample_name = provider_sample_name
+                    # PRIORITY 4: Use default structure (FileNamer)
+                    # If sample name is still unknown, try to get from provider or use default
+                    if self.sample_name == "UnknownSample" and self.provider is not None:
+                        sn = getattr(self.provider, 'sample_name_var', None)
+                        if sn is not None:
+                            provider_sample_name = sn.get().strip()
+                            if provider_sample_name:
+                                self.sample_name = provider_sample_name
                     
                     # When using custom base, sample_name is not used in path, but we still need to pass something
                     namer = FileNamer(base_dir=self.custom_base_path)
                     save_dir = namer.get_device_folder(
-                        sample_name=self.sample_name if not use_provider_custom else "UnknownSample",
+                        sample_name=self.sample_name,
                         device=self.device_label if self.device_label != "UnknownDevice" else "A1",
                         subfolder="Pulse_measurements"
                     )
@@ -2527,7 +2816,11 @@ class TSPTestingGUI(tk.Toplevel):
                 suffix_str = ""
             
             # Create filename
-            if self.use_simple_save_var.get() and self.simple_save_path:
+            # Use simple mode naming only if using simple save AND no provider default structure
+            using_simple_save_mode = (self.use_simple_save_var.get() and self.simple_save_path 
+                                     and not use_provider_default)
+            
+            if using_simple_save_mode:
                 # Simple mode: number at start, then test name + details + suffix + timestamp
                 from datetime import datetime
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2552,27 +2845,26 @@ class TSPTestingGUI(tk.Toplevel):
                 notes = f"{notes}\n{extra_notes}" if notes else extra_notes
             
             # Extract sample name for metadata
-            # Priority: 1) From custom path (if using custom location), 2) From provider's sample_name_var, 3) Current sample_name
+            # Priority: 1) From provider's default structure (already set), 2) From provider's sample_name_var, 3) Current sample_name
             sample_name_for_metadata = self.sample_name
             
-            # Check if using provider custom location - extract sample name from path
-            if self.provider is not None:
-                use_custom = getattr(self.provider, 'use_custom_save_var', None)
-                if use_custom and use_custom.get():
-                    custom_path = getattr(self.provider, 'custom_save_location', None)
-                    if custom_path:
-                        # Extract sample name from the last part of the custom path
-                        sample_from_path = Path(custom_path).name
-                        if sample_from_path:
-                            sample_name_for_metadata = sample_from_path
-            
-            # If not using custom location, try to get from provider's sample_name_var
+            # If using provider's default structure, sample_name is already set correctly above
+            # Otherwise, try to get from provider's sample_name_var
             if sample_name_for_metadata == "UnknownSample" and self.provider is not None:
                 sn = getattr(self.provider, 'sample_name_var', None)
                 if sn is not None:
-                    provider_sample_name = sn.get().strip()
-                    if provider_sample_name:
-                        sample_name_for_metadata = provider_sample_name
+                    try:
+                        provider_sample_name = sn.get().strip()
+                        if provider_sample_name:
+                            sample_name_for_metadata = provider_sample_name
+                    except Exception:
+                        pass
+                
+                # Fallback: try sample_gui's current_device_name
+                if sample_name_for_metadata == "UnknownSample" and hasattr(self.provider, 'sample_gui') and self.provider.sample_gui:
+                    fallback_name = getattr(self.provider.sample_gui, 'current_device_name', None)
+                    if fallback_name:
+                        sample_name_for_metadata = str(fallback_name).strip()
             
             # Prepare metadata
             metadata = {
@@ -2635,7 +2927,23 @@ class TSPTestingGUI(tk.Toplevel):
             
             if success:
                 # Display full filepath for easy finding
+                plot_path = filepath.with_suffix('.png')
+                abs_save_dir = filepath.parent.resolve()
+                abs_data_path = filepath.resolve()
+                abs_plot_path = plot_path.resolve()
+                
                 self.log(f"✓ Saved to: {filepath}")
+                self.log(f"📁 Save folder: {abs_save_dir}")
+                self.log(f"   Data file: {filepath.name}")
+                self.log(f"   Plot file: {plot_path.name}")
+                
+                # Print to console with full absolute paths
+                print(f"\n{'='*70}")
+                print(f"[PulseTesting] Data saved successfully!")
+                print(f"[PulseTesting] Save location: {abs_save_dir}")
+                print(f"[PulseTesting] Data file: {abs_data_path}")
+                print(f"[PulseTesting] Plot file: {abs_plot_path}")
+                print(f"{'='*70}\n")
                 if show_dialog:
                     messagebox.showinfo("Success", 
                         f"Test #{index} saved successfully!\n\n"
@@ -3064,7 +3372,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Pattern: Initial Read → (Pulse→Read)×{cycles}', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
+        self._set_preview_ylim(voltages + [r_v, p_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0, not -0.1
     
@@ -3135,7 +3443,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Pattern: Initial Read → {n_pulses}×Pulse→{n_reads}×Read ×{cycles}', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
+        self._set_preview_ylim(voltages + [r_v, p_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
@@ -3184,7 +3492,7 @@ class TSPTestingGUI(tk.Toplevel):
         title = f'Width Sweep (Full): {len(widths)} widths' if with_pulse_measurement else f'Width Sweep: {len(widths)} widths'
         self.diagram_ax.set_title(title, fontsize=10)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, max(p_v, r_v)*1.2)
+        self._set_preview_ylim(voltages + [r_v, p_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
@@ -3369,7 +3677,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, set_v*1.2)
+        self._set_preview_ylim(voltages + [set_v, r_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
@@ -3452,9 +3760,22 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(reset_v*1.2, 0.5)
+        self._set_preview_ylim(voltages + [reset_v, r_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
+    
+    def _set_preview_ylim(self, values):
+        """Set Y limits for preview plots, handling negative voltages."""
+        if not values:
+            self.diagram_ax.set_ylim(-1, 1)
+            return
+        min_v = min(values)
+        max_v = max(values)
+        if min_v == max_v:
+            pad = max(0.1, abs(max_v) * 0.1 + 0.1)
+        else:
+            pad = max(0.1, (max_v - min_v) * 0.1)
+        self.diagram_ax.set_ylim(min_v - pad, max_v + pad)
     
     def _draw_endurance(self, params):
         """Draw endurance test with initial read"""
@@ -3513,30 +3834,64 @@ class TSPTestingGUI(tk.Toplevel):
         read_times = []
         p_v = params.get('pulse_voltage', 1.5)
         r_v = params.get('read_voltage', 0.2)
-        p_w = params.get('pulse_width', 1e-3)
+        p_w = params.get('pulse_width', 1e-6)  # Default in seconds for 4200A
         n_pulses = params.get('num_pulses', 1)
-        n_reads = min(params.get('num_reads', 50), 8)
+        n_reads = params.get('num_reads', 50)
+        pulses_to_draw = min(n_pulses, 12)
+        reads_to_draw = min(n_reads, 12)
         
-        # Initial read before any pulses
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        # Get actual delay parameters (already in seconds)
+        delay_between_pulses = params.get('delay_between_pulses', 1e-6)  # Default 1µs
+        delay_between_reads = params.get('delay_between_reads', 100e-6)  # Default 100µs
+        read_width = max(params.get('read_width', 0.5e-6 if self.current_system_name in ('keithley4200a',) else 1e-3), 1e-9)
+        
+        # Check if 4200A - use realistic timing
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        if is_4200a:
+            read_rise = params.get('read_rise_time', 0.1e-6)  # 0.1µs in seconds
+            
+            # Initial read before pulses
+            read_start = t + read_rise
+            read_end = read_start + read_width
+            read_center = (read_start + read_end) / 2
+            read_times.append(read_center)
+            times.extend([t, t, read_start, read_start, read_end, read_end])
+            voltages.extend([0, 0, 0, r_v, r_v, 0])
+            t = read_end + max(1e-6, delay_between_pulses, delay_between_reads, read_width * 0.2)
+        else:
+            # For 2450: simplified timing
+            read_t = t + read_width / 2
+            read_times.append(read_t)
+            times.extend([t, t, t+read_width, t+read_width])
+            voltages.extend([0, r_v, r_v, 0])
+            t += read_width + max(delay_between_reads, read_width * 0.2)
         
         # N pulses
-        for i in range(min(n_pulses, 3)):
+        for i in range(pulses_to_draw):
             times.extend([t, t, t+p_w, t+p_w])
             voltages.extend([0, p_v, p_v, 0])
-            t += p_w + params.get('delay_between_pulses', 1e-3)
+            t += p_w + delay_between_pulses
         
-        # Many reads
-        for i in range(n_reads):
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between_reads', 100e-3)
+        # Many reads after pulses (use actual delay_between_reads)
+        if is_4200a:
+            read_rise = params.get('read_rise_time', 0.1e-6)
+            for i in range(reads_to_draw):
+                read_start = t + read_rise
+                read_end = read_start + read_width
+                read_center = (read_start + read_end) / 2
+                read_times.append(read_center)
+                times.extend([t, t, read_start, read_start, read_end, read_end])
+                voltages.extend([0, 0, 0, r_v, r_v, 0])
+                t = read_end + delay_between_reads
+        else:
+            for i in range(reads_to_draw):
+                read_t = t + read_width / 2
+                read_times.append(read_t)
+                times.extend([t, t, t+read_width, t+read_width])
+                voltages.extend([0, r_v, r_v, 0])
+                t += read_width
+                if i < reads_to_draw - 1:
+                    t += delay_between_reads
         
         times_ms = np.array(times) * 1e3
         self.diagram_ax.plot(times_ms, voltages, 'cyan', linewidth=2)
@@ -3547,9 +3902,15 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Initial Read → {n_pulses}×Pulse → {n_reads} Reads', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, p_v*1.2)
+        self._set_preview_ylim(voltages + [r_v, p_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
+        
+        if n_pulses > pulses_to_draw or n_reads > reads_to_draw:
+            self.diagram_ax.text(0.98, 0.9,
+                                 "preview truncated",
+                                 transform=self.diagram_ax.transAxes,
+                                 ha='right', va='top', fontsize=8, color='gray')
     
     def _draw_multi_read_only(self, params):
         """Draw multiple reads only"""
@@ -3575,45 +3936,79 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Only Reads: {n_reads} measurements', fontsize=10)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.1, r_v*1.3)
+        self._set_preview_ylim(voltages + [r_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
     
     def _draw_relaxation(self, params, with_pulse_measurement=False):
         """Draw relaxation pattern"""
-        t = 0
+        t = 0.0
         times, voltages = [], []
         read_times = []
         pulse_read_times = []  # Read at pulse peak
         p_v = params.get('pulse_voltage', 1.5)
         r_v = params.get('read_voltage', 0.2)
-        p_w = params.get('pulse_width', 1e-3)
-        n_pulses = min(params.get('num_pulses', 10), 5)
-        n_reads = min(params.get('num_reads', 10), 5)
+        is_4200a = self.current_system_name in ('keithley4200a',)
+        
+        pulse_width = max(params.get('pulse_width', 1e-6 if is_4200a else 1e-3), 1e-9)
+        delay_between_pulses = max(params.get('delay_between_pulses', 1e-6 if is_4200a else 1e-3), 0.0)
+        read_width = max(params.get('read_width', 0.5e-6 if is_4200a else 1e-3), 1e-9)
+        delay_between_reads = max(params.get('delay_between_reads', 100e-6 if is_4200a else 1e-3), 0.0)
+        
+        n_pulses = params.get('num_pulses', 10)
+        n_reads = params.get('num_reads', 10)
+        pulses_to_draw = min(n_pulses, 12)
+        reads_to_draw = min(n_reads, 12)
         
         # Initial read
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
+        if is_4200a:
+            read_rise = params.get('read_rise_time', 0.1e-6)
+            read_start = t + read_rise
+            read_end = read_start + read_width
+            read_times.append((read_start + read_end) / 2)
+            times.extend([t, t, read_start, read_start, read_end, read_end])
+            voltages.extend([0, 0, 0, r_v, r_v, 0])
+            t = read_end + max(1e-6, delay_between_pulses, read_width * 0.2)
+        else:
+            read_times.append(t + read_width / 2)
+            times.extend([t, t, t + read_width, t + read_width])
+            voltages.extend([0, r_v, r_v, 0])
+            t += read_width + max(delay_between_reads, read_width * 0.2)
         
         # Multiple pulses
-        for i in range(n_pulses):
+        for i in range(pulses_to_draw):
             pulse_start_t = t
-            times.extend([t, t, t+p_w, t+p_w])
+            times.extend([t, t, t + pulse_width, t + pulse_width])
             voltages.extend([0, p_v, p_v, 0])
             if with_pulse_measurement:
-                pulse_read_times.append(pulse_start_t + p_w*0.5)  # Peak read
-            t += p_w + params.get('delay_between_pulses', 1e-3)
+                pulse_read_times.append(pulse_start_t + pulse_width * 0.5)  # Peak read marker
+            t += pulse_width
+            if i < pulses_to_draw - 1:
+                t += delay_between_pulses
+        
+        # Pause before reads
+        t += max(delay_between_reads, pulse_width * 0.1)
         
         # Multiple reads (relaxation)
-        for i in range(n_reads):
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between_reads', 100e-6)
+        if is_4200a:
+            read_rise = params.get('read_rise_time', 0.1e-6)
+            for i in range(reads_to_draw):
+                read_start = t + read_rise
+                read_end = read_start + read_width
+                read_times.append((read_start + read_end) / 2)
+                times.extend([t, t, read_start, read_start, read_end, read_end])
+                voltages.extend([0, 0, 0, r_v, r_v, 0])
+                t = read_end
+                if i < reads_to_draw - 1:
+                    t += delay_between_reads
+        else:
+            for i in range(reads_to_draw):
+                read_times.append(t + read_width / 2)
+                times.extend([t, t, t + read_width, t + read_width])
+                voltages.extend([0, r_v, r_v, 0])
+                t += read_width
+                if i < reads_to_draw - 1:
+                    t += delay_between_reads
         
         times_ms = np.array(times) * 1e3
         self.diagram_ax.plot(times_ms, voltages, 'magenta', linewidth=2)
@@ -3629,9 +4024,13 @@ class TSPTestingGUI(tk.Toplevel):
         title = f'Relaxation (Pulse Meas): 1Read→{n_pulses}Pulse→{n_reads}Read' if with_pulse_measurement else f'Relaxation: 1Read→{n_pulses}Pulse→{n_reads}Read'
         self.diagram_ax.set_title(title, fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, p_v*1.2)
+        self._set_preview_ylim(voltages + [r_v, p_v, 0])
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
+        if n_pulses > pulses_to_draw or n_reads > reads_to_draw:
+            self.diagram_ax.text(0.98, 0.9, "preview truncated",
+                                 transform=self.diagram_ax.transAxes,
+                                 ha='right', va='top', fontsize=8, color='gray')
     
     def _draw_voltage_sweep(self, params):
         """Draw: For each voltage: Initial Read → (Pulse → Read) × N → Reset"""
@@ -3686,7 +4085,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Voltage Sweep: {start_v}V to {stop_v}V, {pulses_per_v} pulses/voltage', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(min(min(voltages), reset_v)*1.2, max(max(voltages), start_v)*1.2)
+        self._set_preview_ylim(voltages + [reset_v, start_v, stop_v, r_v, 0])
     
     def _draw_ispp(self, params):
         """Draw: Initial Read → (Pulse with increasing voltage → Read) × N"""
@@ -3729,7 +4128,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'ISPP: {start_v}V → {max_v}V, step {step_v}V', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(-0.2, max_v*1.2)
+        self._set_preview_ylim(voltages + [r_v, start_v, max_v, 0])
     
     def _draw_threshold(self, params):
         """Draw: For each voltage: Initial Read → (Pulse → Read) × N"""
@@ -3776,9 +4175,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Threshold Test ({direction.upper()}): {start_v}V → {max_v}V', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        min_v = min(min(voltages) if voltages else 0, -max_v)
-        max_v_plot = max(max(voltages) if voltages else 0, max_v)
-        self.diagram_ax.set_ylim(min_v*1.2, max_v_plot*1.2)
+        self._set_preview_ylim(voltages + [r_v, -max_v, max_v, 0])
     
     def _draw_multilevel(self, params):
         """Draw: For each level: Reset → Program with pulses → Read"""
@@ -3830,7 +4227,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Multilevel: {levels_to_show} levels, {pulses_per_level} pulses/level', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        self.diagram_ax.set_ylim(reset_v*1.2, pulse_v*1.2)
+        self._set_preview_ylim(voltages + [reset_v, pulse_v, r_v, 0])
     
     def _draw_pulse_train(self, params):
         """Draw: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
@@ -3869,9 +4266,8 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.set_ylabel('Voltage (V)')
         self.diagram_ax.set_title(f'Pulse Train: {len(pulse_voltages)} voltages × {num_repeats} repeats', fontsize=9)
         self.diagram_ax.grid(True, alpha=0.3)
-        min_v = min(min(voltages) if voltages else 0, min(pulse_voltages) if pulse_voltages else 0)
-        max_v_plot = max(max(voltages) if voltages else 0, max(pulse_voltages) if pulse_voltages else 0)
-        self.diagram_ax.set_ylim(min_v*1.2, max_v_plot*1.2)
+        extra = pulse_voltages if isinstance(pulse_voltages, list) else []
+        self._set_preview_ylim(voltages + extra + [r_v, 0])
     
     def _draw_laser_and_read(self, params):
         """Draw laser and read pattern using visualizer"""
@@ -4126,12 +4522,27 @@ class TSPTestingGUI(tk.Toplevel):
         if not preset_name:
             return
         
-        # Get current parameters
-        try:
-            params = self.get_test_parameters()
-        except Exception as e:
-            messagebox.showerror("Error", f"Invalid parameters: {e}")
-            return
+        # Get current parameters - save raw display values (before conversion)
+        # This ensures values load back correctly regardless of system/unit
+        params = {}
+        for param_name, param_info in self.param_vars.items():
+            var = param_info["var"]
+            param_type = param_info["type"]
+            
+            try:
+                if param_type == "bool":
+                    params[param_name] = var.get()
+                elif param_type == "int":
+                    params[param_name] = int(var.get())
+                elif param_type == "float":
+                    params[param_name] = float(var.get())
+                elif param_type == "list":
+                    params[param_name] = var.get()
+                else:
+                    params[param_name] = var.get()
+            except Exception as e:
+                messagebox.showerror("Error", f"Invalid parameter {param_name}: {e}")
+                return
         
         # Store preset
         if test_name not in self.presets:
@@ -4165,33 +4576,25 @@ class TSPTestingGUI(tk.Toplevel):
             messagebox.showwarning("Not Found", f"Preset '{preset_name}' not found")
             return
         
-        # Load parameters into GUI
-        # Check if current system is 4200A (need to convert to µs)
-        is_4200a = self.current_system_name in ('keithley4200a',)
-        time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_between_cycles', 'post_read_interval',
-                      'reset_width', 'delay_between_voltages', 'delay_between_levels']
-        
+        # Load parameters into GUI - values are saved as raw display values
+        # so we can set them directly without conversion
         for param_name, value in params.items():
             if param_name in self.param_vars:
                 var = self.param_vars[param_name]["var"]
                 param_type = self.param_vars[param_name]["type"]
-                is_time_param = self.param_vars[param_name].get("is_time_param", False)
-                
-                # Convert back from seconds to display units for time parameters
-                if is_time_param and param_type == "float":
-                    if is_4200a:
-                        value = value * 1e6  # s → µs
-                    else:
-                        value = value * 1000.0  # s → ms
                 
                 # Format value appropriately
-                if param_type == "int":
+                if param_type == "bool":
+                    var.set(value)
+                elif param_type == "int":
                     var.set(str(int(value)))
                 elif param_type == "float":
                     var.set(str(value))
                 elif param_type == "list":
-                    var.set(",".join(str(v) for v in value))
+                    if isinstance(value, str):
+                        var.set(value)
+                    else:
+                        var.set(",".join(str(v) for v in value))
                 else:
                     var.set(str(value))
         

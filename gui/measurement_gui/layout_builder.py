@@ -319,6 +319,10 @@ class MeasurementGUILayoutBuilder:
     
     def _open_pulse_testing(self) -> None:
         """Open the TSP/Pulse Testing GUI"""
+        open_cb = getattr(self.gui, "open_pulse_testing_gui", None)
+        if callable(open_cb):
+            open_cb()
+            return
         try:
             from gui.pulse_testing_gui import TSPTestingGUI
             TSPTestingGUI(self.gui.master)
