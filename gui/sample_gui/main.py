@@ -2308,11 +2308,16 @@ class SampleGUI:
             messagebox.showwarning("Device Name", "Please enter a device name (e.g., D104)")
             return
         
-        # Validate device name (alphanumeric, dashes, underscores)
+        # Sanitize device name to allow broader characters (convert disallowed ones to '_')
         import re
-        if not re.match(r'^[A-Za-z0-9_-]+$', device_name):
-            messagebox.showerror("Invalid Name", "Device name can only contain letters, numbers, dashes, and underscores.")
-            return
+        cleaned_name = re.sub(r'[^A-Za-z0-9_\-\.\(\)% ]+', '_', device_name)
+        if cleaned_name != device_name:
+            messagebox.showinfo(
+                "Device Name Adjusted",
+                f"Some characters in '{device_name}' were not allowed.\n"
+                f"The device name has been adjusted to:\n{cleaned_name}"
+            )
+            device_name = cleaned_name
         
         self.current_device_name = device_name
         

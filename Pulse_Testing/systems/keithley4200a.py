@@ -6,6 +6,7 @@ Implementation for Keithley 4200A measurement system using KXCI scripts.
 Integrates with keithley4200_kxci_scripts.py for all test functions.
 """
 
+import time
 from typing import Dict, List, Any, Optional
 from .base_system import BaseMeasurementSystem
 # Import from backward-compatible module
@@ -364,6 +365,14 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             params['delay_between_pulses'] = params['delay_between_pulses'] / 1_000_000.0  # µs → s
         if 'delay_between_reads' in params:
             params['delay_between_reads'] = params['delay_between_reads'] / 1_000_000.0  # µs → s
+        if 'read_width' in params:
+            read_width_us = params['read_width']
+            if read_width_us > 1_000_000:
+                raise ValueError(f"read_width appears to be in wrong units. Got {read_width_us:.2f} µs "
+                               f"({read_width_us/1e6:.2e} s). Expected value should be < 1000 µs.")
+            params['read_width'] = read_width_us / 1_000_000.0  # µs → s
+        else:
+            params['read_width'] = 0.5e-6  # default 0.5 µs
         return self._scripts.pulse_multi_read(**params)
     
     def multi_read_only(self, **params) -> Dict[str, Any]:
@@ -401,6 +410,14 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             params['delay_between_pulses'] = params['delay_between_pulses'] / 1_000_000.0  # µs → s
         if 'delay_between_reads' in params:
             params['delay_between_reads'] = params['delay_between_reads'] / 1_000_000.0  # µs → s
+        if 'read_width' in params:
+            read_width_us = params['read_width']
+            if read_width_us > 1_000_000:
+                raise ValueError(f"read_width appears to be in wrong units. Got {read_width_us:.2f} µs "
+                               f"({read_width_us/1e6:.2e} s). Expected value should be < 1000 µs.")
+            params['read_width'] = read_width_us / 1_000_000.0  # µs → s
+        else:
+            params['read_width'] = 0.5e-6
         return self._scripts.relaxation_after_multi_pulse(**params)
     
     def relaxation_after_multi_pulse_with_pulse_measurement(self, **params) -> Dict[str, Any]:
@@ -415,6 +432,14 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             params['delay_between_pulses'] = params['delay_between_pulses'] / 1_000_000.0  # µs → s
         if 'delay_between_reads' in params:
             params['delay_between_reads'] = params['delay_between_reads'] / 1_000_000.0  # µs → s
+        if 'read_width' in params:
+            read_width_us = params['read_width']
+            if read_width_us > 1_000_000:
+                raise ValueError(f"read_width appears to be in wrong units. Got {read_width_us:.2f} µs "
+                               f"({read_width_us/1e6:.2e} s). Expected value should be < 1000 µs.")
+            params['read_width'] = read_width_us / 1_000_000.0  # µs → s
+        else:
+            params['read_width'] = 0.5e-6
         return self._scripts.relaxation_after_multi_pulse_with_pulse_measurement(**params)
     
     # Additional tests available in 4200A but not in base_system
@@ -510,6 +535,62 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         # So NO conversion needed here - they're already in the correct units
         return self._scripts.laser_and_read(**params)
     
+    def smu_slow_pulse_measure(self, **params) -> Dict[str, Any]:
+        """Single slow pulse measurement using SMU (not PMU).
+        
+        ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
+        The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
+        
+        Note: pulse_width is expected in SECONDS (not microseconds) for SMU functions.
+        """
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        # Note: For SMU, pulse_width is in SECONDS (not microseconds like PMU functions)
+        # The GUI will send it in seconds, so no conversion needed
+        # i_range and i_compliance are already in Amperes, no conversion needed
+        return self._scripts.smu_slow_pulse_measure(**params)
+    
+    def smu_retention(self, **params) -> Dict[str, Any]:
+        """SMU-based retention test with alternating SET/RESET pulses.
+        
+        ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
+        The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
+        
+        Pattern: (SET pulse → Read → RESET pulse → Read) × N cycles
+        
+        Note: All durations are expected in SECONDS (not microseconds) for SMU functions.
+        
+        Supports progress_callback parameter for real-time plotting.
+        """
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        # Note: For SMU, all durations are in SECONDS (not microseconds like PMU functions)
+        # The GUI will send them in seconds, so no conversion needed
+        # i_range and i_compliance are already in Amperes, no conversion needed
+        # Extract progress_callback if present (it's passed from GUI)
+        return self._scripts.smu_retention(**params)
+    
+    def smu_retention_with_pulse_measurement(self, **params) -> Dict[str, Any]:
+        """SMU-based retention test with measurements during SET/RESET pulses.
+        
+        ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
+        The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
+        
+        Pattern: (SET pulse+measure → Read → RESET pulse+measure → Read) × N cycles
+        
+        Measures resistance DURING the SET and RESET pulses (not just after).
+        
+        Note: All durations are expected in SECONDS (not microseconds) for SMU functions.
+        
+        Supports progress_callback parameter for real-time plotting.
+        """
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        # Note: For SMU, all durations are in SECONDS (not microseconds like PMU functions)
+        # The GUI will send them in seconds, so no conversion needed
+        # i_range and i_compliance are already in Amperes, no conversion needed
+        return self._scripts.smu_retention_with_pulse_measurement(**params)
+    
     def cyclical_iv_sweep(self, **params) -> Dict[str, Any]:
         """Cyclical IV sweep: (0V → +Vpos → Vneg → 0V) × N cycles
         
@@ -602,11 +683,46 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             if not kxci_client._enter_ul_mode():
                 raise RuntimeError("Failed to enter UL mode for cyclical IV sweep")
             
-            # Execute EX command
-            result = kxci_client._execute_ex_command(command)
+            # Calculate wait time based on sweep parameters
+            # Time per point ≈ settle_time + (integration_time × 0.01s per PLC)
+            # Total time = (4 × num_cycles) × time_per_point × safety_factor
+            time_per_point = settle_time + (integration_time * 0.01)  # Rough: 1 PLC ≈ 0.01s
+            estimated_time = (4 * num_cycles) * time_per_point
+            wait_time = max(2.0, estimated_time * 1.5)  # Minimum 2s, add 50% safety margin
             
-            if result != 0:
-                raise RuntimeError(f"EX command failed with error code: {result}")
+            # Execute EX command with calculated wait time
+            return_value, error = kxci_client._execute_ex_command(command, wait_seconds=wait_time)
+            
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+            
+            # smu_ivsweep returns 0 on success, negative values on error
+            if return_value == 0:
+                pass  # Success
+            elif return_value is not None and return_value != 0:
+                if return_value < 0:
+                    error_messages = {
+                        -1: "Invalid Vpos (must be >= 0) or Vneg (must be <= 0)",
+                        -2: "NumIPoints != NumVPoints (array size mismatch)",
+                        -3: "NumIPoints != 4 × NumCycles (array size must equal 4 × number of cycles)",
+                        -4: "Invalid array sizes (NumIPoints or NumVPoints < 4)",
+                        -5: "Invalid NumCycles (must be >= 1 and <= 1000)",
+                        -6: "forcev() failed (check SMU connection and voltage range)",
+                        -7: "measi() failed (check SMU connection)",
+                        -8: "limiti() failed (check current limit value)",
+                        -9: "setmode() failed (check SMU connection)",
+                    }
+                    msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
+                    raise RuntimeError(f"EX command returned error code: {return_value} - {msg}")
+                else:
+                    raise RuntimeError(f"EX command returned unexpected value: {return_value} (expected 0 for success)")
+            
+            # Wait a bit more to ensure EX command is fully complete
+            time.sleep(0.3)
+            
+            # Exit UL mode before GP commands (GP commands must be sent in normal mode)
+            kxci_client._exit_ul_mode()
+            time.sleep(0.5)  # Wait longer for mode transition to complete (GP commands need normal mode)
             
             # Retrieve data from GP parameters
             # GP 4 = Imeas, GP 6 = Vforce (as per C module metadata)
@@ -649,7 +765,8 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             
         finally:
             try:
-                kxci_client._exit_ul_mode()
+                if kxci_client._ul_mode_active:
+                    kxci_client._exit_ul_mode()
                 kxci_client.disconnect()
             except Exception:
                 pass

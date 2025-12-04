@@ -123,14 +123,18 @@ class KXCIClient:
         self._ul_mode_active = False
         return True
 
-    def _execute_ex_command(self, command: str) -> tuple[Optional[int], Optional[str]]:
+    def _execute_ex_command(self, command: str, wait_seconds: float = 1.0) -> tuple[Optional[int], Optional[str]]:
         if self.inst is None:
             raise RuntimeError("Instrument not connected")
 
         try:
             self.inst.write(command)
             time.sleep(0.03)
-            time.sleep(1.0)  # Wait for sweep to complete
+            # Wait for measurement to complete (configurable wait time)
+            # For IV sweeps, this should be calculated based on:
+            # (4 × num_cycles) × (settle_time + integration_time × 0.01) × safety_factor
+            wait_seconds = max(0.5, wait_seconds)  # Minimum 0.5s
+            time.sleep(wait_seconds)
             response = self._safe_read()
             return self._parse_return_value(response), None
         except Exception as exc:
@@ -160,10 +164,26 @@ class KXCIClient:
         if self.inst is None:
             raise RuntimeError("Instrument not connected")
         command = f"GP {param_position} {num_values}"
-        self.inst.write(command)
-        time.sleep(0.03)
-        raw = self._safe_read()
-        return self._parse_gp_response(raw)
+        
+        # Retry logic for GP commands (sometimes they fail with -992 if sent too quickly)
+        for attempt in range(3):
+            try:
+                self.inst.write(command)
+                time.sleep(0.1 if attempt > 0 else 0.03)  # Longer wait on retry
+                raw = self._safe_read()
+                if raw and not raw.strip().startswith("ERROR"):
+                    return self._parse_gp_response(raw)
+                if attempt < 2:
+                    time.sleep(0.2)  # Wait before retry
+                    continue
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(0.2)
+                    continue
+                raise RuntimeError(f"GP command failed after {attempt + 1} attempts: {e}")
+        
+        # If we get here, all retries failed
+        raise RuntimeError(f"GP command failed: {raw if 'raw' in locals() else 'no response'}")
 
     @staticmethod
     def _parse_gp_response(response: str) -> List[float]:
@@ -199,6 +219,10 @@ class KXCIClient:
 
 def format_param(value: float | int | str) -> str:
     """Format parameter for EX command."""
+    # Handle integers explicitly (e.g., debug flags, cycle counts)
+    if isinstance(value, int):
+        return str(value)
+    
     if isinstance(value, float):
         if value == 0.0:
             return "0"
@@ -250,6 +274,9 @@ def build_ex_command(
     They are retrieved via GP commands after execution (GP 4 for Imeas, GP 6 for Vforce).
     """
     
+    # Ensure clarius_debug is an integer (0 or 1)
+    clarius_debug = int(bool(clarius_debug))  # Convert to 0 or 1
+    
     params = [
         format_param(vpos),            # 1: Vpos
         format_param(vneg),            # 2: Vneg (0 for auto-symmetric with -Vpos)
@@ -263,6 +290,11 @@ def build_ex_command(
         format_param(integration_time), # 10: IntegrationTime
         format_param(clarius_debug),    # 11: ClariusDebug
     ]
+    
+    # Debug: verify the debug flag is correctly formatted
+    debug_param = params[10]  # 11th parameter (0-indexed: 10)
+    if clarius_debug == 1 and debug_param != "1":
+        print(f"[WARNING] Debug flag mismatch: clarius_debug={clarius_debug}, formatted='{debug_param}'")
     
     command = f"EX A_Iv_Sweep smu_ivsweep({','.join(params)})"
     return command

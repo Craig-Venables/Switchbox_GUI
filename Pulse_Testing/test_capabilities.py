@@ -45,6 +45,9 @@ ALL_TEST_FUNCTIONS = [
     'multilevel_programming',
     'pulse_train_varying_amplitudes',
     'laser_and_read',
+    'smu_slow_pulse_measure',  # SMU-based slow pulse (much slower than PMU)
+    'smu_retention',  # SMU-based retention with alternating SET/RESET pulses
+    'smu_retention_with_pulse_measurement',  # SMU-based retention with measurements during pulses
 ]
 
 # System capability matrix
@@ -101,6 +104,35 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'multilevel_programming': True,
         'pulse_train_varying_amplitudes': True,
         'laser_and_read': True,  # ✅ Uses Read_With_Laser_Pulse_SegArb.c: CH1 continuous reads, CH2 independent laser pulse
+        'smu_slow_pulse_measure': True,  # ⚠️ Uses SMU (not PMU) - much slower but supports pulse widths up to 480 seconds
+        'smu_retention': True,  # ⚠️ Uses SMU (not PMU) - alternating SET/RESET pulses with reads, supports pulse widths up to 480 seconds
+        'smu_retention_with_pulse_measurement': True,  # ⚠️ Uses SMU (not PMU) - measures resistance DURING SET/RESET pulses, supports pulse widths up to 480 seconds
+    },
+    'keithley2400': {
+        # Tests implemented using direct SCPI commands via Keithley2400Controller
+        # All tests use voltage-based pulsing (0V → pulse → 0V) without toggling output on/off
+        # NOTE: GPIB speed limitations mean minimum pulse width is ~10ms
+        'pulse_read_repeat': True,  # ✅ SCPI-based: Initial Read → (Pulse → Read → Delay) × N
+        'pulse_then_read': True,  # ✅ SCPI-based: (Pulse → Delay → Read) × N
+        'multi_pulse_then_read': True,  # ✅ SCPI-based: (Pulse×N → Read) × Cycles
+        'varying_width_pulses': True,  # ✅ SCPI-based: Test multiple pulse widths
+        'width_sweep_with_reads': True,  # ✅ SCPI-based: For each width: (Read→Pulse→Read)×N, Reset
+        'width_sweep_with_all_measurements': True,  # ✅ SCPI-based: Width sweep with pulse peak measurements
+        'potentiation_depression_cycle': True,  # ✅ SCPI-based: Initial Read → Gradual SET → Gradual RESET
+        'potentiation_only': True,  # ✅ SCPI-based: Initial Read → Repeated SET pulses with reads
+        'depression_only': True,  # ✅ SCPI-based: Initial Read → Repeated RESET pulses with reads
+        'endurance_test': True,  # ✅ SCPI-based: (SET → Read → RESET → Read) × N cycles
+        'retention_test': True,  # ✅ SCPI-based: Pulse → Read @ t1 → Read @ t2 → Read @ t3...
+        'pulse_multi_read': True,  # ✅ SCPI-based: N pulses then many reads
+        'multi_read_only': True,  # ✅ SCPI-based: Just reads, no pulses
+        'current_range_finder': True,  # ✅ SCPI-based: Find optimal current measurement range
+        'relaxation_after_multi_pulse': True,  # ✅ SCPI-based: 1×Read → N×Pulse → N×Read (measure reads only)
+        'relaxation_after_multi_pulse_with_pulse_measurement': True,  # ✅ SCPI-based: 1×Read → N×Pulse(measured) → N×Read
+        'voltage_amplitude_sweep': True,  # ✅ SCPI-based: For each voltage: Initial Read → (Pulse → Read) × N → Reset
+        'ispp_test': True,  # ✅ SCPI-based: Start at low voltage, increase by step each pulse
+        'switching_threshold_test': True,  # ✅ SCPI-based: Try increasing voltages, find minimum that causes switching
+        'multilevel_programming': True,  # ✅ SCPI-based: For each level: Reset → Program with pulses → Read
+        'pulse_train_varying_amplitudes': True,  # ✅ SCPI-based: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
     },
 }
 
@@ -169,6 +201,10 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
     
     # Custom explanations for unsupported tests (can be expanded)
     explanations = {
+        'keithley2400': {
+            # All tests are supported for 2400, but note GPIB speed limitations
+            # Minimum pulse width is ~10ms due to GPIB communication overhead
+        },
         'keithley4200a': {
             'varying_width_pulses': 'Not available - use width_sweep_with_reads instead (uses pmu_pulse_read_interleaved with Python-side loop)',
             'width_sweep_with_reads': 'Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values (one call per width)',
