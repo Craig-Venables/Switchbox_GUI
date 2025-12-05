@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFont
 from pathlib import Path
 from typing import List, Optional
 import sys
+import re
 
 # Matplotlib for thumbnail preview
 import matplotlib
@@ -25,6 +26,26 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.data_parser import parse_tsp_file, TSPData
 from core.test_type_registry import get_registry
 from utils.settings import get_settings
+
+
+def natural_sort_key(text: str) -> tuple:
+    """
+    Generate a sort key for natural/numeric sorting.
+    
+    Converts strings like "file10.txt" to (('file',), (10,), ('.txt',))
+    so that numeric parts are sorted numerically rather than alphabetically.
+    
+    Example:
+        "file1.txt" -> (('file',), (1,), ('.txt',))
+        "file10.txt" -> (('file',), (10,), ('.txt',))
+        "file2.txt" -> (('file',), (2,), ('.txt',))
+    
+    This ensures: file1.txt < file2.txt < file10.txt (not file1.txt < file10.txt < file2.txt)
+    """
+    def convert(text_part):
+        return int(text_part) if text_part.isdigit() else text_part.lower()
+    
+    return tuple(convert(c) for c in re.split(r'(\d+)', text))
 
 
 class FileListItem(QListWidgetItem):
@@ -313,12 +334,19 @@ class FileBrowserTab(QWidget):
         # Get current filter
         current_filter = self.test_type_filter.currentText()
         
-        # Add items
+        # Filter files
+        filtered_files = []
         for data in self.all_files:
             # Apply filter
             if current_filter != "All Test Types" and data.test_name != current_filter:
                 continue
-            
+            filtered_files.append(data)
+        
+        # Sort files using natural/numeric sorting
+        filtered_files.sort(key=lambda data: natural_sort_key(data.filename))
+        
+        # Add items in sorted order
+        for data in filtered_files:
             item = FileListItem(data)
             self.file_list.addItem(item)
     

@@ -221,5 +221,120 @@
       "num_reads_per_range",
       "current_ranges"
     ]
+  },
+  "IV Sweep (Hysteresis)": {
+    "description": "Voltage-Current hysteresis loop",
+    "plot_type": "iv_sweep",
+    "expected_columns": [
+      "Voltage",
+      "Current",
+      "Time"
+    ],
+    "key_parameters": [
+      "voltage",
+      "sweep_rate"
+    ]
+  },
+  "PMU Pulse-Read": {
+    "description": "Pulse measurement with reads",
+    "plot_type": "time_series",
+    "expected_columns": [
+      "Time",
+      "Voltage",
+      "Current",
+      "Resistance"
+    ],
+    "key_parameters": [
+      "set_voltage",
+      "read_voltage"
+    ]
+  },
+  "Laser and Read": {
+    "description": "Pattern: CH1 continuous reads, CH2 independent laser pulse\nPhoto-induced effects, laser-assisted switching, time-resolved photoconductivity",
+    "plot_type": "time_series",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "read_voltage",
+      "read_width",
+      "laser_voltage_high",
+      "laser_width",
+      "num_reads"
+    ]
+  },
+  "\u26a0\ufe0f SMU Slow Pulse Measure": {
+    "description": "\u26a0\ufe0f IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Single pulse \u2192 Measure resistance during pulse\nUse for very slow pulses (milliseconds to seconds), relaxation studies",
+    "plot_type": "time_series",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "pulse_voltage",
+      "pulse_width",
+      "i_range"
+    ]
+  },
+  "\u26a0\ufe0f SMU Endurance": {
+    "description": "\u26a0\ufe0f IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse \u2192 Read \u2192 RESET pulse \u2192 Read) \u00d7 N cycles\nUse for endurance cycling with slow pulses (milliseconds to seconds)",
+    "plot_type": "time_series",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "set_voltage",
+      "reset_voltage",
+      "set_duration",
+      "reset_duration",
+      "num_cycles"
+    ]
+  },
+  "\u26a0\ufe0f SMU Retention": {
+    "description": "\u26a0\ufe0f IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Initial Read \u2192 Pulse \u2192 Read @ t1 \u2192 Read @ t2 \u2192 Read @ t3... (retention over time)\nMeasures initial state, then how resistance changes over time after a single pulse",
+    "plot_type": "time_series",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "pulse_voltage",
+      "pulse_duration",
+      "read_voltage",
+      "num_reads",
+      "delay_between_reads"
+    ]
+  },
+  "\u26a0\ufe0f SMU Retention (Pulse Measured)": {
+    "description": "\u26a0\ufe0f IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse+measure \u2192 Read \u2192 RESET pulse+measure \u2192 Read) \u00d7 N cycles\nMeasures resistance DURING SET/RESET pulses (not just after)",
+    "plot_type": "time_series",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "set_voltage",
+      "reset_voltage",
+      "set_duration",
+      "reset_duration",
+      "num_cycles"
+    ]
   }
 }

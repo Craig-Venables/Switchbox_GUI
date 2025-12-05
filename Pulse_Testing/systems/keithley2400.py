@@ -239,3 +239,5 @@ class Keithley2400System(BaseMeasurementSystem):
             raise RuntimeError("Not connected to device")
         return self.test_scripts.pulse_train_varying_amplitudes(**params)
 
+
+

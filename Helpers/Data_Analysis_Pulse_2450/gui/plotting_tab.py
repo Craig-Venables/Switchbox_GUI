@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                               QLabel, QGroupBox, QComboBox, QCheckBox,
                               QSpinBox, QDoubleSpinBox, QColorDialog, QFileDialog,
                               QScrollArea, QFrame, QSplitter, QListWidget,
-                              QListWidgetItem, QMessageBox)
+                              QListWidgetItem, QMessageBox, QTextEdit, QMenu)
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 from pathlib import Path
 from typing import List, Optional
 import sys
@@ -104,11 +104,22 @@ class PlottingTab(QWidget):
         
         self.dataset_list = QListWidget()
         self.dataset_list.itemDoubleClicked.connect(self.toggle_dataset_visibility)
-        dataset_layout.addWidget(QLabel("Double-click to show/hide:"))
+        self.dataset_list.itemSelectionChanged.connect(self.on_dataset_selection_changed)
+        dataset_layout.addWidget(QLabel("Double-click to show/hide | Right-click for menu:"))
         dataset_layout.addWidget(self.dataset_list, 1)
+        
+        # Enable context menu
+        self.dataset_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.dataset_list.customContextMenuRequested.connect(self.show_dataset_context_menu)
         
         # Dataset controls
         ds_buttons = QHBoxLayout()
+        
+        self.view_details_btn = QPushButton("ℹ️ View Details")
+        self.view_details_btn.clicked.connect(self.view_dataset_details)
+        self.view_details_btn.setToolTip("View detailed information about selected dataset")
+        self.view_details_btn.setEnabled(False)  # Disabled until a dataset is selected
+        ds_buttons.addWidget(self.view_details_btn)
         
         edit_labels_btn = QPushButton("✏️ Edit Labels")
         edit_labels_btn.clicked.connect(self.edit_labels)
@@ -1087,7 +1098,15 @@ class PlottingTab(QWidget):
             self.dataset_list.takeItem(current_row)
             del self.datasets[current_row]
             del self.dataset_colors[current_row]
+            # Also remove custom labels/samples if they exist
+            if current_row < len(self.custom_labels):
+                del self.custom_labels[current_row]
+            if current_row < len(self.custom_samples):
+                del self.custom_samples[current_row]
             self.update_plot()
+            # Update button state
+            if len(self.datasets) == 0:
+                self.view_details_btn.setEnabled(False)
     
     def edit_labels(self):
         """Open label editor dialog"""
@@ -1106,6 +1125,109 @@ class PlottingTab(QWidget):
             
             QMessageBox.information(self, "Success", "Labels updated!")
     
+    def on_dataset_selection_changed(self):
+        """Handle dataset selection change - enable/disable view details button"""
+        current_row = self.dataset_list.currentRow()
+        has_selection = current_row >= 0 and current_row < len(self.datasets)
+        self.view_details_btn.setEnabled(has_selection)
+    
+    def show_dataset_context_menu(self, position):
+        """Show context menu for dataset list"""
+        item = self.dataset_list.itemAt(position)
+        if item is None:
+            return
+        
+        menu = QMenu(self)
+        
+        view_action = menu.addAction("ℹ️ View Details")
+        view_action.triggered.connect(self.view_dataset_details)
+        
+        menu.addSeparator()
+        
+        toggle_action = menu.addAction("👁️ Toggle Visibility")
+        toggle_action.triggered.connect(lambda: self.toggle_dataset_visibility(item))
+        
+        remove_action = menu.addAction("🗑️ Remove")
+        remove_action.triggered.connect(self.remove_selected_dataset)
+        
+        menu.exec(self.dataset_list.mapToGlobal(position))
+    
+    def view_dataset_details(self):
+        """Show detailed information about selected dataset"""
+        current_row = self.dataset_list.currentRow()
+        if current_row < 0 or current_row >= len(self.datasets):
+            QMessageBox.information(self, "No Selection", "Please select a dataset to view details.")
+            return
+        
+        data = self.datasets[current_row]
+        
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Dataset Details: {data.filename}")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(400)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Create text area with formatted information
+        details_text = QTextEdit()
+        details_text.setReadOnly(True)
+        details_text.setFont(QFont("Courier New", 9))
+        details_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                border: 1px solid #555;
+                padding: 8px;
+            }
+        """)
+        
+        # Format information similar to file browser preview
+        info_html = f"""
+        <style>
+            body {{ background-color: #2b2b2b; color: #e0e0e0; }}
+            h3 {{ color: #2196F3; }}
+            hr {{ border: 1px solid #555; }}
+            b {{ color: #b0b0b0; }}
+        </style>
+        <h3>{data.filename}</h3>
+        <hr>
+        <b>Test Type:</b> <span style="color: #4CAF50;">{data.test_name}</span><br>
+        <b>Sample:</b> {data.sample}<br>
+        <b>Device:</b> {data.device}<br>
+        <b>Instrument:</b> {data.instrument}<br>
+        <b>Address:</b> {data.address}<br>
+        <b>Timestamp:</b> {data.timestamp}<br>
+        <b>Data Points:</b> {len(data.timestamps)}<br>
+        <b>Duration:</b> {data.duration:.2f} s<br>
+        <b>File Path:</b> <span style="color: #888; font-size: 9pt;">{data.filepath}</span><br>
+        <hr>
+        <b>Test Parameters:</b><br>
+        """
+        for key, value in data.parameters.items():
+            info_html += f"&nbsp;&nbsp;<span style='color: #888'>{key}:</span> {value}<br>"
+        
+        if data.hardware_limits:
+            info_html += f"<hr><b>Hardware Limits:</b><br>"
+            for key, value in data.hardware_limits.items():
+                info_html += f"&nbsp;&nbsp;<span style='color: #888'>{key}:</span> {value}<br>"
+        
+        if data.notes:
+            info_html += f"<hr><b>Notes:</b><br><span style='color: #d0d0d0'>{data.notes}</span>"
+        
+        details_text.setHtml(info_html)
+        layout.addWidget(details_text)
+        
+        # Close button
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(dialog.accept)
+        button_layout.addWidget(close_btn)
+        layout.addLayout(button_layout)
+        
+        dialog.exec()
+    
     def clear_all_datasets(self):
         """Clear all datasets"""
         reply = QMessageBox.question(
@@ -1123,6 +1245,8 @@ class PlottingTab(QWidget):
             self.dataset_list.clear()
             self.figure.clear()
             self.canvas.draw()
+            # Update button state
+            self.view_details_btn.setEnabled(False)
             self.status_label.setText("No data loaded")
     
     def change_background_color(self):

@@ -65,10 +65,30 @@ class TektronixTBS1000C:
             if resource:
                 self.resource = resource
             if not self.resource:
-                raise ValueError("No VISA resource specified.")
+                print("Error: No VISA resource specified.")
+                return False
             
             self.rm = pyvisa.ResourceManager()
-            self.inst = self.rm.open_resource(self.resource)
+            
+            # Try to open the resource
+            try:
+                self.inst = self.rm.open_resource(self.resource)
+            except pyvisa.errors.VisaIOError as e:
+                print(f"Failed to open VISA resource '{self.resource}': {e}")
+                print(f"Please check:")
+                print(f"  1. Address is correct: {self.resource}")
+                print(f"  2. Device is powered on and connected")
+                print(f"  3. VISA drivers are installed")
+                print(f"  4. Device is not in use by another program")
+                self.inst = None
+                if self.rm:
+                    try:
+                        self.rm.close()
+                    except Exception:
+                        pass
+                    self.rm = None
+                return False
+            
             self.inst.timeout = self.timeout_ms
             
             # Configure communication settings
@@ -76,10 +96,24 @@ class TektronixTBS1000C:
             self.inst.read_termination = '\n'
             
             # Verify connection by checking IDN
-            _ = self.idn()
+            try:
+                idn_result = self.idn()
+                if not idn_result or "error" in idn_result.lower():
+                    print(f"Warning: IDN query returned unexpected result: {idn_result}")
+                    # Don't fail on IDN warning, connection might still work
+            except Exception as e:
+                print(f"Warning: IDN query failed: {e}")
+                # Don't fail on IDN error, connection might still work
+            
             return True
         except Exception as e:
-            print(f"Error connecting to oscilloscope: {e}")
+            error_msg = str(e)
+            print(f"Error connecting to oscilloscope: {error_msg}")
+            print(f"Please check:")
+            print(f"  1. Address is correct: {self.resource if self.resource else 'Not set'}")
+            print(f"  2. Device is powered on and connected")
+            print(f"  3. VISA drivers are installed")
+            print(f"  4. Device is not in use by another program")
             self.inst = None
             if self.rm:
                 try:
@@ -230,7 +264,7 @@ class TektronixTBS1000C:
         """
         if channel not in (1, 2):
             raise ValueError("Channel must be 1 or 2")
-        self.write(f"CH{channel}:SCAL {volts_per_div}")
+        self.write(f"CH{channel}:SCA {volts_per_div}")
     
     def get_channel_scale(self, channel: int) -> float:
         """
@@ -301,7 +335,7 @@ class TektronixTBS1000C:
         Args:
             scale: Time per division in seconds (e.g., 1e-3 for 1 ms/div)
         """
-        self.write(f"HOR:MAIN:SCAL {scale}")
+        self.write(f"HOR:SCA {scale}")
     
     def get_timebase_scale(self) -> float:
         """
@@ -311,7 +345,7 @@ class TektronixTBS1000C:
             float: Time per division in seconds
         """
         try:
-            return float(self.query("HOR:MAIN:SCAL?"))
+            return float(self.query("HOR:SCA?"))
         except Exception:
             return 1e-3
     
@@ -322,7 +356,7 @@ class TektronixTBS1000C:
         Args:
             position: Horizontal position in seconds
         """
-        self.write(f"HOR:MAIN:POS {position}")
+        self.write(f"HOR:POS {position}")
     
     def get_timebase_position(self) -> float:
         """
@@ -332,7 +366,7 @@ class TektronixTBS1000C:
             float: Horizontal position in seconds
         """
         try:
-            return float(self.query("HOR:MAIN:POS?"))
+            return float(self.query("HOR:POS?"))
         except Exception:
             return 0.0
     
@@ -410,6 +444,53 @@ class TektronixTBS1000C:
     def force_trigger(self):
         """Force a trigger event."""
         self.write("TRIG FORC")
+        
+    def set_trigger_mode(self, mode: str):
+        """
+        Set trigger mode.
+        
+        Args:
+            mode: 'AUTO' or 'NORMAL'
+        """
+        self.write(f"TRIG:A:MOD {mode.upper()}")
+        
+    def get_trigger_mode(self) -> str:
+        """
+        Get current trigger mode.
+        
+        Returns:
+            str: 'AUTO' or 'NORMAL'
+        """
+        try:
+            return self.query("TRIG:A:MOD?").strip()
+        except Exception:
+            return "AUTO"
+
+    # ==================== Acquisition Control ====================
+    
+    def configure_acquisition(self, mode: str = 'SAMPLE', stop_after: str = 'RUNSTOP'):
+        """
+        Configure acquisition mode.
+        
+        Args:
+            mode: 'SAMPLE', 'PEAKDETECT', 'AVERAGE'
+            stop_after: 'RUNSTOP' (Continuous) or 'SEQUENCE' (Single Shot)
+        """
+        self.write(f"ACQ:MOD {mode}")
+        self.write(f"ACQ:STOPA {stop_after}")
+
+    def start_acquisition(self):
+        """Start acquisition (Run)."""
+        self.write("ACQ:STATE ON")
+        
+    def stop_acquisition(self):
+        """Stop acquisition."""
+        self.write("ACQ:STATE OFF")
+        
+    def set_single_shot(self):
+        """Configure for single shot acquisition and arm."""
+        self.configure_acquisition(stop_after='SEQUENCE')
+        self.start_acquisition()
     
     # ==================== Waveform Acquisition ====================
     
@@ -516,6 +597,21 @@ class TektronixTBS1000C:
         
         # Select channel and set data format
         self.write(f"DAT:SOU CH{channel}")
+        
+        # Try to maximize record length for high resolution
+        try:
+            # Set record length based on request (default 20k if not specified or large)
+            target_reco = 20000
+            if num_points is not None:
+                if int(num_points) <= 2500:
+                    target_reco = 2500
+                else:
+                    target_reco = 20000
+            
+            self.write(f"HOR:RECO {target_reco}")
+        except:
+            pass
+            
         self.write(f"DAT:ENC {format}")
         self.write(f"DAT:WID 1")  # 1 byte per data point
         
@@ -526,10 +622,12 @@ class TektronixTBS1000C:
         record_length = self._extract_record_length(preamble)
         target_points = record_length if num_points is None else max(1, min(int(num_points), record_length))
         
+        # Ensure we read the full record if possible
+        self.write(f"DAT:STAR 1")
+        self.write(f"DAT:STOP {target_points}")
+        
         # Read waveform data
         if format == "ASCII":
-            self.write("DAT:STAR 1")
-            self.write(f"DAT:STOP {target_points}")
             data_str = self.query("CURV?")
             
             # Parse ASCII data
@@ -541,8 +639,6 @@ class TektronixTBS1000C:
                     continue
         else:
             # Binary format
-            self.write("DAT:STAR 1")
-            self.write(f"DAT:STOP {target_points}")
             
             # Configure for binary read
             self.inst.chunk_size = 1024000  # Increase chunk size for binary
@@ -563,7 +659,7 @@ class TektronixTBS1000C:
         else:
             # Fallback: use timebase scale
             time_scale = self.get_timebase_scale()
-            time_values = np.linspace(-4 * time_scale, 4 * time_scale, num_points)
+            time_values = np.linspace(-5 * time_scale, 5 * time_scale, num_points)
         
         return time_values, y_values
     
