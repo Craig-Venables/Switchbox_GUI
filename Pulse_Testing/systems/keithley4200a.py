@@ -550,13 +550,33 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         # i_range and i_compliance are already in Amperes, no conversion needed
         return self._scripts.smu_slow_pulse_measure(**params)
     
-    def smu_retention(self, **params) -> Dict[str, Any]:
-        """SMU-based retention test with alternating SET/RESET pulses.
+    def smu_endurance(self, **params) -> Dict[str, Any]:
+        """SMU-based endurance test with alternating SET/RESET pulses.
         
         ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
         The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
         
         Pattern: (SET pulse → Read → RESET pulse → Read) × N cycles
+        
+        Note: All durations are expected in SECONDS (not microseconds) for SMU functions.
+        
+        Supports progress_callback parameter for real-time plotting.
+        """
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        # Note: For SMU, all durations are in SECONDS (not microseconds like PMU functions)
+        # The GUI will send them in seconds, so no conversion needed
+        # i_range and i_compliance are already in Amperes, no conversion needed
+        # Extract progress_callback if present (it's passed from GUI)
+        return self._scripts.smu_endurance(**params)
+    
+    def smu_retention(self, **params) -> Dict[str, Any]:
+        """SMU-based retention test: Single pulse followed by multiple reads over time.
+        
+        ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
+        The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
+        
+        Pattern: Pulse → Read @ t1 → Read @ t2 → Read @ t3... (measures retention over time)
         
         Note: All durations are expected in SECONDS (not microseconds) for SMU functions.
         

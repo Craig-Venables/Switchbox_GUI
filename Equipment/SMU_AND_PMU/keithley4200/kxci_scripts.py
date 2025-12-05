@@ -427,15 +427,25 @@ class KXCIClient:
 
         try:
             self.inst.write(command)
-            time.sleep(0.03)
+            time.sleep(0.01)  # Small delay to ensure command is sent
             
-            # Wait for measurement to complete and read all output
-            # The C code printf() statements come through the instrument's output stream
-            print("⏳ Waiting for measurement to complete...")
-            time.sleep(2.0)
+            # Determine wait time based on command type
+            # pulse_only commands are fast (no measurement), pulse_measure needs more time
+            if "SMU_pulse_only" in command:
+                # pulse_only is fast - minimal wait needed
+                wait_time = 0.01  # 10ms should be enough for pulse_only
+            elif "SMU_pulse_measure" in command:
+                # pulse_measure may need slightly more time for measurement
+                wait_time = 0.05  # 50ms for pulse_measure
+            else:
+                # Other commands - use minimal wait, reading loop will handle it
+                wait_time = 0.02  # 20ms default
+            
+            # Small wait for command to start processing
+            time.sleep(wait_time)
             
             # Read all available output (including printf statements from C code)
-            # Read in a loop until we get the RETURN VALUE or timeout
+            # The reading loop will handle waiting for the response with appropriate timeouts
             all_output = []
             return_value = None
             max_attempts = 20  # Read up to 20 times to get all output
@@ -4099,7 +4109,7 @@ class Keithley4200_KXCI_Scripts:
             except Exception:
                 pass
     
-    def smu_retention(self, set_voltage: float = 2.0,
+    def smu_endurance(self, set_voltage: float = 2.0,
                      reset_voltage: float = -2.0,
                      set_duration: float = 0.1,  # seconds
                      reset_duration: float = 0.1,  # seconds
@@ -4113,7 +4123,7 @@ class Keithley4200_KXCI_Scripts:
                      log_messages: bool = True,
                      enable_debug_output: bool = True,
                      progress_callback: Optional[Callable] = None) -> Dict:
-        """SMU-based retention test with alternating SET/RESET pulses.
+        """SMU-based endurance test with alternating SET/RESET pulses.
         
         ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
         The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
@@ -4187,7 +4197,7 @@ class Keithley4200_KXCI_Scripts:
         
         if enable_debug_output:
             print("\n" + "="*80)
-            print("[KXCI] SMU Retention Test Parameters:")
+            print("[KXCI] SMU Endurance Test Parameters:")
             print("="*80)
             print(f"  ⚠️  Using SMU (not PMU) - Much slower but supports longer pulses")
             print(f"  Pattern: (SET → Read → RESET → Read) × {num_cycles} cycles")
@@ -4273,7 +4283,7 @@ class Keithley4200_KXCI_Scripts:
                                 'resistances': all_resistances.copy(),
                                 'cycle_numbers': cycle_numbers.copy(),
                                 'pulse_types': pulse_types.copy(),
-                                'test_name': '⚠️ SMU Retention'
+                                'test_name': '⚠️ SMU Endurance'
                             })
                         except Exception as e:
                             if enable_debug_output:
@@ -4326,7 +4336,7 @@ class Keithley4200_KXCI_Scripts:
                                 'resistances': all_resistances.copy(),
                                 'cycle_numbers': cycle_numbers.copy(),
                                 'pulse_types': pulse_types.copy(),
-                                'test_name': '⚠️ SMU Retention'
+                                'test_name': '⚠️ SMU Endurance'
                             })
                         except Exception as e:
                             if enable_debug_output:
@@ -4337,7 +4347,7 @@ class Keithley4200_KXCI_Scripts:
                     time.sleep(repeat_delay)
             
             if enable_debug_output:
-                print(f"\n[KXCI] Retention Test Complete:")
+                print(f"\n[KXCI] Endurance Test Complete:")
                 print(f"  Total measurements: {len(all_timestamps)}")
                 print(f"  Cycles completed: {num_cycles}")
             
@@ -4345,6 +4355,237 @@ class Keithley4200_KXCI_Scripts:
                 all_timestamps, all_voltages, all_currents, all_resistances,
                 cycle_numbers=cycle_numbers if num_cycles > 1 else None,
                 pulse_types=pulse_types
+            )
+            
+        finally:
+            try:
+                controller._exit_ul_mode()
+            except Exception:
+                pass
+    
+    def smu_retention(self, pulse_voltage: float = 2.0,
+                     pulse_duration: float = 0.1,  # seconds
+                     read_voltage: float = 0.2,  # V (read voltage)
+                     read_duration: float = 0.01,  # seconds (read pulse width)
+                     num_reads: int = 10,
+                     delay_between_reads: float = 1.0,  # seconds between reads
+                     i_range: float = 10e-3,  # A
+                     i_compliance: float = 0.0,  # A (0 = disabled)
+                     initialize: bool = True,
+                     log_messages: bool = True,
+                     enable_debug_output: bool = True,
+                     progress_callback: Optional[Callable] = None) -> Dict:
+        """SMU-based retention test: Initial read, then pulse, then multiple reads over time.
+        
+        ⚠️ IMPORTANT: This function uses the SMU (Source Measure Unit) instead of PMU.
+        The SMU is much slower but supports much longer pulse widths (up to 480 seconds).
+        
+        Pattern: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3... (measures retention over time)
+        
+        **Implementation Details:**
+        - Single pulse using `SMU_pulse_only` (no measurement during pulse)
+        - Multiple reads using `SMU_pulse_measure` (measures resistance at each read)
+        - Time between reads is user-configurable
+        - Plots resistance over time to show retention characteristics
+        
+        **Key Differences from PMU Functions:**
+        - Uses SMU1 instead of PMU channels
+        - Much slower pulse widths: 40ns to 480 seconds (vs microseconds for PMU)
+        - Single measurement per read (not multiple measurements per pulse)
+        - Different hardware path (SMU vs PMU)
+        - Lower maximum current range (1A vs higher for PMU)
+        
+        **Limits:**
+        - Pulse widths: 40ns (4e-8s) to 480 seconds
+        - Voltages: -20V to +20V
+        - Current range: 0 to 1A
+        - Current compliance: -10mA to +10mA (0 = disabled)
+        
+        **When to Use:**
+        - For retention studies (measuring how resistance changes over time after a pulse)
+        - For very slow pulses (milliseconds to seconds)
+        - When PMU timing constraints are too restrictive
+        - When you need pulse widths > 1ms
+        
+        **When NOT to Use:**
+        - For fast pulses (< 1ms) - use PMU functions instead
+        - For high-speed measurements - PMU is much faster
+        - For endurance cycling - use smu_endurance instead
+        
+        Args:
+            pulse_voltage: Pulse voltage (V), range: -20 to +20
+            pulse_duration: Pulse width (seconds), range: 40ns to 480s
+            read_voltage: Read/probe voltage (V), range: -20 to +20
+            read_duration: Read pulse width (seconds), range: 40ns to 480s
+            num_reads: Number of reads after the pulse
+            delay_between_reads: Delay between reads (seconds)
+            i_range: Current range (A), range: 0 to 1A (default: 10mA)
+            i_compliance: Current compliance limit (A), range: -10mA to +10mA (0 = disabled)
+            initialize: Initialize SMU configuration (default: True)
+            log_messages: Enable C module log messages (default: True)
+            enable_debug_output: Enable debug output (default: True)
+            progress_callback: Optional callback for real-time plotting
+        
+        Returns:
+            Dict with timestamps, voltages, currents, resistances
+            Timestamps are relative to the start (initial read at t=0, pulse and subsequent reads at positive times)
+        """
+        # Validate parameters
+        if pulse_duration < 40e-9 or pulse_duration > 480.0:
+            raise ValueError(f"pulse_duration must be between 40ns and 480s, got {pulse_duration:.2e}s")
+        if read_duration < 40e-9 or read_duration > 480.0:
+            raise ValueError(f"read_duration must be between 40ns and 480s, got {read_duration:.2e}s")
+        if abs(pulse_voltage) > 20.0:
+            raise ValueError(f"pulse_voltage must be between -20V and +20V, got {pulse_voltage:.2f}V")
+        if abs(read_voltage) > 20.0:
+            raise ValueError(f"read_voltage must be between -20V and +20V, got {read_voltage:.2f}V")
+        if i_range < 0.0 or i_range > 1.0:
+            raise ValueError(f"i_range must be between 0 and 1A, got {i_range:.2e}A")
+        if abs(i_compliance) > 10e-3:
+            raise ValueError(f"i_compliance must be between -10mA and +10mA, got {i_compliance:.2e}A")
+        if num_reads < 1:
+            raise ValueError(f"num_reads must be >= 1, got {num_reads}")
+        
+        if enable_debug_output:
+            print("\n" + "="*80)
+            print("[KXCI] SMU Retention Test Parameters:")
+            print("="*80)
+            print(f"  ⚠️  Using SMU (not PMU) - Much slower but supports longer pulses")
+            print(f"  Pattern: Initial Read → Pulse → {num_reads} reads (retention over time)")
+            print(f"  Pulse:    {pulse_voltage:.6f} V, {pulse_duration:.6e} s ({pulse_duration*1e3:.3f} ms)")
+            print(f"  Read:     {read_voltage:.6f} V, {read_duration:.6e} s ({read_duration*1e3:.3f} ms)")
+            print(f"  Delay between reads: {delay_between_reads:.6e} s ({delay_between_reads*1e3:.3f} ms)")
+            print(f"  Current range:        {i_range:.2e} A ({i_range*1e3:.2f} mA)")
+            print(f"  Current compliance:    {i_compliance:.2e} A ({i_compliance*1e3:.2f} mA)" if i_compliance != 0.0 else "  Current compliance:    Disabled")
+            print(f"  Initialize:           {initialize}")
+            print(f"  Log messages:         {log_messages}")
+            print("="*80 + "\n")
+        
+        all_timestamps: List[float] = []
+        all_voltages: List[float] = []
+        all_currents: List[float] = []
+        all_resistances: List[float] = []
+        
+        controller = self._get_controller()
+        
+        if not controller.connect():
+            raise RuntimeError("Unable to connect to instrument")
+        
+        try:
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            
+            # Initialize once at the start
+            if initialize:
+                init_command = f"EX Labview_Controlled_Programs_Kemp SMU_pulse_measure(1,0,1.00E-4,0,{format_param(i_range)},{format_param(i_compliance)},)"
+                controller._execute_ex_command(init_command)
+            
+            # Record start time (for relative timestamps)
+            start_timestamp = self._get_timestamp()
+            
+            # Initial read before pulse
+            if enable_debug_output:
+                print(f"\n[Initial Read] Measuring initial state before pulse")
+            
+            initial_read_command = f"EX Labview_Controlled_Programs_Kemp SMU_pulse_measure(0,{1 if log_messages else 0},{format_param(read_duration)},{format_param(read_voltage)},{format_param(i_range)},{format_param(i_compliance)},)"
+            return_value, error = controller._execute_ex_command(initial_read_command)
+            if error:
+                raise RuntimeError(f"Initial read failed: {error}")
+            
+            # Store initial read measurement
+            if return_value is not None:
+                resistance = float(return_value)
+                # Calculate current (handle division by zero or very large values)
+                if abs(resistance) > 1e-12 and abs(resistance) < 1e12:
+                    current = read_voltage / resistance
+                else:
+                    current = 0.0
+                
+                # Calculate time relative to start (initial read at t=0)
+                current_timestamp = self._get_timestamp()
+                time_since_start = current_timestamp - start_timestamp
+                
+                all_timestamps.append(time_since_start)
+                all_voltages.append(read_voltage)
+                all_currents.append(current)
+                all_resistances.append(resistance)
+                
+                if enable_debug_output:
+                    print(f"  Initial resistance: R={resistance:.6e} Ω ({resistance/1e3:.3f} kΩ), I={current:.6e} A ({current*1e6:.3f} µA)")
+            
+            # Apply the pulse (no measurement)
+            if enable_debug_output:
+                print(f"\n[Pulse] Applying pulse: {pulse_voltage:.6f} V, {pulse_duration:.6e} s")
+            
+            pulse_command = f"EX Labview_Controlled_Programs_Kemp SMU_pulse_only(0,{1 if log_messages else 0},{format_param(pulse_duration)},{format_param(pulse_voltage)},{format_param(i_range)},{format_param(i_compliance)},)"
+            return_value, error = controller._execute_ex_command(pulse_command)
+            if error:
+                raise RuntimeError(f"Pulse failed: {error}")
+            if return_value is not None and return_value != 0:
+                raise RuntimeError(f"Pulse returned error code: {return_value} (0=success, non-zero=error)")
+            
+            # Record pulse time (for reference, but timestamps are relative to start)
+            pulse_timestamp = self._get_timestamp()
+            
+            # Perform multiple reads over time
+            for read_idx in range(num_reads):
+                if enable_debug_output:
+                    print(f"\n[Read {read_idx + 1}/{num_reads}]")
+                
+                # Wait for the delay (except before first read)
+                if read_idx > 0 and delay_between_reads > 0:
+                    time.sleep(delay_between_reads)
+                
+                # Read (measure resistance)
+                read_command = f"EX Labview_Controlled_Programs_Kemp SMU_pulse_measure(0,{1 if log_messages else 0},{format_param(read_duration)},{format_param(read_voltage)},{format_param(i_range)},{format_param(i_compliance)},)"
+                return_value, error = controller._execute_ex_command(read_command)
+                if error:
+                    raise RuntimeError(f"Read {read_idx + 1} failed: {error}")
+                
+                # Store measurement
+                if return_value is not None:
+                    resistance = float(return_value)
+                    # Calculate current (handle division by zero or very large values)
+                    if abs(resistance) > 1e-12 and abs(resistance) < 1e12:
+                        current = read_voltage / resistance
+                    else:
+                        current = 0.0
+                    
+                    # Calculate time since start (all timestamps relative to initial read at t=0)
+                    current_timestamp = self._get_timestamp()
+                    time_since_start = current_timestamp - start_timestamp
+                    
+                    all_timestamps.append(time_since_start)
+                    all_voltages.append(read_voltage)
+                    all_currents.append(current)
+                    all_resistances.append(resistance)
+                    
+                    if enable_debug_output:
+                        time_since_pulse = current_timestamp - pulse_timestamp
+                        print(f"  Time since start: {time_since_start:.6f} s (since pulse: {time_since_pulse:.6f} s)")
+                        print(f"  Resistance: R={resistance:.6e} Ω ({resistance/1e3:.3f} kΩ), I={current:.6e} A ({current*1e6:.3f} µA)")
+                    
+                    # Call progress callback for real-time plotting
+                    if progress_callback:
+                        try:
+                            progress_callback({
+                                'timestamps': all_timestamps.copy(),
+                                'voltages': all_voltages.copy(),
+                                'currents': all_currents.copy(),
+                                'resistances': all_resistances.copy(),
+                                'test_name': '⚠️ SMU Retention'
+                            })
+                        except Exception as e:
+                            if enable_debug_output:
+                                print(f"  ⚠️  Progress callback error: {e}")
+            
+            if enable_debug_output:
+                print(f"\n[KXCI] Retention Test Complete:")
+                print(f"  Total measurements: {len(all_timestamps)}")
+                print(f"  Time span: {all_timestamps[-1] if all_timestamps else 0:.6f} s")
+            
+            return self._format_results(
+                all_timestamps, all_voltages, all_currents, all_resistances
             )
             
         finally:

@@ -167,7 +167,8 @@ class OscilloscopeManager:
         Manually initialize a specific oscilloscope.
         
         Args:
-            scope_type: 'Tektronix TBS1000C' or similar
+            scope_type: 'Tektronix TBS1000C' or similar. If 'Unknown' or doesn't match,
+                       will try all known scope types.
             address: VISA resource string
             
         Returns:
@@ -175,34 +176,47 @@ class OscilloscopeManager:
         """
         # Find matching config
         config = None
-        for cfg in self.OSCILLOSCOPE_CONFIGS:
-            if scope_type in cfg['name'] or scope_type.replace(' ', '') in cfg['name'].replace(' ', ''):
-                config = cfg
-                break
+        if scope_type and scope_type != 'Unknown':
+            for cfg in self.OSCILLOSCOPE_CONFIGS:
+                if scope_type in cfg['name'] or scope_type.replace(' ', '') in cfg['name'].replace(' ', ''):
+                    config = cfg
+                    break
         
-        if not config:
-            print(f"Unknown oscilloscope type: {scope_type}")
-            return False
+        # If no config found or scope_type is 'Unknown', try all known types
+        configs_to_try = [config] if config else self.OSCILLOSCOPE_CONFIGS
         
-        try:
-            scope_class = config['class']
-            self.scope = scope_class(resource=address)
-            
-            # Test connection
-            if self.scope.connect():
-                idn = self.scope.idn()
-                self.scope_type = config['name']
-                self.scope_config = config
-                self.address = address
-                print(f"Connected to {config['name']} at {address}")
-                print(f"ID: {idn}")
-                return True
-            else:
+        for cfg in configs_to_try:
+            try:
+                scope_class = cfg['class']
+                self.scope = scope_class(resource=address)
+                
+                # Test connection
+                if self.scope.connect():
+                    idn = self.scope.idn()
+                    self.scope_type = cfg['name']
+                    self.scope_config = cfg
+                    self.address = address
+                    print(f"Connected to {cfg['name']} at {address}")
+                    print(f"ID: {idn}")
+                    return True
+                else:
+                    self.scope = None
+            except Exception as e:
+                # Try next config if this one fails
+                if self.scope:
+                    try:
+                        self.scope.disconnect()
+                    except:
+                        pass
                 self.scope = None
-                return False
-        except Exception as e:
-            print(f"Failed to connect to {scope_type}: {e}")
-            return False
+                continue
+        
+        # If we get here, all attempts failed
+        print(f"Failed to connect to oscilloscope at {address}")
+        if scope_type and scope_type != 'Unknown':
+            print(f"  Tried type: {scope_type}")
+        print(f"  Tried all known oscilloscope types")
+        return False
     
     # ==================== Unified API Methods ====================
     

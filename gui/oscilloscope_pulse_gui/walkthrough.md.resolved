@@ -1,0 +1,36 @@
+# Oscilloscope Pulse Capture GUI - Enhanced
+
+I have upgraded the **Oscilloscope Pulse Capture GUI** with a refined design and powerful new features, making it consistent with the rest of the application.
+
+## New Features
+
+### 1. Modern "Hint of Color" Interface
+- **Theming**: Adopted a clean `#E6F3FF` (Light Blue) and `#1565c0` (Deep Blue) color scheme.
+- **Top Control Bar**: A pervasive banner at the top displaying:
+  - **Identity**: Clearly shows Current Device and Sample Name.
+  - **System**: Dropdown to switch between measurement systems (e.g., `keithley4200a` vs `2450`).
+  - **Save Location**: Quickly see and change where your data goes.
+
+### 2. Enhanced Visualization (Zoom Graph)
+- **Three-Panel Layout**: 
+  1. **Voltage**: Full waveform.
+  2. **Current**: Full waveform.
+  3. **ZOOM View**: A dedicated overlay plot showing both Voltage (Blue) and Current (Red) zoomed in on the pulse event, allowing for precise inspection of the transient response.
+
+### 3. Hardware Flexibility
+- **Configurable Connections**:
+  - **SMU Address**: Select from available ports or type manually.
+  - **Scope Address**: Dropdown populated with discovered resources.
+- **Smart Context**: 
+  - When opened from the main [MeasurementGUI](file:///c:/Users/ppxcv1/Documents/GitHub/Switchbox_GUI/gui/measurement_gui/main.py#296-4256), it inherits the relevant System, Device, and Save Path automatically.
+  - When opened **Standalone**, it defaults to a safe "Stand-alone" mode with prompt-to-save enabled.
+
+## Code Structure Refactor
+- **[layout.py](file:///c:/Users/ppxcv1/Documents/GitHub/Switchbox_GUI/gui/oscilloscope_pulse_gui/layout.py)**: All UI code is now isolated here, handling the new widgets and styling.
+- **[main.py](file:///c:/Users/ppxcv1/Documents/GitHub/Switchbox_GUI/main.py)**: Serves as the Controller, managing the logic and context data flow.
+
+## How to Verify
+1.  **Launch**: Open the GUI (Standalone or Integrated).
+2.  **Top Bar**: Check that "Device" and "Sample" are displayed correctly.
+3.  **Zoom**: Run a simulation. observe the bottom graph showing the overlay of V and I.
+4.  **Style**: Enjoy the fresh look!

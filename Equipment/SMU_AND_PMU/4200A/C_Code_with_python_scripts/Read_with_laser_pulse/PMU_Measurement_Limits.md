@@ -223,3 +223,5 @@ For voltage sweeps:
 - Single-channel mode (CH1 force + measure) may show current range saturation issues
 - Consider dual-channel mode (CH1 force, CH2 measure) for accurate current measurement if CH2 is available
 
+
+

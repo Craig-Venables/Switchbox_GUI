@@ -110,8 +110,11 @@ class MeasurementGUILayoutBuilder:
         gui.systems = gui.load_systems()
         gui.system_var = tk.StringVar()
         
-        # Set default value if systems exist
-        if gui.systems and gui.systems[0] != "No systems available":
+        # Set default to "Please Select System" (should be first in list)
+        if gui.systems and gui.systems[0] == "Please Select System":
+            gui.system_var.set("Please Select System")
+        elif gui.systems and gui.systems[0] != "No systems available":
+            # Fallback if "Please Select System" not in list
             gui.system_var.set(gui.systems[0])
         
         # Add trace to sync both dropdowns when StringVar changes
@@ -237,11 +240,30 @@ class MeasurementGUILayoutBuilder:
         pulse_btn.pack(side='left', padx=5)
         gui.pulse_testing_button = pulse_btn
         
+        # Oscilloscope Pulse button
+        scope_btn = tk.Button(
+            right_section,
+            text="Oscilloscope Pulse",
+            font=self.FONT_BUTTON,
+            command=self.callbacks.get("open_oscilloscope_pulse"),
+            bg=self.COLOR_BG,
+            relief='raised',
+            padx=10,
+            pady=5
+        )
+        scope_btn.pack(side='left', padx=5)
+        gui.oscilloscope_pulse_button = scope_btn
+        
         self.widgets["top_control_bar"] = frame
     
     def _on_system_change_and_connect(self) -> None:
-        """Handle system change and attempt auto-connect"""
+        """Handle system change - do NOT auto-connect, user must click Connect button"""
         gui = self.gui
+        
+        selected_system = gui.system_var.get()
+        # Don't do anything if "Please Select System" is selected
+        if not selected_system or selected_system == "Please Select System":
+            return
         
         # StringVar trace will automatically sync Setup tab dropdown
         # First load the system configuration (comprehensive update)
@@ -252,10 +274,10 @@ class MeasurementGUILayoutBuilder:
         # Also call the system change callback for address updates
         system_change_cb = self.callbacks.get("on_system_change")
         if system_change_cb:
-            system_change_cb(gui.system_var.get())
+            system_change_cb(selected_system)
         
-        # Automatically connect to the selected system
-        self._auto_connect_instruments()
+        # DO NOT automatically connect - user must click Connect button manually
+        # self._auto_connect_instruments()  # Removed auto-connect
     
     def _auto_connect_instruments(self) -> None:
         """Automatically connect to instruments after system selection"""
@@ -981,13 +1003,17 @@ class MeasurementGUILayoutBuilder:
         
         # Use existing system_var if it exists (from top bar), otherwise create new one
         if not hasattr(gui, 'system_var') or gui.system_var is None:
-            gui.system_var = tk.StringVar(value=systems[0] if systems else "")
+            # Default to "Please Select System" if available, otherwise first system
+            default_value = "Please Select System" if systems and systems[0] == "Please Select System" else (systems[0] if systems else "")
+            gui.system_var = tk.StringVar(value=default_value)
         else:
             # If system_var exists, make sure it has a valid value
             current_value = gui.system_var.get()
             if not current_value or current_value not in systems:
                 if systems:
-                    gui.system_var.set(systems[0])
+                    # Prefer "Please Select System" if available
+                    default_value = "Please Select System" if systems[0] == "Please Select System" else systems[0]
+                    gui.system_var.set(default_value)
         
         # Update top bar dropdown values if it exists
         if hasattr(gui, 'system_dropdown') and gui.system_dropdown:

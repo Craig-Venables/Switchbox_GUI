@@ -409,9 +409,9 @@ TEST_FUNCTIONS = {
         "4200a_only": True,  # Only available for 4200A
     },
     
-    "⚠️ SMU Retention": {
-        "function": "smu_retention",
-        "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse → Read → RESET pulse → Read) × N cycles\nUse for retention studies with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
+    "⚠️ SMU Endurance": {
+        "function": "smu_endurance",
+        "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse → Read → RESET pulse → Read) × N cycles\nUse for endurance cycling with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
@@ -421,6 +421,26 @@ TEST_FUNCTIONS = {
             "repeat_delay": {"default": 1.0, "label": "Repeat Delay (s) ⚠️ SECONDS", "type": "float"},
             "probe_voltage": {"default": 0.2, "label": "Probe Voltage (V)", "type": "float"},
             "probe_duration": {"default": 0.01, "label": "Probe Duration (s) ⚠️ SECONDS", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
+            "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
+            "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
+            "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
+        },
+        "plot_type": "time_series",
+        "4200a_only": True,  # Only available for 4200A
+    },
+    
+    "⚠️ SMU Retention": {
+        "function": "smu_retention",
+        "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time)\nMeasures initial state, then how resistance changes over time after a single pulse\nUse for retention studies with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
+        "params": {
+            "pulse_voltage": {"default": 2.0, "label": "Pulse Voltage (V)", "type": "float"},
+            "pulse_duration": {"default": 0.1, "label": "Pulse Duration (s) ⚠️ SECONDS", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "read_duration": {"default": 0.01, "label": "Read Duration (s) ⚠️ SECONDS", "type": "float"},
+            "num_reads": {"default": 10, "label": "Number of Reads", "type": "int"},
+            "delay_between_reads": {"default": 1.0, "label": "Delay Between Reads (s) ⚠️ SECONDS", "type": "float"},
             "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
             "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
             "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
@@ -529,13 +549,13 @@ class TSPTestingGUI(tk.Toplevel):
         # Auto-connect disabled - user must manually connect
     
     def create_ui(self):
-        """Create the main UI layout"""
+        """Create the main UI layout with tabbed interface"""
         # Main container
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Left panel: Controls with scrollbar
-        left_container = tk.Frame(main_frame, width=450)
+        left_container = tk.Frame(main_frame, width=500)  # Increased width slightly
         left_container.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5))
         left_container.pack_propagate(False)
         
@@ -574,15 +594,257 @@ class TSPTestingGUI(tk.Toplevel):
         right_panel = tk.Frame(main_frame)
         right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Create sections (order matters - params_frame must exist before on_test_selected is called)
+        # Connection section at top (always visible)
         self.create_connection_section(left_panel)
-        self.create_pulse_diagram_section(right_panel)  # NEW: Visual diagram
-        self.create_parameters_section(left_panel)  # Must be before test_selection!
-        self.create_test_selection_section(left_panel)  # This calls on_test_selected
-        self.create_control_buttons_section(left_panel)
-        self.create_status_section(left_panel)
+        
+        # Create tabbed notebook for different testing modes
+        self.notebook = ttk.Notebook(left_panel)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create tabs
+        self.manual_tab = tk.Frame(self.notebook)
+        self.automated_tab = tk.Frame(self.notebook)
+        
+        self.notebook.add(self.manual_tab, text="  Manual Testing  ")
+        self.notebook.add(self.automated_tab, text="  Automated Testing  ")
+        
+        # Populate tabs
+        self.create_manual_testing_tab(self.manual_tab)
+        self.create_automated_testing_tab(self.automated_tab)
+        
+        # Right panel sections
+        self.create_pulse_diagram_section(right_panel)
         self.create_plot_section(right_panel)
+        
+        # Bottom control bar under right panel (under live plot)
+        self.create_bottom_control_bar(right_panel)
     
+    def create_manual_testing_tab(self, parent):
+        """Create the manual testing tab with test selection, parameters, and controls"""
+        # Parameters section MUST be created first (before test_selection calls on_test_selected)
+        self.create_parameters_section(parent)
+        
+        # Test selection section (this calls on_test_selected which needs params_frame)
+        self.create_test_selection_section(parent)
+        
+        # Status section (control buttons moved to bottom bar)
+        self.create_status_section(parent)
+    
+    def create_automated_testing_tab(self, parent):
+        """Create the automated testing tab for automated pulse characterization"""
+        # Test type selection
+        test_frame = tk.LabelFrame(parent, text="Automated Test Type", padx=5, pady=5)
+        test_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        tk.Label(test_frame, text="Test Type:", font=("TkDefaultFont", 9, "bold")).pack(anchor="w")
+        
+        self.auto_test_var = tk.StringVar()
+        auto_test_types = [
+            "Retention Pulse Optimization",
+            "Voltage Sweep Characterization", 
+            "Pulse Width Sweep",
+            "Endurance Cycling Matrix"
+        ]
+        auto_test_combo = ttk.Combobox(test_frame, textvariable=self.auto_test_var,
+                                       values=auto_test_types, state="readonly", width=35)
+        auto_test_combo.pack(fill=tk.X, pady=5)
+        auto_test_combo.current(0)
+        
+        # Description
+        tk.Label(test_frame, text="Description:", font=("TkDefaultFont", 9, "bold")).pack(anchor="w", pady=(5,0))
+        self.auto_desc_text = tk.Text(test_frame, height=3, wrap=tk.WORD, bg="#f0f0f0", 
+                                      relief=tk.FLAT, font=("TkDefaultFont", 9))
+        self.auto_desc_text.pack(fill=tk.X, pady=2)
+        self.auto_desc_text.insert(1.0, "Automatically test retention characteristics across different pulse parameters to find optimal settings.")
+        self.auto_desc_text.config(state=tk.DISABLED)
+        
+        # Parameter ranges
+        ranges_frame = tk.LabelFrame(parent, text="Parameter Ranges", padx=5, pady=5)
+        ranges_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Voltage range
+        volt_frame = tk.Frame(ranges_frame)
+        volt_frame.pack(fill=tk.X, pady=2)
+        tk.Label(volt_frame, text="Voltage Range (V):", width=20, anchor="w").pack(side=tk.LEFT)
+        tk.Label(volt_frame, text="Start:").pack(side=tk.LEFT, padx=(5,2))
+        self.auto_volt_start_var = tk.StringVar(value="0.5")
+        tk.Entry(volt_frame, textvariable=self.auto_volt_start_var, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Label(volt_frame, text="End:").pack(side=tk.LEFT, padx=(5,2))
+        self.auto_volt_end_var = tk.StringVar(value="5.0")
+        tk.Entry(volt_frame, textvariable=self.auto_volt_end_var, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Label(volt_frame, text="Step:").pack(side=tk.LEFT, padx=(5,2))
+        self.auto_volt_step_var = tk.StringVar(value="0.5")
+        tk.Entry(volt_frame, textvariable=self.auto_volt_step_var, width=8).pack(side=tk.LEFT, padx=2)
+        
+        # Pulse width range
+        width_frame = tk.Frame(ranges_frame)
+        width_frame.pack(fill=tk.X, pady=2)
+        tk.Label(width_frame, text="Pulse Width Range (s):", width=20, anchor="w").pack(side=tk.LEFT)
+        tk.Label(width_frame, text="Start:").pack(side=tk.LEFT, padx=(5,2))
+        self.auto_width_start_var = tk.StringVar(value="0.5")
+        tk.Entry(width_frame, textvariable=self.auto_width_start_var, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Label(width_frame, text="End:").pack(side=tk.LEFT, padx=(5,2))
+        self.auto_width_end_var = tk.StringVar(value="5.0")
+        tk.Entry(width_frame, textvariable=self.auto_width_end_var, width=8).pack(side=tk.LEFT, padx=2)
+        tk.Label(width_frame, text="Step:").pack(side=tk.LEFT, padx=(5,2))
+        self.auto_width_step_var = tk.StringVar(value="0.5")
+        tk.Entry(width_frame, textvariable=self.auto_width_step_var, width=8).pack(side=tk.LEFT, padx=2)
+        
+        # Cycles per test point
+        cycles_frame = tk.Frame(ranges_frame)
+        cycles_frame.pack(fill=tk.X, pady=2)
+        tk.Label(cycles_frame, text="Cycles per Test Point:", width=20, anchor="w").pack(side=tk.LEFT)
+        self.auto_cycles_var = tk.StringVar(value="10")
+        tk.Entry(cycles_frame, textvariable=self.auto_cycles_var, width=10).pack(side=tk.LEFT, padx=5)
+        
+        # Delay between tests (for device relaxation)
+        delay_frame = tk.Frame(ranges_frame)
+        delay_frame.pack(fill=tk.X, pady=2)
+        tk.Label(delay_frame, text="Delay Between Tests (s):", width=20, anchor="w").pack(side=tk.LEFT)
+        self.auto_delay_var = tk.StringVar(value="5.0")
+        tk.Entry(delay_frame, textvariable=self.auto_delay_var, width=10).pack(side=tk.LEFT, padx=5)
+        tk.Label(delay_frame, text="(for device relaxation)", font=("TkDefaultFont", 8), fg="gray").pack(side=tk.LEFT, padx=5)
+        
+        # Test matrix preview
+        matrix_frame = tk.LabelFrame(parent, text="Test Matrix Preview", padx=5, pady=5)
+        matrix_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.auto_matrix_text = tk.Text(matrix_frame, height=4, wrap=tk.WORD, bg="#f0f0f0",
+                                        relief=tk.FLAT, font=("Courier", 8))
+        self.auto_matrix_text.pack(fill=tk.X)
+        self.auto_matrix_text.insert(1.0, "Test matrix will be calculated based on parameter ranges.\nExample: 10 voltages × 10 widths = 100 test points")
+        self.auto_matrix_text.config(state=tk.DISABLED)
+        
+        # Control buttons
+        control_frame = tk.LabelFrame(parent, text="Control", padx=5, pady=5)
+        control_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.auto_run_btn = tk.Button(control_frame, text="▶  START AUTOMATED TEST", 
+                                       command=self._run_automated_test,
+                                       bg="#28a745", fg="white", font=("TkDefaultFont", 12, "bold"),
+                                       height=2, relief=tk.RAISED, bd=3, cursor="hand2",
+                                       state=tk.DISABLED)  # Disabled until implemented
+        self.auto_run_btn.pack(fill=tk.X, pady=(0, 5))
+        
+        # Progress section
+        progress_frame = tk.LabelFrame(parent, text="Progress", padx=5, pady=5)
+        progress_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.auto_progress_var = tk.StringVar(value="Ready to start automated testing")
+        tk.Label(progress_frame, textvariable=self.auto_progress_var, 
+                font=("TkDefaultFont", 9)).pack(anchor="w")
+        
+        self.auto_progress_bar = ttk.Progressbar(progress_frame, mode='determinate', length=400)
+        self.auto_progress_bar.pack(fill=tk.X, pady=5)
+        
+        # Results summary
+        results_frame = tk.LabelFrame(parent, text="Results Summary", padx=5, pady=5)
+        results_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        self.auto_results_text = tk.Text(results_frame, height=8, wrap=tk.WORD, bg="black", 
+                                         fg="lime", font=("Courier", 8))
+        self.auto_results_text.pack(fill=tk.BOTH, expand=True)
+        self.auto_results_text.insert(1.0, "Automated test results will appear here...\n")
+        self.auto_results_text.config(state=tk.DISABLED)
+        
+        # Export button (moved to bottom bar, keep reference for later)
+        # export_btn = tk.Button(control_frame, text="📊 Export Results", 
+        #                       command=self._export_automated_results,
+        #                       font=("TkDefaultFont", 9), state=tk.DISABLED)
+        # export_btn.pack(fill=tk.X, pady=(5, 0))
+    
+    def _run_automated_test(self):
+        """Placeholder for automated test execution"""
+        messagebox.showinfo("Not Implemented", 
+                          "Automated testing functionality will be implemented in a future update.")
+    
+    def _export_automated_results(self):
+        """Placeholder for exporting automated test results"""
+        messagebox.showinfo("Not Implemented",
+                          "Results export functionality will be implemented in a future update.")
+    
+    def create_bottom_control_bar(self, parent):
+        """Create clean bottom control bar with context-aware buttons"""
+        # Bottom bar frame with clean styling
+        bottom_bar = tk.Frame(parent, bg="#f5f5f5", relief=tk.RAISED, bd=1)
+        bottom_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=0, pady=0)
+        
+        # Inner frame for padding
+        inner_frame = tk.Frame(bottom_bar, bg="#f5f5f5")
+        inner_frame.pack(fill=tk.X, padx=10, pady=6)
+        
+        # Top row: Main action buttons
+        button_row = tk.Frame(inner_frame, bg="#f5f5f5")
+        button_row.pack(fill=tk.X, pady=(0, 4))
+        
+        # Run button - prominent but not huge
+        self.run_btn = tk.Button(button_row, text="▶ RUN", command=self.run_test,
+                                bg="#28a745", fg="white", font=("TkDefaultFont", 10, "bold"),
+                                relief=tk.FLAT, bd=0, padx=20, pady=6, cursor="hand2")
+        self.run_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Stop button
+        self.stop_btn = tk.Button(button_row, text="⏹ STOP", command=self.stop_test,
+                                 bg="#dc3545", fg="white", font=("TkDefaultFont", 10),
+                                 relief=tk.FLAT, bd=0, padx=15, pady=6, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Save button
+        self.save_btn = tk.Button(button_row, text="💾 SAVE", command=self.manual_save_with_notes,
+                                 bg="#007bff", fg="white", font=("TkDefaultFont", 10),
+                                 relief=tk.FLAT, bd=0, padx=15, pady=6, state=tk.DISABLED)
+        self.save_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Analysis button
+        analysis_btn = tk.Button(button_row, text="📊 ANALYSIS", command=self.open_data_analysis,
+                                bg="#FF9800", fg="white", font=("TkDefaultFont", 10),
+                                relief=tk.FLAT, bd=0, padx=15, pady=6)
+        analysis_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Bottom row: Options and settings (underneath buttons)
+        options_row = tk.Frame(inner_frame, bg="#f5f5f5")
+        options_row.pack(fill=tk.X)
+        
+        # Auto-save checkbox
+        self.auto_save_var = tk.BooleanVar(value=True)
+        auto_save_check = tk.Checkbutton(options_row, text="Auto-save",
+                                        variable=self.auto_save_var,
+                                        bg="#f5f5f5", font=("TkDefaultFont", 9),
+                                        relief=tk.FLAT, bd=0)
+        auto_save_check.pack(side=tk.LEFT, padx=(0, 15))
+        
+        # Filename suffix entry (compact)
+        tk.Label(options_row, text="Suffix:", bg="#f5f5f5",
+                font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=(0, 2))
+        self.filename_suffix_var = tk.StringVar()
+        suffix_entry = tk.Entry(options_row, textvariable=self.filename_suffix_var,
+                               font=("TkDefaultFont", 9), width=15, relief=tk.FLAT, bd=1)
+        suffix_entry.pack(side=tk.LEFT, padx=(0, 15))
+        
+        # Notes text (compact, single line)
+        tk.Label(options_row, text="Notes:", bg="#f5f5f5",
+                font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=(0, 2))
+        self.notes_text = tk.Text(options_row, height=1, width=30, wrap=tk.NONE,
+                                 font=("TkDefaultFont", 9), relief=tk.FLAT, bd=1)
+        self.notes_text.pack(side=tk.LEFT, padx=0)
+        self.notes_text.insert(1.0, "Add notes...")
+        
+        # Bind tab change to update button states
+        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+    
+    def _on_tab_changed(self, event=None):
+        """Update bottom bar controls based on active tab"""
+        current_tab = self.notebook.index(self.notebook.select())
+        
+        if current_tab == 0:  # Manual Testing tab
+            # Show manual testing controls
+            self.run_btn.config(text="▶ RUN", command=self.run_test)
+        elif current_tab == 1:  # Automated Testing tab
+            # Show automated testing controls
+            self.run_btn.config(text="▶ START AUTO TEST", command=self._run_automated_test)
+
+
+
     def create_connection_section(self, parent):
         """Connection controls with collapsible functionality"""
         frame = tk.LabelFrame(parent, text="Connection", padx=5, pady=5)
@@ -749,8 +1011,8 @@ class TSPTestingGUI(tk.Toplevel):
         frame = tk.LabelFrame(parent, text="📊 Pulse Pattern Preview", padx=5, pady=5)
         frame.pack(fill=tk.X, padx=5, pady=5)
         
-        # Create matplotlib figure for pulse diagram
-        self.diagram_fig = Figure(figsize=(6, 2.5), dpi=100)
+        # Create matplotlib figure for pulse diagram (reduced height)
+        self.diagram_fig = Figure(figsize=(6, 1.8), dpi=100)
         self.diagram_ax = self.diagram_fig.add_subplot(111)
         self.diagram_fig.tight_layout(pad=2.0)
         
@@ -888,7 +1150,7 @@ class TSPTestingGUI(tk.Toplevel):
         frame = tk.LabelFrame(parent, text="Live Plot", padx=5, pady=5)
         frame.pack(fill=tk.BOTH, expand=True)
         
-        self.fig = Figure(figsize=(8, 6), dpi=100)
+        self.fig = Figure(figsize=(8, 4), dpi=100)  # Reduced from 6 to 4
         self.ax = self.fig.add_subplot(111)
         self.ax.set_title("No data yet")
         self.ax.set_xlabel("Time (s)")
@@ -1820,8 +2082,8 @@ class TSPTestingGUI(tk.Toplevel):
             # Get function name
             func_name = test_info["function"]
             
-            # For SMU retention tests, add progress callback for real-time plotting
-            if func_name in ['smu_retention', 'smu_retention_with_pulse_measurement']:
+            # For SMU endurance/retention tests, add progress callback for real-time plotting
+            if func_name in ['smu_endurance', 'smu_retention', 'smu_retention_with_pulse_measurement']:
                 def progress_callback(partial_results):
                     """Callback to update plot in real-time"""
                     try:
@@ -2024,9 +2286,46 @@ class TSPTestingGUI(tk.Toplevel):
         
         valid_times, valid_resistances = zip(*valid_data)
         
-        # Special handling for SMU Retention: plot SET and RESET separately with different colors
+        # Special handling for SMU Retention: plot resistance over time (no pulse_types)
+        if test_name == "⚠️ SMU Retention":
+            # Retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3...
+            # Timestamps are relative to start (initial read at t=0), plot resistance over time
+            if timestamps and resistances:
+                # Plot resistance over time
+                # Mark initial read (first point) with different style
+                if len(timestamps) > 0:
+                    # Plot initial read with different marker
+                    self.ax.plot(timestamps[0], resistances[0], 'go', markersize=10, 
+                               markeredgewidth=2, label='Initial Read', alpha=0.8, zorder=3)
+                    # Plot subsequent reads
+                    if len(timestamps) > 1:
+                        self.ax.plot(timestamps[1:], resistances[1:], 'o-', color='blue', 
+                                   markersize=6, linewidth=2, label='After Pulse', alpha=0.8)
+                else:
+                    # Fallback if no data
+                    self.ax.plot(timestamps, resistances, 'o-', color='blue', markersize=6, 
+                               linewidth=2, label='Resistance', alpha=0.8)
+                
+                self.ax.set_xlabel('Time Since Start (s)')
+                self.ax.set_ylabel('Resistance (Ω)')
+                self.ax.set_title('SMU Retention: Resistance vs Time (Initial Read → Pulse → Reads)')
+                self.ax.grid(True, alpha=0.3)
+                self.ax.legend(loc='best')
+                
+                # Use appropriate scale
+                min_r = min(resistances)
+                max_r = max(resistances)
+                if min_r < 0 or max_r < 0:
+                    self.ax.set_yscale('linear')
+                elif min_r > 0:
+                    self.ax.set_yscale('log')
+                else:
+                    self.ax.set_yscale('symlog', linthresh=1e-6)
+            return
+        
+        # Special handling for SMU Endurance: plot SET and RESET separately with different colors
         pulse_types = self.last_results.get('pulse_types', [])
-        if test_name in ["⚠️ SMU Retention", "⚠️ SMU Retention (Pulse Measured)"] and pulse_types:
+        if test_name in ["⚠️ SMU Endurance", "⚠️ SMU Retention (Pulse Measured)"] and pulse_types:
             # For smu_retention_with_pulse_measurement: plot all four types
             if test_name == "⚠️ SMU Retention (Pulse Measured)":
                 # Plot all four types with different colors
@@ -2099,7 +2398,7 @@ class TSPTestingGUI(tk.Toplevel):
                             self.ax.set_yscale('symlog', linthresh=1e-6)
                 return
             
-            # For regular smu_retention: only READ_AFTER_SET and READ_AFTER_RESET
+            # For regular smu_endurance: only READ_AFTER_SET and READ_AFTER_RESET
             set_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_SET"]
             reset_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_RESET"]
             
@@ -3150,9 +3449,36 @@ class TSPTestingGUI(tk.Toplevel):
         if 'pulse_voltage' in params:
             v = params['pulse_voltage']
             details.append(f"{abs(v):.1f}V")
+        elif 'set_voltage' in params:
+            # For SMU endurance tests
+            v = params['set_voltage']
+            details.append(f"{abs(v):.1f}V")
         
-        # Pulse width (if present)
-        if 'pulse_width' in params:
+        # Pulse width/duration - VITAL for retention and endurance tests
+        # Check for SMU retention/endurance duration parameters first (these are in seconds)
+        if 'pulse_duration' in params:
+            # SMU retention test: pulse_duration is in seconds
+            pd = params['pulse_duration']
+            if pd >= 1.0:
+                details.append(f"{pd:.1f}s")
+            elif pd >= 1e-3:
+                details.append(f"{pd*1e3:.0f}ms")
+            else:
+                details.append(f"{pd*1e6:.0f}us")
+        elif 'set_duration' in params or 'reset_duration' in params:
+            # SMU endurance test: set_duration and reset_duration are in seconds
+            # Use set_duration as primary (most important), include reset if different
+            if 'set_duration' in params:
+                sd = params['set_duration']
+                if sd >= 1.0:
+                    details.append(f"{sd:.1f}s")
+                elif sd >= 1e-3:
+                    details.append(f"{sd*1e3:.0f}ms")
+                else:
+                    details.append(f"{sd*1e6:.0f}us")
+            # If reset_duration is different and significant, could add it, but keep max 3 params
+        elif 'pulse_width' in params:
+            # Regular PMU tests: pulse_width is in microseconds
             pw = params['pulse_width']
             if pw >= 1e-3:
                 details.append(f"{pw*1e3:.0f}ms")
@@ -3275,6 +3601,8 @@ class TSPTestingGUI(tk.Toplevel):
                 self._draw_depression_only(params)
             elif "Endurance" in test_name:
                 self._draw_endurance(params)
+            elif test_name == "⚠️ SMU Retention":
+                self._draw_smu_retention(params)
             elif "Pulse-Multi-Read" in test_name:
                 self._draw_pulse_multi_read(params)
             elif "Multi-Read Only" in test_name:
@@ -3826,6 +4154,68 @@ class TSPTestingGUI(tk.Toplevel):
         self.diagram_ax.grid(True, alpha=0.3)
         if times_ms.size > 0:
             self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
+    
+    def _draw_smu_retention(self, params):
+        """Draw SMU retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3..."""
+        t = 0
+        times, voltages = [], []
+        read_times = []
+        pulse_v = params.get('pulse_voltage', 2.0)
+        read_v = params.get('read_voltage', 0.2)
+        pulse_duration = params.get('pulse_duration', 0.1)  # seconds
+        read_duration = params.get('read_duration', 0.01)  # seconds
+        num_reads = min(params.get('num_reads', 10), 10)  # Limit to 10 for visualization
+        delay_between_reads = params.get('delay_between_reads', 1.0)  # seconds
+        
+        # Draw initial read before pulse
+        initial_read_start = t
+        initial_read_end = t + read_duration
+        initial_read_center = (initial_read_start + initial_read_end) / 2
+        read_times.append(initial_read_center)
+        times.extend([initial_read_start, initial_read_start, initial_read_end, initial_read_end])
+        voltages.extend([0, read_v, read_v, 0])
+        t = initial_read_end + 0.001  # Small gap after initial read
+        
+        # Draw the pulse
+        times.extend([t, t, t + pulse_duration, t + pulse_duration])
+        voltages.extend([0, pulse_v, pulse_v, 0])
+        t += pulse_duration + 0.001  # Small gap after pulse
+        
+        # Draw multiple reads over time
+        for i in range(num_reads):
+            if i > 0:
+                t += delay_between_reads
+            
+            # Read pulse
+            read_start = t
+            read_end = t + read_duration
+            read_center = (read_start + read_end) / 2
+            read_times.append(read_center)
+            
+            times.extend([read_start, read_start, read_end, read_end])
+            voltages.extend([0, read_v, read_v, 0])
+            t = read_end + 0.001  # Small gap after read
+        
+        # Convert to milliseconds for display
+        times_ms = np.array(times) * 1e3
+        self.diagram_ax.plot(times_ms, voltages, 'brown', linewidth=2)
+        self.diagram_ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='brown')
+        
+        # Mark read points (initial read in different color/style)
+        for i, rt in enumerate(read_times):
+            if i == 0:
+                # Initial read - use different marker
+                self.diagram_ax.plot(rt*1e3, read_v, 'go', markersize=10, markeredgewidth=2, label='Initial Read')
+            else:
+                # Subsequent reads
+                self.diagram_ax.plot(rt*1e3, read_v, 'rx', markersize=10, markeredgewidth=2)
+        
+        self.diagram_ax.set_xlabel('Time (ms)')
+        self.diagram_ax.set_ylabel('Voltage (V)')
+        self.diagram_ax.set_title(f'SMU Retention: Initial Read → Pulse → {num_reads} Reads Over Time', fontsize=9)
+        self.diagram_ax.grid(True, alpha=0.3)
+        if times_ms.size > 0:
+            self.diagram_ax.set_xlim(0, times_ms[-1]*1.1)
     
     def _draw_pulse_multi_read(self, params):
         """Draw initial read → pulse followed by multiple reads"""

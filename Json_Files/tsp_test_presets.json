@@ -101,5 +101,37 @@
       "clim": 0.0001,
       "enable_debug_output": true
     }
+  },
+  "\u26a0\ufe0f SMU Retention": {
+    "Basic": {
+      "pulse_voltage": 2.0,
+      "pulse_duration": 0.5,
+      "read_voltage": 0.2,
+      "read_duration": 0.05,
+      "num_reads": 10,
+      "delay_between_reads": 20.0,
+      "i_range": 1e-05,
+      "i_compliance": 0.0,
+      "initialize": true,
+      "log_messages": true,
+      "enable_debug_output": true
+    }
+  },
+  "\u26a0\ufe0f SMU Endurance": {
+    "deault": {
+      "set_voltage": 2.5,
+      "reset_voltage": -2.5,
+      "num_cycles": 30,
+      "set_duration": 2.0,
+      "reset_duration": 2.0,
+      "repeat_delay": 1.0,
+      "probe_voltage": 0.5,
+      "probe_duration": 0.05,
+      "i_range": 1e-07,
+      "i_compliance": 0.0,
+      "initialize": true,
+      "log_messages": true,
+      "enable_debug_output": true
+    }
   }
 }

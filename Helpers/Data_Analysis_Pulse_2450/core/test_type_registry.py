@@ -32,7 +32,7 @@ class TestTypeRegistry:
         """Load test types from JSON file"""
         if self.registry_file.exists():
             try:
-                with open(self.registry_file, 'r') as f:
+                with open(self.registry_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
                 for name, info in data.items():
@@ -141,6 +141,36 @@ class TestTypeRegistry:
                 "plot_type": "time_series",
                 "expected_columns": ["Time", "Voltage", "Current", "Resistance"],
                 "key_parameters": ["set_voltage", "read_voltage"]
+            },
+            "Laser and Read": {
+                "description": "Pattern: CH1 continuous reads, CH2 independent laser pulse\nPhoto-induced effects, laser-assisted switching, time-resolved photoconductivity",
+                "plot_type": "time_series",
+                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)"],
+                "key_parameters": ["read_voltage", "read_width", "laser_voltage_high", "laser_width", "num_reads"]
+            },
+            "⚠️ SMU Slow Pulse Measure": {
+                "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Single pulse → Measure resistance during pulse\nUse for very slow pulses (milliseconds to seconds), relaxation studies",
+                "plot_type": "time_series",
+                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)"],
+                "key_parameters": ["pulse_voltage", "pulse_width", "i_range"]
+            },
+            "⚠️ SMU Endurance": {
+                "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse → Read → RESET pulse → Read) × N cycles\nUse for endurance cycling with slow pulses (milliseconds to seconds)",
+                "plot_type": "time_series",
+                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)"],
+                "key_parameters": ["set_voltage", "reset_voltage", "set_duration", "reset_duration", "num_cycles"]
+            },
+            "⚠️ SMU Retention": {
+                "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time)\nMeasures initial state, then how resistance changes over time after a single pulse",
+                "plot_type": "time_series",
+                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)"],
+                "key_parameters": ["pulse_voltage", "pulse_duration", "read_voltage", "num_reads", "delay_between_reads"]
+            },
+            "⚠️ SMU Retention (Pulse Measured)": {
+                "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse+measure → Read → RESET pulse+measure → Read) × N cycles\nMeasures resistance DURING SET/RESET pulses (not just after)",
+                "plot_type": "time_series",
+                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)"],
+                "key_parameters": ["set_voltage", "reset_voltage", "set_duration", "reset_duration", "num_cycles"]
             }
         }
         
@@ -173,8 +203,8 @@ class TestTypeRegistry:
                     'key_parameters': info.key_parameters
                 }
             
-            with open(self.registry_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            with open(self.registry_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
                 
         except Exception as e:
             print(f"Error saving test type registry: {e}")

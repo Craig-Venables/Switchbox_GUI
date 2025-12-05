@@ -139,6 +139,7 @@ from gui.measurement_gui.layout_builder import MeasurementGUILayoutBuilder
 from gui.measurement_gui.plot_panels import MeasurementPlotPanels
 from gui.measurement_gui.plot_updaters import PlotUpdaters
 from gui.pulse_testing_gui import TSPTestingGUI
+from gui.oscilloscope_pulse_gui.main import OscilloscopePulseGUI
 
 # Import cyclical IV sweep functions for 4200A (conditional import)
 # Using importlib to avoid issues with directory names starting with numbers
@@ -455,6 +456,7 @@ class MeasurementGUI:
                 "start_sequential_measurement": self._start_sequential_measurement_thread,
                 "stop_sequential_measurement": self.set_measurment_flag_true,
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
+                "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
             },
         )
         
@@ -1189,14 +1191,12 @@ class MeasurementGUI:
         self.temp_connect_button.grid(row=3, column=2)
 
     def set_default_system(self) -> None:
+        """Set default system to 'Please Select System' without auto-connecting"""
         systems = self.systems
-        default = "Lab Small"
-        if default in systems:
-            self.system_var.set(default)
-            self._handle_system_selection(default)
-        elif systems and systems[0] != "No systems available":
-            self.system_var.set(systems[0])
-            self._handle_system_selection(systems[0])
+        default = "Please Select System"
+        # Set to "Please Select System" without triggering auto-connect
+        self.system_var.set(default)
+        # Don't call _handle_system_selection to avoid auto-connection
 
     def load_systems(self) -> List[str]:
         """Load system configurations from JSON file"""
@@ -1205,9 +1205,11 @@ class MeasurementGUI:
         try:
             with open(config_file, 'r') as f:
                 self.system_configs = json.load(f)
-            return list(self.system_configs.keys())
+            systems_list = list(self.system_configs.keys())
+            # Prepend "Please Select System" to the list
+            return ["Please Select System"] + systems_list
         except (FileNotFoundError, json.JSONDecodeError):
-            return ["No systems available"]
+            return ["Please Select System", "No systems available"]
 
     def load_system(self) -> None:
         """Load the selected system configuration and populate all fields"""
@@ -1216,7 +1218,7 @@ class MeasurementGUI:
             return
         
         system_name = selected_system.get() if hasattr(selected_system, 'get') else str(selected_system)
-        if not system_name or system_name == "No systems available":
+        if not system_name or system_name == "No systems available" or system_name == "Please Select System":
             return
         
         if not hasattr(self, 'system_configs') or system_name not in self.system_configs:
@@ -1522,15 +1524,31 @@ class MeasurementGUI:
     
     def on_system_change(self, selected_system: str) -> None:
         """Update addresses when system selection changes (legacy method)"""
+        if selected_system == "Please Select System" or not selected_system:
+            # Don't update addresses if no system selected
+            return
+            
         if selected_system in self.system_configs:
             config = self.system_configs[selected_system]
 
             # Update IV section
             iv_address = config.get("SMU_address", "")
             self.iv_address = iv_address
+            self.keithley_address = iv_address
+            
+            # Update the StringVar (this should sync with combobox if bound)
             if hasattr(self, 'keithley_address_var'):
                 self.keithley_address_var.set(iv_address)
-            self.keithley_address = iv_address
+            
+            # Also explicitly update combobox if it exists (in case it's not bound properly)
+            if hasattr(self, 'iv_address_combo'):
+                # Ensure address is in combobox values first
+                current_values = list(self.iv_address_combo['values'])
+                if iv_address and iv_address not in current_values:
+                    self.iv_address_combo['values'] = tuple([iv_address] + list(current_values))
+                # Then set the value
+                self.iv_address_combo.set(iv_address)
+            
             self.update_component_state("iv", iv_address)
 
             # Update PSU section
@@ -1570,9 +1588,15 @@ class MeasurementGUI:
                 self.optical = None
 
     def _handle_system_selection(self, selected_system: str) -> None:
-        """Callback for legacy system dropdown to auto-connect after selection."""
+        """Callback for legacy system dropdown - only connects if a valid system is selected."""
+        # Don't auto-connect if "Please Select System" is selected
+        if selected_system == "Please Select System" or not selected_system:
+            self.on_system_change(selected_system)
+            return
+        
         self.on_system_change(selected_system)
-        self.auto_connect_current_system()
+        # Don't auto-connect - user must click Connect button manually
+        # self.auto_connect_current_system()  # Removed auto-connect
 
 
     def update_component_state(self, component_type: str, address: str) -> None:
@@ -3950,6 +3974,29 @@ class MeasurementGUI:
             self.final_device_number = int(number)
         except ValueError:
             self.final_device_number = number
+
+    def open_oscilloscope_pulse(self) -> None:
+        """Open the Oscilloscope Pulse Capture GUI with current context."""
+        try:
+            # 1. Prepare Adapter
+            adapter = None
+            if self.keithley:
+                 adapter = SMUAdapter(self.keithley)
+            
+            # 2. Prepare Context
+            context = {
+                'device_label': self.current_device,
+                'sample_name': self.sample_gui.sample_name if hasattr(self.sample_gui, 'sample_name') else "Unknown",
+                'save_directory': self.default_save_root,
+                'smu_ports': [self.keithley_address], # Currently connected
+                'known_systems': self.systems if hasattr(self, 'systems') and isinstance(self.systems, list) else (list(self.systems.keys()) if hasattr(self, 'systems') else []),
+                'system': self.controller_type 
+            }
+            
+            # 3. Launch
+            OscilloscopePulseGUI(self.master, smu_instance=adapter, context=context)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to open Oscilloscope Pulse GUI:\n{e}")
 
     def open_motor_control(self) -> None:
         """Launch or raise the motor control GUI."""

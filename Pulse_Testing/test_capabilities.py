@@ -46,8 +46,9 @@ ALL_TEST_FUNCTIONS = [
     'pulse_train_varying_amplitudes',
     'laser_and_read',
     'smu_slow_pulse_measure',  # SMU-based slow pulse (much slower than PMU)
-    'smu_retention',  # SMU-based retention with alternating SET/RESET pulses
-    'smu_retention_with_pulse_measurement',  # SMU-based retention with measurements during pulses
+    'smu_endurance',  # SMU-based endurance: (SET pulse → Read → RESET pulse → Read) × N cycles
+    'smu_retention',  # SMU-based retention: Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time)
+    'smu_retention_with_pulse_measurement',  # SMU-based retention with measurements during SET/RESET pulses
 ]
 
 # System capability matrix
@@ -105,7 +106,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'pulse_train_varying_amplitudes': True,
         'laser_and_read': True,  # ✅ Uses Read_With_Laser_Pulse_SegArb.c: CH1 continuous reads, CH2 independent laser pulse
         'smu_slow_pulse_measure': True,  # ⚠️ Uses SMU (not PMU) - much slower but supports pulse widths up to 480 seconds
-        'smu_retention': True,  # ⚠️ Uses SMU (not PMU) - alternating SET/RESET pulses with reads, supports pulse widths up to 480 seconds
+        'smu_endurance': True,  # ⚠️ Uses SMU (not PMU) - (SET pulse → Read → RESET pulse → Read) × N cycles, supports pulse widths up to 480 seconds
+        'smu_retention': True,  # ⚠️ Uses SMU (not PMU) - Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time), supports pulse widths up to 480 seconds
         'smu_retention_with_pulse_measurement': True,  # ⚠️ Uses SMU (not PMU) - measures resistance DURING SET/RESET pulses, supports pulse widths up to 480 seconds
     },
     'keithley2400': {
