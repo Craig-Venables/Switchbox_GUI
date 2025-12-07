@@ -169,6 +169,28 @@ class MeasurementGUILayoutBuilder:
         )
         gui.connection_status_label.pack(side='left', padx=10)
         
+        # Analysis Controls section (between connection status and device)
+        analysis_section = tk.Frame(left_section, bg=self.COLOR_BG)
+        analysis_section.pack(side='left', fill='y', padx=10)
+        
+        # Enable Analysis Toggle
+        tk.Label(analysis_section, text="Analysis:", font=self.FONT_MAIN, bg=self.COLOR_BG).pack(side='left', padx=(0, 5))
+        gui.analysis_enabled = tk.BooleanVar(value=False)  # Default: disabled
+        analysis_checkbox = tk.Checkbutton(analysis_section, variable=gui.analysis_enabled, bg=self.COLOR_BG)
+        analysis_checkbox.pack(side='left', padx=(0, 5))
+        
+        # Analysis Level Dropdown
+        gui.analysis_level_var = tk.StringVar(value="full")
+        analysis_level_menu = ttk.Combobox(
+            analysis_section,
+            textvariable=gui.analysis_level_var,
+            values=["basic", "classification", "full", "research"],
+            state="readonly",
+            font=self.FONT_MAIN,
+            width=12
+        )
+        analysis_level_menu.pack(side='left', padx=(0, 5))
+        
         # Middle section: Current device display
         middle_section = tk.Frame(frame, bg=self.COLOR_BG)
         middle_section.pack(side='left', fill='y', padx=20)

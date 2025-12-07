@@ -2238,11 +2238,11 @@ class MeasurementGUI:
         # Sweep Type variable already declared above; controls will be shown in DC Triangle UI
 
         # LED Controls mini title
-        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold")).grid(row=23, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=22, column=0, columnspan=2, sticky="w",
                                                                              pady=(10, 2))
 
         # LED Toggle Button
-        tk.Label(frame, text="LED Status:").grid(row=24, column=0, sticky="w")
+        tk.Label(frame, text="LED Status:", bg='#f0f0f0').grid(row=23, column=0, sticky="w")
         self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
 
         def toggle_led():
@@ -2258,26 +2258,26 @@ class MeasurementGUI:
 
         self.led_button = tk.Button(frame, text="OFF", bg="red", fg="white",
                                     width=8, command=toggle_led)
-        self.led_button.grid(row=24, column=1, sticky="w")
+        self.led_button.grid(row=23, column=1, sticky="w")
 
-        tk.Label(frame, text="Led_Power (0-1):").grid(row=25, column=0, sticky="w")
+        tk.Label(frame, text="Led_Power (0-1):", bg='#f0f0f0').grid(row=24, column=0, sticky="w")
         self.led_power = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.led_power).grid(row=25, column=1)
+        tk.Entry(frame, textvariable=self.led_power).grid(row=24, column=1)
 
-        tk.Label(frame, text="Sequence: (01010)").grid(row=26, column=0, sticky="w")
+        tk.Label(frame, text="Sequence: (01010)", bg='#f0f0f0').grid(row=25, column=0, sticky="w")
         self.sequence = tk.StringVar()
-        tk.Entry(frame, textvariable=self.sequence).grid(row=26, column=1)
+        tk.Entry(frame, textvariable=self.sequence).grid(row=25, column=1)
 
         # Other Controls mini title
-        tk.Label(frame, text="Other", font=("Arial", 9, "bold")).grid(row=27, column=0, columnspan=2, sticky="w",
+        tk.Label(frame, text="Other", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=26, column=0, columnspan=2, sticky="w",
                                                                       pady=(10, 2))
 
-        tk.Label(frame, text="Pause at end?:").grid(row=28, column=0, sticky="w")
+        tk.Label(frame, text="Pause at end?:", bg='#f0f0f0').grid(row=27, column=0, sticky="w")
         self.pause = tk.DoubleVar(value=0.0)
-        tk.Entry(frame, textvariable=self.pause).grid(row=28, column=1)
+        tk.Entry(frame, textvariable=self.pause).grid(row=27, column=1)
 
         temp_row = 29
-        tk.Label(frame, text="Target Temp (°C):").grid(row=temp_row, column=0, sticky="w")
+        tk.Label(frame, text="Target Temp (°C):", bg='#f0f0f0').grid(row=temp_row, column=0, sticky="w")
         self.target_temp_var = tk.DoubleVar(value=25.0)
         self.target_temp_entry = tk.Entry(frame, textvariable=self.target_temp_var, state="disabled")
         self.target_temp_entry.grid(row=temp_row, column=1, sticky="w")
