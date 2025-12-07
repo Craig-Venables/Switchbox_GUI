@@ -756,54 +756,156 @@ class AutomatedTesterGUI(tk.Toplevel):
 
     def _build_ui(self):
         frm = ttk.Frame(self); frm.pack(fill="both",expand=True,padx=8,pady=8)
-        ttk.Label(frm, text="Excel config:").grid(row=0,column=0,sticky="w")
+        
+        # Top bar with help button
+        top_bar = tk.Frame(frm, bg="#e6f3ff", pady=5, padx=10)
+        top_bar.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 10))
+        top_bar.columnconfigure(0, weight=1)
+        
+        title_label = tk.Label(
+            top_bar,
+            text="Automated Memristor Tester",
+            font=("Segoe UI", 11, "bold"),
+            bg="#e6f3ff",
+            fg="#1565c0"
+        )
+        title_label.grid(row=0, column=0, sticky="w")
+        
+        help_btn = tk.Button(
+            top_bar,
+            text="Help / Guide",
+            command=self._show_help,
+            bg="#1565c0",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            padx=10,
+            pady=2
+        )
+        help_btn.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        
+        ttk.Label(frm, text="Excel config:").grid(row=1,column=0,sticky="w")
         self.excel_path_var = tk.StringVar(value="")
-        ttk.Entry(frm, textvariable=self.excel_path_var, width=56).grid(row=0,column=1,columnspan=2,sticky="w")
-        ttk.Button(frm, text="Load Excel...", command=self._load_excel).grid(row=0,column=3,sticky="w")
+        ttk.Entry(frm, textvariable=self.excel_path_var, width=56).grid(row=1,column=1,columnspan=2,sticky="w")
+        ttk.Button(frm, text="Load Excel...", command=self._load_excel).grid(row=1,column=3,sticky="w")
         self.use_tsp_var = tk.BooleanVar(value=self.params.use_tsp)
-        ttk.Checkbutton(frm, text="Use embedded TSP (Keithley 2401)", variable=self.use_tsp_var).grid(row=1,column=0,columnspan=2,sticky="w")
+        ttk.Checkbutton(frm, text="Use embedded TSP (Keithley 2401)", variable=self.use_tsp_var).grid(row=2,column=0,columnspan=2,sticky="w")
         self.debug_mode_var = tk.BooleanVar(value=self.params.debug_mode)
-        ttk.Checkbutton(frm, text="Debug mode (bypass precheck)", variable=self.debug_mode_var).grid(row=1,column=2,columnspan=2,sticky="w")
+        ttk.Checkbutton(frm, text="Debug mode (bypass precheck)", variable=self.debug_mode_var).grid(row=2,column=2,columnspan=2,sticky="w")
         # basic params...
-        ttk.Label(frm, text="V_read (V):").grid(row=2,column=0,sticky="w")
-        self.vread_var = tk.DoubleVar(value=self.params.V_read); ttk.Entry(frm,textvariable=self.vread_var,width=10).grid(row=2,column=1)
-        ttk.Label(frm, text="V_step (V):").grid(row=2,column=2,sticky="w")
-        self.vstep_var = tk.DoubleVar(value=self.params.V_step); ttk.Entry(frm,textvariable=self.vstep_var,width=10).grid(row=2,column=3)
-        ttk.Label(frm, text="V_form_max (V):").grid(row=3,column=0,sticky="w")
-        self.vform_var = tk.DoubleVar(value=self.params.V_form_max); ttk.Entry(frm,textvariable=self.vform_var,width=10).grid(row=3,column=1)
-        ttk.Label(frm, text="I_comp_start (A):").grid(row=4,column=0,sticky="w")
-        self.icomp_start_var = tk.DoubleVar(value=self.params.I_comp_start_A); ttk.Entry(frm,textvariable=self.icomp_start_var,width=12).grid(row=4,column=1)
-        ttk.Label(frm, text="I_comp_max (A):").grid(row=4,column=2,sticky="w")
-        self.icomp_max_var = tk.DoubleVar(value=self.params.I_comp_max_A); ttk.Entry(frm,textvariable=self.icomp_max_var,width=12).grid(row=4,column=3)
-        ttk.Label(frm, text="Jump factor:").grid(row=5,column=0,sticky="w")
-        self.jump_var = tk.DoubleVar(value=self.params.jump_factor); ttk.Entry(frm,textvariable=self.jump_var,width=12).grid(row=5,column=1)
-        ttk.Label(frm, text="Fast samples/step:").grid(row=5,column=2,sticky="w")
-        self.nsamples_var = tk.IntVar(value=self.params.nsamples_fast); ttk.Entry(frm,textvariable=self.nsamples_var,width=12).grid(row=5,column=3)
-        ttk.Label(frm, text="Pulse delta V (V):").grid(row=6,column=0,sticky="w")
-        self.pulse_dv_var = tk.DoubleVar(value=self.params.pulse_deltaV); ttk.Entry(frm,textvariable=self.pulse_dv_var,width=12).grid(row=6,column=1)
-        ttk.Label(frm, text="Pulse widths (ms comma):").grid(row=6,column=2,sticky="w")
-        self.pulse_widths_var = tk.StringVar(value=",".join(str(int(w*1e3)) for w in self.params.pulse_widths_s)); ttk.Entry(frm,textvariable=self.pulse_widths_var,width=24).grid(row=6,column=3)
-        ttk.Label(frm, text="Device ID:").grid(row=7,column=0,sticky="w")
+        ttk.Label(frm, text="V_read (V):").grid(row=3,column=0,sticky="w")
+        self.vread_var = tk.DoubleVar(value=self.params.V_read); ttk.Entry(frm,textvariable=self.vread_var,width=10).grid(row=3,column=1)
+        ttk.Label(frm, text="V_step (V):").grid(row=3,column=2,sticky="w")
+        self.vstep_var = tk.DoubleVar(value=self.params.V_step); ttk.Entry(frm,textvariable=self.vstep_var,width=10).grid(row=3,column=3)
+        ttk.Label(frm, text="V_form_max (V):").grid(row=4,column=0,sticky="w")
+        self.vform_var = tk.DoubleVar(value=self.params.V_form_max); ttk.Entry(frm,textvariable=self.vform_var,width=10).grid(row=4,column=1)
+        ttk.Label(frm, text="I_comp_start (A):").grid(row=5,column=0,sticky="w")
+        self.icomp_start_var = tk.DoubleVar(value=self.params.I_comp_start_A); ttk.Entry(frm,textvariable=self.icomp_start_var,width=12).grid(row=5,column=1)
+        ttk.Label(frm, text="I_comp_max (A):").grid(row=5,column=2,sticky="w")
+        self.icomp_max_var = tk.DoubleVar(value=self.params.I_comp_max_A); ttk.Entry(frm,textvariable=self.icomp_max_var,width=12).grid(row=5,column=3)
+        ttk.Label(frm, text="Jump factor:").grid(row=6,column=0,sticky="w")
+        self.jump_var = tk.DoubleVar(value=self.params.jump_factor); ttk.Entry(frm,textvariable=self.jump_var,width=12).grid(row=6,column=1)
+        ttk.Label(frm, text="Fast samples/step:").grid(row=6,column=2,sticky="w")
+        self.nsamples_var = tk.IntVar(value=self.params.nsamples_fast); ttk.Entry(frm,textvariable=self.nsamples_var,width=12).grid(row=6,column=3)
+        ttk.Label(frm, text="Pulse delta V (V):").grid(row=7,column=0,sticky="w")
+        self.pulse_dv_var = tk.DoubleVar(value=self.params.pulse_deltaV); ttk.Entry(frm,textvariable=self.pulse_dv_var,width=12).grid(row=7,column=1)
+        ttk.Label(frm, text="Pulse widths (ms comma):").grid(row=7,column=2,sticky="w")
+        self.pulse_widths_var = tk.StringVar(value=",".join(str(int(w*1e3)) for w in self.params.pulse_widths_s)); ttk.Entry(frm,textvariable=self.pulse_widths_var,width=24).grid(row=7,column=3)
+        ttk.Label(frm, text="Device ID:").grid(row=8,column=0,sticky="w")
         self.device_id_var = tk.StringVar(value=self.current_device_id)
-        ttk.Entry(frm,textvariable=self.device_id_var,width=12).grid(row=7,column=1)
-        ttk.Label(frm, text="Device # (1-10):").grid(row=7,column=2,sticky="w")
+        ttk.Entry(frm,textvariable=self.device_id_var,width=12).grid(row=8,column=1)
+        ttk.Label(frm, text="Device # (1-10):").grid(row=8,column=2,sticky="w")
         self.device_num_var = tk.IntVar(value=1)
-        ttk.Spinbox(frm, from_=1, to=10, textvariable=self.device_num_var, width=6).grid(row=7,column=3)
-        ttk.Label(frm, text="Chip ID:").grid(row=7,column=2,sticky="w")
-        self.chip_id_var = tk.StringVar(value="chip1"); ttk.Entry(frm,textvariable=self.chip_id_var,width=12).grid(row=7,column=3)
-        ttk.Label(frm, text="Section ID:").grid(row=8,column=0,sticky="w")
-        self.section_id_var = tk.StringVar(value=self.current_section or "A"); ttk.Entry(frm,textvariable=self.section_id_var,width=12).grid(row=8,column=1)
-        ttk.Label(frm, text="Area (um^2):").grid(row=8,column=2,sticky="w")
-        self.area_var = tk.DoubleVar(value=DEFAULTS["area_um2"]); ttk.Entry(frm,textvariable=self.area_var,width=12).grid(row=8,column=3)
+        ttk.Spinbox(frm, from_=1, to=10, textvariable=self.device_num_var, width=6).grid(row=8,column=3)
+        ttk.Label(frm, text="Chip ID:").grid(row=8,column=2,sticky="w")
+        self.chip_id_var = tk.StringVar(value="chip1"); ttk.Entry(frm,textvariable=self.chip_id_var,width=12).grid(row=8,column=3)
+        ttk.Label(frm, text="Section ID:").grid(row=9,column=0,sticky="w")
+        self.section_id_var = tk.StringVar(value=self.current_section or "A"); ttk.Entry(frm,textvariable=self.section_id_var,width=12).grid(row=9,column=1)
+        ttk.Label(frm, text="Area (um^2):").grid(row=9,column=2,sticky="w")
+        self.area_var = tk.DoubleVar(value=DEFAULTS["area_um2"]); ttk.Entry(frm,textvariable=self.area_var,width=12).grid(row=9,column=3)
         self.measure_one_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(frm, text="Measure one device only", variable=self.measure_one_var).grid(row=9,column=0,sticky="w")
-        ttk.Button(frm, text="Start Single Test", command=self._start_single_test).grid(row=9,column=1,pady=8)
-        ttk.Button(frm, text="Run batch (Excel devices)", command=self._start_batch).grid(row=9,column=2,pady=8)
-        ttk.Button(frm, text="Stop (safe)", command=self._stop_requested).grid(row=9,column=2,pady=8)
-        ttk.Button(frm, text="Save params...", command=self._save_params).grid(row=9,column=3)
-        ttk.Button(frm, text="Open data folder", command=self._open_data_folder).grid(row=9,column=4)
-        self.status = tk.Text(frm, height=16); self.status.grid(row=10,column=0,columnspan=5,pady=8)
+        ttk.Checkbutton(frm, text="Measure one device only", variable=self.measure_one_var).grid(row=10,column=0,sticky="w")
+        ttk.Button(frm, text="Start Single Test", command=self._start_single_test).grid(row=10,column=1,pady=8)
+        ttk.Button(frm, text="Run batch (Excel devices)", command=self._start_batch).grid(row=10,column=2,pady=8)
+        ttk.Button(frm, text="Stop (safe)", command=self._stop_requested).grid(row=10,column=2,pady=8)
+        ttk.Button(frm, text="Save params...", command=self._save_params).grid(row=10,column=3)
+        ttk.Button(frm, text="Open data folder", command=self._open_data_folder).grid(row=10,column=4)
+        self.status = tk.Text(frm, height=16); self.status.grid(row=11,column=0,columnspan=5,pady=8)
         self._append_status("Ready. Load Excel and run batch or start single test.")
+
+    def _show_help(self):
+        """Display a help window with usage instructions."""
+        help_win = tk.Toplevel(self)
+        help_win.title("Automated Memristor Tester Guide")
+        help_win.geometry("800x700")
+        help_win.configure(bg="#f0f0f0")
+        
+        # Scrollable Content
+        canvas = tk.Canvas(help_win, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
+        
+        tk.Label(scrollable_frame, text="Automated Memristor Tester Guide", 
+                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame, 
+                text="This tool automates memristor testing using Excel-driven device manifests.\n"
+                      "It supports TSP-based embedded sweeps and Python-controlled forming.\n"
+                      "Designed for batch testing of multiple devices.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Load Excel file with device manifest (lot/sections/devices)\n"
+                      "• Configure test parameters (voltages, compliance, etc.)\n"
+                      "• Choose between single device test or batch mode\n"
+                      "• Enable TSP mode for faster embedded sweeps (if supported)\n"
+                      "• Click 'Start Single Test' or 'Run batch' to begin",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="3. Parameters", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• V_read: Read voltage for device characterization\n"
+                      "• V_step: Voltage step size for sweeps\n"
+                      "• V_form_max: Maximum forming voltage\n"
+                      "• I_comp_start/max: Current compliance limits\n"
+                      "• Pulse parameters: For pulse-based testing\n"
+                      "• Device/Section IDs: For device tracking",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="4. Features", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Excel-driven device management\n"
+                      "• TSP-based fast sweeps (Keithley 2401)\n"
+                      "• Automatic forming and characterization\n"
+                      "• Batch processing of multiple devices\n"
+                      "• Parameter saving and loading\n"
+                      "• Debug mode for development",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="Video tutorials and additional resources will be added here.",
+                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
 
     def _sync_from_host(self):
         try:

@@ -594,6 +594,32 @@ class TSPTestingGUI(tk.Toplevel):
         right_panel = tk.Frame(main_frame)
         right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
+        # Top bar with help button
+        top_bar = tk.Frame(left_panel, bg="#e6f3ff", pady=5, padx=10)
+        top_bar.pack(fill=tk.X, pady=(0, 5))
+        top_bar.columnconfigure(0, weight=1)
+        
+        title_label = tk.Label(
+            top_bar,
+            text="TSP Pulse Testing",
+            font=("Segoe UI", 11, "bold"),
+            bg="#e6f3ff",
+            fg="#1565c0"
+        )
+        title_label.grid(row=0, column=0, sticky="w")
+        
+        help_btn = tk.Button(
+            top_bar,
+            text="Help / Guide",
+            command=self._show_help,
+            bg="#1565c0",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            padx=10,
+            pady=2
+        )
+        help_btn.grid(row=0, column=1, sticky="e", padx=(10, 0))
+        
         # Connection section at top (always visible)
         self.create_connection_section(left_panel)
         
@@ -980,6 +1006,80 @@ class TSPTestingGUI(tk.Toplevel):
             self.conn_inner_frame.pack_forget()
             self.conn_collapse_btn.config(text="▶")
             self.conn_collapsed.set(True)
+    
+    def _show_help(self):
+        """Display a help window with usage instructions."""
+        help_win = tk.Toplevel(self)
+        help_win.title("TSP Pulse Testing Guide")
+        help_win.geometry("800x700")
+        help_win.configure(bg="#f0f0f0")
+        
+        # Scrollable Content
+        canvas = tk.Canvas(help_win, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
+        
+        tk.Label(scrollable_frame, text="TSP Pulse Testing Guide", 
+                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame, 
+                text="This GUI provides fast, buffer-based pulse testing with real-time visualization\n"
+                      "for Keithley instruments. Supports both Keithley 2450 (TSP-based) and\n"
+                      "Keithley 4200A-SCS (KXCI-based) systems.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Select your system type (2450 or 4200A)\n"
+                      "• Enter device address or use auto-detect\n"
+                      "• Choose test type from Manual Testing tab\n"
+                      "• Configure pulse parameters\n"
+                      "• Click 'Start Test' to begin\n"
+                      "• Monitor results in real-time plots",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="3. Test Types", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Pulse-Read-Repeat: Single pulse followed by read\n"
+                      "• Multi-Pulse-Then-Read: Multiple pulses then read\n"
+                      "• Width Sweep: Characterize pulse width dependence\n"
+                      "• Potentiation/Depression: Training cycles\n"
+                      "• Endurance Test: Long-term cycling",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="4. Features", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Automatic system detection from device address\n"
+                      "• Real-time plotting and visualization\n"
+                      "• Customizable save locations\n"
+                      "• Test parameter presets\n"
+                      "• Automated testing workflows",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="Video tutorials and additional resources will be added here.",
+                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
     
     def create_test_selection_section(self, parent):
         """Test type selection"""

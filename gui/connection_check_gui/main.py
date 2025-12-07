@@ -98,13 +98,40 @@ class CheckConnection:
         """Create the main UI with plot and controls."""
         # Configure grid weights for responsive layout
         self.top.columnconfigure(0, weight=1)
-        self.top.rowconfigure(0, weight=1)
-        self.top.rowconfigure(1, weight=0)
+        self.top.rowconfigure(0, weight=0)  # Top bar
+        self.top.rowconfigure(1, weight=1)   # Plot
+        self.top.rowconfigure(2, weight=0)   # Controls
+        
+        # ========== TOP BAR WITH HELP BUTTON ==========
+        top_bar = tk.Frame(self.top, bg="#e6f3ff", pady=5, padx=10)
+        top_bar.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
+        top_bar.columnconfigure(0, weight=1)
+        
+        title_label = tk.Label(
+            top_bar,
+            text="Connection Check - Pin Lowering Assistant",
+            font=("Segoe UI", 11, "bold"),
+            bg="#e6f3ff",
+            fg="#1565c0"
+        )
+        title_label.grid(row=0, column=0, sticky="w")
+        
+        help_btn = tk.Button(
+            top_bar,
+            text="Help / Guide",
+            command=self._show_help,
+            bg="#1565c0",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            padx=10,
+            pady=2
+        )
+        help_btn.grid(row=0, column=1, sticky="e", padx=(10, 0))
         
         # ========== PLOT FRAME ==========
         plot_frame = tk.LabelFrame(self.top, text="Real-Time Current Monitor", 
                                    padx=10, pady=10, relief=tk.GROOVE, borderwidth=2)
-        plot_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
+        plot_frame.grid(row=1, column=0, padx=10, pady=10, sticky="nsew")
         plot_frame.columnconfigure(0, weight=1)
         plot_frame.rowconfigure(0, weight=1)
 
@@ -120,7 +147,7 @@ class CheckConnection:
         # ========== CONTROLS FRAME ==========
         controls_frame = tk.LabelFrame(self.top, text="Settings & Controls", 
                                        padx=10, pady=10, relief=tk.GROOVE, borderwidth=2)
-        controls_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
+        controls_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
         
         # Row 0: Sound Settings
         sound_label = tk.Label(controls_frame, text="🔊 Sound Alert:", font=("Arial", 10, "bold"))
@@ -464,6 +491,77 @@ class CheckConnection:
                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         
         self.canvas.draw()
+
+    def _show_help(self) -> None:
+        """Display a help window with usage instructions."""
+        help_win = tk.Toplevel(self.top)
+        help_win.title("Connection Check Guide")
+        help_win.geometry("700x600")
+        help_win.configure(bg="#f0f0f0")
+        
+        # Scrollable Content
+        canvas = tk.Canvas(help_win, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
+        
+        tk.Label(scrollable_frame, text="Connection Check Guide", 
+                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="1. Purpose", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame, 
+                text="This tool helps verify electrical connections by applying a small DC bias\n"
+                      "and monitoring current in real-time. Useful for checking if probes are\n"
+                      "making good contact before running measurements.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="2. How to Use", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• The tool applies a small bias voltage and measures current continuously\n"
+                      "• Watch the real-time plot to see if current is detected\n"
+                      "• Set a threshold - the tool will alert when current exceeds this value\n"
+                      "• Use sound alerts to know when connection is established\n"
+                      "• Save the graph for documentation",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="3. Settings", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Sound Alert: Enable/disable audio feedback\n"
+                      "• Threshold: Current level that triggers alert (default: 1e-9 A)\n"
+                      "• Continuous Mode: Beep on every reading above threshold\n"
+                      "• Reset Alert: Clear the alert flag to allow beeping again",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="4. Tips", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Lower the threshold for more sensitive detection\n"
+                      "• Use continuous mode when actively lowering pins\n"
+                      "• The plot shows log-scale current for better visibility\n"
+                      "• Green dot appears when threshold is exceeded",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="Video tutorials and additional resources will be added here.",
+                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
 
     def close_window(self) -> None:
         self.check_connection_window = False

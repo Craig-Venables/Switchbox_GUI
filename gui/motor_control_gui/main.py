@@ -243,6 +243,20 @@ class MotorControlWindow:
         )
         self.btn_disconnect.pack(side=tk.LEFT, padx=5)
         
+        # Help button
+        help_btn = tk.Button(
+            btn_frame,
+            text="Help / Guide",
+            command=self._show_help,
+            bg="#1565c0",
+            fg="white",
+            font=("Arial", 10, "bold"),
+            padx=15,
+            pady=5,
+            relief=tk.FLAT
+        )
+        help_btn.pack(side=tk.LEFT, padx=5)
+        
         # Position display
         pos_label = tk.Label(
             header,
@@ -1493,6 +1507,79 @@ class MotorControlWindow:
         except Exception as exc:
             messagebox.showerror("FG Error", f"Failed to apply voltage:\n{exc}")
 
+    def _show_help(self) -> None:
+        """Display a help window with usage instructions."""
+        help_win = tk.Toplevel(self.root)
+        help_win.title("Motor Control Guide")
+        help_win.geometry("800x700")
+        help_win.configure(bg="#f0f0f0")
+        
+        # Scrollable Content
+        canvas = tk.Canvas(help_win, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
+        
+        tk.Label(scrollable_frame, text="Motor Control & Laser Positioning Guide", 
+                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame, 
+                text="This GUI provides comprehensive control over XY stage motors for laser positioning.\n"
+                      "It combines motor control, laser power management, and visual feedback.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Click 'Connect Motors' to establish connection\n"
+                      "• Use the interactive canvas to click-to-move\n"
+                      "• Use jog controls for precise positioning\n"
+                      "• Set velocity and acceleration in Motor Settings\n"
+                      "• Save positions as presets for quick access",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="3. Features", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Interactive Canvas: Click anywhere to move laser\n"
+                      "• Jog Controls: Arrow buttons for fine positioning\n"
+                      "• Go-To Position: Enter exact coordinates\n"
+                      "• Presets: Save and recall favorite positions\n"
+                      "• Scanning: Automated raster scan patterns\n"
+                      "• Function Generator: Control laser power/amplitude",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="4. Keyboard Shortcuts", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Arrow Keys: Jog motors\n"
+                      "• H: Home position\n"
+                      "• G: Go to position dialog\n"
+                      "• S: Save current position as preset\n"
+                      "• Ctrl+Q: Quit application",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="Video tutorials and additional resources will be added here.",
+                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
+    
     # ---------- Keyboard Shortcuts ----------
     def _setup_keyboard_shortcuts(self) -> None:
         """Setup keyboard shortcuts for common operations."""
