@@ -1737,6 +1737,53 @@ class MeasurementGUI:
                                                     "Threshold Search",
                                                     "Transient Decay"], state="readonly")
         self.excitation_menu.grid(row=0, column=1, sticky="ew")
+        
+        # Auto-switch graphs based on measurement type
+        def on_measurement_type_change(event=None):
+            """Automatically switch graph visibility based on measurement type."""
+            if not hasattr(self, 'plot_panels') or self.plot_panels is None:
+                return
+            
+            meas_type = self.excitation_var.get()
+            
+            # Hide all specialized plots first
+            if hasattr(self.plot_panels, 'plot_visibility'):
+                # Reset visibility to defaults
+                self.plot_panels.plot_visibility["rt_iv"].set(True)
+                self.plot_panels.plot_visibility["rt_logiv"].set(True)
+                self.plot_panels.plot_visibility["all_sweeps"].set(False)
+                self.plot_panels.plot_visibility["logilogv"].set(False)
+                self.plot_panels.plot_visibility["current_time"].set(False)
+                self.plot_panels.plot_visibility["temp_time"].set(False)
+                self.plot_panels.plot_visibility["endurance"].set(False)
+                self.plot_panels.plot_visibility["retention"].set(False)
+                
+                # Show appropriate plots based on measurement type
+                if meas_type == "Endurance":
+                    # For endurance, show endurance plot prominently, keep IV plots for reference
+                    self.plot_panels.plot_visibility["endurance"].set(True)
+                    self.plot_panels.plot_visibility["rt_iv"].set(True)
+                    self.plot_panels.plot_visibility["rt_logiv"].set(False)  # Hide log IV for cleaner view
+                    print("[MeasurementGUI] Switched to Endurance plot view")
+                elif meas_type == "Retention":
+                    # For retention, show retention plot prominently, keep IV plots for reference
+                    self.plot_panels.plot_visibility["retention"].set(True)
+                    self.plot_panels.plot_visibility["rt_iv"].set(True)
+                    self.plot_panels.plot_visibility["rt_logiv"].set(False)  # Hide log IV for cleaner view
+                    print("[MeasurementGUI] Switched to Retention plot view")
+                else:
+                    # For other measurements (IV sweeps, etc.), show IV plots
+                    self.plot_panels.plot_visibility["rt_iv"].set(True)
+                    self.plot_panels.plot_visibility["rt_logiv"].set(True)
+                    print(f"[MeasurementGUI] Switched to IV plot view for {meas_type}")
+                
+                # Update the layout
+                if hasattr(self.plot_panels, '_update_plot_layout'):
+                    self.plot_panels._update_plot_layout()
+        
+        # Bind the change event
+        self.excitation_menu.bind("<<ComboboxSelected>>", on_measurement_type_change)
+        self.excitation_var.trace_add("write", lambda *args: on_measurement_type_change())
 
         # Source Mode Selection (placed right after measurement type)
         tk.Label(frame, text="Source Mode:", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=1, column=0, sticky="w")
