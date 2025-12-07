@@ -20,6 +20,7 @@ Old Imports (Still Work):
 
 # Re-export all controllers for backward compatibility
 from Equipment.SMU_AND_PMU.keithley2400.controller import Keithley2400Controller
+from Equipment.SMU_AND_PMU.keithley2400.simulation_2400 import Simulation2400
 from Equipment.SMU_AND_PMU.keithley2450.controller import Keithley2450Controller
 from Equipment.SMU_AND_PMU.keithley2450.tsp_controller import Keithley2450_TSP
 from Equipment.SMU_AND_PMU.keithley2450.tsp_sim_controller import Keithley2450_TSP_Sim
@@ -29,6 +30,7 @@ from Equipment.SMU_AND_PMU.keithley4200.controller import (
     Keithley4200A_PMUDualChannel,
 )
 from Equipment.SMU_AND_PMU.keithley4200.kxci_controller import Keithley4200A_KXCI
+from Equipment.SMU_AND_PMU.keithley4200.simulation_4200 import Simulation4200
 from Equipment.SMU_AND_PMU.hp4140b.controller import HP4140BController
 
 # Re-export script collections
@@ -58,6 +60,7 @@ except ImportError:
 __all__ = [
     # Controllers
     'Keithley2400Controller',
+    'Simulation2400',
     'Keithley2450Controller',
     'Keithley2450_TSP',
     'Keithley2450_TSP_Sim',
@@ -65,6 +68,7 @@ __all__ = [
     'Keithley4200AController',
     'Keithley4200A_PMUDualChannel',
     'Keithley4200A_KXCI',
+    'Simulation4200',
     'HP4140BController',
     # Script collections (modules)
     'keithley2450_tsp_scripts',

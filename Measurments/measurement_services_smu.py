@@ -269,18 +269,24 @@ class MeasurementService:
         on_point: Optional[Callable[[float, float, float], None]] = None,
         source_mode: Optional['SourceMode'] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
-        """Execute IV sweeps and return (v_arr, c_arr, timestamps).
-
+        """
+        Execute IV sweeps using the unified API.
+        
+        This method now delegates to keithley.do_iv_sweep() which routes to
+        instrument-specific implementations automatically.
+        
         Notes: optional LED handling, pause-at-extrema, and stop hooks supported.
         Supports both voltage source (default) and current source modes.
         """
-        # Import source mode utilities
-        from Measurments.source_modes import SourceMode, apply_source, measure_result
+        from Measurments.source_modes import SourceMode
+        from Measurments.sweep_config import SweepConfig
+        from Measurments.measurement_context import MeasurementContext
         
         # Default to voltage source if not specified
         if source_mode is None:
             source_mode = SourceMode.VOLTAGE
         
+        # Build voltage range if needed
         if voltage_range is None:
             if start_v is None or stop_v is None:
                 raise ValueError("Must provide voltage_range or (start_v, stop_v)")
@@ -294,113 +300,47 @@ class MeasurementService:
                 step_delay_s=float(step_delay) if step_delay is not None else None,
                 num_steps=num_steps,
             )
-
-        v_arr: List[float] = []
-        c_arr: List[float] = []
-        t_arr: List[float] = []
-
-        # Derive extrema for pause behavior
-        v_list = list(voltage_range)
-        if not v_list:
-            return v_arr, c_arr, t_arr
-        v_max = max(v_list)
-        v_min = min(v_list)
-        prev_v = None
-
-        start_time = time.perf_counter()
-
-        # Precondition instrument (smu_type is reserved for future device-specific differences)
-        try:
-            keithley.set_voltage(0, icc)
-            keithley.enable_output(True)
-        except Exception:
-            pass
-
-        # Initialize optical controller using new utility
-        optical_ctrl = OpticalController(optical=optical, psu=psu)
-
-        for sweep_idx in range(int(sweeps)):
-            # Determine LED state for this sweep
-            led_state = '1' if led else '0'
-            if sequence is not None:
-                try:
-                    seq_list = list(sequence)
-                    if sweep_idx < len(seq_list):
-                        led_state = str(seq_list[sweep_idx])
-                except Exception:
-                    pass
-
-            # Apply optical per-sweep using new controller
+        
+        # Convert sequence to list if provided
+        sequence_list = None
+        if sequence is not None:
             try:
-                optical_ctrl.set_state(led_state == '1', power=float(power))
+                sequence_list = list(sequence)
             except Exception:
-                pass
-
-            for v in v_list:
-                if should_stop and should_stop():
-                    break
-                try:
-                    # Use source mode abstraction
-                    apply_source(keithley, source_mode, v, icc)
-                except Exception:
-                    # attempt to continue but capture what we can
-                    pass
-                time.sleep(0.1)
-                
-                # Measure appropriate quantity based on source mode
-                try:
-                    measurement = measure_result(keithley, source_mode)
-                    measurement = normalize_measurement(measurement)
-                except Exception:
-                    measurement = float('nan')
-
-                t_now = time.time() - start_time
-
-                # Store based on mode (v_arr/c_arr naming is legacy, but works)
-                if source_mode == SourceMode.VOLTAGE:
-                    v_arr.append(v)
-                    c_arr.append(measurement)  # measured current
-                elif source_mode == SourceMode.CURRENT:
-                    v_arr.append(measurement)  # measured voltage
-                    c_arr.append(v)  # sourced current
-                
-                t_arr.append(t_now)
-
-                if on_point:
-                    try:
-                        # Pass source value, measurement, time
-                        if source_mode == SourceMode.VOLTAGE:
-                            on_point(v, measurement, t_now)
-                        else:
-                            on_point(measurement, v, t_now)
-                    except Exception:
-                        pass
-
-                time.sleep(max(0.0, float(step_delay)))
-
-                # Pause at extrema only once per arrival
-                if pause_s:
-                    if (v == v_max or v == v_min) and v != prev_v:
-                        try:
-                            keithley.set_voltage(0, icc)
-                        except Exception:
-                            pass
-                        time.sleep(pause_s)
-                prev_v = v
-
-            if should_stop and should_stop():
-                break
-
-        # Always disable optical at the end using new controller
-        optical_ctrl.disable()
-
-        try:
-            keithley.set_voltage(0, icc)
-            keithley.enable_output(False)
-        except Exception:
-            pass
-
-        return v_arr, c_arr, t_arr
+                sequence_list = None
+        
+        # Create SweepConfig
+        config = SweepConfig(
+            start_v=float(start_v) if start_v is not None else float(list(voltage_range)[0]),
+            stop_v=float(stop_v) if stop_v is not None else float(list(voltage_range)[-1]),
+            step_v=float(step_v) if step_v is not None else 0.05,
+            neg_stop_v=float(neg_stop_v) if neg_stop_v is not None else None,
+            step_delay=float(step_delay),
+            sweep_type=sweep_type,
+            sweeps=int(sweeps),
+            pause_s=float(pause_s),
+            icc=float(icc),
+            voltage_list=list(voltage_range) if voltage_range is not None else None,
+        )
+        
+        # Create MeasurementContext
+        context = MeasurementContext(
+            led=led,
+            power=float(power),
+            sequence=sequence_list,
+            source_mode=source_mode,
+            pause_s=float(pause_s),
+            should_stop=should_stop,
+            on_point=on_point,
+        )
+        
+        # Use unified API - delegates to instrument-specific implementation
+        # Check if keithley has the unified API method
+        if hasattr(keithley, 'do_iv_sweep'):
+            return keithley.do_iv_sweep(config, psu, optical, should_stop, on_point)
+        else:
+            # Fallback for backwards compatibility (should not happen with IVControllerManager)
+            raise RuntimeError("keithley object does not support unified API (do_iv_sweep). Expected IVControllerManager instance.")
 
     def run_retention(
         self,
@@ -421,60 +361,47 @@ class MeasurementService:
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
-        """Run retention: set pulse then sample I(t) at a read voltage."""
-        v_arr: List[float] = []
-        c_arr: List[float] = []
-        t_arr: List[float] = []
-
-        start_t = time.perf_counter()
-
-        # Session assumed prepared by caller
-
-        # Initialize optical controller using new utility
-        optical_ctrl = OpticalController(optical=optical, psu=psu)
-        if led:
-            optical_ctrl.enable(1.0)
-
-        # Apply set pulse
-        try:
-            keithley.set_voltage(set_voltage, icc)
-        except Exception:
-            pass
-        time.sleep(max(0.0, float(set_time_s)))
-
-        # Switch to read voltage for sampling
-        try:
-            keithley.set_voltage(read_voltage, icc)
-        except Exception:
-            pass
-
-        for i in range(int(number)):
-            if should_stop and should_stop():
-                break
+        """
+        Run retention using the unified API.
+        
+        Delegates to keithley.do_retention_measurement() which routes to
+        instrument-specific implementations automatically.
+        """
+        from Measurments.measurement_context import MeasurementContext
+        
+        # Convert sequence to list if provided
+        sequence_list = None
+        if sequence is not None:
             try:
-                current = safe_measure_current(keithley)
+                sequence_list = list(sequence)
             except Exception:
-                current = float('nan')
-            t_now = time.time() - start_t
-            v_arr.append(read_voltage)
-            c_arr.append(current)
-            t_arr.append(t_now)
-            if on_point:
-                try:
-                    on_point(read_voltage, current, t_now)
-                except Exception:
-                    pass
-            time.sleep(max(0.0, float(repeat_delay_s)))
-
-        # Disable optical using controller
-        optical_ctrl.disable()
-
-        try:
-            keithley.finish_pulses(Icc=float(icc), restore_autozero=True)
-        except Exception:
-            pass
-
-        return v_arr, c_arr, t_arr
+                sequence_list = None
+        
+        # Create MeasurementContext
+        context = MeasurementContext(
+            led=led,
+            power=1.0,
+            sequence=sequence_list,
+            should_stop=should_stop,
+            on_point=on_point,
+        )
+        
+        # Use unified API
+        if hasattr(keithley, 'do_retention_measurement'):
+            return keithley.do_retention_measurement(
+                set_voltage=float(set_voltage),
+                set_time_s=float(set_time_s),
+                read_voltage=float(read_voltage),
+                num_reads=int(number),
+                read_delay_s=float(repeat_delay_s),
+                icc=float(icc),
+                psu=psu,
+                optical=optical,
+                should_stop=should_stop,
+                on_point=on_point,
+            )
+        else:
+            raise RuntimeError("keithley object does not support unified API (do_retention_measurement). Expected IVControllerManager instance.")
 
     # --------------------------
     # Endurance (basic pulse-based for an SMU_AND_PMU)
@@ -498,103 +425,29 @@ class MeasurementService:
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
-        """Alternate set/reset pulses; sample after each pulse (returns V/I/t arrays)."""
-        v_arr: List[float] = []
-        c_arr: List[float] = []
-        t_arr: List[float] = []
-        start_t = time.time()
-
-        try:
-            keithley.prepare_for_pulses(Icc=float(icc), v_range=20.0, ovp=21.0,
-                                        use_remote_sense=False, autozero_off=True)
-        except Exception:
-            pass
-
-        # Optical handling using new controller
-        optical_ctrl = OpticalController(optical=optical, psu=psu)
-        if led:
-            optical_ctrl.enable(power)
-
-        for k in range(int(num_cycles)):
-            if should_stop and should_stop():
-                break
-
-            # SET pulse
-            try:
-                keithley.set_voltage(set_voltage, icc)
-            except Exception:
-                pass
-            time.sleep(max(0.0, float(pulse_width_s)))
-
-            # Read after SET
-            try:
-                keithley.set_voltage(read_voltage, icc)
-                time.sleep(0.002)
-                i_set_val = safe_measure_current(keithley)
-            except Exception:
-                i_set_val = float('nan')
-            t_now = time.perf_counter() - start_t
-            v_arr.append(read_voltage); c_arr.append(i_set_val); t_arr.append(t_now)
-            if on_point:
-                try: on_point(read_voltage, i_set_val, t_now)
-                except Exception: pass
-
-            if should_stop and should_stop():
-                break
-
-            # RESET pulse
-            try:
-                keithley.set_voltage(reset_voltage, icc)
-            except Exception:
-                pass
-            time.sleep(max(0.0, float(pulse_width_s)))
-
-            # Read after RESET
-            try:
-                keithley.set_voltage(read_voltage, icc)
-                time.sleep(0.002)
-                i_reset_val = safe_measure_current(keithley)
-            except Exception:
-                i_reset_val = float('nan')
-            t_now = time.perf_counter() - start_t
-            v_arr.append(read_voltage); c_arr.append(i_reset_val); t_arr.append(t_now)
-            if on_point:
-                try: on_point(read_voltage, i_reset_val, t_now)
-                except Exception: pass
-
-            if inter_cycle_delay_s:
-                post_start = time.perf_counter()
-                buf_i: List[float] = []
-                buf_t: List[float] = []
-                while (time.perf_counter() - post_start) < float(inter_cycle_delay_s):
-                    if should_stop and should_stop():
-                        break
-                    try:
-                        it = keithley.measure_current()
-                        iv = it[1] if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
-                    except Exception:
-                        iv = float('nan')
-                    buf_i.append(iv)
-                    buf_t.append(time.perf_counter() - start_t)
-                if buf_t:
-                    c_arr.extend(buf_i)
-                    t_arr.extend(buf_t)
-                    try:
-                        v_arr.extend([read_voltage] * len(buf_t))
-                    except Exception:
-                        for _ in buf_t:
-                            v_arr.append(read_voltage)
-
-        # Cleanup
-        # Disable optical using controller
-        optical_ctrl.disable()
-        try:
-            keithley.set_voltage(0, icc)
-            keithley.enable_output(False)
-        except Exception:
-            pass
-
-        return v_arr, c_arr, t_arr
+        """
+        Run endurance using the unified API.
+        
+        Delegates to keithley.do_endurance_measurement() which routes to
+        instrument-specific implementations automatically.
+        """
+        # Use unified API
+        if hasattr(keithley, 'do_endurance_measurement'):
+            return keithley.do_endurance_measurement(
+                set_voltage=float(set_voltage),
+                reset_voltage=float(reset_voltage),
+                pulse_width_s=float(pulse_width_s),
+                num_cycles=int(num_cycles),
+                read_voltage=float(read_voltage),
+                inter_cycle_delay_s=float(inter_cycle_delay_s),
+                icc=float(icc),
+                psu=psu,
+                optical=optical,
+                should_stop=should_stop,
+                on_point=on_point,
+            )
+        else:
+            raise RuntimeError("keithley object does not support unified API (do_endurance_measurement). Expected IVControllerManager instance.")
 
     def run_pulse_measurement(
         self,
@@ -619,145 +472,42 @@ class MeasurementService:
         return_to_zero_at_end: bool = True,
         reset_should_stop: Optional[Callable[[], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
-        """Run pulse(s) then read at vbase with optional timing validation.
-
-        Returns (v_arr, c_arr, timestamps).
         """
-        v_arr: List[float] = []
-        c_arr: List[float] = []
-        t_arr: List[float] = []
-
-        # Validate timing constraints
-        if validate_timing:
-            limits = self.smu_limits.get_limits(smu_type)
-            min_pulse_width = limits["min_pulse_width_ms"]
-            if pulse_width_ms < min_pulse_width:
-                raise ValueError(
-                    f"Pulse width {pulse_width_ms} ms is below minimum "
-                    f"for {smu_type} ({min_pulse_width} ms)"
-                )
-
-        start_time = time.perf_counter()
-        # Optional: reset external stop flag provided by GUI
-        if reset_should_stop:
+        Run pulse measurement using the unified API.
+        
+        Delegates to keithley.do_pulse_measurement() which routes to
+        instrument-specific implementations automatically.
+        """
+        from Measurments.measurement_context import MeasurementContext
+        
+        # Convert sequence to list if provided
+        sequence_list = None
+        if sequence is not None:
             try:
-                reset_should_stop()
+                sequence_list = list(sequence)
             except Exception:
-                pass
-
-        # Assumes caller/session manager already prepared; only set initial level if needed
-        try:
-            if not start_at_zero:
-                keithley.set_voltage(read_voltage, icc)
-        except Exception:
-            pass
-
-        # Optical setup using new controller
-        optical_ctrl = OpticalController(optical=optical, psu=psu)
-        if led:
-            optical_ctrl.enable(power)
-
-        for pulse_idx in range(int(num_pulses)):
-            if should_stop and should_stop():
-                break
-
-            # Determine LED state for this pulse
-            led_state = '1' if led else '0'
-            if sequence is not None:
-                try:
-                    seq_list = list(sequence)
-                    if pulse_idx < len(seq_list):
-                        led_state = str(seq_list[pulse_idx])
-                except Exception:
-                    pass
-
-            # Apply optical state if using sequence
-            if sequence is not None:
-                try:
-                    if optical is not None:
-                        if led_state == '1':
-                            optical.set_enabled(True)
-                        elif led:
-                            optical.set_enabled(False)
-                    elif psu is not None:
-                        if led_state == '1':
-                            psu.led_on_380(power)
-                        elif led:
-                            psu.led_off_380()
-                except Exception:
-                    pass
-
-            # Apply pulse (no sampling during the pulse window)
-            try:
-                keithley.set_voltage(pulse_voltage, icc)
-            except Exception:
-                pass
-
-            pulse_start = time.perf_counter()
-            pulse_width_s = pulse_width_ms / 1000.0
-            while (time.perf_counter() - pulse_start) < pulse_width_s:
-                if should_stop and should_stop():
-                    break
-                # Very small sleep to avoid 100% CPU busy-wait
-                time.sleep(0.00001)
-
-            if should_stop and should_stop():
-                break
-
-            # Return to read voltage
-            try:
-                keithley.set_voltage(read_voltage, icc)
-            except Exception:
-                pass
-
-            # Forced immediate single read after returning to read voltage
-            try:
-                #time.sleep(0.0001)  # brief settle
-                current = safe_measure_current(keithley)
-            except Exception:
-                current = float('nan')
-            t_now = time.perf_counter() - start_time
-            v_arr.append(read_voltage)
-            c_arr.append(current)
-            t_arr.append(t_now)
-            if on_point:
-                try:
-                    on_point(read_voltage, current, t_now)
-                except Exception:
-                    pass
-
-            # Continue sampling until inter-pulse delay elapses
-            if inter_pulse_delay_s > 0:
-                post_start = time.perf_counter()
-                buf_t: List[float] = []
-                buf_i: List[float] = []
-                while (time.perf_counter() - post_start) < float(inter_pulse_delay_s):
-                    if should_stop and should_stop():
-                        break
-                    try:
-                        current_tuple = keithley.measure_current()
-                        current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
-                    except Exception:
-                        current = float('nan')
-                    t_now = time.perf_counter() - start_time
-                    buf_t.append(t_now)
-                    buf_i.append(current)
-                # Bulk-extend once at the end to reduce overhead
-                if buf_t:
-                    t_arr.extend(buf_t)
-                    c_arr.extend(buf_i)
-                    try:
-                        v_arr.extend([read_voltage] * len(buf_t))
-                    except Exception:
-                        for _ in buf_t:
-                            v_arr.append(read_voltage)
-
-        # Cleanup optical using controller
-        optical_ctrl.disable()
-
-        # Do not finish session here; caller/high-level manages session
-
-        return v_arr, c_arr, t_arr
+                sequence_list = None
+        
+        # Use unified API
+        if hasattr(keithley, 'do_pulse_measurement'):
+            return keithley.do_pulse_measurement(
+                pulse_voltage=float(pulse_voltage),
+                pulse_width_ms=float(pulse_width_ms),
+                num_pulses=int(num_pulses),
+                read_voltage=float(read_voltage),
+                read_delay_ms=float(inter_pulse_delay_s * 1000.0),
+                icc=float(icc),
+                psu=psu,
+                optical=optical,
+                led=led,
+                power=float(power),
+                sequence=sequence_list,
+                should_stop=should_stop,
+                on_point=on_point,
+                validate_timing=validate_timing,
+            )
+        else:
+            raise RuntimeError("keithley object does not support unified API (do_pulse_measurement). Expected IVControllerManager instance.")
 
     def run_pulse_measurement_debug(
         self,
@@ -858,65 +608,67 @@ class MeasurementService:
         reset_should_stop: Optional[Callable[[], None]] = None,
         manage_session: bool = True,
     ) -> Tuple[List[float], List[float], List[float]]:
-        """Amplitude-sweep pulsed IV; returns (amps, I_read, t)."""
-        # Optional: reset external stop flag prior to run
-        if reset_should_stop:
-            try:
-                reset_should_stop()
-            except Exception:
-                pass
-        # Build amplitude list according to sweep_type
-        amps: List[float] = []
-        sv = float(start_v); ev = float(stop_v)
-        # helper to build linear range including endpoint
-        def _linrange(v0: float, v1: float, step_opt: Optional[float], nsteps_opt: Optional[int]) -> List[float]:
-            out: List[float] = []
-            if step_opt is not None and float(step_opt) != 0.0:
-                s = float(step_opt) if v1 >= v0 else -abs(float(step_opt))
-                v = v0
-                if s > 0:
-                    while v <= v1 + 1e-12:
-                        out.append(round(v, 6)); v += s
-                else:
-                    while v >= v1 - 1e-12:
-                        out.append(round(v, 6)); v += s
-            elif nsteps_opt is not None and int(nsteps_opt) > 1:
-                n = int(nsteps_opt)
-                step = (v1 - v0) / float(n - 1)
-                out = [round(v0 + i * step, 6) for i in range(n)]
-            else:
-                out = [round(v0, 6)] if abs(v1 - v0) < 1e-15 else [round(v0, 6), round(v1, 6)]
-            return out
-
-        if sweep_type == "PS":
-            amps = _linrange(sv, ev, step_v, num_steps) + _linrange(ev, sv, step_v, num_steps)
-        elif sweep_type == "NS":
-            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
-            amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
-        else:  # FS
-            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
-            amps = (
-                _linrange(sv, ev, step_v, num_steps)
-                + _linrange(ev, nv, step_v, num_steps)
-                + _linrange(nv, sv, step_v, num_steps)
-            )
-
-        # Default pulse width from SMU_AND_PMU limits if not provided
+        """
+        Run pulsed IV sweep using the unified API.
+        
+        Delegates to keithley.do_pulsed_iv_sweep() which routes to
+        instrument-specific implementations automatically.
+        """
+        from Measurments.sweep_config import SweepConfig
+        
+        # Default pulse width if not provided
         if pulse_width_ms is None:
             try:
                 pulse_width_ms = float(self.smu_limits.get_limits(smu_type).get("min_pulse_width_ms", 1.0))
             except Exception:
                 pulse_width_ms = 1.0
-
-        v_out: List[float] = []
-        i_out: List[float] = []
-        t_out: List[float] = []
-        t0 = time.perf_counter()
-
-        if manage_session:
-            self.begin_pulse_session(keithley, icc, v_range=20.0, ovp=21.0, use_remote_sense=False, autozero_off=True)
-        try:
-            for amp in amps:
+        
+        # Build voltage range for sweep
+        if step_v is None and num_steps is None:
+            step_v = 0.1  # Default step
+        
+        voltage_range = self.compute_voltage_range(
+            float(start_v), float(stop_v), float(step_v) if step_v else 0.0,
+            sweep_type, VoltageRangeMode.FIXED_STEP,
+            neg_stop_v=neg_stop_v,
+            num_steps=num_steps,
+        )
+        
+        # Create SweepConfig
+        config = SweepConfig(
+            start_v=float(start_v),
+            stop_v=float(stop_v),
+            step_v=float(step_v) if step_v else 0.1,
+            neg_stop_v=float(neg_stop_v) if neg_stop_v is not None else None,
+            step_delay=float(inter_step_delay_s),
+            sweep_type=sweep_type,
+            sweeps=1,
+            pause_s=0.0,
+            icc=float(icc),
+            voltage_list=list(voltage_range) if voltage_range is not None else None,
+        )
+        
+        # Use unified API
+        if hasattr(keithley, 'do_pulsed_iv_sweep'):
+            return keithley.do_pulsed_iv_sweep(
+                config=config,
+                pulse_width_ms=float(pulse_width_ms),
+                read_delay_ms=0.0,  # Immediate read
+                psu=None,
+                optical=None,
+                should_stop=should_stop,
+                on_point=on_point,
+                validate_timing=validate_timing,
+            )
+        else:
+            # Fallback: use run_pulse_measurement in a loop (already updated to use unified API)
+            # This maintains backward compatibility
+            v_out: List[float] = []
+            i_out: List[float] = []
+            t_out: List[float] = []
+            t0 = time.perf_counter()
+            
+            for amp in voltage_range:
                 if should_stop and should_stop():
                     break
                 _v, _i, _t = self.run_pulse_measurement(
@@ -928,12 +680,7 @@ class MeasurementService:
                     inter_pulse_delay_s=0.0,
                     icc=float(icc),
                     smu_type=smu_type,
-                    psu=None,
-                    led=False,
-                    power=1.0,
-                    sequence=None,
                     should_stop=should_stop,
-                    on_point=None,
                     validate_timing=validate_timing,
                 )
                 try:
@@ -950,10 +697,8 @@ class MeasurementService:
                         pass
                 if inter_step_delay_s and inter_step_delay_s > 0:
                     time.sleep(max(0.0, float(inter_step_delay_s)))
-        finally:
-            if manage_session:
-                self.end_pulse_session(keithley, icc, restore_autozero=True)
-        return v_out, i_out, t_out
+            
+            return v_out, i_out, t_out
 
     def run_pulsed_iv_sweep_debug(
         self,
@@ -2569,61 +2314,16 @@ class MeasurementService:
         on_point: Optional[Callable[[float, float, float], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
-        Execute IV sweep with automatic hardware acceleration when available.
+        Execute IV sweep using the unified API.
         
-        This method automatically selects the best sweep method:
-        - Hardware sweep for Keithley 4200A (10-150x faster!)
-        - Point-by-point for other instruments
-        
-        Args:
-            keithley: IV controller manager
-            config: SweepConfig with all parameters
-            smu_type: SMU type string
-            psu: Optional power supply
-            optical: Optional optical source
-            should_stop: Optional stop callback
-            on_point: Optional per-point callback (disabled for hardware sweep)
-        
-        Returns:
-            Tuple[List[float], List[float], List[float]]: (voltages, currents, timestamps)
-        
-        Example:
-            >>> config = SweepConfig(start_v=0, stop_v=1, step_v=0.01, icc=1e-3)
-            >>> v, i, t = service.run_iv_sweep_v2(
-            ...     keithley=keithley,
-            ...     config=config,
-            ...     smu_type='Keithley 4200A'
-            ... )
-            >>> # Automatically uses hardware sweep if beneficial!
+        This method now delegates to keithley.do_iv_sweep() which routes to
+        instrument-specific implementations automatically.
         """
-        # Get instrument capabilities
-        capabilities = keithley.get_capabilities()
-        
-        # Auto-select sweep method if not specified
-        if config.sweep_method is None:
-            config.sweep_method = self._select_sweep_method(config, capabilities)
-        
-        # Route to appropriate implementation
-        if config.sweep_method == SweepMethod.HARDWARE_SWEEP:
-            return self._run_hardware_sweep(
-                keithley=keithley,
-                config=config,
-                smu_type=smu_type,
-                psu=psu,
-                optical=optical,
-                should_stop=should_stop,
-                on_point=on_point
-            )
+        # Use unified API directly
+        if hasattr(keithley, 'do_iv_sweep'):
+            return keithley.do_iv_sweep(config, psu, optical, should_stop, on_point)
         else:
-            return self._run_point_by_point_sweep(
-                keithley=keithley,
-                config=config,
-                smu_type=smu_type,
-                psu=psu,
-                optical=optical,
-                should_stop=should_stop,
-                on_point=on_point
-            )
+            raise RuntimeError("keithley object does not support unified API (do_iv_sweep). Expected IVControllerManager instance.")
     
     def _select_sweep_method(
         self,

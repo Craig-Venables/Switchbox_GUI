@@ -117,21 +117,58 @@ def _run_iv_sweep_mode(gui: Any) -> None:
                 gui.t_arr_disp.append(timestamp)
 
             try:
-                v_arr, c_arr, timestamps = gui.measurement_service.run_iv_sweep(
-                    keithley=gui.keithley,
-                    icc=icc_val,
-                    sweeps=1,
-                    step_delay=0.05,
-                    voltage_range=voltage_array,
-                    psu=getattr(gui, "psu", None),
-                    led=False,
-                    power=1.0,
-                    sequence=None,
-                    pause_s=0.0,
-                    smu_type=getattr(gui, "SMU_type", "Keithley 2401"),
-                    should_stop=lambda: getattr(gui, "stop_measurement_flag", False),
-                    on_point=_on_point,
-                )
+                # Use unified API directly from IVControllerManager
+                if hasattr(gui.keithley, 'do_iv_sweep'):
+                    from Measurments.sweep_config import SweepConfig
+                    from Measurments.source_modes import SourceMode
+                    
+                    # Determine start/stop from voltage array
+                    v_list = list(voltage_array)
+                    if not v_list:
+                        return
+                    start_v = v_list[0]
+                    stop_v = v_list[-1]
+                    
+                    config = SweepConfig(
+                        start_v=start_v,
+                        stop_v=stop_v,
+                        step_v=0.05,  # Default, not used since voltage_list is provided
+                        step_delay=0.05,
+                        sweep_type="FS",
+                        sweeps=1,
+                        pause_s=0.0,
+                        icc=icc_val,
+                        led=False,
+                        power=1.0,
+                        sequence=None,
+                        source_mode=SourceMode.VOLTAGE,
+                        voltage_list=v_list,
+                    )
+                    
+                    v_arr, c_arr, timestamps = gui.keithley.do_iv_sweep(
+                        config=config,
+                        psu=getattr(gui, "psu", None),
+                        optical=None,
+                        should_stop=lambda: getattr(gui, "stop_measurement_flag", False),
+                        on_point=_on_point,
+                    )
+                else:
+                    # Fallback to measurement service (backwards compatibility)
+                    v_arr, c_arr, timestamps = gui.measurement_service.run_iv_sweep(
+                        keithley=gui.keithley,
+                        icc=icc_val,
+                        sweeps=1,
+                        step_delay=0.05,
+                        voltage_range=voltage_array,
+                        psu=getattr(gui, "psu", None),
+                        led=False,
+                        power=1.0,
+                        sequence=None,
+                        pause_s=0.0,
+                        smu_type=getattr(gui, "SMU_type", "Keithley 2401"),
+                        should_stop=lambda: getattr(gui, "stop_measurement_flag", False),
+                        on_point=_on_point,
+                    )
             except Exception as exc:
                 _log(gui, f"Sequential measurement error: {exc}")
                 interrupted = True

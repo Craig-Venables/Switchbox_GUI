@@ -376,6 +376,73 @@ class MeasurementPlotPanels:
         """Hide retention plot when retention test is complete"""
         self.hide_plot("retention")
     
+    def update_endurance_plot(self, ratios: List[float]) -> None:
+        """Update endurance plot with new data"""
+        if "endurance" not in self.axes:
+            return
+        
+        self.endurance_ratios = ratios if ratios else []
+        ax = self.axes["endurance"]
+        canvas = self.canvases["endurance"]
+        
+        ax.clear()
+        ax.set_title("Endurance (ON/OFF)")
+        ax.set_xlabel("Cycle")
+        ax.set_ylabel("ON/OFF Ratio")
+        
+        if self.endurance_ratios:
+            ax.plot(
+                range(1, len(self.endurance_ratios) + 1),
+                self.endurance_ratios,
+                marker="o",
+                linestyle="-",
+                linewidth=1.5,
+                markersize=5
+            )
+            ax.grid(True, alpha=0.3)
+            ax.relim()
+            ax.autoscale()
+        
+        canvas.draw()
+    
+    def update_retention_plot(self, times: List[float], currents: List[float]) -> None:
+        """Update retention plot with new data"""
+        if "retention" not in self.axes:
+            return
+        
+        self.retention_times = times if times else []
+        self.retention_currents = currents if currents else []
+        ax = self.axes["retention"]
+        canvas = self.canvases["retention"]
+        
+        ax.clear()
+        ax.set_title("Retention")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Current (A)")
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        
+        if self.retention_times and self.retention_currents and len(self.retention_times) == len(self.retention_currents):
+            # Filter out zeros and negative values for log scale
+            valid_indices = [i for i in range(len(self.retention_times)) 
+                           if self.retention_times[i] > 0 and self.retention_currents[i] > 0]
+            if valid_indices:
+                valid_times = [self.retention_times[i] for i in valid_indices]
+                valid_currents = [self.retention_currents[i] for i in valid_indices]
+                ax.plot(
+                    valid_times,
+                    valid_currents,
+                    marker="x",
+                    linestyle="-",
+                    linewidth=1.5,
+                    markersize=5
+                )
+            ax.grid(True, alpha=0.3)
+            ax.relim()
+            ax.autoscale()
+        
+        canvas.draw()
+    
     def show_temp_plot(self) -> None:
         """Show temperature plot when temp measurements are active"""
         self.show_plot("temp_time")
