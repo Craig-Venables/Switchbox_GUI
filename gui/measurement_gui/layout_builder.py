@@ -254,6 +254,24 @@ class MeasurementGUILayoutBuilder:
         scope_btn.pack(side='left', padx=5)
         gui.oscilloscope_pulse_button = scope_btn
         
+        # Help / Guide button (far right)
+        help_btn = tk.Button(
+            right_section,
+            text="Help / Guide",
+            font=self.FONT_BUTTON,
+            command=lambda: self._show_help(gui),
+            bg='#1565c0',  # Darker blue
+            fg='white',
+            activebackground='#0d47a1',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            padx=12,
+            pady=6
+        )
+        help_btn.pack(side='left', padx=5)
+        gui.help_button = help_btn
+        
         self.widgets["top_control_bar"] = frame
     
     def _on_system_change_and_connect(self) -> None:
@@ -351,6 +369,78 @@ class MeasurementGUILayoutBuilder:
         except Exception as e:
             print(f"Failed to open Pulse Testing GUI: {e}")
             messagebox.showerror("Error", f"Could not open Pulse Testing GUI:\n{e}")
+    
+    def _show_help(self, gui: object) -> None:
+        """Display a help window with usage instructions."""
+        help_win = tk.Toplevel(gui.master)
+        help_win.title("Measurement GUI Guide")
+        help_win.geometry("800x700")
+        help_win.configure(bg="#f0f0f0")
+        
+        # Scrollable Content
+        canvas = tk.Canvas(help_win, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
+        
+        tk.Label(scrollable_frame, text="Measurement GUI Guide", 
+                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame, 
+                text="This is the main measurement interface for IV/PMU/SMU measurements on device arrays.\n"
+                      "It provides comprehensive control over instrument connections, measurement\n"
+                      "configuration, real-time plotting, and data saving.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Select your measurement system from the dropdown in the top bar\n"
+                      "• Configure instrument connections in the Setup tab\n"
+                      "• Set measurement parameters in the Measurements tab\n"
+                      "• Click 'Start Measurement' to begin\n"
+                      "• Monitor progress in real-time plots",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="3. Key Features", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• IV Sweeps: Standard voltage sweeps with current measurement\n"
+                      "• Custom Measurements: Load pre-configured sweeps from JSON\n"
+                      "• Sequential Measurements: Test multiple devices automatically\n"
+                      "• Pulse Testing: Fast pulse characterization (opens separate GUI)\n"
+                      "• Real-time Plotting: Live voltage, current, and resistance plots\n"
+                      "• Data Saving: Automatic file naming and organization",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="4. Utility Buttons", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Motor Control: Control XY stage for laser positioning\n"
+                      "• Check Connection: Verify electrical connections before testing\n"
+                      "• Pulse Testing: Open advanced pulse testing interface",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="Video tutorials and additional resources will be added here.",
+                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
     
     # ------------------------------------------------------------------
     # Tabbed Content Area

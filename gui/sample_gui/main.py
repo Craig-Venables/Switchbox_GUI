@@ -193,7 +193,7 @@ class SampleGUI:
     def __init__(self, root: tk.Misc) -> None:
         self.root = root
         self.root.title("Device Selection & Quick Scan")
-        self.root.geometry("1000x850")
+        self.root.geometry("1100x850")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=0)  # Top bar
         self.root.rowconfigure(1, weight=1)  # Notebook
@@ -398,6 +398,21 @@ class SampleGUI:
         
         # Spacer
         ttk.Frame(control_bar).pack(side="left", expand=True)
+        
+        # Help button
+        help_btn = tk.Button(
+            control_bar,
+            text="Help / Guide",
+            command=self._show_help,
+            bg="#1565c0",
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            padx=12,
+            pady=5,
+            relief=tk.RAISED,
+            cursor="hand2"
+        )
+        help_btn.pack(side="right", padx=5)
         
         # Measure Button (accent color)
         self.measure_button = tk.Button(
@@ -2974,6 +2989,77 @@ class SampleGUI:
         self.measurement_window = False
         self.measuremnt_gui = None
     
+    def _show_help(self) -> None:
+        """Display a help window with usage instructions."""
+        help_win = tk.Toplevel(self.root)
+        help_win.title("Sample GUI Guide")
+        help_win.geometry("800x700")
+        help_win.configure(bg="#f0f0f0")
+        
+        # Scrollable Content
+        canvas = tk.Canvas(help_win, bg="#f0f0f0")
+        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Content
+        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
+        
+        tk.Label(scrollable_frame, text="Sample GUI Guide", 
+                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame, 
+                text="This is the main entry point for device selection and sample management.\n"
+                      "It provides a visual interface to browse device maps, select devices to test,\n"
+                      "control multiplexer routing, and launch measurement interfaces.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Select multiplexer type and sample type from dropdowns\n"
+                      "• Click on devices in the map to select them\n"
+                      "• Use device selection panel to navigate devices\n"
+                      "• Click 'Measure Selected Devices' to start measurements\n"
+                      "• Use Quick Scan for rapid device testing",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="3. Features", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Visual Device Map: Click-to-select devices on image\n"
+                      "• Device Status Tracking: Mark devices as working/failed/untested\n"
+                      "• Multiplexer Control: Route signals to selected devices\n"
+                      "• Quick Scan: Rapidly test multiple devices\n"
+                      "• Device Manager: Organize and manage device information",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="4. Tabs", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• Device Selection: Main interface for selecting devices\n"
+                      "• Device Manager: Manage device information and status\n"
+                      "• Quick Scan Results: View results from quick scan tests",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="Video tutorials and additional resources will be added here.",
+                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
+
     def open_measurement_window(self) -> None:
         """Open the measurement window. Checks device name first, then device selection."""
         # Check if window exists and is still valid

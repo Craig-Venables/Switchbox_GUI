@@ -3,6 +3,7 @@ from tkinter import ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.gridspec as gridspec
+import numpy as np
 
 class OscilloscopePulseLayout:
     """
@@ -71,6 +72,8 @@ class OscilloscopePulseLayout:
         self._build_pulse_frame(left_panel)
         self._build_scope_frame(left_panel)
         self._build_measurement_frame(left_panel)
+        self._build_calculator_frame(left_panel)
+        self._build_save_options_frame(left_panel)
         self._build_action_buttons(left_panel)
         self._build_status_bar(left_panel)
 
@@ -92,10 +95,17 @@ class OscilloscopePulseLayout:
         tk.Label(bar_frame, text="System:", bg="#e6f3ff").pack(side="left")
         self.vars['system'] = tk.StringVar(value=self.config.get("system", "keithley4200a"))
         sys_combo = ttk.Combobox(bar_frame, textvariable=self.vars['system'], 
-                                values=self.context.get('known_systems', ["keithley4200a", "keithley2450"]), 
+                                values=self.context.get('known_systems', ["keithley4200a", "keithley2450", "keithley2400"]), 
                                 width=15, state="readonly")
         sys_combo.pack(side="left", padx=5)
         sys_combo.bind("<<ComboboxSelected>>", lambda e: self.callbacks.get('on_system_change', lambda: None)())
+        
+        # Simulation Mode (moved to top bar)
+        self.vars['simulation_mode'] = tk.BooleanVar(value=self.config.get("simulation_mode", False))
+        sim_check = ttk.Checkbutton(bar_frame, text="🔧 Simulation Mode", 
+                                    variable=self.vars['simulation_mode'])
+        sim_check.pack(side="left", padx=(10, 0))
+        ToolTip(sim_check, "Test without oscilloscope - generates simulated data")
         
         # Right: Help & Save
         tk.Button(bar_frame, text="Help / Guide", command=self._show_help, bg="#1565c0", fg="white", font=("Segoe UI", 9, "bold")).pack(side="right", padx=10)
@@ -277,6 +287,7 @@ class OscilloscopePulseLayout:
                                 values=self.context.get('smu_ports', ["GPIB0::17::INSTR"]), 
                                 width=20)
         smu_combo.pack(side="right")
+        self.widgets['smu_address'] = smu_combo  # Store reference for updates
         self.widgets['smu_combo'] = smu_combo
         
         # Scope Address
@@ -377,77 +388,195 @@ class OscilloscopePulseLayout:
 
     def _build_measurement_frame(self, parent):
         """Build measurement method frame"""
-        frame = ttk.Labelframe(parent, text="Measurement Method", padding=10)
+        frame = ttk.Labelframe(parent, text="Measurement Settings", padding=10)
         frame.pack(fill="x", pady=5)
         
-        self.vars['measurement_method'] = tk.StringVar(value=self.config.get("measurement_method", "shunt"))
-        method_frame = ttk.Frame(frame)
-        method_frame.pack(fill="x", pady=2)
-        ttk.Label(method_frame, text="Method:").pack(side="left")
-        ttk.Radiobutton(method_frame, text="Shunt Resistor", variable=self.vars['measurement_method'], 
-                       value="shunt").pack(side="left", padx=10)
-        ttk.Radiobutton(method_frame, text="SMU Current", variable=self.vars['measurement_method'], 
-                       value="smu").pack(side="left", padx=10)
-        
         self._add_param(frame, "R_shunt (Ω):", "r_shunt", "1.0",
-                       ToolTipText="Value of shunt resistor (for Method A)")
-        
-        # Simulation mode checkbox
-        sim_frame = ttk.Frame(frame)
-        sim_frame.pack(fill="x", pady=(10, 0))
-        self.vars['simulation_mode'] = tk.BooleanVar(value=self.config.get("simulation_mode", False))
-        sim_check = ttk.Checkbutton(sim_frame, text="🔧 Simulation Mode (no scope required)", 
-                                    variable=self.vars['simulation_mode'])
-        sim_check.pack(side="left")
-        ToolTip(sim_check, "Test without oscilloscope - generates simulated data")
-
-        
-        # Shunt Calculator Section
-        calc_frame = tk.LabelFrame(frame, text="📐 Shunt Resistor Calculator", bg="#e8f5e9", 
-                                   font=("Segoe UI", 9, "bold"), fg="#2e7d32", padx=10, pady=8)
-        calc_frame.pack(fill="x", pady=(10, 0))
+                       ToolTipText="Value of shunt resistor used for current measurement")
+    
+    def _build_calculator_frame(self, parent):
+        """Build shunt resistor calculator frame"""
+        frame = ttk.Labelframe(parent, text="📐 Shunt Resistor Calculator", padding=10)
+        frame.pack(fill="x", pady=5)
         
         # Input row
-        input_row = ttk.Frame(calc_frame)
+        input_row = ttk.Frame(frame)
         input_row.pack(fill="x", pady=2)
         
-        ttk.Label(input_row, text="Test Voltage (V):", background="#e8f5e9").pack(side="left")
+        ttk.Label(input_row, text="Test Voltage (V):").pack(side="left")
         self.vars['calc_voltage'] = tk.StringVar(value="2.0")
         calc_v_entry = ttk.Entry(input_row, textvariable=self.vars['calc_voltage'], width=8)
         calc_v_entry.pack(side="left", padx=5)
         
-        ttk.Label(input_row, text="Expected Current (A):", background="#e8f5e9").pack(side="left", padx=(10, 0))
+        ttk.Label(input_row, text="Expected Current (A):").pack(side="left", padx=(10, 0))
         self.vars['calc_current'] = tk.StringVar(value="0.000001")
         calc_i_entry = ttk.Entry(input_row, textvariable=self.vars['calc_current'], width=12)
         calc_i_entry.pack(side="left", padx=5)
+        
+        # Rule selection (1% or 10%)
+        ttk.Label(input_row, text="Rule:").pack(side="left", padx=(10, 0))
+        self.vars['calc_rule'] = tk.StringVar(value="10")
+        rule_combo = ttk.Combobox(input_row, textvariable=self.vars['calc_rule'], 
+                                 values=["1", "10"], width=5, state="readonly")
+        rule_combo.pack(side="left", padx=5)
+        ttk.Label(input_row, text="%").pack(side="left")
         
         tk.Button(input_row, text="Calculate", command=self._calculate_shunt,
                  bg="#4caf50", fg="white", font=("Segoe UI", 8, "bold"), 
                  relief=tk.FLAT, padx=10, pady=2).pack(side="left", padx=5)
         
-        # Quick Test button
-        quick_test_btn = tk.Button(input_row, text="⚡ Quick Test", 
-                                   command=self._quick_test_device,
-                                   bg="#ff9800", fg="white", font=("Segoe UI", 8, "bold"),
-                                   relief=tk.FLAT, padx=10, pady=2)
-        quick_test_btn.pack(side="left", padx=5)
-        ToolTip(quick_test_btn, "Pulse device at test voltage and measure current")
-        
-        # Results display with wrapping
-        results_frame = ttk.Frame(calc_frame)
-        results_frame.pack(fill="x", pady=(5, 0))
-        
-        self.vars['calc_result'] = tk.StringVar(value="Enter values and click Calculate (or Quick Test)")
-        result_label = tk.Label(results_frame, textvariable=self.vars['calc_result'], 
-                               bg="#e8f5e9", fg="#1b5e20", font=("Consolas", 8), 
-                               justify="left", anchor="w", wraplength=400)
-        result_label.pack(fill="x")
-        
         # Auto-calculate on Enter key
         calc_v_entry.bind("<Return>", lambda e: self._calculate_shunt())
         calc_i_entry.bind("<Return>", lambda e: self._calculate_shunt())
+        
+        # Results display
+        results_frame = ttk.Frame(frame)
+        results_frame.pack(fill="x", pady=(5, 0))
+        
+        self.vars['calc_result'] = tk.StringVar(value="Enter values and click Calculate")
+        result_label = tk.Label(results_frame, textvariable=self.vars['calc_result'], 
+                               bg="#f0f0f0", fg="#1b5e20", font=("Consolas", 8), 
+                               justify="left", anchor="w", wraplength=400, relief=tk.SUNKEN, bd=1, padx=5, pady=5)
+        result_label.pack(fill="x")
+        
+        # Quick Test Section (Expandable)
+        self._build_quick_test_section(frame)
+    
+    def _build_quick_test_section(self, parent):
+        """Build expandable quick test section"""
+        # Container frame
+        test_container = ttk.Frame(parent)
+        test_container.pack(fill="x", pady=(10, 0))
+        
+        # Header with expand/collapse button
+        header_frame = ttk.Frame(test_container)
+        header_frame.pack(fill="x")
+        
+        self.vars['quick_test_expanded'] = tk.BooleanVar(value=False)
+        expand_btn = ttk.Button(header_frame, text="▶ Quick Test", 
+                               command=lambda: self._toggle_quick_test(test_container, expand_btn),
+                               style="Small.TButton")
+        expand_btn.pack(side="left")
+        self.widgets['quick_test_expand_btn'] = expand_btn
+        
+        # Expandable content frame (initially hidden)
+        self.widgets['quick_test_content'] = ttk.Frame(test_container)
+        
+        # Quick test parameters (stored but not shown until expanded)
+        self.vars['quick_test_voltage'] = tk.StringVar(value="2.0")
+        self.vars['quick_test_duration'] = tk.StringVar(value="0.1")
+        self.vars['quick_test_compliance'] = tk.StringVar(value="0.001")
+    
+    def _toggle_quick_test(self, container, button):
+        """Toggle quick test section expand/collapse"""
+        content_frame = self.widgets['quick_test_content']
+        expanded = self.vars['quick_test_expanded'].get()
+        
+        if expanded:
+            # Collapse
+            content_frame.pack_forget()
+            button.config(text="▶ Quick Test")
+            self.vars['quick_test_expanded'].set(False)
+        else:
+            # Expand - build content if not already built
+            if not hasattr(self, '_quick_test_built'):
+                self._build_quick_test_content(content_frame)
+                self._quick_test_built = True
+            
+            content_frame.pack(fill="x", pady=(5, 0))
+            button.config(text="▼ Quick Test")
+            self.vars['quick_test_expanded'].set(True)
+    
+    def _build_quick_test_content(self, parent):
+        """Build quick test content (called when expanded)"""
+        # Quick test parameters
+        params_frame = ttk.LabelFrame(parent, text="Quick Test Parameters", padding=5)
+        params_frame.pack(fill="x", pady=2)
+        
+        # Voltage
+        v_frame = ttk.Frame(params_frame)
+        v_frame.pack(fill="x", pady=2)
+        ttk.Label(v_frame, text="Voltage (V):").pack(side="left")
+        v_entry = ttk.Entry(v_frame, textvariable=self.vars['quick_test_voltage'], width=10)
+        v_entry.pack(side="right")
+        
+        # Duration
+        d_frame = ttk.Frame(params_frame)
+        d_frame.pack(fill="x", pady=2)
+        ttk.Label(d_frame, text="Duration (s):").pack(side="left")
+        d_entry = ttk.Entry(d_frame, textvariable=self.vars['quick_test_duration'], width=10)
+        d_entry.pack(side="right")
+        
+        # Compliance
+        c_frame = ttk.Frame(params_frame)
+        c_frame.pack(fill="x", pady=2)
+        ttk.Label(c_frame, text="Compliance (A):").pack(side="left")
+        c_entry = ttk.Entry(c_frame, textvariable=self.vars['quick_test_compliance'], width=10)
+        c_entry.pack(side="right")
+        
+        # Test button
+        btn_frame = ttk.Frame(parent)
+        btn_frame.pack(fill="x", pady=5)
+        quick_test_btn = tk.Button(btn_frame, text="⚡ Run Quick Test", 
+                                   command=self._run_quick_test,
+                                   bg="#ff9800", fg="white", font=("Segoe UI", 9, "bold"),
+                                   relief=tk.FLAT, padx=15, pady=5)
+        quick_test_btn.pack(side="left")
+        ToolTip(quick_test_btn, "Pulse device with specified parameters and measure current")
+    
+    def _run_quick_test(self):
+        """Run quick test with specified parameters"""
+        try:
+            voltage = float(self.vars['quick_test_voltage'].get())
+            duration = float(self.vars['quick_test_duration'].get())
+            compliance = float(self.vars['quick_test_compliance'].get())
+            
+            # Update calculator voltage field
+            self.vars['calc_voltage'].set(str(voltage))
+            
+            # Check if we have a callback for quick test
+            if 'quick_test' in self.callbacks:
+                self.vars['calc_result'].set(f"⚡ Testing device at {voltage}V for {duration}s...")
+                self.parent.update()  # Force GUI update
+                
+                # Call the quick test callback with custom parameters
+                # We need to modify the callback to accept duration and compliance
+                current = self.callbacks['quick_test'](voltage, duration, compliance)
+                
+                if current is not None and abs(current) > 1e-15:
+                    # Success! Update current field
+                    self.vars['calc_current'].set(f"{current:.9f}")
+                    # Auto-calculate
+                    self._calculate_shunt()
+                    # Show success message
+                    self.vars['calc_result'].set(f"✅ Quick test successful! Measured {abs(current)*1e6:.3f} µA\n" + 
+                                                 self.vars['calc_result'].get())
+                else:
+                    self.vars['calc_result'].set("⚠️ Quick test returned zero or None - check connections")
+            else:
+                self.vars['calc_result'].set("⚠️ Quick test not available - connect SMU first")
+                
+        except ValueError:
+            self.vars['calc_result'].set("⚠️ Error: Please enter valid numbers")
+        except Exception as e:
+            self.vars['calc_result'].set(f"⚠️ Error: {str(e)}")
 
 
+    def _build_save_options_frame(self, parent):
+        """Build save options frame"""
+        frame = ttk.Labelframe(parent, text="Save Options", padding=10)
+        frame.pack(fill="x", pady=5)
+        
+        # Auto-save checkbox
+        self.vars['auto_save'] = tk.BooleanVar(value=self.config.get("auto_save", True))
+        auto_save_check = ttk.Checkbutton(
+            frame, 
+            text="Auto-save after measurement",
+            variable=self.vars['auto_save']
+        )
+        auto_save_check.pack(side="left", padx=5)
+        ToolTip(auto_save_check, "Automatically save measurement data after completion")
+    
     def _build_action_buttons(self, parent):
         """Build action buttons frame"""
         frame = ttk.Frame(parent, padding=10)
@@ -481,44 +610,130 @@ class OscilloscopePulseLayout:
         status_label.pack(side="left")
 
     def _build_plots(self, parent):
-        """Build matplotlib plots"""
-        # Create figure with subplots
-        self.fig = plt.Figure(figsize=(10, 8), dpi=100)
-        gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 1], hspace=0.3)
+        """Build matplotlib plots in tabbed interface"""
+        # Create notebook for tabs
+        self.plot_notebook = ttk.Notebook(parent)
+        self.plot_notebook.pack(fill="both", expand=True)
         
-        # Voltage plot
-        self.ax_voltage = self.fig.add_subplot(gs[0])
-        self.ax_voltage.set_ylabel("Voltage (V)")
-        self.ax_voltage.set_title("Voltage Waveform", fontsize=10)
-        self.ax_voltage.grid(True, alpha=0.3)
+        # Store plot data for line visibility toggles
+        self.plot_data = {}
+        self.plot_lines = {}
         
-        # Current plot
-        self.ax_current = self.fig.add_subplot(gs[1])
-        self.ax_current.set_ylabel("Current (A)")
-        self.ax_current.set_title("Current Waveform", fontsize=10)
-        self.ax_current.grid(True, alpha=0.3)
+        # Create Overview tab with all plots in grid
+        self._create_overview_tab()
         
-        # Zoom plot (dual axis)
-        self.ax_zoom = self.fig.add_subplot(gs[2])
-        self.ax_zoom.set_xlabel("Time (s)")
-        self.ax_zoom.set_title("Pulse Zoom View", fontsize=10)
-        self.ax_zoom.set_ylabel("Voltage (V)", color='b')
-        self.ax_zoom.tick_params(axis='y', labelcolor='b')
-        self.ax_zoom.grid(True, alpha=0.3)
+        # Create individual tabs for each plot
+        self._create_plot_tab("Voltage Breakdown", "Voltage Distribution: SMU, Shunt, and Memristor")
+        self._create_plot_tab("Current", "Current Through Circuit (I = V_shunt / R_shunt)")
+        self._create_plot_tab("Resistance", "Memristor Resistance: R = (V_SMU - V_shunt) / I")
+        self._create_plot_tab("Power", "Power Dissipation in Memristor: P = V_memristor × I")
         
-        # Dual y-axis for current in zoom
-        self.ax_zoom_r = self.ax_zoom.twinx()
-        self.ax_zoom_r.set_ylabel("Current (A)", color='r')
-        self.ax_zoom_r.tick_params(axis='y', labelcolor='r')
+        # Store axes references for compatibility
+        self.ax_voltage_breakdown = self.plot_lines['Overview']['axes']['voltage']
+        self.ax_current = self.plot_lines['Overview']['axes']['current']
+        self.ax_resistance = self.plot_lines['Overview']['axes']['resistance']
+        self.ax_power = self.plot_lines['Overview']['axes']['power']
+    
+    def _create_overview_tab(self):
+        """Create overview tab with all plots in 2x2 grid"""
+        # Create frame for tab
+        tab_frame = ttk.Frame(self.plot_notebook)
+        self.plot_notebook.add(tab_frame, text="Overview")
         
-        # Embed in tkinter
-        self.canvas = FigureCanvasTkAgg(self.fig, parent)
-        self.canvas.draw()
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+        # Create figure with 2x2 grid
+        fig = plt.Figure(figsize=(12, 10), dpi=100)
+        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1], width_ratios=[1, 1], hspace=0.4, wspace=0.3)
         
-        # Toolbar
-        toolbar = NavigationToolbar2Tk(self.canvas, parent)
+        # Create all 4 subplots
+        ax_voltage = fig.add_subplot(gs[0, 0])
+        ax_voltage.set_ylabel("Voltage (V)")
+        ax_voltage.set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=11, fontweight='bold')
+        ax_voltage.grid(True, alpha=0.3)
+        ax_voltage.set_xlabel("Time (s)")
+        
+        ax_current = fig.add_subplot(gs[0, 1])
+        ax_current.set_ylabel("Current (A)")
+        ax_current.set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=11, fontweight='bold')
+        ax_current.grid(True, alpha=0.3)
+        ax_current.set_xlabel("Time (s)")
+        
+        ax_resistance = fig.add_subplot(gs[1, 0])
+        ax_resistance.set_ylabel("Resistance (Ω)")
+        ax_resistance.set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=11, fontweight='bold')
+        ax_resistance.grid(True, alpha=0.3)
+        ax_resistance.set_xlabel("Time (s)")
+        
+        ax_power = fig.add_subplot(gs[1, 1])
+        ax_power.set_ylabel("Power (W)")
+        ax_power.set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=11, fontweight='bold')
+        ax_power.grid(True, alpha=0.3)
+        ax_power.set_xlabel("Time (s)")
+        
+        # Create canvas
+        canvas = FigureCanvasTkAgg(fig, tab_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Create toolbar
+        toolbar = NavigationToolbar2Tk(canvas, tab_frame)
         toolbar.update()
+        toolbar.pack(side="bottom", fill="x")
+        
+        # Store references
+        self.plot_lines['Overview'] = {
+            'fig': fig,
+            'axes': {
+                'voltage': ax_voltage,
+                'current': ax_current,
+                'resistance': ax_resistance,
+                'power': ax_power
+            },
+            'canvas': canvas,
+            'toolbar': toolbar,
+            'lines': {}
+        }
+    
+    def _create_plot_tab(self, tab_name, title):
+        """Create a tab with a single plot and controls"""
+        # Create frame for tab
+        tab_frame = ttk.Frame(self.plot_notebook)
+        self.plot_notebook.add(tab_frame, text=tab_name)
+        
+        # Control frame for line visibility toggles
+        control_frame = ttk.Frame(tab_frame)
+        control_frame.pack(fill="x", padx=5, pady=2)
+        
+        ttk.Label(control_frame, text="Show:", font=("Segoe UI", 9)).pack(side="left", padx=5)
+        
+        # Create figure and axis
+        fig = plt.Figure(figsize=(10, 6), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.set_title(title, fontsize=12, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Time (s)")
+        
+        # Create canvas
+        canvas = FigureCanvasTkAgg(fig, tab_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Create toolbar
+        toolbar = NavigationToolbar2Tk(canvas, tab_frame)
+        toolbar.update()
+        toolbar.pack(side="bottom", fill="x")
+        
+        # Store references
+        if not hasattr(self, 'plot_lines'):
+            self.plot_lines = {}
+        self.plot_lines[tab_name] = {
+            'fig': fig,
+            'ax': ax,
+            'canvas': canvas,
+            'toolbar': toolbar,
+            'control_frame': control_frame,
+            'checkboxes': {},
+            'lines': {}  # Store line objects for visibility toggling
+        }
     
     def _calculate_shunt(self):
         """Calculate recommended shunt resistor values based on device parameters"""
@@ -526,6 +741,7 @@ class OscilloscopePulseLayout:
             # Get inputs
             voltage = float(self.vars['calc_voltage'].get())
             current = float(self.vars['calc_current'].get())
+            rule_pct = float(self.vars['calc_rule'].get())  # 1 or 10
             
             if current == 0:
                 self.vars['calc_result'].set("⚠️ Error: Current cannot be zero")
@@ -534,13 +750,45 @@ class OscilloscopePulseLayout:
             # Calculate device resistance
             r_device = voltage / current
             
-            # Calculate recommended shunt values
-            r_shunt_10pct = r_device * 0.10
-            r_shunt_1pct = r_device * 0.01
+            # Calculate recommended shunt value based on selected rule
+            r_shunt_target = r_device * (rule_pct / 100.0)
             
-            # Calculate voltage drops across shunts
-            v_drop_10pct = current * r_shunt_10pct
-            v_drop_1pct = current * r_shunt_1pct
+            # Calculate voltage drop
+            v_drop = current * r_shunt_target
+            
+            # Find nearest standard resistor values
+            # Standard E12 series: 1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2
+            # Multiplied by powers of 10
+            e12_base = [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2]
+            
+            # Find appropriate decade
+            if r_shunt_target < 1e-3:
+                decade = 1e-6  # µΩ range (unlikely)
+                r_range = [r * 1e-6 for r in e12_base[:3]]  # Only smallest values
+            elif r_shunt_target < 1:
+                decade = 1e-3  # mΩ range
+                r_range = [r * 1e-3 for r in e12_base]
+            elif r_shunt_target < 1e3:
+                decade = 1  # Ω range
+                r_range = [r for r in e12_base]
+            elif r_shunt_target < 1e6:
+                decade = 1e3  # kΩ range
+                r_range = [r * 1e3 for r in e12_base]
+            else:
+                decade = 1e6  # MΩ range
+                r_range = [r * 1e6 for r in e12_base[:6]]  # Only smaller values
+            
+            # Find closest standard values (above and below target)
+            r_range_sorted = sorted(r_range)
+            r_below = None
+            r_above = None
+            
+            for r in r_range_sorted:
+                if r <= r_shunt_target:
+                    r_below = r
+                elif r > r_shunt_target and r_above is None:
+                    r_above = r
+                    break
             
             # Format current for display
             if abs(current) >= 1e-3:
@@ -553,32 +801,61 @@ class OscilloscopePulseLayout:
                 i_str = f"{current:.3e} A"
             
             # Format resistance for display
-            if r_device >= 1e6:
-                r_str = f"{r_device/1e6:.2f} MΩ"
-            elif r_device >= 1e3:
-                r_str = f"{r_device/1e3:.2f} kΩ"
-            else:
-                r_str = f"{r_device:.2f} Ω"
+            def format_resistance(r):
+                if r >= 1e6:
+                    return f"{r/1e6:.2f} MΩ"
+                elif r >= 1e3:
+                    return f"{r/1e3:.2f} kΩ"
+                elif r >= 1:
+                    return f"{r:.2f} Ω"
+                elif r >= 1e-3:
+                    return f"{r*1e3:.2f} mΩ"
+                else:
+                    return f"{r:.2e} Ω"
+            
+            r_device_str = format_resistance(r_device)
+            r_target_str = format_resistance(r_shunt_target)
             
             # Build result string
             result = (
-                f"Device: {r_str} @ {voltage}V ({i_str})\\n"
-                f"\\n"
-                f"10% Rule: R_shunt = {r_shunt_10pct:.2f} Ω  →  {v_drop_10pct*1e3:.2f} mV signal\\n"
-                f" 1% Rule: R_shunt = {r_shunt_1pct:.2f} Ω  →  {v_drop_1pct*1e3:.2f} mV signal\\n"
-                f"\\n"
+                f"Device: {r_device_str} @ {voltage}V ({i_str})\n"
+                f"\n"
+                f"{rule_pct:.0f}% Rule: R_shunt = {r_target_str}  →  {v_drop*1e3:.2f} mV signal\n"
+                f"\n"
             )
             
-            # Add recommendation
-            if v_drop_10pct >= 0.01:  # 10 mV or more
-                result += f"✅ Recommended: Use 10% rule ({r_shunt_10pct:.2f} Ω)"
+            # Add standard resistor recommendations
+            if r_below or r_above:
+                result += "Standard Resistor Options:\n"
+                if r_below:
+                    v_below = current * r_below
+                    result += f"  • {format_resistance(r_below)} → {v_below*1e3:.2f} mV\n"
+                if r_above:
+                    v_above = current * r_above
+                    result += f"  • {format_resistance(r_above)} → {v_above*1e3:.2f} mV\n"
+                result += "\n"
+                
+                # Auto-select closest standard value
+                if r_below and r_above:
+                    if abs(r_shunt_target - r_below) < abs(r_shunt_target - r_above):
+                        selected_r = r_below
+                    else:
+                        selected_r = r_above
+                elif r_below:
+                    selected_r = r_below
+                else:
+                    selected_r = r_above
+                
+                result += f"✅ Recommended: {format_resistance(selected_r)}"
                 # Auto-fill r_shunt field
-                self.vars['r_shunt'].set(f"{r_shunt_10pct:.2f}")
-            elif v_drop_1pct >= 0.001:  # 1 mV or more
-                result += f"⚠️ Use 1% rule ({r_shunt_1pct:.2f} Ω) - signal is small"
-                self.vars['r_shunt'].set(f"{r_shunt_1pct:.2f}")
+                self.vars['r_shunt'].set(f"{selected_r:.2f}")
             else:
-                result += "❌ Signal too small! Consider using TIA instead"
+                result += f"✅ Use: {r_target_str}"
+                self.vars['r_shunt'].set(f"{r_shunt_target:.2f}")
+            
+            # Check if signal is too small
+            if v_drop < 0.001:  # Less than 1 mV
+                result += "\n⚠️ Signal < 1mV - consider using TIA instead"
             
             self.vars['calc_result'].set(result)
             
@@ -587,36 +864,6 @@ class OscilloscopePulseLayout:
         except Exception as e:
             self.vars['calc_result'].set(f"⚠️ Error: {str(e)}")
     
-    def _quick_test_device(self):
-        """Perform a quick pulse test to measure device current"""
-        try:
-            voltage = float(self.vars['calc_voltage'].get())
-            
-            # Check if we have a callback for quick test
-            if 'quick_test' in self.callbacks:
-                self.vars['calc_result'].set(f"⚡ Testing device at {voltage}V...")
-                self.parent.update()  # Force GUI update
-                
-                # Call the quick test callback (will be handled by logic layer)
-                current = self.callbacks['quick_test'](voltage)
-                
-                if current is not None and abs(current) > 1e-15:
-                    # Success! Update current field
-                    self.vars['calc_current'].set(f"{current:.9f}")
-                    # Auto-calculate
-                    self._calculate_shunt()
-                    # Show success message
-                    self.vars['calc_result'].set(f"✅ Quick test successful! Measured {abs(current)*1e6:.3f} µA\n" + 
-                                                 self.vars['calc_result'].get())
-                else:
-                    self.vars['calc_result'].set("⚠️ Quick test returned zero or None - check connections")
-            else:
-                self.vars['calc_result'].set("⚠️ Quick test not available - connect SMU first")
-                
-        except ValueError:
-            self.vars['calc_result'].set("⚠️ Error: Invalid voltage value")
-        except Exception as e:
-            self.vars['calc_result'].set(f"⚠️ Error: {str(e)}")
     
     def _read_scope_settings(self):
         """Read current oscilloscope settings and populate GUI fields"""
@@ -684,40 +931,427 @@ class OscilloscopePulseLayout:
     
     def reset_plots(self):
         """Reset all plots to empty state"""
-        if not hasattr(self, 'ax_voltage'):
+        if not hasattr(self, 'plot_lines'):
             return
-        for ax in [self.ax_voltage, self.ax_current, self.ax_zoom, self.ax_zoom_r]:
-            ax.clear()
+        
+        for tab_name, plot_info in self.plot_lines.items():
+            if tab_name == "Overview":
+                # Clear all axes in overview
+                for ax in plot_info['axes'].values():
+                    ax.clear()
+                    ax.set_xlabel("Time (s)")
+                    ax.grid(True, alpha=0.3)
+                # Re-add titles
+                plot_info['axes']['voltage'].set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=11, fontweight='bold')
+                plot_info['axes']['voltage'].set_ylabel("Voltage (V)")
+                plot_info['axes']['current'].set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=11, fontweight='bold')
+                plot_info['axes']['current'].set_ylabel("Current (A)")
+                plot_info['axes']['resistance'].set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=11, fontweight='bold')
+                plot_info['axes']['resistance'].set_ylabel("Resistance (Ω)")
+                plot_info['axes']['power'].set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=11, fontweight='bold')
+                plot_info['axes']['power'].set_ylabel("Power (W)")
+            else:
+                # Individual tabs
+                plot_info['ax'].clear()
+                plot_info['lines'].clear()
+                # Re-add title and labels
+                if tab_name == "Voltage Breakdown":
+                    plot_info['ax'].set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=12, fontweight='bold')
+                    plot_info['ax'].set_ylabel("Voltage (V)")
+                elif tab_name == "Current":
+                    plot_info['ax'].set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=12, fontweight='bold')
+                    plot_info['ax'].set_ylabel("Current (A)")
+                elif tab_name == "Resistance":
+                    plot_info['ax'].set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=12, fontweight='bold')
+                    plot_info['ax'].set_ylabel("Resistance (Ω)")
+                elif tab_name == "Power":
+                    plot_info['ax'].set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=12, fontweight='bold')
+                    plot_info['ax'].set_ylabel("Power (W)")
+                plot_info['ax'].set_xlabel("Time (s)")
+                plot_info['ax'].grid(True, alpha=0.3)
             
-        self.ax_voltage.set_ylabel("Voltage (V)")
-        self.ax_voltage.set_title("Voltage Waveform", fontsize=10)
-        self.ax_voltage.grid(True, alpha=0.3)
+            plot_info['canvas'].draw()
         
-        self.ax_current.set_ylabel("Current (A)")
-        self.ax_current.set_title("Current Waveform", fontsize=10)
-        self.ax_current.grid(True, alpha=0.3)
+    def update_plots(self, t, v, i, metadata=None):
+        """Update plots with new data - works with tabbed interface
         
-        self.ax_zoom.set_xlabel("Time (s)")
-        self.ax_zoom.set_title("Pulse Zoom View", fontsize=10)
-        self.ax_zoom.set_ylabel("Voltage (V)", color='b')
-        self.ax_zoom_r.set_ylabel("Current (A)", color='r')
-        self.ax_zoom.grid(True, alpha=0.3)
-        
-        self.canvas.draw()
-        
-    def update_plots(self, t, v, i):
-        """Update plots with new data"""
-        if not hasattr(self, 'ax_voltage'):
+        Args:
+            t: Time array
+            v: Voltage array (V_shunt from oscilloscope)
+            i: Current array (calculated from V_shunt / R_shunt)
+            metadata: Dictionary containing 'pulse_voltage' and 'shunt_resistance'
+        """
+        if not hasattr(self, 'plot_lines'):
             return
-        # 1. Full View
-        self.ax_voltage.plot(t, v, 'b-', label='V')
-        self.ax_current.plot(t, i, 'r-', label='I')
         
-        # 2. Zoom View
-        self.ax_zoom.plot(t, v, 'b-', alpha=0.7)
-        self.ax_zoom_r.plot(t, i, 'r-', alpha=0.7)
+        # Get metadata
+        if metadata is None:
+            metadata = {}
         
-        self.canvas.draw()
+        pulse_voltage = metadata.get('pulse_voltage', 1.0)
+        if 'params' in metadata:
+            params = metadata['params']
+            pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
+            pre_delay = float(params.get('pre_pulse_delay', 0.1))
+            pulse_duration = float(params.get('pulse_duration', 0.001))
+        else:
+            pre_delay = 0.1
+            pulse_duration = 0.001
+        
+        shunt_r = metadata.get('shunt_resistance', 50.0)
+        
+        # Calculate derived quantities
+        v_shunt = v
+        
+        # V_SMU is the applied pulse voltage
+        pulse_start = pre_delay
+        pulse_end = pre_delay + pulse_duration
+        v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
+        
+        # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
+        v_memristor = np.maximum(v_smu - v_shunt, 0.0)  # Ensure non-negative
+        
+        # R_memristor = V_memristor / I (Ohm's law)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            r_memristor = np.divide(v_memristor, i, out=np.full_like(v_memristor, np.nan), where=i!=0)
+            r_memristor = np.where(np.isfinite(r_memristor) & (r_memristor < 1e12), r_memristor, np.nan)
+        
+        # P_memristor = V_memristor × I (always positive)
+        p_memristor = np.maximum(v_memristor * i, 0.0)
+        
+        # Store data for line visibility toggles
+        self.plot_data = {
+            't': t, 'v_smu': v_smu, 'v_shunt': v_shunt, 'v_memristor': v_memristor,
+            'i': i, 'r_memristor': r_memristor, 'p_memristor': p_memristor
+        }
+        
+        # Update overview tab (all plots)
+        self._update_overview_tab()
+        
+        # Update individual tabs
+        self._update_voltage_tab()
+        self._update_current_tab()
+        self._update_resistance_tab()
+        self._update_power_tab()
+    
+    def _update_overview_tab(self):
+        """Update overview tab with all plots"""
+        if 'Overview' not in self.plot_lines:
+            return
+        
+        plot_info = self.plot_lines['Overview']
+        axes = plot_info['axes']
+        
+        t = self.plot_data['t']
+        v_smu = self.plot_data['v_smu']
+        v_shunt = self.plot_data['v_shunt']
+        v_memristor = self.plot_data['v_memristor']
+        i = self.plot_data['i']
+        r_memristor = self.plot_data['r_memristor']
+        p_memristor = self.plot_data['p_memristor']
+        
+        # Clear all axes
+        for ax in axes.values():
+            ax.clear()
+        
+        # Plot 1: Voltage Breakdown
+        axes['voltage'].plot(t, v_smu, 'g-', label='V_SMU (Applied)', linewidth=2, alpha=0.7)
+        axes['voltage'].plot(t, v_shunt, 'b-', label='V_shunt (Measured)', linewidth=2)
+        axes['voltage'].plot(t, v_memristor, 'r-', label='V_memristor (Calculated)', linewidth=2)
+        axes['voltage'].set_ylabel("Voltage (V)")
+        axes['voltage'].set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=11, fontweight='bold')
+        axes['voltage'].set_xlabel("Time (s)")
+        axes['voltage'].grid(True, alpha=0.3)
+        axes['voltage'].legend(loc='best', fontsize=8)
+        
+        # Plot 2: Current
+        axes['current'].plot(t, i, 'r-', linewidth=2, label='Current')
+        axes['current'].set_ylabel("Current (A)")
+        axes['current'].set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=11, fontweight='bold')
+        axes['current'].set_xlabel("Time (s)")
+        axes['current'].grid(True, alpha=0.3)
+        axes['current'].legend(loc='best', fontsize=8)
+        
+        # Plot 3: Resistance
+        valid_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
+        if np.any(valid_mask):
+            r_plot = r_memristor[valid_mask]
+            t_plot = t[valid_mask]
+            
+            # Convert to appropriate units
+            if np.max(r_plot) >= 1e6:
+                r_plot_display = r_plot / 1e6
+                unit = "MΩ"
+            elif np.max(r_plot) >= 1e3:
+                r_plot_display = r_plot / 1e3
+                unit = "kΩ"
+            else:
+                r_plot_display = r_plot
+                unit = "Ω"
+            
+            axes['resistance'].plot(t_plot, r_plot_display, 'purple', linewidth=2, label=f'R_memristor ({unit})')
+            
+            # Add annotations
+            if len(r_plot) > 0:
+                initial_r = r_plot[0]
+                final_r = r_plot[-1]
+                
+                def format_r(r_val):
+                    if r_val >= 1e6:
+                        return f"{r_val/1e6:.2f} MΩ"
+                    elif r_val >= 1e3:
+                        return f"{r_val/1e3:.2f} kΩ"
+                    else:
+                        return f"{r_val:.2f} Ω"
+                
+                axes['resistance'].annotate(f'Initial: {format_r(initial_r)}', 
+                                           xy=(t_plot[0], r_plot_display[0]), 
+                                           xytext=(10, 10), textcoords='offset points',
+                                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
+                                           fontsize=7)
+                
+                if abs(final_r - initial_r) / max(abs(initial_r), 1e-12) > 0.01:
+                    axes['resistance'].annotate(f'Final: {format_r(final_r)}', 
+                                               xy=(t_plot[-1], r_plot_display[-1]), 
+                                               xytext=(10, -20), textcoords='offset points',
+                                               bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgreen', alpha=0.7),
+                                               arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
+                                               fontsize=7)
+            
+            axes['resistance'].set_ylabel(f"Resistance ({unit})")
+        else:
+            axes['resistance'].set_ylabel("Resistance (Ω)")
+        
+        axes['resistance'].set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=11, fontweight='bold')
+        axes['resistance'].set_xlabel("Time (s)")
+        axes['resistance'].grid(True, alpha=0.3)
+        axes['resistance'].legend(loc='best', fontsize=8)
+        
+        # Plot 4: Power
+        axes['power'].plot(t, p_memristor, 'orange', linewidth=2, label='Power')
+        
+        # Add peak power annotation
+        if len(p_memristor) > 0:
+            peak_power_idx = np.nanargmax(p_memristor)
+            peak_power = p_memristor[peak_power_idx]
+            if peak_power > 0:
+                axes['power'].annotate(f'Peak: {peak_power*1e3:.2f} mW', 
+                                      xy=(t[peak_power_idx], peak_power), 
+                                      xytext=(10, 10), textcoords='offset points',
+                                      bbox=dict(boxstyle='round,pad=0.3', facecolor='orange', alpha=0.7),
+                                      arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
+                                      fontsize=7)
+        
+        axes['power'].set_ylabel("Power (W)")
+        axes['power'].set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=11, fontweight='bold')
+        axes['power'].set_xlabel("Time (s)")
+        axes['power'].grid(True, alpha=0.3)
+        axes['power'].legend(loc='best', fontsize=8)
+        
+        plot_info['canvas'].draw()
+    
+    def _update_voltage_tab(self):
+        """Update voltage breakdown tab"""
+        if 'Voltage Breakdown' not in self.plot_lines:
+            return
+        
+        plot_info = self.plot_lines['Voltage Breakdown']
+        ax = plot_info['ax']
+        ax.clear()
+        
+        t = self.plot_data['t']
+        v_smu = self.plot_data['v_smu']
+        v_shunt = self.plot_data['v_shunt']
+        v_memristor = self.plot_data['v_memristor']
+        
+        # Plot lines and store references
+        line1 = ax.plot(t, v_smu, 'g-', label='V_SMU (Applied)', linewidth=2, alpha=0.7)[0]
+        line2 = ax.plot(t, v_shunt, 'b-', label='V_shunt (Measured)', linewidth=2)[0]
+        line3 = ax.plot(t, v_memristor, 'r-', label='V_memristor (Calculated)', linewidth=2)[0]
+        
+        plot_info['lines'] = {
+            'V_SMU': line1,
+            'V_shunt': line2,
+            'V_memristor': line3
+        }
+        
+        ax.set_ylabel("Voltage (V)")
+        ax.set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=12, fontweight='bold')
+        ax.set_xlabel("Time (s)")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=9)
+        
+        # Add checkboxes for line visibility
+        self._add_line_visibility_controls('Voltage Breakdown', ['V_SMU', 'V_shunt', 'V_memristor'])
+        
+        plot_info['canvas'].draw()
+    
+    def _update_current_tab(self):
+        """Update current tab"""
+        if 'Current' not in self.plot_lines:
+            return
+        
+        plot_info = self.plot_lines['Current']
+        ax = plot_info['ax']
+        ax.clear()
+        
+        t = self.plot_data['t']
+        i = self.plot_data['i']
+        
+        line = ax.plot(t, i, 'r-', label='Current', linewidth=2)[0]
+        plot_info['lines'] = {'Current': line}
+        
+        ax.set_ylabel("Current (A)")
+        ax.set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=12, fontweight='bold')
+        ax.set_xlabel("Time (s)")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=9)
+        
+        self._add_line_visibility_controls('Current', ['Current'])
+        plot_info['canvas'].draw()
+    
+    def _update_resistance_tab(self):
+        """Update resistance tab"""
+        if 'Resistance' not in self.plot_lines:
+            return
+        
+        plot_info = self.plot_lines['Resistance']
+        ax = plot_info['ax']
+        ax.clear()
+        
+        t = self.plot_data['t']
+        r_memristor = self.plot_data['r_memristor']
+        
+        valid_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
+        if np.any(valid_mask):
+            r_plot = r_memristor[valid_mask]
+            t_plot = t[valid_mask]
+            
+            # Convert to appropriate units
+            if np.max(r_plot) >= 1e6:
+                r_plot_display = r_plot / 1e6
+                unit = "MΩ"
+            elif np.max(r_plot) >= 1e3:
+                r_plot_display = r_plot / 1e3
+                unit = "kΩ"
+            else:
+                r_plot_display = r_plot
+                unit = "Ω"
+            
+            line = ax.plot(t_plot, r_plot_display, 'purple', linewidth=2, label=f'R_memristor ({unit})')[0]
+            plot_info['lines'] = {'R_memristor': line}
+            
+            # Add annotations
+            if len(r_plot) > 0:
+                initial_r = r_plot[0]
+                final_r = r_plot[-1]
+                
+                def format_r(r_val):
+                    if r_val >= 1e6:
+                        return f"{r_val/1e6:.2f} MΩ"
+                    elif r_val >= 1e3:
+                        return f"{r_val/1e3:.2f} kΩ"
+                    else:
+                        return f"{r_val:.2f} Ω"
+                
+                ax.annotate(f'Initial: {format_r(initial_r)}', 
+                           xy=(t_plot[0], r_plot_display[0]), 
+                           xytext=(10, 10), textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
+                           fontsize=8)
+                
+                if abs(final_r - initial_r) / max(abs(initial_r), 1e-12) > 0.01:
+                    ax.annotate(f'Final: {format_r(final_r)}', 
+                               xy=(t_plot[-1], r_plot_display[-1]), 
+                               xytext=(10, -20), textcoords='offset points',
+                               bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgreen', alpha=0.7),
+                               arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
+                               fontsize=8)
+            
+            ax.set_ylabel(f"Resistance ({unit})")
+        else:
+            plot_info['lines'] = {}
+            ax.set_ylabel("Resistance (Ω)")
+        
+        ax.set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=12, fontweight='bold')
+        ax.set_xlabel("Time (s)")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=9)
+        
+        self._add_line_visibility_controls('Resistance', ['R_memristor'])
+        plot_info['canvas'].draw()
+    
+    def _update_power_tab(self):
+        """Update power tab"""
+        if 'Power' not in self.plot_lines:
+            return
+        
+        plot_info = self.plot_lines['Power']
+        ax = plot_info['ax']
+        ax.clear()
+        
+        t = self.plot_data['t']
+        p_memristor = self.plot_data['p_memristor']
+        
+        line = ax.plot(t, p_memristor, 'orange', linewidth=2, label='Power')[0]
+        plot_info['lines'] = {'Power': line}
+        
+        # Add peak power annotation
+        if len(p_memristor) > 0:
+            peak_power_idx = np.nanargmax(p_memristor)
+            peak_power = p_memristor[peak_power_idx]
+            if peak_power > 0:
+                ax.annotate(f'Peak: {peak_power*1e3:.2f} mW', 
+                           xy=(t[peak_power_idx], peak_power), 
+                           xytext=(10, 10), textcoords='offset points',
+                           bbox=dict(boxstyle='round,pad=0.3', facecolor='orange', alpha=0.7),
+                           arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'),
+                           fontsize=8)
+        
+        ax.set_ylabel("Power (W)")
+        ax.set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=12, fontweight='bold')
+        ax.set_xlabel("Time (s)")
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=9)
+        
+        self._add_line_visibility_controls('Power', ['Power'])
+        plot_info['canvas'].draw()
+    
+    def _add_line_visibility_controls(self, tab_name, line_names):
+        """Add checkboxes to toggle line visibility"""
+        if tab_name not in self.plot_lines:
+            return
+        
+        plot_info = self.plot_lines[tab_name]
+        control_frame = plot_info['control_frame']
+        
+        # Clear existing checkboxes
+        for widget in control_frame.winfo_children():
+            widget.destroy()
+        
+        ttk.Label(control_frame, text="Show:", font=("Segoe UI", 9)).pack(side="left", padx=5)
+        
+        # Create checkboxes for each line
+        for line_name in line_names:
+            if line_name in plot_info['lines']:
+                var = tk.BooleanVar(value=True)
+                cb = ttk.Checkbutton(control_frame, text=line_name, variable=var,
+                                    command=lambda ln=line_name, v=var: self._toggle_line_visibility(tab_name, ln, v))
+                cb.pack(side="left", padx=5)
+                plot_info['checkboxes'][line_name] = var
+    
+    def _toggle_line_visibility(self, tab_name, line_name, var):
+        """Toggle visibility of a plot line"""
+        if tab_name not in self.plot_lines:
+            return
+        if line_name not in self.plot_lines[tab_name]['lines']:
+            return
+        
+        line = self.plot_lines[tab_name]['lines'][line_name]
+        line.set_visible(var.get())
+        self.plot_lines[tab_name]['canvas'].draw()
 
     def set_status(self, msg):
         """Set status message"""

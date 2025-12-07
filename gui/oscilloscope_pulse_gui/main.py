@@ -6,6 +6,9 @@ import numpy as np
 import json
 from pathlib import Path
 
+# Get project root (go up from gui/oscilloscope_pulse_gui/ to project root)
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]  # gui/oscilloscope_pulse_gui/main.py -> gui -> root
+
 # --- Standalone Execution Hack ---
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -115,6 +118,36 @@ class OscilloscopePulseGUI(tk.Toplevel):
         self.last_data = None
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _load_systems_from_json(self):
+        """Load system configurations from JSON file (same method as measurement GUI)
+        
+        Returns:
+            List of system config names (e.g., ['Lab_Laser-4200A_C', 'Lab Small-2401', ...])
+            Same format as measurement GUI - uses named configs, not just system types
+        """
+        config_file = _PROJECT_ROOT / "Json_Files" / "system_configs.json"
+        
+        try:
+            with open(config_file, 'r') as f:
+                system_configs = json.load(f)
+            
+            # Store configs for later use
+            self.system_configs = system_configs
+            
+            # Return list of config names (same as measurement GUI)
+            systems_list = list(system_configs.keys())
+            
+            # Fallback if no systems found
+            if not systems_list:
+                systems_list = ["No systems available"]
+            
+            return systems_list
+        except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+            print(f"Warning: Could not load systems from JSON: {e}")
+            # Fallback
+            self.system_configs = {}
+            return ["No systems available"]
+    
     def _populate_context_defaults(self):
         """Ensure context has necessary keys, auto-discovering if standalone."""
         if 'device_label' not in self.context: self.context['device_label'] = "Stand-alone"
@@ -123,8 +156,9 @@ class OscilloscopePulseGUI(tk.Toplevel):
             self.context['save_directory'] = str(Path.home() / "Documents" / "PulseData")
             os.makedirs(self.context['save_directory'], exist_ok=True)
             
+        # Load systems from JSON file (same method as measurement GUI)
         if 'known_systems' not in self.context:
-            self.context['known_systems'] = ["keithley4200a", "keithley2450"]
+            self.context['known_systems'] = self._load_systems_from_json()
 
         # Hardware Discovery (if standalone or not provided)
         if 'smu_ports' not in self.context or not self.context['smu_ports']:
@@ -196,26 +230,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
     def _on_data_received(self, t, v, i, metadata):
         def update_plot():
             self.last_data = (t, v, i, metadata)
-            # Update plots including zoom
-            self.layout.update_plots(t, v, i)
-            
-            # Zoom logic: center closely around pulse
-            # We know params['pre_pulse_delay'] and duration
-            # But simpler: find where v > 0.1 * max(v) ?
-            # Logic: Zoom to [start_of_pulse - margin, end_of_pulse + margin]
-            # If simulated or we trust timing:
-            try:
-                # Metadata might carry exact timing from logic?
-                # If not, use config
-                pre = float(self.config.get('pre_pulse_delay', 0.1))
-                dur = float(self.config.get('pulse_duration', 0.001))
-                zoomed_start = max(0, pre - dur*0.5)
-                zoomed_end = pre + dur*1.5 
-                
-                self.layout.ax_zoom.set_xlim(zoomed_start, zoomed_end)
-                self.layout.canvas.draw()
-            except:
-                pass
+            # Update plots with metadata for calculations
+            self.layout.update_plots(t, v, i, metadata)
                 
         self.after(0, update_plot)
 
@@ -230,10 +246,15 @@ class OscilloscopePulseGUI(tk.Toplevel):
             else:
                 self.layout.set_status("Measurement Complete.")
                 
-            # Auto-save Check? Or "Simple Save" flow?
-            # User requirement: "simple save will forced" if standalone
-            # Actually standard practice: Just save to default dir with timestamp
-            self._auto_save_if_needed()
+            # Auto-save if enabled
+            auto_save_var = self.layout.vars.get('auto_save')
+            if auto_save_var:
+                auto_save_enabled = auto_save_var.get()
+            else:
+                auto_save_enabled = True  # Default to enabled if not set
+            
+            if auto_save_enabled:
+                self._auto_save_if_needed()
             
         self.after(0, reset_ui)
         
@@ -276,6 +297,40 @@ class OscilloscopePulseGUI(tk.Toplevel):
 
     def _write_file(self, filename, t, v, i, meta):
         try:
+            import numpy as np
+            
+            # Calculate all derived quantities for saving
+            pulse_voltage = meta.get('pulse_voltage', 1.0)
+            if 'params' in meta:
+                params = meta['params']
+                pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
+                pre_delay = float(params.get('pre_pulse_delay', 0.1))
+                pulse_duration = float(params.get('pulse_duration', 0.001))
+            else:
+                pre_delay = 0.1
+                pulse_duration = 0.001
+            
+            shunt_r = meta.get('shunt_resistance', 50.0)
+            
+            # V_shunt is what we measured (v)
+            v_shunt = v
+            
+            # V_SMU is the applied pulse voltage
+            pulse_start = pre_delay
+            pulse_end = pre_delay + pulse_duration
+            v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
+            
+            # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
+            v_memristor = np.maximum(v_smu - v_shunt, 0.0)
+            
+            # R_memristor = V_memristor / I (Ohm's law)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                r_memristor = np.divide(v_memristor, i, out=np.full_like(v_memristor, np.nan), where=i!=0)
+                r_memristor = np.where(np.isfinite(r_memristor) & (r_memristor < 1e12), r_memristor, np.nan)
+            
+            # P_memristor = V_memristor × I
+            p_memristor = np.maximum(v_memristor * i, 0.0)
+            
             if filename.endswith('.txt'):
                 with open(filename, 'w') as f:
                     import datetime
@@ -283,33 +338,124 @@ class OscilloscopePulseGUI(tk.Toplevel):
                     f.write(f"Timestamp: {datetime.datetime.now()}\n")
                     f.write(f"Device: {self.context.get('device_label', 'Unknown')}\n")
                     f.write(f"Sample: {self.context.get('sample_name', 'Unknown')}\n")
-                    f.write("-" * 40 + "\n")
-                    f.write("Parameters:\n")
+                    f.write("=" * 60 + "\n")
+                    f.write("MEASUREMENT PARAMETERS\n")
+                    f.write("=" * 60 + "\n")
                     # Handle nested meta params
                     params = meta.get('params', meta)
                     for k, val in params.items():
                         if isinstance(val, (str, int, float, bool)):
                            f.write(f"{k}: {val}\n")
-                    f.write("-" * 40 + "\n")
-                    f.write("Time(s)\tVoltage(V)\tCurrent(A)\n")
+                    f.write("\n")
+                    f.write("=" * 60 + "\n")
+                    f.write("CALCULATED VALUES SUMMARY\n")
+                    f.write("=" * 60 + "\n")
+                    
+                    # Calculate statistics
+                    valid_r_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
+                    if np.any(valid_r_mask):
+                        r_valid = r_memristor[valid_r_mask]
+                        initial_r = r_valid[0] if len(r_valid) > 0 else np.nan
+                        final_r = r_valid[-1] if len(r_valid) > 0 else np.nan
+                        min_r = np.nanmin(r_valid) if len(r_valid) > 0 else np.nan
+                        max_r = np.nanmax(r_valid) if len(r_valid) > 0 else np.nan
+                        mean_r = np.nanmean(r_valid) if len(r_valid) > 0 else np.nan
+                        
+                        def format_resistance(r_val):
+                            if np.isnan(r_val):
+                                return "N/A"
+                            if r_val >= 1e6:
+                                return f"{r_val/1e6:.3f} MΩ"
+                            elif r_val >= 1e3:
+                                return f"{r_val/1e3:.3f} kΩ"
+                            else:
+                                return f"{r_val:.3f} Ω"
+                        
+                        f.write(f"Initial Memristor Resistance: {format_resistance(initial_r)}\n")
+                        f.write(f"Final Memristor Resistance: {format_resistance(final_r)}\n")
+                        f.write(f"Minimum Memristor Resistance: {format_resistance(min_r)}\n")
+                        f.write(f"Maximum Memristor Resistance: {format_resistance(max_r)}\n")
+                        f.write(f"Mean Memristor Resistance: {format_resistance(mean_r)}\n")
+                        if not np.isnan(initial_r) and not np.isnan(final_r) and initial_r > 0:
+                            resistance_ratio = final_r / initial_r
+                            f.write(f"Resistance Ratio (Final/Initial): {resistance_ratio:.4f}\n")
+                    
+                    # Power statistics
+                    if len(p_memristor) > 0:
+                        peak_power = np.nanmax(p_memristor)
+                        mean_power = np.nanmean(p_memristor[p_memristor > 0]) if np.any(p_memristor > 0) else 0.0
+                        total_energy = np.trapz(p_memristor, t)  # Integrate power over time
+                        f.write(f"\nPeak Power: {peak_power*1e3:.3f} mW\n")
+                        f.write(f"Mean Power: {mean_power*1e3:.3f} mW\n")
+                        f.write(f"Total Energy: {total_energy*1e3:.3f} mJ\n")
+                    
+                    # Current statistics
+                    if len(i) > 0:
+                        peak_current = np.nanmax(np.abs(i))
+                        mean_current = np.nanmean(np.abs(i[i != 0])) if np.any(i != 0) else 0.0
+                        f.write(f"\nPeak Current: {peak_current*1e3:.3f} mA\n")
+                        f.write(f"Mean Current: {mean_current*1e3:.3f} mA\n")
+                    
+                    f.write("\n")
+                    f.write("=" * 60 + "\n")
+                    f.write("TIME SERIES DATA\n")
+                    f.write("=" * 60 + "\n")
+                    f.write("Time(s)\tV_SMU(V)\tV_shunt(V)\tV_memristor(V)\tCurrent(A)\tR_memristor(Ω)\tPower(W)\n")
                     
                     # Write Data
                     for j in range(len(t)):
-                        f.write(f"{t[j]:.9e}\t{v[j]:.9e}\t{i[j]:.9e}\n")
+                        r_str = f"{r_memristor[j]:.9e}" if not np.isnan(r_memristor[j]) else "NaN"
+                        f.write(f"{t[j]:.9e}\t{v_smu[j]:.9e}\t{v_shunt[j]:.9e}\t{v_memristor[j]:.9e}\t{i[j]:.9e}\t{r_str}\t{p_memristor[j]:.9e}\n")
                         
             elif filename.endswith('.json'):
                 data = meta.copy()
                 data['time'] = t.tolist()
-                data['voltage'] = v.tolist()
+                data['voltage_shunt'] = v.tolist()
+                data['voltage_smu'] = v_smu.tolist()
+                data['voltage_memristor'] = v_memristor.tolist()
                 data['current'] = i.tolist()
+                # Convert NaN to None for JSON compatibility
+                r_memristor_list = [float(x) if not np.isnan(x) else None for x in r_memristor]
+                data['resistance_memristor'] = r_memristor_list
+                data['power_memristor'] = p_memristor.tolist()
+                # Add statistics
+                valid_r_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
+                if np.any(valid_r_mask):
+                    r_valid = r_memristor[valid_r_mask]
+                    data['statistics'] = {
+                        'initial_resistance': float(r_valid[0]) if len(r_valid) > 0 else None,
+                        'final_resistance': float(r_valid[-1]) if len(r_valid) > 0 else None,
+                        'min_resistance': float(np.nanmin(r_valid)) if len(r_valid) > 0 else None,
+                        'max_resistance': float(np.nanmax(r_valid)) if len(r_valid) > 0 else None,
+                        'mean_resistance': float(np.nanmean(r_valid)) if len(r_valid) > 0 else None,
+                        'peak_power': float(np.nanmax(p_memristor)) if len(p_memristor) > 0 else None,
+                        'total_energy': float(np.trapz(p_memristor, t)) if len(p_memristor) > 0 else None,
+                        'peak_current': float(np.nanmax(np.abs(i))) if len(i) > 0 else None
+                    }
                 with open(filename, 'w') as f:
                     json.dump(data, f, indent=2)
             elif filename.endswith('.csv'):
                 import pandas as pd
-                df = pd.DataFrame({'time': t, 'voltage': v, 'current': i})
+                df = pd.DataFrame({
+                    'time': t,
+                    'voltage_smu': v_smu,
+                    'voltage_shunt': v_shunt,
+                    'voltage_memristor': v_memristor,
+                    'current': i,
+                    'resistance_memristor': r_memristor,
+                    'power_memristor': p_memristor
+                })
                 df.to_csv(filename, index=False)
             elif filename.endswith('.npz'):
-                np.savez(filename, time=t, voltage=v, current=i, metadata=meta)
+                np.savez(filename, 
+                        time=t, 
+                        voltage_shunt=v_shunt, 
+                        voltage_smu=v_smu,
+                        voltage_memristor=v_memristor,
+                        current=i, 
+                        resistance_memristor=r_memristor,
+                        power_memristor=p_memristor,
+                        metadata=meta)
             
             messagebox.showinfo("Success", f"Saved to {os.path.basename(filename)}")
         except Exception as e:
@@ -329,14 +475,29 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 return
             
             address = self.layout.vars['smu_address'].get()
-            system_name = self.layout.vars['system'].get()
+            system_config_name = self.layout.vars['system'].get()
             
-            # Auto-detect system if possible
-            if detect_system_from_address:
-                detected = detect_system_from_address(address)
-                if detected and detected != system_name:
-                    self.layout.vars['system'].set(detected)
-                    system_name = detected
+            # Determine system type from config name (same as measurement GUI)
+            system_type = None
+            if hasattr(self, 'system_configs') and system_config_name in self.system_configs:
+                config = self.system_configs[system_config_name]
+                smu_type = config.get("SMU Type", "").lower()
+                
+                # Map SMU Type to system identifier
+                if "4200" in smu_type or "4200a" in smu_type:
+                    system_type = "keithley4200a"
+                elif "2450" in smu_type:
+                    system_type = "keithley2450"
+                elif "2400" in smu_type or "2401" in smu_type:
+                    system_type = "keithley2400"
+            
+            # Fallback: auto-detect system from address if config lookup failed
+            if not system_type and detect_system_from_address:
+                system_type = detect_system_from_address(address)
+            
+            if not system_type:
+                messagebox.showerror("Error", "Could not determine system type. Please check system configuration.")
+                return
             
             # Connect using system wrapper
             self.layout.vars['smu_status'].set("Connecting...")
@@ -345,7 +506,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
             
             connected_system = self.system_wrapper.connect(
                 address=address,
-                system_name=system_name
+                system_name=system_type  # Use system type, not config name
             )
             
             self.current_system_name = connected_system
@@ -365,15 +526,76 @@ class OscilloscopePulseGUI(tk.Toplevel):
             messagebox.showerror("Connection Error", f"Failed to connect to SMU: {str(e)}")
 
     def _on_system_change(self):
-        """Callback when system dropdown changes"""
-        system = self.layout.vars.get('system', tk.StringVar()).get()
-        if system and self.system_wrapper:
-            # Update any system-specific settings if needed
-            self.config['system'] = system
-            # self.logic.set_system(system) # If logic supports it
+        """Callback when system dropdown changes - auto-populates SMU address from JSON config
+        Same method as measurement GUI - uses named config selection
+        """
+        system_config_name = self.layout.vars.get('system', tk.StringVar()).get()
+        if not system_config_name or system_config_name == "No systems available":
+            return
+        
+        # Update config
+        self.config['system'] = system_config_name
+        
+        # Load system configs if not already loaded
+        if not hasattr(self, 'system_configs') or not self.system_configs:
+            try:
+                config_file = _PROJECT_ROOT / "Json_Files" / "system_configs.json"
+                with open(config_file, 'r') as f:
+                    self.system_configs = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError, KeyError):
+                self.layout.set_status("⚠️ Could not load system configs from JSON")
+                return
+        
+        # Get the selected config (same as measurement GUI)
+        if system_config_name not in self.system_configs:
+            self.layout.set_status(f"⚠️ System config '{system_config_name}' not found")
+            return
+        
+        config = self.system_configs[system_config_name]
+        smu_address = config.get("SMU_address", "")
+        smu_type = config.get("SMU Type", "")
+        
+        if not smu_address:
+            self.layout.set_status(f"⚠️ No SMU address found for '{system_config_name}'")
+            return
+        
+        # For 2450, try to find a USB device with "2450" in it (auto-detect if USB)
+        if "2450" in smu_type and smu_address.startswith("USB"):
+            try:
+                import pyvisa
+                rm = pyvisa.ResourceManager()
+                resources = list(rm.list_resources())
+                
+                # Look for USB devices containing "2450"
+                for res in resources:
+                    if res.startswith('USB') and '2450' in res.upper():
+                        smu_address = res
+                        break
+            except:
+                pass  # Use config address if scanning fails
+        
+        # Update the SMU address field
+        if 'smu_address' in self.layout.vars:
+            self.layout.vars['smu_address'].set(smu_address)
+            self.config['smu_address'] = smu_address
+            
+            # Update the combobox values if it exists
+            if 'smu_address' in self.layout.widgets:
+                combo = self.layout.widgets['smu_address']
+                current_values = list(combo['values']) if combo['values'] else []
+                if smu_address not in current_values:
+                    combo['values'] = list(current_values) + [smu_address]
+            
+            self.layout.set_status(f"System: {system_config_name} ({smu_type}), address: {smu_address}")
     
-    def _quick_test_device(self, voltage):
-        """Perform a quick pulse to measure device current at specified voltage"""
+    def _quick_test_device(self, voltage, duration=0.1, compliance=None):
+        """Perform a quick pulse to measure device current at specified voltage
+        
+        Args:
+            voltage: Pulse voltage in volts
+            duration: Pulse duration in seconds (default: 0.1)
+            compliance: Current compliance in amps (default: from GUI or 0.001)
+        """
         try:
             # Check if SMU is connected via SystemWrapper
             if not self.system_wrapper or not self.system_wrapper.is_connected():
@@ -381,8 +603,9 @@ class OscilloscopePulseGUI(tk.Toplevel):
             
             smu = self.system_wrapper.current_system
             
-            # Simple measurement: apply voltage and read current
-            compliance = float(self.layout.vars.get('current_compliance', tk.StringVar(value="0.001")).get())
+            # Get compliance from parameter or GUI
+            if compliance is None:
+                compliance = float(self.layout.vars.get('current_compliance', tk.StringVar(value="0.001")).get())
             
             # For 4200A, we need to use specific methods
             # For 2450, we use standard set_voltage/enable_output
@@ -391,7 +614,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 try:
                     result = smu.smu_slow_pulse_measure(
                         pulse_voltage=voltage,
-                        pulse_width=0.1,  # 100ms pulse
+                        pulse_width=duration,
                         i_compliance=compliance,
                         i_range=compliance  # Auto-range
                     )
@@ -411,7 +634,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 
                 # Wait for settling
                 import time
-                time.sleep(0.05)
+                time.sleep(min(0.05, duration * 0.1))  # Wait proportional to duration
                 
                 # Measure current
                 current = smu.measure_current()

@@ -122,49 +122,80 @@ class PulseMeasurementLogic:
                 if auto_configure:
                     print("  Auto-configuring oscilloscope settings...")
                     try:
-                        # Set trigger
+                        # Step 1: Enable and configure channel FIRST (before trigger)
+                        # Enable channel display
+                        self.scope_manager.enable_channel(scope_ch, enable=True)
+                        print(f"    Channel CH{scope_ch}: Enabled")
+                        
+                        # Set channel coupling to DC (required for shunt resistor measurements)
+                        self.scope_manager.configure_channel(scope_ch, coupling='DC')
+                        print(f"    Channel CH{scope_ch}: DC coupling")
+                        
+                        # Set voltage scale
+                        v_scale_val = params.get('voltage_scale') or params.get('scope_vscale')
+                        if v_scale_val:
+                            v_scale = float(v_scale_val)
+                        else:
+                            # Auto-calculate: use pulse voltage / 3 to show pulse with some headroom
+                            v_scale = pulse_voltage / 3.0
+                            # Ensure reasonable minimum (at least 10mV/div for small signals)
+                            v_scale = max(v_scale, 0.01)
+                        
+                        self.scope_manager.configure_channel(scope_ch, volts_per_div=v_scale)
+                        print(f"    Voltage scale: {v_scale:.3f} V/div")
+                        
+                        # Step 2: Configure timebase
+                        t_scale = params.get('timebase_scale') or params.get('scope_timebase')
+                        if t_scale:
+                            timebase = float(t_scale)
+                            self.scope_manager.configure_timebase(time_per_div=timebase)
+                            print(f"    Timebase: {timebase*1e3:.3f} ms/div")
+                            
+                            # Validate that timebase is large enough for total measurement time
+                            total_measurement_time = pre_delay + duration + post_delay
+                            time_window = timebase * 10.0  # 10 divisions on screen
+                            if time_window < total_measurement_time:
+                                print(f"    ⚠️ WARNING: Timebase too small!")
+                                print(f"       Time window: {time_window:.3f}s, Required: {total_measurement_time:.3f}s")
+                                print(f"       Recommended timebase: {(total_measurement_time * 1.2) / 10.0:.3f} s/div")
+                        else:
+                            # Auto-calculate based on TOTAL measurement time (not just pulse duration)
+                            # Total time = pre_delay + duration + post_delay
+                            total_measurement_time = pre_delay + duration + post_delay
+                            # Add 20% margin for safety and ensure we capture the full window
+                            # Timebase = (total_time + margin) / 10 divisions
+                            timebase = (total_measurement_time * 1.2) / 10.0
+                            
+                            # Ensure minimum timebase for very short pulses (at least 1ms/div)
+                            min_timebase = 1e-3 / 10.0  # 1ms/div minimum
+                            timebase = max(timebase, min_timebase)
+                            
+                            self.scope_manager.configure_timebase(time_per_div=timebase)
+                            time_window = timebase * 10.0
+                            print(f"    Timebase: {timebase*1e3:.3f} ms/div (auto-calculated)")
+                            print(f"    Time window: {time_window:.3f}s (covers {total_measurement_time:.3f}s measurement)")
+                        
+                        # Step 3: Set horizontal position (trigger position)
+                        # Position trigger at ~40% from left (4 divisions) to capture pre-pulse
+                        try:
+                            if self.scope_manager.scope:
+                                trigger_offset = 4.0 * timebase
+                                if hasattr(self.scope_manager.scope, 'set_timebase_position'):
+                                    self.scope_manager.scope.set_timebase_position(trigger_offset)
+                                    print(f"    Horizontal Pos: {trigger_offset:.3f}s (Trigger at ~40% from left)")
+                        except Exception as ex:
+                            print(f"    Failed to set horiz pos: {ex}")
+                        
+                        # Step 4: Configure trigger (AFTER channel and timebase are set)
                         trigger_level = pulse_voltage * 0.5  # Trigger at 50% of pulse voltage
                         trigger_slope = params.get('trigger_slope', 'RISING')
                         self.scope_manager.configure_trigger(
                             source=f'CH{scope_ch}', 
                             level=trigger_level, 
                             slope=trigger_slope, 
-                            mode='NORMAL'
+                            mode='NORMAL'  # NORMAL mode waits for trigger
                         )
                         print(f"    Trigger: CH{scope_ch} @ {trigger_level:.3f}V ({trigger_slope})")
-                        
-                        # Set timebase if provided
-                        t_scale = params.get('timebase_scale') or params.get('scope_timebase')
-                        if t_scale:
-                            timebase = float(t_scale)
-                            self.scope_manager.configure_timebase(time_per_div=timebase)
-                            print(f"    Timebase: {timebase*1e3:.3f} ms/div")
-                        else:
-                            # Auto-calculate
-                            timebase = duration / 2.0 
-                            self.scope_manager.configure_timebase(time_per_div=timebase)
-                            print(f"    Timebase: {timebase*1e6:.1f} µs/div (auto)")
-                        
-                        # Set horizontal position (10% left)
-                        try:
-                            if self.scope_manager.scope:
-                                trigger_offset = 4.0 * timebase
-                                if hasattr(self.scope_manager.scope, 'set_timebase_position'):
-                                    self.scope_manager.scope.set_timebase_position(trigger_offset)
-                                    print(f"    Horizontal Pos: {trigger_offset}s (Trigger at left)")
-                        except Exception as ex:
-                            print(f"    Failed to set horiz pos: {ex}")
-                            
-                        # Set voltage scale
-                        v_scale_val = params.get('voltage_scale') or params.get('scope_vscale')
-                        if v_scale_val:
-                            v_scale = float(v_scale_val)
-                            self.scope_manager.configure_channel(scope_ch, volts_per_div=v_scale)
-                            print(f"    Voltage scale: {v_scale:.3f} V/div")
-                        else:
-                            v_scale = pulse_voltage / 3.0
-                            self.scope_manager.configure_channel(scope_ch, volts_per_div=v_scale)
-                            print(f"    Voltage scale: {v_scale:.3f} V/div (auto)")
                             
                         print("  Scope configuration sent. Waiting for settling...")
                         time.sleep(1.0) 
@@ -293,22 +324,66 @@ class PulseMeasurementLogic:
             on_progress("Acquiring data...")
             
             if simulation_mode:
-                # Generate fake data
+                # Generate realistic memristor switching simulation
                 total_time = pre_delay + duration + post_delay
-                t = np.linspace(0, total_time, 1000)
-                v_scope = np.zeros_like(t)
+                num_points = 5000  # Higher resolution for smooth switching
+                t = np.linspace(0, total_time, num_points)
                 
-                # Create a pulse in the middle
-                start_idx = int(1000 * (pre_delay / total_time))
-                end_idx = int(1000 * ((pre_delay + duration) / total_time))
+                # Memristor parameters
+                r_initial = 10000.0  # Initial resistance: 10 kΩ (high resistance state)
+                r_final = 1000.0     # Final resistance: 1 kΩ (low resistance state)
+                switching_time = duration * 0.3  # Switch over 30% of pulse duration
+                switching_start = pre_delay + duration * 0.1  # Start switching 10% into pulse
                 
-                # Add some rise/fall time and noise
-                v_scope[start_idx:end_idx] = pulse_voltage * (shunt_r / (shunt_r + 1000)) # voltage divider effect
-                noise = np.random.normal(0, 0.01, len(t))
+                # Calculate memristor resistance over time
+                r_memristor_t = np.full_like(t, r_initial)
+                pulse_mask = (t >= pre_delay) & (t <= (pre_delay + duration))
+                
+                # During pulse, memristor switches from high to low resistance
+                for i, time_val in enumerate(t):
+                    if pulse_mask[i]:
+                        if time_val >= switching_start and time_val <= (switching_start + switching_time):
+                            # Exponential switching transition
+                            progress = (time_val - switching_start) / switching_time
+                            # Smooth exponential decay
+                            r_memristor_t[i] = r_initial * np.exp(-progress * np.log(r_initial / r_final))
+                        elif time_val > (switching_start + switching_time):
+                            # After switching, maintain low resistance
+                            r_memristor_t[i] = r_final
+                
+                # Calculate circuit behavior
+                # Total resistance: R_total = R_memristor + R_shunt
+                r_total = r_memristor_t + shunt_r
+                
+                # Current through circuit: I = V_SMU / R_total (during pulse)
+                current = np.zeros_like(t)
+                current[pulse_mask] = pulse_voltage / r_total[pulse_mask]
+                
+                # Voltage across shunt: V_shunt = I × R_shunt
+                v_scope = current * shunt_r
+                
+                # Add realistic noise (0.1% of signal)
+                noise_level = np.max(v_scope) * 0.001
+                noise = np.random.normal(0, noise_level, len(t))
                 v_scope += noise
                 
-                # Current (I = V / R)
-                current = v_scope / shunt_r
+                # Add rise/fall time to pulse edges (RC-like behavior)
+                rise_time = duration * 0.01  # 1% of pulse duration
+                fall_time = duration * 0.01
+                
+                # Smooth rise at pulse start
+                pulse_start = pre_delay
+                pulse_end = pre_delay + duration
+                rise_mask = (t >= pulse_start) & (t < (pulse_start + rise_time))
+                fall_mask = (t >= (pulse_end - fall_time)) & (t <= pulse_end)
+                
+                if np.any(rise_mask):
+                    rise_progress = (t[rise_mask] - pulse_start) / rise_time
+                    v_scope[rise_mask] *= (1 - np.exp(-5 * rise_progress))  # Exponential rise
+                
+                if np.any(fall_mask):
+                    fall_progress = (t[fall_mask] - (pulse_end - fall_time)) / fall_time
+                    v_scope[fall_mask] *= np.exp(-5 * fall_progress)  # Exponential fall
             else:
                 # Real acquisition
                 # The oscilloscope was connected earlier, but the VISA session may have
@@ -362,24 +437,19 @@ class PulseMeasurementLogic:
                 if len(t) == 0:
                     raise RuntimeError("Failed to acquire waveform from oscilloscope.")
                 
-                # Calculate Current
-                if params.get('measurement_method') == 'shunt':
-                    # I = V_shunt / R_shunt
-                    # Note: If measuring across shunt to ground, V_scope = V_shunt. 
-                    # If high-side shunt, this is more complex (requires differential probe or math).
-                    # Assuming Low-Side Shunt for standard setup (Device -> Shunt -> GND).
-                    current = v_scope / shunt_r
-                else:
-                    # SMU Current method fallback (not really synchronous with scope trace)
-                    # For this scope-centric tool, we might just return flat line or cached SMU reading?
-                    # Let's just return zeros if not using shunt, or user relies on V_scope only.
-                    current = np.zeros_like(v_scope)
+                # Calculate Current (always using shunt method)
+                # I = V_shunt / R_shunt
+                # Note: If measuring across shunt to ground, V_scope = V_shunt. 
+                # If high-side shunt, this is more complex (requires differential probe or math).
+                # Assuming Low-Side Shunt for standard setup (Device -> Shunt -> GND).
+                current = v_scope / shunt_r
 
             # --- 4. FINISH ---
             metadata = {
                 'timestamp': time.time(),
                 'params': params,
-                'shunt_resistance': shunt_r
+                'shunt_resistance': shunt_r,
+                'pulse_voltage': pulse_voltage  # Include for voltage breakdown calculation
             }
             
             on_data(t, v_scope, current, metadata)
