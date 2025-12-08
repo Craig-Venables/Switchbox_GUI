@@ -1,5 +1,5 @@
 {
-    "pulse_voltage": "2",
+    "pulse_voltage": "1",
     "pulse_duration": "1",
     "compliance": "0.1",
     "pre_pulse_delay": "0.1",

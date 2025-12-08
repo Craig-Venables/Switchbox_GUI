@@ -149,22 +149,25 @@ class PulseMeasurementLogic:
                             scope_inst.inst.timeout = timeout_ms
                             print(f"    VISA timeout: {timeout_ms/1000:.1f}s (prevents session expiration)")
                         
-                        # Step 1: Set probe attenuation to 1x (critical for correct readings!)
-                        try:
-                            scope_inst.write(f"CH{scope_ch}:PROBE 1")
-                            print(f"    Channel CH{scope_ch}: Probe set to 1x attenuation")
-                        except Exception as ex:
-                            print(f"    ⚠️ Could not set probe attenuation: {ex}")
-                        
-                        # Step 2: Set acquisition mode for best resolution
+                        # Step 1: Set acquisition mode for best resolution
                         if hasattr(scope_inst, 'configure_acquisition'):
                             scope_inst.configure_acquisition(mode='SAMPLE', stop_after='SEQUENCE')
                             print(f"    Acquisition mode: SAMPLE (single-shot)")
                         
-                        # Step 3: Enable and configure channel
+                        # Step 2: Enable and configure channel
                         self.scope_manager.enable_channel(scope_ch, enable=True)
                         self.scope_manager.configure_channel(scope_ch, coupling='DC')
                         print(f"    Channel CH{scope_ch}: Enabled, DC coupling")
+                        
+                        # Step 3: Set probe attenuation to 1x AFTER channel config (critical for correct readings!)
+                        # Reset sets it to 10x by default, so we must explicitly set to 1x
+                        try:
+                            scope_inst.write(f"CH{scope_ch}:PROBE 1")
+                            # Verify it was set correctly
+                            probe_setting = scope_inst.query(f"CH{scope_ch}:PROBE?").strip()
+                            print(f"    Channel CH{scope_ch}: Probe attenuation set to 1x (verified: {probe_setting})")
+                        except Exception as ex:
+                            print(f"    ⚠️ Could not set/verify probe attenuation: {ex}")
                         
                         # Step 4: Apply known-good settings from scope_settings.json
                         # Force record length to 20k (scope will clamp if needed)
@@ -278,6 +281,9 @@ class PulseMeasurementLogic:
                      self.scope_manager.configure_trigger(source=f'CH{scope_ch}', level=pulse_voltage*0.5, slope=params.get('trigger_slope', 'RISING'), mode='NORMAL')
                      print("  ✓ Scope configured for normal trigger mode")
                 
+                # Give scope a moment to fully arm before disconnecting
+                time.sleep(1.0)
+                
                 # CRITICAL: Close scope connection to prevent VISA conflicts with SMU
                 # The scope will hold the triggered waveform in SEQUENCE mode even when disconnected
                 print("  Closing scope connection (waveform will be held in memory)...")
@@ -288,8 +294,10 @@ class PulseMeasurementLogic:
                     except Exception as ex:
                         print(f"  ⚠️ Warning: Could not disconnect scope cleanly: {ex}") 
                 
-                # Wait a brief moment before firing the SMU pulse (let scope settle)
-                time.sleep(1.0)
+                # Wait for scope to fully settle after arming/disconnecting (critical for reliable triggering)
+                # On subsequent runs, the scope needs more time to be ready
+                print("  Waiting for scope to settle before SMU pulse (5 seconds)...")
+                time.sleep(5.0)
             
             # Configure SMU - System-specific
             if not simulation_mode:

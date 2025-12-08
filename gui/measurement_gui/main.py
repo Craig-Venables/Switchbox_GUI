@@ -138,6 +138,7 @@ from Measurments.telegram_coordinator import TelegramCoordinator
 from gui.measurement_gui.layout_builder import MeasurementGUILayoutBuilder
 from gui.measurement_gui.plot_panels import MeasurementPlotPanels
 from gui.measurement_gui.plot_updaters import PlotUpdaters
+from gui.measurement_gui.analysis_stats_window import AnalysisStatsWindow
 from gui.pulse_testing_gui import TSPTestingGUI
 from gui.oscilloscope_pulse_gui.main import OscilloscopePulseGUI
 
@@ -487,6 +488,8 @@ class MeasurementGUI:
         
         # Attach plot attributes to self for backwards compatibility
         self.plot_panels.attach_to(self)
+        # Set GUI reference for toggle logic
+        self.plot_panels.gui = self
         
         # Set up context menus for quick notes on all plot canvases
         if hasattr(self, 'layout_builder'):
@@ -505,6 +508,19 @@ class MeasurementGUI:
                 voltage="0V",
                 loop="#1"
             )
+        
+        # Initialize analysis stats window (floating overlay)
+        if hasattr(self, 'measurements_graph_panel'):
+            self.analysis_stats_window = AnalysisStatsWindow(
+                parent=self.master,
+                graph_frame=self.measurements_graph_panel
+            )
+        else:
+            self.analysis_stats_window = None
+        
+        # Wire up analysis enabled checkbox to show/hide stats window
+        if hasattr(self, 'analysis_enabled'):
+            self.analysis_enabled.trace_add('write', self._on_analysis_enabled_changed)
 
         # self.measurement_thread = None
         # self.plotter = None
@@ -553,6 +569,13 @@ class MeasurementGUI:
             # Don't raise during process exit; just log to stdout where possible
             print("Warning: keithley.shutdown() failed during cleanup")
 
+        # Clean up analysis stats window
+        try:
+            if hasattr(self, 'analysis_stats_window') and self.analysis_stats_window:
+                self.analysis_stats_window.destroy()
+        except Exception:
+            pass
+        
         # If a temperature controller is connected, try to set it to 0°C
         try:
             if getattr(self, 'itc_connected', False) and getattr(self, 'itc', None):
@@ -573,6 +596,90 @@ class MeasurementGUI:
         # Reset runtime test flags
         self.tests_running = False
         self.abort_tests_flag = False
+
+    def _on_analysis_enabled_changed(self, *args) -> None:
+        """
+        Callback when analysis_enabled checkbox changes.
+        Shows or hides the analysis stats window accordingly.
+        Note: If stats panel is visible, floating window will be hidden.
+        """
+        if not hasattr(self, 'analysis_stats_window') or not self.analysis_stats_window:
+            return
+        
+        if hasattr(self, 'analysis_enabled') and self.analysis_enabled.get():
+            # Check if stats panel is visible - if so, don't show floating window
+            stats_panel_visible = False
+            if hasattr(self, 'plot_panels') and self.plot_panels:
+                stats_panel_visible = self.plot_panels.plot_visibility.get(
+                    "analysis_stats",
+                    tk.BooleanVar(value=False)
+                ).get()
+            
+            if not stats_panel_visible:
+                # Show the stats window
+                self.analysis_stats_window.show()
+            else:
+                # Stats panel is visible, so hide floating window
+                self.analysis_stats_window.hide()
+        else:
+            # Hide the stats window
+            self.analysis_stats_window.hide()
+    
+    def update_analysis_stats(self, analysis_data: Dict[str, Any], analysis_level: Optional[str] = None) -> None:
+        """
+        Update the analysis stats window and panel with new analysis data.
+        
+        This method should be called when analysis is performed on a sweep.
+        It will update both the floating window and the stats panel if they're visible.
+        
+        Example usage (when wiring up analysis):
+        ---------------------------------------
+        from Helpers.IV_Analysis import IVSweepAnalyzer
+        
+        # After a sweep completes, analyze the data:
+        analyzer = IVSweepAnalyzer(analysis_level=self.analysis_level_var.get())
+        analysis_data = analyzer.analyze_sweep(voltage=voltage_data, current=current_data)
+        
+        # Update the stats window:
+        self.update_analysis_stats(analysis_data)
+        
+        Parameters:
+        -----------
+        analysis_data : dict
+            Analysis data from IVSweepAnalyzer.analyze_sweep()
+        analysis_level : str, optional
+            Analysis level ('basic', 'classification', 'full', 'research').
+            If None, uses the current value from analysis_level_var.
+        """
+        # Get analysis level from GUI if not provided
+        if analysis_level is None:
+            if hasattr(self, 'analysis_level_var'):
+                analysis_level = self.analysis_level_var.get()
+            else:
+                analysis_level = 'full'
+        
+        # Update the stats panel (if it exists)
+        if hasattr(self, 'plot_panels') and self.plot_panels:
+            self.plot_panels.update_stats_panel(analysis_data, analysis_level)
+        
+        # Update the floating stats window (if it exists)
+        if hasattr(self, 'analysis_stats_window') and self.analysis_stats_window:
+            self.analysis_stats_window.update_stats(analysis_data, analysis_level)
+            
+            # Show window if analysis is enabled AND stats panel is not visible
+            if hasattr(self, 'analysis_enabled') and self.analysis_enabled.get():
+                # Check if stats panel is visible - if so, hide floating window
+                stats_panel_visible = False
+                if hasattr(self, 'plot_panels') and self.plot_panels:
+                    stats_panel_visible = self.plot_panels.plot_visibility.get(
+                        "analysis_stats", 
+                        tk.BooleanVar(value=False)
+                    ).get()
+                
+                if not stats_panel_visible:
+                    self.analysis_stats_window.show()
+                else:
+                    self.analysis_stats_window.hide()
 
     def load_custom_sweeps(self, path: str) -> Dict[str, Dict[str, Any]]:
         """Load custom measurement definitions from JSON (backward compatible)."""
