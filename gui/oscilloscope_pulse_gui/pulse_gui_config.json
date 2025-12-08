@@ -13,17 +13,17 @@
     "volts_per_div": 0.5,
     "shunt_resistance": "50.0",
     "measurement_method": "shunt",
-    "simulation_mode": true,
+    "simulation_mode": false,
     "system": "keithley4200a",
     "smu_address": "GPIB0::17::INSTR",
     "current_compliance": "0.001",
-    "scope_timebase": "2",
-    "scope_vscale": "0.2",
+    "scope_timebase": "1",
+    "scope_vscale": "1",
     "r_shunt": "100E3",
     "calc_voltage": "2.0",
     "calc_current": "0.000001",
     "calc_result": "Enter values and click Calculate",
-    "smu_status": "SMU: Not Connected",
+    "smu_status": "SMU: Connected (KEITHLEY4200A)",
     "auto_configure_scope": true,
     "record_length": "20",
     "calc_rule": "10",
@@ -31,5 +31,5 @@
     "quick_test_voltage": "2.0",
     "quick_test_duration": "0.1",
     "quick_test_compliance": "0.001",
-    "auto_save": false
+    "auto_save": true
 }

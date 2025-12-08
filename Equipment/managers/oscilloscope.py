@@ -288,6 +288,24 @@ class OscilloscopeManager:
         except Exception as e:
             print(f"Error configuring channel: {e}")
     
+    def configure_record_length(self, points: Optional[int] = None) -> Optional[int]:
+        """
+        Configure acquisition record length (number of samples).
+        
+        Args:
+            points: Desired number of points; driver may clamp to supported range.
+        
+        Returns:
+            Optional[int]: The record length actually applied, if available.
+        """
+        if not self.scope or not hasattr(self.scope, 'set_record_length'):
+            return None
+        try:
+            return self.scope.set_record_length(points if points is not None else 20000)
+        except Exception as e:
+            print(f"Error configuring record length: {e}")
+            return None
+    
     def configure_timebase(self, time_per_div: Optional[float] = None,
                           position: Optional[float] = None):
         """
@@ -311,7 +329,8 @@ class OscilloscopeManager:
     def configure_trigger(self, source: Optional[str] = None,
                          level: Optional[float] = None, 
                          mode: Optional[str] = None,
-                         slope: Optional[str] = None):
+                         slope: Optional[str] = None,
+                         holdoff: Optional[float] = None):
         """
         Configure trigger settings.
         
@@ -320,6 +339,7 @@ class OscilloscopeManager:
             level: Trigger level in volts
             mode: 'AUTO', 'NORMAL', 'SINGLE', or 'STOP'
             slope: 'RISING', 'FALLING', or 'EITHER'
+            holdoff: Trigger holdoff in seconds
         """
         if not self.scope:
             return
@@ -333,6 +353,8 @@ class OscilloscopeManager:
                 self.scope.set_trigger_mode(mode)
             if slope is not None:
                 self.scope.set_trigger_slope(slope)
+            if holdoff is not None and hasattr(self.scope, "set_trigger_holdoff"):
+                self.scope.set_trigger_holdoff(holdoff)
         except Exception as e:
             print(f"Error configuring trigger: {e}")
     
