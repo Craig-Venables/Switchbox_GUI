@@ -22,7 +22,7 @@ from __future__ import annotations
 
 # Standard library imports
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 # Third-party imports
 import numpy as np
@@ -119,6 +119,7 @@ class MeasurementPlotPanels:
             "temp_time": tk.BooleanVar(value=False),
             "endurance": tk.BooleanVar(value=False),
             "retention": tk.BooleanVar(value=False),
+            "analysis_stats": tk.BooleanVar(value=False),  # Stats panel
         }
         
         # Create all plot frames (initially hidden except IV/LogIV)
@@ -144,6 +145,7 @@ class MeasurementPlotPanels:
             "temp_time": "Temperature vs Time",
             "endurance": "Endurance",
             "retention": "Retention",
+            "analysis_stats": "Analysis Statistics",
         }
         
         for key, label in labels.items():
@@ -151,7 +153,7 @@ class MeasurementPlotPanels:
                 menu.add_checkbutton(
                     label=label,
                     variable=self.plot_visibility[key],
-                    command=self._update_plot_layout
+                    command=lambda k=key: self._on_plot_visibility_changed(k)
                 )
         
         # Show menu below button
@@ -162,20 +164,32 @@ class MeasurementPlotPanels:
         except:
             pass
     
+    def _on_plot_visibility_changed(self, plot_key: str) -> None:
+        """Handle plot visibility change, including stats panel toggle logic"""
+        # Special handling for stats panel - hide floating window when panel is visible
+        if plot_key == "analysis_stats" and self.gui:
+            stats_visible = self.plot_visibility["analysis_stats"].get()
+            if stats_visible and hasattr(self.gui, 'analysis_stats_window'):
+                # Hide floating window when panel is shown
+                if self.gui.analysis_stats_window:
+                    self.gui.analysis_stats_window.hide()
+        
+        # Update layout
+        self._update_plot_layout()
+    
     def _update_plot_layout(self) -> None:
         """Update the grid layout based on visibility settings"""
         # Hide all plots first
         for frame in self.plot_frames.values():
             frame.grid_forget()
         
-        # Get visible plots
-        visible = [key for key, var in self.plot_visibility.items() if var.get()]
-        
-        if not visible:
-            return
+        # Get visible plots (exclude stats from grid layout - it will be handled separately if needed)
+        visible = [key for key, var in self.plot_visibility.items() if var.get() and key != "analysis_stats"]
+        stats_visible = self.plot_visibility.get("analysis_stats", tk.BooleanVar(value=False)).get()
         
         # Layout strategy: IV and LogIV get priority (larger, side by side if both visible)
         # Others fill in below in a 2-column grid
+        # Stats panel can be shown separately if needed
         
         row = 0
         col = 0
@@ -203,6 +217,12 @@ class MeasurementPlotPanels:
                     row += 1
                 pad_x = (0, 5) if col == 0 else (5, 0)
                 self.plot_frames[plot_key].grid(row=row, column=col, sticky="nsew", padx=pad_x, pady=(0, 5))
+        
+        # Add stats panel if visible (can span full width or be in grid)
+        if stats_visible and "analysis_stats" in self.plot_frames:
+            stats_row = row + 1 if secondary_plots else row
+            self.plot_frames["analysis_stats"].grid(row=stats_row, column=0, columnspan=2, sticky="nsew", pady=(0, 5))
+            row = stats_row
         
         # Configure grid weights for responsive resizing
         if self.main_container:
@@ -320,6 +340,35 @@ class MeasurementPlotPanels:
         self.retention_currents: List[float] = []
         self._register("retention", fig_ret, ax_ret, canvas_ret, None)
         self.plot_frames["retention"] = frame_ret
+        
+        # Analysis Statistics Panel
+        frame_stats = tk.LabelFrame(parent, text="Analysis Statistics", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        # Create a text widget for stats display
+        stats_text_frame = tk.Frame(frame_stats, bg='white')
+        stats_text_frame.pack(fill='both', expand=True)
+        
+        # Text widget with scrollbar
+        stats_scrollbar = ttk.Scrollbar(stats_text_frame)
+        stats_scrollbar.pack(side='right', fill='y')
+        
+        self.stats_text = tk.Text(
+            stats_text_frame,
+            font=("Segoe UI", 8),
+            bg='#ffe0b2',  # Light orange background
+            fg='#e65100',  # Dark orange text
+            wrap='word',
+            relief='solid',
+            borderwidth=1,
+            padx=8,
+            pady=8,
+            yscrollcommand=stats_scrollbar.set
+        )
+        self.stats_text.pack(side='left', fill='both', expand=True)
+        stats_scrollbar.config(command=self.stats_text.yview)
+        
+        # Store reference to stats frame
+        self.plot_frames["analysis_stats"] = frame_stats
+        self.stats_text_widget = self.stats_text  # For easy access
     
     def _create_floating_overlay(self, parent: tk.Frame) -> None:
         """Create a floating info overlay with light orange transparency"""
@@ -344,6 +393,145 @@ class MeasurementPlotPanels:
         if self.overlay_label:
             text = f"Sample: {sample_name} | Device: {device} | Voltage: {voltage} | Loop: {loop}"
             self.overlay_label.config(text=text)
+    
+    def update_stats_panel(self, analysis_data: Dict[str, Any], analysis_level: str = "full") -> None:
+        """
+        Update the stats panel text widget with analysis data.
+        
+        Parameters:
+        -----------
+        analysis_data : dict
+            Analysis data from IVSweepAnalyzer.analyze_sweep()
+        analysis_level : str
+            Analysis level: 'basic', 'classification', 'full', or 'research'
+        """
+        if not hasattr(self, 'stats_text') or not self.stats_text:
+            return
+        
+        # Clear existing content
+        self.stats_text.delete('1.0', tk.END)
+        
+        # Format stats based on analysis level
+        lines = []
+        
+        # Device Info
+        device_info = analysis_data.get('device_info', {})
+        lines.append("=== Device Information ===")
+        lines.append(f"Device: {device_info.get('name', 'N/A')}")
+        lines.append(f"Type: {device_info.get('measurement_type', 'N/A')}")
+        lines.append(f"Loops: {device_info.get('num_loops', 0)}")
+        lines.append(f"Analysis Level: {analysis_level.upper()}")
+        lines.append("")
+        
+        # Resistance Metrics
+        res_metrics = analysis_data.get('resistance_metrics', {})
+        lines.append("=== Resistance Metrics ===")
+        lines.append(f"Ron (mean): {self._format_stat_value(res_metrics.get('ron_mean', 0), 'Ω')}")
+        lines.append(f"Ron (std): {self._format_stat_value(res_metrics.get('ron_std', 0), 'Ω')}")
+        lines.append(f"Roff (mean): {self._format_stat_value(res_metrics.get('roff_mean', 0), 'Ω')}")
+        lines.append(f"Roff (std): {self._format_stat_value(res_metrics.get('roff_std', 0), 'Ω')}")
+        lines.append(f"Switching Ratio: {self._format_stat_value(res_metrics.get('switching_ratio_mean', 0))}")
+        lines.append(f"ON/OFF Ratio: {self._format_stat_value(res_metrics.get('on_off_ratio_mean', 0))}")
+        lines.append("")
+        
+        # Voltage Metrics
+        volt_metrics = analysis_data.get('voltage_metrics', {})
+        lines.append("=== Voltage Metrics ===")
+        lines.append(f"Von (mean): {self._format_stat_value(volt_metrics.get('von_mean', 0), 'V')}")
+        lines.append(f"Voff (mean): {self._format_stat_value(volt_metrics.get('voff_mean', 0), 'V')}")
+        lines.append(f"Max Voltage: {self._format_stat_value(volt_metrics.get('max_voltage', 0), 'V')}")
+        lines.append("")
+        
+        # Hysteresis
+        hyst_metrics = analysis_data.get('hysteresis_metrics', {})
+        lines.append("=== Hysteresis ===")
+        lines.append(f"Normalized Area: {self._format_stat_value(hyst_metrics.get('normalized_area_mean', 0))}")
+        lines.append(f"Has Hysteresis: {'Yes' if hyst_metrics.get('has_hysteresis', False) else 'No'}")
+        lines.append(f"Pinched: {'Yes' if hyst_metrics.get('pinched_hysteresis', False) else 'No'}")
+        lines.append("")
+        
+        # Classification (if available)
+        if analysis_level in ['classification', 'full', 'research']:
+            class_data = analysis_data.get('classification', {})
+            lines.append("=== Classification ===")
+            lines.append(f"Device Type: {class_data.get('device_type', 'N/A')}")
+            lines.append(f"Confidence: {self._format_stat_value(class_data.get('confidence', 0) * 100, '%', 1)}")
+            lines.append(f"Conduction: {class_data.get('conduction_mechanism', 'N/A')}")
+            if class_data.get('model_r2', 0) > 0:
+                lines.append(f"Model R²: {self._format_stat_value(class_data.get('model_r2', 0), '', 3)}")
+            lines.append("")
+        
+        # Performance (if available)
+        if analysis_level in ['full', 'research']:
+            perf_metrics = analysis_data.get('performance_metrics', {})
+            lines.append("=== Performance ===")
+            lines.append(f"Retention Score: {self._format_stat_value(perf_metrics.get('retention_score', 0), '', 3)}")
+            lines.append(f"Endurance Score: {self._format_stat_value(perf_metrics.get('endurance_score', 0), '', 3)}")
+            lines.append(f"Rectification: {self._format_stat_value(perf_metrics.get('rectification_ratio_mean', 1))}")
+            lines.append(f"Non-linearity: {self._format_stat_value(perf_metrics.get('nonlinearity_mean', 0))}")
+            if perf_metrics.get('power_consumption_mean', 0) > 0:
+                lines.append(f"Power: {self._format_stat_value(perf_metrics.get('power_consumption_mean', 0), 'W')}")
+            if perf_metrics.get('compliance_current') is not None:
+                lines.append(f"Compliance: {self._format_stat_value(perf_metrics.get('compliance_current', 0), 'μA')}")
+            lines.append("")
+        
+        # Research Diagnostics (if available)
+        if analysis_level == 'research':
+            research_data = analysis_data.get('research_diagnostics', {})
+            if research_data:
+                lines.append("=== Research Diagnostics ===")
+                if research_data.get('switching_polarity'):
+                    lines.append(f"Polarity: {research_data.get('switching_polarity', 'N/A')}")
+                if research_data.get('ndr_index') is not None:
+                    lines.append(f"NDR Index: {self._format_stat_value(research_data.get('ndr_index', 0))}")
+                if research_data.get('hysteresis_direction'):
+                    lines.append(f"Hyst. Direction: {research_data.get('hysteresis_direction', 'N/A')}")
+                if research_data.get('loop_similarity_score') is not None:
+                    lines.append(f"Loop Similarity: {self._format_stat_value(research_data.get('loop_similarity_score', 0), '', 3)}")
+                if research_data.get('noise_floor') is not None:
+                    lines.append(f"Noise Floor: {self._format_stat_value(research_data.get('noise_floor', 0), 'A')}")
+                lines.append("")
+        
+        # Metadata (if available)
+        metadata = device_info.get('metadata', {})
+        if metadata:
+            lines.append("=== Metadata ===")
+            if metadata.get('led_on') is not None:
+                lines.append(f"LED: {'ON' if metadata.get('led_on') else 'OFF'}")
+            if metadata.get('led_type'):
+                lines.append(f"LED Type: {metadata.get('led_type', 'N/A')}")
+            if metadata.get('temperature') is not None:
+                lines.append(f"Temperature: {self._format_stat_value(metadata.get('temperature', 0), '°C', 1)}")
+            if metadata.get('humidity') is not None:
+                lines.append(f"Humidity: {self._format_stat_value(metadata.get('humidity', 0), '%', 1)}")
+        
+        # Insert all lines (enable first, then disable)
+        self.stats_text.config(state='normal')
+        self.stats_text.delete('1.0', tk.END)
+        self.stats_text.insert('1.0', '\n'.join(lines))
+        self.stats_text.config(state='disabled')  # Make read-only
+    
+    def _format_stat_value(self, value: Any, unit: str = "", precision: int = 3) -> str:
+        """Format a numeric value for display in stats panel"""
+        if value is None:
+            return "N/A"
+        
+        try:
+            if isinstance(value, (int, float)):
+                if abs(value) >= 1e6:
+                    return f"{value/1e6:.{precision}f} M{unit}"
+                elif abs(value) >= 1e3:
+                    return f"{value/1e3:.{precision}f} k{unit}"
+                elif abs(value) < 1e-3 and abs(value) > 0:
+                    return f"{value*1e6:.{precision}f} μ{unit}"
+                elif abs(value) < 1e-6 and abs(value) > 0:
+                    return f"{value*1e9:.{precision}f} n{unit}"
+                else:
+                    return f"{value:.{precision}f} {unit}".strip()
+            else:
+                return str(value)
+        except (ValueError, TypeError):
+            return str(value) if value is not None else "N/A"
     
     # ------------------------------------------------------------------
     # Conditional visibility helpers
