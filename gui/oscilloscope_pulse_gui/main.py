@@ -79,6 +79,11 @@ class OscilloscopePulseGUI(tk.Toplevel):
              
         self.title("Oscilloscope Pulse Capture")
         self.geometry("1400x900")
+        # Start maximized for full-screen view (Windows-friendly)
+        try:
+            self.state("zoomed")
+        except Exception:
+            pass
         
         # 1. State & Config
         self.config_manager = ConfigManager()
@@ -95,9 +100,29 @@ class OscilloscopePulseGUI(tk.Toplevel):
         self.context = context or {}
         self._populate_context_defaults()
 
-        # 3. Layout (View)
+        # 3. Layout container with scrollbars
+        container = tk.Frame(self)
+        container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(container, highlightthickness=0)
+        v_scroll = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        h_scroll = tk.Scrollbar(container, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=v_scroll.set, xscrollcommand=h_scroll.set)
+
+        v_scroll.pack(side="right", fill="y")
+        h_scroll.pack(side="bottom", fill="x")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        content_frame = tk.Frame(canvas)
+        canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+        def _on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        content_frame.bind("<Configure>", _on_frame_configure)
+
+        # 4. Layout (View)
         self.layout = OscilloscopePulseLayout(
-            parent=self, 
+            parent=content_frame, 
             callbacks={
                 'start': self._start_measurement,
                 'stop': self._stop_measurement,
@@ -332,7 +357,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
             p_memristor = np.maximum(v_memristor * i, 0.0)
             
             if filename.endswith('.txt'):
-                with open(filename, 'w') as f:
+                with open(filename, 'w', encoding='utf-8') as f:
                     import datetime
                     # Write Header
                     f.write(f"Timestamp: {datetime.datetime.now()}\n")
@@ -432,8 +457,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
                         'total_energy': float(np.trapz(p_memristor, t)) if len(p_memristor) > 0 else None,
                         'peak_current': float(np.nanmax(np.abs(i))) if len(i) > 0 else None
                     }
-                with open(filename, 'w') as f:
-                    json.dump(data, f, indent=2)
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
             elif filename.endswith('.csv'):
                 import pandas as pd
                 df = pd.DataFrame({
@@ -445,7 +470,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
                     'resistance_memristor': r_memristor,
                     'power_memristor': p_memristor
                 })
-                df.to_csv(filename, index=False)
+                df.to_csv(filename, index=False, encoding='utf-8')
             elif filename.endswith('.npz'):
                 np.savez(filename, 
                         time=t, 

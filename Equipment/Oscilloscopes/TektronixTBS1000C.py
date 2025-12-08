@@ -358,6 +358,34 @@ class TektronixTBS1000C:
         """
         self.write(f"HOR:POS {position}")
     
+    def set_record_length(self, points: int) -> int:
+        """
+        Set acquisition record length (number of samples).
+        
+        The TBS1000C supports limited record lengths (commonly 2.5k, 10k, or 20k
+        depending on model/settings). We clamp to a safe range to avoid errors.
+        
+        Args:
+            points: Desired number of points.
+        
+        Returns:
+            int: The clamped record length sent to the scope.
+        """
+        target = int(points) if points is not None else 20000
+        # Clamp to typical supported values
+        if target <= 2500:
+            target = 2500
+        elif target >= 20000:
+            target = 20000
+        
+        try:
+            self.write(f"HOR:RECO {target}")
+            # Clear preamble cache because scaling depends on record length.
+            self.wfmo_cache.clear()
+        except Exception:
+            pass
+        return target
+    
     def get_timebase_position(self) -> float:
         """
         Get current horizontal position.
@@ -416,6 +444,18 @@ class TektronixTBS1000C:
             level: Trigger level in volts
         """
         self.write(f"TRIG:A:LEV {level}")
+
+    def set_trigger_holdoff(self, holdoff_seconds: float):
+        """
+        Set trigger holdoff to avoid re-triggering too quickly.
+        
+        Args:
+            holdoff_seconds: Holdoff time in seconds
+        """
+        try:
+            self.write(f"TRIG:A:HOLD {holdoff_seconds}")
+        except Exception:
+            pass
     
     def get_trigger_level(self) -> float:
         """
@@ -578,6 +618,63 @@ class TektronixTBS1000C:
 
         return 10000
 
+    @staticmethod
+    def _scale_waveform_values(raw_values: np.ndarray, preamble: Dict[str, Any]) -> np.ndarray:
+        """
+        Convert raw ADC sample codes to volts using Tektronix preamble fields.
+        
+        Args:
+            raw_values: Raw integer codes from CURV? response.
+            preamble: Parsed waveform preamble containing YMULT, YOFF, YZERO.
+        
+        Returns:
+            np.ndarray: Scaled voltage values in volts.
+        """
+        if raw_values is None:
+            return np.array([], dtype=np.float64)
+
+        values = raw_values.astype(np.float64)
+        ymult = preamble.get('YMULT')
+        yoff = preamble.get('YOFF')
+        yzero = preamble.get('YZERO', 0.0)
+
+        # Tektronix formula: V = (code - YOFF) * YMULT + YZERO
+        if ymult is None or yoff is None:
+            return values
+
+        return (values - yoff) * ymult + (yzero or 0.0)
+
+    @staticmethod
+    def _build_time_array(num_points: int, preamble: Dict[str, Any], fallback_scale: Optional[float] = None) -> np.ndarray:
+        """
+        Construct the time axis (seconds) using Tektronix preamble fields.
+        
+        Args:
+            num_points: Number of samples in the waveform.
+            preamble: Parsed waveform preamble containing XINCR/XZERO/PT_OFF/XOFF.
+            fallback_scale: Optional time-per-division (seconds) used when preamble
+                fields are missing.
+        
+        Returns:
+            np.ndarray: Time values in seconds.
+        """
+        if num_points <= 0:
+            return np.array([])
+
+        x_incr = preamble.get('XINCR')
+        x_zero = preamble.get('XZERO', 0.0)
+        pt_off = preamble.get('PT_OFF', preamble.get('XOFF', 0.0))
+
+        if x_incr is not None:
+            indices = np.arange(num_points, dtype=np.float64) - (pt_off or 0.0)
+            return x_zero + indices * x_incr
+
+        if fallback_scale:
+            return np.linspace(-5 * fallback_scale, 5 * fallback_scale, num_points)
+
+        # Final fallback: simple 0..1 timeline to avoid crashes while signalling missing metadata
+        return np.linspace(0, 1, num_points)
+
     def acquire_waveform(self, channel: int, format: str = "ASCII",
                          num_points: Optional[int] = None) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -630,11 +727,11 @@ class TektronixTBS1000C:
         if format == "ASCII":
             data_str = self.query("CURV?")
             
-            # Parse ASCII data
+            # Parse ASCII data as floats (do not quantize to int to preserve resolution)
             data_points = []
             for value in data_str.split(','):
                 try:
-                    data_points.append(int(float(value.strip())))
+                    data_points.append(float(value.strip()))
                 except ValueError:
                     continue
         else:
@@ -648,18 +745,18 @@ class TektronixTBS1000C:
         # Convert to numpy array
         y_values = np.array(data_points, dtype=np.float64)
         
-        # Apply vertical scaling
-        if 'YMULT' in preamble and 'YOFF' in preamble and 'YZERO' in preamble:
-            y_values = (y_values * preamble['YMULT']) + preamble['YOFF'] - preamble['YZERO']
+        # Apply vertical scaling using Tektronix preamble formula
+        y_values = self._scale_waveform_values(y_values, preamble)
         
         # Generate time array
         num_points = len(y_values)
-        if 'XINCR' in preamble and 'XZERO' in preamble:
-            time_values = np.arange(num_points) * preamble['XINCR'] + preamble['XZERO']
-        else:
-            # Fallback: use timebase scale
-            time_scale = self.get_timebase_scale()
-            time_values = np.linspace(-5 * time_scale, 5 * time_scale, num_points)
+        time_scale = None
+        if 'XINCR' not in preamble or 'XZERO' not in preamble:
+            try:
+                time_scale = self.get_timebase_scale()
+            except Exception:
+                time_scale = None
+        time_values = self._build_time_array(num_points, preamble, fallback_scale=time_scale)
         
         return time_values, y_values
     

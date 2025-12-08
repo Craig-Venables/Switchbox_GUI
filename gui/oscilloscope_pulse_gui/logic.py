@@ -120,88 +120,128 @@ class PulseMeasurementLogic:
                 auto_configure = params.get('auto_configure_scope', True)
                 
                 if auto_configure:
-                    print("  Auto-configuring oscilloscope settings...")
+                    print("  Auto-configuring oscilloscope for high-resolution capture...")
                     try:
-                        # Step 1: Enable and configure channel FIRST (before trigger)
-                        # Enable channel display
+                        # Step 1: Set acquisition mode for best resolution
+                        if hasattr(self.scope_manager.scope, 'configure_acquisition'):
+                            self.scope_manager.scope.configure_acquisition(mode='SAMPLE', stop_after='SEQUENCE')
+                            print(f"    Acquisition mode: SAMPLE (single-shot)")
+                        
+                        # Step 2: Enable and configure channel
                         self.scope_manager.enable_channel(scope_ch, enable=True)
-                        print(f"    Channel CH{scope_ch}: Enabled")
-                        
-                        # Set channel coupling to DC (required for shunt resistor measurements)
                         self.scope_manager.configure_channel(scope_ch, coupling='DC')
-                        print(f"    Channel CH{scope_ch}: DC coupling")
+                        print(f"    Channel CH{scope_ch}: Enabled, DC coupling")
                         
-                        # Set voltage scale
+                        # Step 3: Set record length to MAXIMUM for highest resolution
+                        rec_len_k = float(params.get('record_length', 20))
+                        # TBS1000C supports up to 20k points
+                        target_points = int(rec_len_k * 1000)
+                        if target_points < 2500:
+                            target_points = 2500
+                        elif target_points > 20000:
+                            target_points = 20000
+                        
+                        applied_points = self.scope_manager.configure_record_length(target_points)
+                        if applied_points:
+                            print(f"    Record length: {applied_points} points (max resolution)")
+                        else:
+                            print(f"    Record length: {target_points} points requested")
+                        
+                        # Step 4: Calculate optimal timebase for full capture
+                        total_measurement_time = pre_delay + duration + post_delay
+                        
+                        t_scale = params.get('timebase_scale') or params.get('scope_timebase')
+                        if t_scale:
+                            # User-specified timebase
+                            timebase = float(t_scale)
+                            time_window = timebase * 10.0  # 10 divisions
+                            
+                            # Validate
+                            if time_window < total_measurement_time:
+                                print(f"    ⚠️ WARNING: Timebase too small!")
+                                print(f"       Current window: {time_window:.4f}s, Required: {total_measurement_time:.4f}s")
+                                recommended = (total_measurement_time * 1.2) / 10.0
+                                print(f"       Recommended: {recommended:.6f} s/div ({recommended*1e3:.3f} ms/div)")
+                                # Override with recommended value
+                                timebase = recommended
+                        else:
+                            # Auto-calculate: ensure we capture the FULL measurement window
+                            # Add 20% margin for safety
+                            timebase = (total_measurement_time * 1.2) / 10.0
+                        
+                        self.scope_manager.configure_timebase(time_per_div=timebase)
+                        time_window = timebase * 10.0
+                        
+                        # Calculate resolution
+                        points_for_calc = applied_points if applied_points else target_points
+                        sample_interval = time_window / points_for_calc if points_for_calc > 0 else 0
+                        sample_rate = 1.0 / sample_interval if sample_interval > 0 else 0
+                        
+                        print(f"    Timebase: {timebase:.6f} s/div ({timebase*1e3:.3f} ms/div)")
+                        print(f"    Total window: {time_window:.6f} s")
+                        print(f"    Sample interval: {sample_interval:.6e} s")
+                        print(f"    Sample rate: {sample_rate:.3f} Sa/s")
+                        print(f"    Resolution: {points_for_calc} points over {total_measurement_time:.4f}s pulse")
+                        
+                        # Step 5: Set voltage scale based on expected signal
                         v_scale_val = params.get('voltage_scale') or params.get('scope_vscale')
                         if v_scale_val:
                             v_scale = float(v_scale_val)
                         else:
-                            # Auto-calculate: use pulse voltage / 3 to show pulse with some headroom
-                            v_scale = pulse_voltage / 3.0
-                            # Ensure reasonable minimum (at least 10mV/div for small signals)
-                            v_scale = max(v_scale, 0.01)
+                            # Auto-calculate based on shunt voltage drop
+                            # Estimate: V_shunt = I * R_shunt, where I ≈ V_pulse / (R_device + R_shunt)
+                            # For safety, assume worst case (device shorts): I_max = V_pulse / R_shunt
+                            estimated_v_shunt = abs(pulse_voltage) * (shunt_r / (shunt_r + 100))  # Assume R_device ~ 100Ω
+                            # Set scale to show full range with 20% headroom, across 8 divisions
+                            v_scale = (estimated_v_shunt * 1.2) / 4.0  # 4 divisions peak-to-peak
+                            # Clamp to reasonable range
+                            v_scale = max(0.001, min(v_scale, 10.0))  # 1mV/div to 10V/div
                         
                         self.scope_manager.configure_channel(scope_ch, volts_per_div=v_scale)
-                        print(f"    Voltage scale: {v_scale:.3f} V/div")
+                        print(f"    Voltage scale: {v_scale:.4f} V/div")
                         
-                        # Step 2: Configure timebase
-                        t_scale = params.get('timebase_scale') or params.get('scope_timebase')
-                        if t_scale:
-                            timebase = float(t_scale)
-                            self.scope_manager.configure_timebase(time_per_div=timebase)
-                            print(f"    Timebase: {timebase*1e3:.3f} ms/div")
-                            
-                            # Validate that timebase is large enough for total measurement time
-                            total_measurement_time = pre_delay + duration + post_delay
-                            time_window = timebase * 10.0  # 10 divisions on screen
-                            if time_window < total_measurement_time:
-                                print(f"    ⚠️ WARNING: Timebase too small!")
-                                print(f"       Time window: {time_window:.3f}s, Required: {total_measurement_time:.3f}s")
-                                print(f"       Recommended timebase: {(total_measurement_time * 1.2) / 10.0:.3f} s/div")
-                        else:
-                            # Auto-calculate based on TOTAL measurement time (not just pulse duration)
-                            # Total time = pre_delay + duration + post_delay
-                            total_measurement_time = pre_delay + duration + post_delay
-                            # Add 20% margin for safety and ensure we capture the full window
-                            # Timebase = (total_time + margin) / 10 divisions
-                            timebase = (total_measurement_time * 1.2) / 10.0
-                            
-                            # Ensure minimum timebase for very short pulses (at least 1ms/div)
-                            min_timebase = 1e-3 / 10.0  # 1ms/div minimum
-                            timebase = max(timebase, min_timebase)
-                            
-                            self.scope_manager.configure_timebase(time_per_div=timebase)
-                            time_window = timebase * 10.0
-                            print(f"    Timebase: {timebase*1e3:.3f} ms/div (auto-calculated)")
-                            print(f"    Time window: {time_window:.3f}s (covers {total_measurement_time:.3f}s measurement)")
-                        
-                        # Step 3: Set horizontal position (trigger position)
-                        # Position trigger at ~40% from left (4 divisions) to capture pre-pulse
+                        # Step 6: Position trigger to capture pre-pulse baseline
+                        # Set trigger at 40% from left (4 divisions) to see pre-pulse
                         try:
-                            if self.scope_manager.scope:
-                                trigger_offset = 4.0 * timebase
-                                if hasattr(self.scope_manager.scope, 'set_timebase_position'):
-                                    self.scope_manager.scope.set_timebase_position(trigger_offset)
-                                    print(f"    Horizontal Pos: {trigger_offset:.3f}s (Trigger at ~40% from left)")
+                            if self.scope_manager.scope and hasattr(self.scope_manager.scope, 'set_timebase_position'):
+                                # Trigger position in seconds from center
+                                # Negative = left of center, Positive = right of center
+                                # We want trigger at -1 division (10% left of center) for 40% from left edge
+                                trigger_pos = -1.0 * timebase
+                                self.scope_manager.scope.set_timebase_position(trigger_pos)
+                                print(f"    Trigger position: {trigger_pos:.6f}s (40% from left edge)")
                         except Exception as ex:
-                            print(f"    Failed to set horiz pos: {ex}")
+                            print(f"    ⚠️ Could not set trigger position: {ex}")
                         
-                        # Step 4: Configure trigger (AFTER channel and timebase are set)
-                        trigger_level = pulse_voltage * 0.5  # Trigger at 50% of pulse voltage
-                        trigger_slope = params.get('trigger_slope', 'RISING')
+                        # Step 7: Configure trigger
+                        trigger_ratio = float(params.get('trigger_ratio', 0.2))
+                        trigger_level = max(0.001, abs(pulse_voltage) * trigger_ratio)  # Lower threshold for sensitivity
+                        # Choose a sensible default slope if none provided: positive pulse -> RISING, negative -> FALLING
+                        trigger_slope_param = params.get('trigger_slope')
+                        trigger_slope = trigger_slope_param if trigger_slope_param else ('FALLING' if pulse_voltage < 0 else 'RISING')
+                        trigger_slope = str(trigger_slope).upper()
+                        
+                        # Set holdoff to prevent re-triggering during pulse
+                        holdoff_s = total_measurement_time + 0.1  # Add buffer
+                        
                         self.scope_manager.configure_trigger(
                             source=f'CH{scope_ch}', 
-                            level=trigger_level, 
+                            level=trigger_level if pulse_voltage >= 0 else -trigger_level, 
                             slope=trigger_slope, 
-                            mode='NORMAL'  # NORMAL mode waits for trigger
+                            mode='NORMAL',  # NORMAL mode waits for valid trigger
+                            holdoff=holdoff_s
                         )
-                        print(f"    Trigger: CH{scope_ch} @ {trigger_level:.3f}V ({trigger_slope})")
+                        print(f"    Trigger: CH{scope_ch} @ {trigger_level if pulse_voltage >=0 else -trigger_level:.4f}V")
+                        print(f"    Trigger slope: {trigger_slope}")
+                        print(f"    Trigger holdoff: {holdoff_s:.4f}s")
                             
-                        print("  Scope configuration sent. Waiting for settling...")
-                        time.sleep(1.0) 
+                        print("  ✓ Scope configured for high-resolution capture")
+                        print("  Waiting for scope to settle...")
+                        time.sleep(0.5)  # Brief settling time
                         
                     except Exception as e:
-                        print(f"  Warning: Failed to configure scope settings: {e}")
+                        print(f"  ⚠️ Warning: Scope configuration error: {e}")
+                        traceback.print_exc()
                 else:
                     print("  Using manual oscilloscope settings (auto-configure disabled)")
                 
@@ -386,53 +426,51 @@ class PulseMeasurementLogic:
                     v_scope[fall_mask] *= np.exp(-5 * fall_progress)  # Exponential fall
             else:
                 # Real acquisition
-                # The oscilloscope was connected earlier, but the VISA session may have
-                # timed out during the pulse delays. Always reconnect before acquisition.
-                
-                addr = params.get('scope_address')
-                scope_type = params.get('scope_type', 'Tektronix TBS1000C')
-                
-                if not addr:
-                    raise RuntimeError("No oscilloscope address provided")
-                
-                # Close any existing connection
-                if self.scope_manager.scope:
-                    try:
-                        self.scope_manager.scope.disconnect()
-                    except:
-                        pass
-                
-                # Reconnect fresh
-                print(f"Reconnecting to oscilloscope at {addr} for waveform acquisition...")
-                if not self.scope_manager.manual_init_scope(scope_type, addr):
-                    raise RuntimeError(f"Failed to connect to oscilloscope at {addr}")
-                
+                # Prefer to reuse the existing session; if the VISA session expired, perform a single reconnect as a fallback.
                 scope = self.scope_manager.scope
                 if scope is None:
-                    raise RuntimeError("Oscilloscope manager has no active scope instance")
+                    raise RuntimeError("Oscilloscope not connected - scope instance is None")
                 
-                print("✓ Oscilloscope reconnected successfully")
+                print("Reading waveform from oscilloscope (already armed and triggered)...")
                 
-                # Reconfigure trigger and timebase (only if auto-configure is enabled)
-                # ERROR FIX: Configuring AFTER the pulse clears the acquisition!
-                # Configuration logic moved to Setup phase (before pulse).
-                # Here we strictly READ the data.
-                pass
-                
-                # auto_configure = params.get('auto_configure_scope', True)
-                # if auto_configure: ... (REMOVED)
-                
-                # Now acquire waveform with fresh connection
-                try:
+                def _acquire_with_scope(active_scope):
                     # Get Requested Record Length (e.g. 20k -> 20000)
                     rec_len_k = float(params.get('record_length', 20))
-                    num_points = int(rec_len_k * 1000)
+                    num_points = max(2500, min(int(rec_len_k * 1000), 20000))
                     
                     print(f"  Acquiring waveform ({num_points} points target)...")
-                    t, v_scope = scope.acquire_waveform(channel=scope_ch, format='ASCII', num_points=num_points)
-                    print(f"  Captured {len(t)} points.")
+                    t_arr, v_arr = active_scope.acquire_waveform(channel=scope_ch, format='ASCII', num_points=num_points)
+                    print(f"  ✓ Captured {len(t_arr)} points.")
+                    if len(t_arr) != num_points:
+                        print(f"  ℹ️ Scope returned {len(t_arr)} points (instrument limit: {rec_len_k}k setting).")
+                    if len(t_arr) > 1:
+                        time_window = t_arr[-1] - t_arr[0]
+                        sample_rate = len(t_arr) / time_window if time_window > 0 else 0
+                        print(f"  Time window: {time_window:.6f} s")
+                        print(f"  Sample interval: {(time_window/(len(t_arr)-1) if len(t_arr) > 1 else 0):.6e} s")
+                        print(f"  Effective sample rate: {sample_rate:.3f} Sa/s")
+                    return t_arr, v_arr
+                
+                try:
+                    t, v_scope = _acquire_with_scope(scope)
                 except Exception as e:
-                    raise RuntimeError(f"Failed to acquire waveform: {e}")
+                    # Handle InvalidSession gracefully by reconnecting once.
+                    from pyvisa import errors as visa_errors
+                    if isinstance(e, visa_errors.InvalidSession):
+                        print("  ⚠️ VISA session expired. Reconnecting once to retrieve waveform...")
+                        addr = params.get('scope_address')
+                        scope_type = params.get('scope_type', 'Tektronix TBS1000C')
+                        if not addr:
+                            raise RuntimeError("VISA session invalid and no scope address provided for reconnect.") from e
+                        # Attempt reconnect (should not clear captured data on the instrument)
+                        if not self.scope_manager.manual_init_scope(scope_type, addr):
+                            raise RuntimeError("Failed to reconnect to oscilloscope after session loss.") from e
+                        scope = self.scope_manager.scope
+                        if scope is None:
+                            raise RuntimeError("Reconnect succeeded but scope instance is None.") from e
+                        t, v_scope = _acquire_with_scope(scope)
+                    else:
+                        raise RuntimeError(f"Failed to acquire waveform: {e}") from e
                 
                 if len(t) == 0:
                     raise RuntimeError("Failed to acquire waveform from oscilloscope.")

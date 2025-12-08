@@ -987,6 +987,10 @@ class OscilloscopePulseLayout:
         # Get metadata
         if metadata is None:
             metadata = {}
+
+        # Normalize time to start at 0s for clearer viewing
+        if t is not None and len(t) > 0:
+            t = t - t[0]
         
         pulse_voltage = metadata.get('pulse_voltage', 1.0)
         if 'params' in metadata:
