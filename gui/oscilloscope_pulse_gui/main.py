@@ -324,25 +324,30 @@ class OscilloscopePulseGUI(tk.Toplevel):
         try:
             import numpy as np
             
+            # Normalize time to start at 0 and convert ms -> s (scope assumed ms)
+            if t is not None and len(t) > 0:
+                t = (t - t[0]) / 1000.0
+            
             # Calculate all derived quantities for saving
             pulse_voltage = meta.get('pulse_voltage', 1.0)
+            pulse_duration = meta.get('pulse_duration', 0.001)
+            pulse_start_time = meta.get('pulse_start_time', 0.0)
+            
             if 'params' in meta:
                 params = meta['params']
                 pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
-                pre_delay = float(params.get('pre_pulse_delay', 0.1))
-                pulse_duration = float(params.get('pulse_duration', 0.001))
-            else:
-                pre_delay = 0.1
-                pulse_duration = 0.001
+                pulse_duration = float(params.get('pulse_duration', pulse_duration))
+                pre_delay = float(params.get('pre_pulse_delay', pulse_start_time))
+                pulse_start_time = pre_delay
             
             shunt_r = meta.get('shunt_resistance', 50.0)
             
-            # V_shunt is what we measured (v)
+            # V_shunt is what we measured (RAW oscilloscope data)
             v_shunt = v
             
-            # V_SMU is the applied pulse voltage
-            pulse_start = pre_delay
-            pulse_end = pre_delay + pulse_duration
+            # V_SMU is the applied pulse voltage at correct time (assume pulse_start_time)
+            pulse_start = pulse_start_time
+            pulse_end = pulse_start_time + pulse_duration
             v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
             
             # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
@@ -359,22 +364,16 @@ class OscilloscopePulseGUI(tk.Toplevel):
             if filename.endswith('.txt'):
                 with open(filename, 'w', encoding='utf-8') as f:
                     import datetime
-                    # Write Header
-                    f.write(f"Timestamp: {datetime.datetime.now()}\n")
-                    f.write(f"Device: {self.context.get('device_label', 'Unknown')}\n")
-                    f.write(f"Sample: {self.context.get('sample_name', 'Unknown')}\n")
-                    f.write("=" * 60 + "\n")
-                    f.write("MEASUREMENT PARAMETERS\n")
-                    f.write("=" * 60 + "\n")
-                    # Handle nested meta params
+                    # Origin-friendly: comment metadata with '# ' so Origin skips them
+                    f.write(f"# Timestamp: {datetime.datetime.now()}\n")
+                    f.write(f"# Device: {self.context.get('device_label', 'Unknown')}\n")
+                    f.write(f"# Sample: {self.context.get('sample_name', 'Unknown')}\n")
+                    f.write(f"# ==================== MEASUREMENT PARAMETERS ====================\n")
                     params = meta.get('params', meta)
                     for k, val in params.items():
                         if isinstance(val, (str, int, float, bool)):
-                           f.write(f"{k}: {val}\n")
-                    f.write("\n")
-                    f.write("=" * 60 + "\n")
-                    f.write("CALCULATED VALUES SUMMARY\n")
-                    f.write("=" * 60 + "\n")
+                           f.write(f"# {k}: {val}\n")
+                    f.write(f"# ==================== CALCULATED VALUES SUMMARY ====================\n")
                     
                     # Calculate statistics
                     valid_r_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
@@ -423,14 +422,13 @@ class OscilloscopePulseGUI(tk.Toplevel):
                     
                     f.write("\n")
                     f.write("=" * 60 + "\n")
-                    f.write("TIME SERIES DATA\n")
-                    f.write("=" * 60 + "\n")
-                    f.write("Time(s)\tV_SMU(V)\tV_shunt(V)\tV_memristor(V)\tCurrent(A)\tR_memristor(Ω)\tPower(W)\n")
+                    # Table header (tab-separated) for Origin
+                    f.write("Time(s)\tV_shunt_raw(V)\tV_SMU(V)\tV_shunt(V)\tV_memristor(V)\tCurrent(A)\tR_memristor(Ω)\tPower(W)\n")
                     
-                    # Write Data
+                    # Write Data (raw + calculated in one table, left to right)
                     for j in range(len(t)):
                         r_str = f"{r_memristor[j]:.9e}" if not np.isnan(r_memristor[j]) else "NaN"
-                        f.write(f"{t[j]:.9e}\t{v_smu[j]:.9e}\t{v_shunt[j]:.9e}\t{v_memristor[j]:.9e}\t{i[j]:.9e}\t{r_str}\t{p_memristor[j]:.9e}\n")
+                        f.write(f"{t[j]:.9e}\t{v_shunt[j]:.9e}\t{v_smu[j]:.9e}\t{v_shunt[j]:.9e}\t{v_memristor[j]:.9e}\t{i[j]:.9e}\t{r_str}\t{p_memristor[j]:.9e}\n")
                         
             elif filename.endswith('.json'):
                 data = meta.copy()
