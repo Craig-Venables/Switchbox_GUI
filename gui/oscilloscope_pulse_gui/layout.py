@@ -988,29 +988,50 @@ class OscilloscopePulseLayout:
         if metadata is None:
             metadata = {}
 
-        # Normalize time to start at 0s for clearer viewing
+        # Normalize time to start at 0s (scope already returns time in seconds)
         if t is not None and len(t) > 0:
             t = t - t[0]
         
         pulse_voltage = metadata.get('pulse_voltage', 1.0)
+        pulse_duration = metadata.get('pulse_duration', 0.001)
+        
         if 'params' in metadata:
             params = metadata['params']
             pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
-            pre_delay = float(params.get('pre_pulse_delay', 0.1))
-            pulse_duration = float(params.get('pulse_duration', 0.001))
-        else:
-            pre_delay = 0.1
-            pulse_duration = 0.001
+            pulse_duration = float(params.get('pulse_duration', pulse_duration))
         
         shunt_r = metadata.get('shunt_resistance', 50.0)
         
         # Calculate derived quantities
         v_shunt = v
         
-        # V_SMU is the applied pulse voltage
-        pulse_start = pre_delay
-        pulse_end = pre_delay + pulse_duration
-        v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
+        # Detect pulse start from v_shunt signal (works with normalized time)
+        if len(t) > 0 and len(v_shunt) > 10:
+            v_max = np.max(np.abs(v_shunt))
+            threshold = max(v_max * 0.1, 0.01)  # 10% of max or 10mV minimum
+            
+            if pulse_voltage > 0:
+                pulse_indices = np.where(v_shunt > threshold)[0]
+            else:
+                pulse_indices = np.where(v_shunt < -threshold)[0]
+            
+            if len(pulse_indices) > 0:
+                pulse_start_idx = pulse_indices[0]
+                pulse_start = t[pulse_start_idx]
+            else:
+                # Fallback: use metadata pulse_start_time (already relative to normalized time)
+                pulse_start_time_abs = metadata.get('pulse_start_time', 0.0)
+                # After normalization, pulse_start_time needs to be relative to original t[0]
+                # Since we don't have original t[0], try to find it from the first significant signal
+                pulse_start = max(0.0, t[0] if len(t) > 0 else 0.0)
+            
+            pulse_end = pulse_start + pulse_duration
+            v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
+            print(f"Plot timing: pulse from {pulse_start:.4f}s to {pulse_end:.4f}s (duration {pulse_duration:.4f}s)")
+        else:
+            v_smu = np.zeros_like(v_shunt) if len(v_shunt) > 0 else np.array([])
+            pulse_start = 0.0
+            pulse_end = pulse_duration
         
         # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
         v_memristor = np.maximum(v_smu - v_shunt, 0.0)  # Ensure non-negative
