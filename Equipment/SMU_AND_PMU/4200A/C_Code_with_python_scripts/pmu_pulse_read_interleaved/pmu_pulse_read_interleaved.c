@@ -325,17 +325,18 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
   int segIdx = 0;  // segment index for times/volts arrays
 
   // Initialize starting voltage (volts[0] must be set before first segment)
-  volts[0] = 0.0;
+  double baseline = 0.0; // leave original behavior: return to 0 V between segments
+  volts[0] = baseline;
 
   // Initial delay and rise time
   times[segIdx] = resetDelay;
   ttime += times[segIdx];
-  volts[segIdx] = 0.0;  // Start voltage of first delay segment
+  volts[segIdx] = baseline;  // Start voltage of first delay segment
   segIdx++;
 
   times[segIdx] = riseTime;
   ttime += times[segIdx];
-  volts[segIdx] = 0.0;
+  volts[segIdx] = baseline;
   segIdx++;
 
   // ****************
@@ -349,11 +350,11 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
   }
   if(debug) printf("\n%s: ===== INITIAL READ ===== (segIdx=%d)\n", mod, segIdx);
   
-  // RISE: Transition from 0V to measV over riseTime
+  // RISE: Transition from baseline to measV over riseTime
   times[segIdx] = riseTime;
   ttime += times[segIdx];
   if(debug) printf("%s: Initial READ RISE: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
-    mod, segIdx, 0.0, segIdx, riseTime);
+    mod, segIdx, baseline, segIdx, riseTime);
   segIdx++;
   volts[segIdx] = measV;  // END voltage of RISE
   if(debug) printf("%s: Initial READ RISE: End v[%d]=%.6fV\n",
@@ -382,26 +383,26 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
   volts[segIdx] = measV;
   segIdx++;
 
-  // FALL: Transition from measV to 0V over riseTime
+  // FALL: Transition from measV to baseline over riseTime
   times[segIdx] = riseTime;
   ttime += times[segIdx];
   if(debug) printf("%s: Initial READ FALL: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
     mod, segIdx, measV, segIdx, riseTime);
   segIdx++;
-  volts[segIdx] = 0.0;  // END voltage of FALL (now at 0V)
+  volts[segIdx] = baseline;  // END voltage of FALL (now at baseline)
   if(debug) printf("%s: Initial READ FALL: End v[%d]=%.6fV\n",
-    mod, segIdx, 0.0);
+    mod, segIdx, baseline);
 
-  // DELAY: Delay at 0V after initial read, before cycles
+  // DELAY: Delay at baseline after initial read, before cycles
   double initialDelayStart = ttime;
   times[segIdx] = measDelay;
   ttime += times[segIdx];
-  if(debug) printf("%s: Initial DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
-    mod, segIdx, 0.0, segIdx, measDelay);
+  if(debug) printf("%s: Initial DELAY AT baseline: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
+    mod, segIdx, baseline, segIdx, measDelay);
   segIdx++;
-  volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
-  if(debug) printf("%s: Initial DELAY AT 0V: End v[%d]=%.6fV (flat delay at 0V before cycles)\n",
-    mod, segIdx, 0.0);
+  volts[segIdx] = baseline;  // END voltage of delay segment (flat at baseline) - CRITICAL: must be set AFTER increment
+  if(debug) printf("%s: Initial DELAY AT baseline: End v[%d]=%.6fV (flat delay at baseline before cycles)\n",
+    mod, segIdx, baseline);
   measOffMinTime[initialProbeIdx] = initialDelayStart + ratio * measDelay;
   measOffMaxTime[initialProbeIdx] = initialDelayStart + measDelay * 0.9;
   if(debug) printf("%s: Initial read offset window[%d] = (%g, %g)\n",
@@ -424,8 +425,8 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
     {
       if(debug) printf("\n%s: Cycle %d - PULSE %d/%d\n", mod, cycleIdx+1, pulseIdx+1, NumPulsesPerGroup);
       
-      // RISE: Transition from 0V to PulseV over PulseRiseTime
-      volts[segIdx] = 0.0;  // START voltage
+      // RISE: Transition from baseline to PulseV over PulseRiseTime
+      volts[segIdx] = baseline;  // START voltage
       times[segIdx] = PulseRiseTime;
       ttime += times[segIdx];
       if(debug) printf("%s: Cycle %d Pulse %d - RISE: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
@@ -445,25 +446,25 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
       if(debug) printf("%s: Cycle %d Pulse %d - TOP: End v[%d]=%.6fV (flat top)\n",
         mod, cycleIdx+1, pulseIdx+1, segIdx, PulseV);
 
-      // FALL: Transition from PulseV to 0V over PulseFallTime
+      // FALL: Transition from PulseV to baseline over PulseFallTime
       times[segIdx] = PulseFallTime;
       ttime += times[segIdx];
       if(debug) printf("%s: Cycle %d Pulse %d - FALL: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
         mod, cycleIdx+1, pulseIdx+1, segIdx, PulseV, segIdx, PulseFallTime);
       segIdx++;
-      volts[segIdx] = 0.0;  // END voltage of FALL (now at 0V)
+      volts[segIdx] = baseline;  // END voltage of FALL (now at baseline)
       if(debug) printf("%s: Cycle %d Pulse %d - FALL: End v[%d]=%.6fV\n",
-        mod, cycleIdx+1, pulseIdx+1, segIdx, 0.0);
+        mod, cycleIdx+1, pulseIdx+1, segIdx, baseline);
 
-      // DELAY: Delay at 0V after pulse (before next pulse or reads)
+      // DELAY: Delay at baseline after pulse (before next pulse or reads)
       times[segIdx] = PulseDelay;
       ttime += times[segIdx];
-      if(debug) printf("%s: Cycle %d Pulse %d - DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
-        mod, cycleIdx+1, pulseIdx+1, segIdx, 0.0, segIdx, PulseDelay);
+      if(debug) printf("%s: Cycle %d Pulse %d - DELAY AT baseline: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
+        mod, cycleIdx+1, pulseIdx+1, segIdx, baseline, segIdx, PulseDelay);
       segIdx++;
-      volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
-      if(debug) printf("%s: Cycle %d Pulse %d - DELAY AT 0V: End v[%d]=%.6fV\n",
-        mod, cycleIdx+1, pulseIdx+1, segIdx, 0.0);
+      volts[segIdx] = baseline;  // END voltage of delay segment (flat at baseline) - CRITICAL: must be set AFTER increment
+      if(debug) printf("%s: Cycle %d Pulse %d - DELAY AT baseline: End v[%d]=%.6fV\n",
+        mod, cycleIdx+1, pulseIdx+1, segIdx, baseline);
     }
 
     // ****************
@@ -474,11 +475,11 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
     {
       if(debug) printf("\n%s: Cycle %d - READ %d/%d\n", mod, cycleIdx+1, readIdx+1, NumReads);
       
-      // RISE: Transition from 0V to measV over riseTime
+      // RISE: Transition from baseline to measV over riseTime
       times[segIdx] = riseTime;
       ttime += times[segIdx];
       if(debug) printf("%s: Cycle %d Read %d - RISE: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
-        mod, cycleIdx+1, readIdx+1, segIdx, 0.0, segIdx, riseTime);
+        mod, cycleIdx+1, readIdx+1, segIdx, baseline, segIdx, riseTime);
       segIdx++;
       volts[segIdx] = measV;  // END voltage of RISE
       if(debug) printf("%s: Cycle %d Read %d - RISE: End v[%d]=%.6fV\n",
@@ -508,26 +509,26 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
       volts[segIdx] = measV;
       segIdx++;
 
-      // FALL: Transition from measV to 0V over riseTime
+      // FALL: Transition from measV to baseline over riseTime
       times[segIdx] = riseTime;
       ttime += times[segIdx];
       if(debug) printf("%s: Cycle %d Read %d - FALL: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
         mod, cycleIdx+1, readIdx+1, segIdx, measV, segIdx, riseTime);
       segIdx++;
-      volts[segIdx] = 0.0;  // END voltage of FALL (now at 0V)
+      volts[segIdx] = baseline;  // END voltage of FALL (now at baseline)
       if(debug) printf("%s: Cycle %d Read %d - FALL: End v[%d]=%.6fV\n",
-        mod, cycleIdx+1, readIdx+1, segIdx, 0.0);
+        mod, cycleIdx+1, readIdx+1, segIdx, baseline);
 
-      // DELAY: Delay at 0V after read (before next read or next cycle)
+      // DELAY: Delay at baseline after read (before next read or next cycle)
       double readDelayStart = ttime;
       times[segIdx] = measDelay;
       ttime += times[segIdx];
-      if(debug) printf("%s: Cycle %d Read %d - DELAY AT 0V: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
-        mod, cycleIdx+1, readIdx+1, segIdx, 0.0, segIdx, measDelay);
+      if(debug) printf("%s: Cycle %d Read %d - DELAY AT baseline: Start v[%d]=%.6fV, time t[%d]=%.9fs\n",
+        mod, cycleIdx+1, readIdx+1, segIdx, baseline, segIdx, measDelay);
       segIdx++;
-      volts[segIdx] = 0.0;  // END voltage of delay segment (flat at 0V) - CRITICAL: must be set AFTER increment
-      if(debug) printf("%s: Cycle %d Read %d - DELAY AT 0V: End v[%d]=%.6fV\n",
-        mod, cycleIdx+1, readIdx+1, segIdx, 0.0);
+      volts[segIdx] = baseline;  // END voltage of delay segment (flat at baseline) - CRITICAL: must be set AFTER increment
+      if(debug) printf("%s: Cycle %d Read %d - DELAY AT baseline: End v[%d]=%.6fV\n",
+        mod, cycleIdx+1, readIdx+1, segIdx, baseline);
       measOffMinTime[readProbeIdx] = readDelayStart + ratio * measDelay;
       measOffMaxTime[readProbeIdx] = readDelayStart + measDelay * 0.9;
       if(debug) printf("%s: Cycle %d Read %d offset window[%d] = (%g, %g)\n",
@@ -538,7 +539,7 @@ int pmu_pulse_read_interleaved( double riseTime, double resetV, double resetWidt
   if(debug) printf("%s: All cycles complete (segIdx=%d, recordedProbeCount=%d)\n", mod, segIdx, recordedProbeCount);
 
   // Final voltage point
-  volts[segIdx] = 0.0;
+  volts[segIdx] = baseline;
   int NewVoltsSize = segIdx + 1;
   int NewTimesSize = segIdx;
 

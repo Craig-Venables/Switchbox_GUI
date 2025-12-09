@@ -4,6 +4,14 @@ import numpy as np
 from typing import Optional, Callable, Dict, Any, Tuple
 import traceback
 
+# Timing knobs (adjust as needed)
+SCOPE_ARM_SETTLE_S = 1.0      # Wait after arming before disconnecting scope
+SCOPE_POST_DISCONNECT_S = 1.0 # Wait after disconnecting scope before SMU pulse
+SCOPE_POST_HOLD_EXTRA_S = 1.0 # Extra wait after post-delay before reconnect/read
+
+# NOTE: Scope probe remains at 10x (cannot force 1x on this unit). We compensate in
+# software by dividing captured voltages by 10 to get correct 1x-equivalent values.
+
 # Try to import equipment managers, but handle failure for simulation/offline dev
 try:
     from Equipment.managers.oscilloscope import OscilloscopeManager
@@ -159,15 +167,16 @@ class PulseMeasurementLogic:
                         self.scope_manager.configure_channel(scope_ch, coupling='DC')
                         print(f"    Channel CH{scope_ch}: Enabled, DC coupling")
                         
-                        # Step 3: Set probe attenuation to 1x AFTER channel config (critical for correct readings!)
-                        # Reset sets it to 10x by default, so we must explicitly set to 1x
+                        # Step 3: Probe attenuation: leave at scope setting (10x). Just log what scope reports.
                         try:
-                            scope_inst.write(f"CH{scope_ch}:PROBE 1")
-                            # Verify it was set correctly
-                            probe_setting = scope_inst.query(f"CH{scope_ch}:PROBE?").strip()
-                            print(f"    Channel CH{scope_ch}: Probe attenuation set to 1x (verified: {probe_setting})")
-                        except Exception as ex:
-                            print(f"    ⚠️ Could not set/verify probe attenuation: {ex}")
+                            probe_setting = scope_inst.query(f"CH{scope_ch}:PROBEFACTOR?").strip()
+                            print(f"    Channel CH{scope_ch}: Probe factor reported: {probe_setting} (leaving as-is)")
+                        except Exception:
+                            try:
+                                probe_setting = scope_inst.query(f"CH{scope_ch}:PROBE?").strip()
+                                print(f"    Channel CH{scope_ch}: Probe reported: {probe_setting} (leaving as-is)")
+                            except Exception as ex2:
+                                print(f"    ⚠️ Could not read probe attenuation: {ex2}")
                         
                         # Step 4: Apply known-good settings from scope_settings.json
                         # Force record length to 20k (scope will clamp if needed)
@@ -282,7 +291,7 @@ class PulseMeasurementLogic:
                      print("  ✓ Scope configured for normal trigger mode")
                 
                 # Give scope a moment to fully arm before disconnecting
-                time.sleep(1.0)
+                time.sleep(SCOPE_ARM_SETTLE_S)
                 
                 # CRITICAL: Close scope connection to prevent VISA conflicts with SMU
                 # The scope will hold the triggered waveform in SEQUENCE mode even when disconnected
@@ -296,8 +305,8 @@ class PulseMeasurementLogic:
                 
                 # Wait for scope to fully settle after arming/disconnecting (critical for reliable triggering)
                 # On subsequent runs, the scope needs more time to be ready
-                print("  Waiting for scope to settle before SMU pulse (5 seconds)...")
-                time.sleep(5.0)
+                print(f"  Waiting for scope to settle before SMU pulse ({SCOPE_POST_DISCONNECT_S} seconds)...")
+                time.sleep(SCOPE_POST_DISCONNECT_S)
             
             # Configure SMU - System-specific
             if not simulation_mode:
@@ -398,7 +407,7 @@ class PulseMeasurementLogic:
             # The scope will trigger, capture, and hold the waveform in SEQUENCE mode
             time.sleep(post_delay)
             # Extra guard time before reconnecting to read the screen
-            time.sleep(1.0)
+            time.sleep(SCOPE_POST_HOLD_EXTRA_S)
             
             if not simulation_mode:
                 # Use cached system name
@@ -585,6 +594,17 @@ class PulseMeasurementLogic:
                 
                 if len(t) == 0:
                     raise RuntimeError("Failed to acquire waveform from oscilloscope.")
+                
+                # Debug: show a few raw samples from scope
+                raw_preview = v_scope[:5].tolist()
+                print(f"  Raw scope samples (first 5): {raw_preview}")
+                
+                # Apply software compensation for 10x probe (scope reports 10x values)
+                v_scope = v_scope / 10.0
+                
+                # Debug: show a few scaled samples
+                scaled_preview = v_scope[:5].tolist()
+                print(f"  Scaled (÷10) samples (first 5): {scaled_preview}")
                 
                 # Calculate Current (always using shunt method)
                 # I = V_shunt / R_shunt
