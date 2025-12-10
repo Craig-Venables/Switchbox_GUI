@@ -125,6 +125,9 @@ class OscilloscopePulseGUI(tk.Toplevel):
             parent=content_frame, 
             callbacks={
                 'start': self._start_measurement,
+                'start_no_config': self._start_measurement_no_config,
+                'grab_scope': self._grab_scope_only,
+                'pulse_only': self._send_pulse_only,
                 'stop': self._stop_measurement,
                 'save': self._save_data_dialog,
                 'browse_save': self._browse_save_path,
@@ -244,6 +247,103 @@ class OscilloscopePulseGUI(tk.Toplevel):
             on_error=self._on_error,
             on_finished=self._on_finished
         )
+
+    def _start_measurement_no_config(self):
+        """Run measurement but skip scope auto-configuration."""
+        try:
+            params = self.layout.get_params()
+            # Persist current GUI config (user choices), but run with auto_configure_scope=False
+            self.config.update(params)
+            self.config_manager.save_config(self.config)
+        except Exception as e:
+            messagebox.showerror("Configuration Error", str(e))
+            return
+
+        self.layout.set_running_state(True)
+        self.layout.set_status("Starting (no scope auto-config)...")
+        self.layout.reset_plots()
+
+        run_params = dict(params)
+        run_params['auto_configure_scope'] = False
+
+        run_params.update({
+            'device_label': self.context.get('device_label'),
+            'sample_name': self.context.get('sample_name'),
+            'system': self.layout.vars.get('system', tk.StringVar()).get()
+        })
+
+        self.logic.start_measurement(
+            run_params,
+            on_progress=self._update_status,
+            on_data=self._on_data_received,
+            on_error=self._on_error,
+            on_finished=self._on_finished
+        )
+
+    def _grab_scope_only(self):
+        """Do not pulse; just grab the current waveform on the scope screen and plot/save."""
+        try:
+            params = self.layout.get_params()
+            # Persist current GUI config
+            self.config.update(params)
+            self.config_manager.save_config(self.config)
+        except Exception as e:
+            messagebox.showerror("Configuration Error", str(e))
+            return
+
+        self.layout.set_running_state(True)
+        self.layout.set_status("Grabbing scope screen...")
+        self.layout.reset_plots()
+
+        run_params = dict(params)
+        run_params['auto_configure_scope'] = False  # do not touch scope settings
+        run_params.update({
+            'device_label': self.context.get('device_label'),
+            'sample_name': self.context.get('sample_name'),
+            'system': self.layout.vars.get('system', tk.StringVar()).get(),
+            'scope_only': True
+        })
+
+        self.logic.start_scope_capture(
+            run_params,
+            on_progress=self._update_status,
+            on_data=self._on_data_received,
+            on_error=self._on_error,
+            on_finished=self._on_finished
+        )
+
+    def _send_pulse_only(self):
+        """Send SMU pulse only, no scope interaction."""
+        try:
+            params = self.layout.get_params()
+            self.config.update(params)
+            self.config_manager.save_config(self.config)
+        except Exception as e:
+            messagebox.showerror("Configuration Error", str(e))
+            return
+
+        self.layout.set_running_state(True)
+        self.layout.set_status("Sending pulse...")
+        
+        params.update({
+            'device_label': self.context.get('device_label'),
+            'sample_name': self.context.get('sample_name'),
+            'system': self.layout.vars.get('system', tk.StringVar()).get()
+        })
+
+        self.logic.send_pulse_only(
+            params,
+            on_progress=self._update_status,
+            on_error=self._on_error,
+            on_finished=self._on_pulse_finished
+        )
+
+    def _on_pulse_finished(self):
+        """Callback when pulse-only operation completes."""
+        def reset_ui():
+            self.layout.set_running_state(False)
+            self.layout.set_status("Pulse sent.")
+        self.after(0, reset_ui)
 
     def _stop_measurement(self):
         self.logic.stop_measurement()

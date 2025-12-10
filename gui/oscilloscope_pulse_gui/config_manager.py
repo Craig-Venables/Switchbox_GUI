@@ -16,6 +16,8 @@ class ConfigManager:
             "pulse_voltage": 1.0,
             "pulse_duration": 0.001,
             "compliance": 0.1,
+            "bias_voltage": 0.2,
+            "bias_hold": 1.0,
             "pre_pulse_delay": 0.1,
             "post_pulse_hold": 0.1,
             "scope_address": None,
@@ -27,7 +29,8 @@ class ConfigManager:
             "volts_per_div": 0.5,
             "shunt_resistance": 50.0,
             "measurement_method": "Shunt Resistor",
-            "simulation_mode": False
+            "simulation_mode": False,
+            "voltage_scale_factor": "1"
         }
 
     def load_config(self) -> Dict[str, Any]:

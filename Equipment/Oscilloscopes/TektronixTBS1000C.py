@@ -538,6 +538,9 @@ class TektronixTBS1000C:
         """
         Get waveform preamble information for a channel.
         
+        This method queries the scope's WFMO? command and also directly queries
+        channel settings (volts/div, offset) to ensure accurate scaling.
+        
         Args:
             channel: Channel number (1 or 2)
             
@@ -558,12 +561,54 @@ class TektronixTBS1000C:
         
         # Parse preamble
         preamble = self._parse_waveform_preamble(wfmo_str)
+        
+        # Also query scope settings directly as backup/verification
+        # This is more reliable than parsing the preamble
+        try:
+            v_scale = float(self.query(f"CH{channel}:SCA?").strip())
+            v_offset = float(self.query(f"CH{channel}:OFFS?").strip())
+            probe_atten = None
+            try:
+                probe_query = self.query(f"CH{channel}:PROBEFACTOR?").strip()
+                probe_atten = float(probe_query)
+            except:
+                pass
+            
+            # Store these as backup - can be used if preamble parsing fails
+            preamble['_CH_V_SCALE'] = v_scale  # Volts per division
+            preamble['_CH_V_OFFSET'] = v_offset  # Vertical offset in volts
+            if probe_atten:
+                preamble['_PROBE_ATTEN'] = probe_atten
+            
+        except Exception:
+            pass  # If we can't read these, rely on preamble only
+        
         self.wfmo_cache[cache_key] = preamble
         return preamble
     
     def _parse_waveform_preamble(self, wfmo_str: str) -> Dict[str, Any]:
         """
-        Parse waveform preamble string.
+        Parse waveform preamble string from WFMO? query.
+        
+        According to Tektronix documentation, WFMO? returns a semicolon-separated
+        list where values appear in a specific order. The format varies by scope model,
+        but typically includes (in order):
+        - BYT_NR (bytes per point)
+        - BIT_NR (bits per point)  
+        - ENC (encoding: ASC, BIN, RIB, RPB)
+        - BN_FMT (binary format: RI, RP)
+        - BYT_OR (byte order: LSB, MSB)
+        - WFID (waveform identifier string)
+        - NR_PT (number of points)
+        - PT_FMT (point format: Y, ENV)
+        - XUNIT (X axis unit, typically "s")
+        - XINCR (X increment)
+        - XZERO (X zero)
+        - PT_OFF (point offset)
+        - YUNIT (Y axis unit, typically "V")
+        - YMULT (Y multiply)
+        - YOFF (Y offset)
+        - YZERO (Y zero)
         
         Args:
             wfmo_str: Waveform preamble string from WFMO? query
@@ -572,22 +617,50 @@ class TektronixTBS1000C:
             dict: Parsed preamble dictionary
         """
         preamble = {}
-        for item in wfmo_str.split(';'):
-            if ':' in item:
-                key, value = item.split(':', 1)
-                key = key.strip()
-                value = value.strip()
-                
-                # Convert numeric values
-                try:
-                    if '.' in value or 'e' in value.lower() or 'E' in value:
-                        preamble[key] = float(value)
-                    else:
-                        preamble[key] = int(value)
-                except ValueError:
-                    preamble[key] = value
-            else:
-                preamble[item.strip()] = True
+        items = [item.strip() for item in wfmo_str.split(';')]
+        
+        # Try to parse as positional format first
+        # Common order for Tektronix scopes:
+        expected_fields = ['BYT_NR', 'BIT_NR', 'ENC', 'BN_FMT', 'BYT_OR', 'WFID', 
+                          'NR_PT', 'PT_FMT', 'XUNIT', 'XINCR', 'XZERO', 'PT_OFF',
+                          'YUNIT', 'YMULT', 'YOFF', 'YZERO']
+        
+        # Also try key-value format if colons present
+        if any(':' in item for item in items):
+            for item in items:
+                if ':' in item:
+                    key, value = item.split(':', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Convert numeric values
+                    try:
+                        if '.' in value or 'e' in value.lower() or 'E' in value or value.startswith('-'):
+                            preamble[key] = float(value)
+                        else:
+                            preamble[key] = int(value)
+                    except ValueError:
+                        preamble[key] = value
+                else:
+                    # Positional value - try to match to expected field
+                    preamble[item] = True
+        else:
+            # Pure positional format - map by position
+            # This is tricky without knowing exact format, so try common positions
+            for i, item in enumerate(items):
+                if i < len(expected_fields):
+                    # Try to parse as number
+                    try:
+                        if '.' in item or 'e' in item.lower() or 'E' in item or item.startswith('-'):
+                            preamble[expected_fields[i]] = float(item)
+                        else:
+                            preamble[expected_fields[i]] = int(item)
+                    except ValueError:
+                        # String value
+                        preamble[expected_fields[i]] = item
+                else:
+                    # Store by position if we don't have a field name
+                    preamble[f'FIELD_{i}'] = item
         
         return preamble
     
@@ -623,9 +696,16 @@ class TektronixTBS1000C:
         """
         Convert raw ADC sample codes to volts using Tektronix preamble fields.
         
+        Standard Tektronix formula: V = (code - YOFF) * YMULT + YZERO
+        
+        If preamble parsing failed, this method also tries to use direct scope settings
+        (_CH_V_SCALE, _CH_V_OFFSET) if they were queried as a fallback.
+        
         Args:
             raw_values: Raw integer codes from CURV? response.
             preamble: Parsed waveform preamble containing YMULT, YOFF, YZERO.
+                    Also checks case-insensitive and alternative field names.
+                    May contain _CH_V_SCALE and _CH_V_OFFSET from direct queries.
         
         Returns:
             np.ndarray: Scaled voltage values in volts.
@@ -634,12 +714,55 @@ class TektronixTBS1000C:
             return np.array([], dtype=np.float64)
 
         values = raw_values.astype(np.float64)
-        ymult = preamble.get('YMULT')
-        yoff = preamble.get('YOFF')
-        yzero = preamble.get('YZERO', 0.0)
+        
+        # Try to get scaling factors (check multiple possible keys, case-insensitive)
+        ymult = None
+        yoff = None
+        yzero = 0.0
+        
+        # Normalize keys to uppercase for lookup
+        normalized_preamble = {}
+        for key, value in preamble.items():
+            normalized_preamble[str(key).upper()] = value
+        
+        # Try different possible key names
+        ymult = (normalized_preamble.get('YMULT') or 
+                normalized_preamble.get('YMULTIPLY') or
+                preamble.get('YMULT'))
+        
+        yoff = (normalized_preamble.get('YOFF') or 
+               normalized_preamble.get('YOFFSET') or
+               preamble.get('YOFF'))
+        
+        yzero = (normalized_preamble.get('YZERO') or 
+                normalized_preamble.get('YZERO_OFFSET') or
+                preamble.get('YZERO', 0.0))
+        
+        # If preamble parsing failed, try to use direct scope settings as fallback
+        # Calculate from volts/div and vertical offset if available
+        if (ymult is None or yoff is None) and '_CH_V_SCALE' in preamble:
+            # Calculate YMULT from volts per division
+            # Full scale is 10 divisions, so YMULT ≈ v_scale * 10 / (max_adc - min_adc)
+            # For 8-bit ADC, range is typically -127 to 127 (255 codes)
+            v_scale = preamble['_CH_V_SCALE']
+            max_code = 127  # Typical for 8-bit signed
+            min_code = -128
+            code_range = max_code - min_code  # 255
+            # Volts per code = (volts per div * 10 divisions) / code range
+            estimated_ymult = (v_scale * 10.0) / code_range
+            # Estimate YOFF from center (typically 0 for centered signal)
+            estimated_yoff = 0.0
+            
+            if ymult is None:
+                ymult = estimated_ymult
+            if yoff is None:
+                yoff = estimated_yoff
+            yzero = preamble.get('_CH_V_OFFSET', yzero)
 
         # Tektronix formula: V = (code - YOFF) * YMULT + YZERO
         if ymult is None or yoff is None:
+            # If we still can't find scaling factors, return raw values
+            # (User will see raw ADC codes - better than crashing)
             return values
 
         return (values - yoff) * ymult + (yzero or 0.0)
@@ -682,7 +805,8 @@ class TektronixTBS1000C:
         
         Args:
             channel: Channel number (1 or 2)
-            format: Data format - 'ASCII', 'RIBINARY', or 'WORD' (default: 'ASCII')
+            format: Data format - 'ASCII', 'RIBINARY', or 'RPBINARY' (default: 'ASCII')
+                    Note: ASCII is more reliable on TBS1000C. RIBINARY can be slow with PyVISA.
             num_points: Optional number of points to request. If None, uses full
                 record length reported by the oscilloscope.
             
@@ -734,13 +858,31 @@ class TektronixTBS1000C:
                     data_points.append(float(value.strip()))
                 except ValueError:
                     continue
-        else:
-            # Binary format
-            
+        elif format == "RIBINARY":
+            # RIBINARY format: signed integer binary (RI = signed integer, MSB first, faster)
+            # For 1-byte: use signed int8 ('b')
+            # Configure for binary read
+            self.inst.chunk_size = 1024000  # Increase chunk size for binary
+            data_binary = self.inst.query_binary_values("CURV?", datatype='b', container=np.array)
+            data_points = data_binary.astype(np.float64).tolist()
+        elif format == "RPBINARY":
+            # RPBINARY format: positive/unsigned integer binary (RP = positive, offset by 128)
+            # For 1-byte: use unsigned int8 ('B'), then convert to signed
             # Configure for binary read
             self.inst.chunk_size = 1024000  # Increase chunk size for binary
             data_binary = self.inst.query_binary_values("CURV?", datatype='B', container=np.array)
-            data_points = data_binary.tolist()
+            # Convert unsigned 0-255 to signed -128 to 127
+            data_binary = data_binary.astype(np.int16) - 128
+            data_points = data_binary.astype(np.float64).tolist()
+        else:
+            # Fallback: treat as ASCII if unknown format
+            data_str = self.query("CURV?")
+            data_points = []
+            for value in data_str.split(','):
+                try:
+                    data_points.append(float(value.strip()))
+                except ValueError:
+                    continue
         
         # Convert to numpy array
         y_values = np.array(data_points, dtype=np.float64)
