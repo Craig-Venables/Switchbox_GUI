@@ -15,10 +15,13 @@ import time
 import pyvisa
 
 
+LIB_NAME = "a_SMU_Pulse"
+
+
 def run_ul_over_gpib(resource: str, module_name: str, args: list[str]) -> str:
     """
     Send UL command over GPIB to the 4200A.
-    Sequence: UL -> EX ... -> DE
+    Sequence: UL -> EX <lib> <module>(args) -> DE
     """
     rm = pyvisa.ResourceManager()
     inst = rm.open_resource(resource)
@@ -26,7 +29,7 @@ def run_ul_over_gpib(resource: str, module_name: str, args: list[str]) -> str:
     # Enter UL mode
     inst.write("UL")
     time.sleep(0.05)
-    cmd = f"EX {module_name}({','.join(args)})"
+    cmd = f"EX {LIB_NAME} {module_name}({','.join(args)})"
     inst.write(cmd)
     time.sleep(0.05)
     resp = inst.read().strip()
