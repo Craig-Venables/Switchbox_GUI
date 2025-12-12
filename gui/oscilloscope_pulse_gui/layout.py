@@ -1120,20 +1120,22 @@ class OscilloscopePulseLayout:
         
         try:
             pulse_voltage = float(self.vars['pulse_voltage'].get())
-            pulse_duration = self.vars['align_pulse_duration'].get()
+            pulse_duration = float(self.vars['pulse_duration'].get())  # Use actual pulse duration from pulse parameters
             bias_voltage = float(self.vars['bias_voltage'].get())
-            pre_bias_hold = self.vars['align_pre_bias_hold'].get()
-            pre_delay = self.vars['align_pre_delay'].get()
-            post_delay = self.vars['align_post_delay'].get()
-            post_bias_hold = self.vars['align_post_bias_hold'].get()
+            # Get pre_bias_time from pulse parameters (use for both pre and post until post_bias_time works)
+            pre_bias_time = float(self.vars['pre_bias_time'].get())
+            post_bias_time = pre_bias_time  # Use pre_bias_time for post as well
         except:
             pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
             pulse_duration = float(metadata.get('pulse_duration', 0.001))
             bias_voltage = float(metadata.get('bias_voltage', 0.2))
-            pre_bias_hold = float(metadata.get('pre_bias_hold', 0.1))
-            pre_delay = float(metadata.get('params', {}).get('pre_pulse_delay', 0.1))
-            post_delay = float(metadata.get('params', {}).get('post_pulse_hold', 0.1))
-            post_bias_hold = float(metadata.get('post_bias_hold', 1.0))
+            # Get from metadata, checking params first
+            if 'params' in metadata:
+                pre_bias_time = float(metadata['params'].get('pre_bias_time', metadata.get('pre_bias_time', 0.1)))
+            else:
+                pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
+            # Use pre_bias_time for post as well
+            post_bias_time = pre_bias_time
         
         original_pulse_start = metadata.get('pulse_start_time', 0.0)
         if original_pulse_start is None:
@@ -1181,29 +1183,46 @@ class OscilloscopePulseLayout:
     
     def _create_v_smu_waveform(self, t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
                                pre_bias_time, post_bias_time):
-        """Create V_SMU waveform from pulse parameters with pre/post bias times"""
+        """
+        Create V_SMU waveform matching the actual Keithley 4200A output.
+        
+        Waveform sequence:
+        0V → bias_voltage (for pre_bias_time) → pulse_voltage (for pulse duration) → 
+        bias_voltage (for pre_bias_time, since post_bias_time not working yet) → continue at bias_voltage
+        
+        Example: 0V → 0.2V (1s) → 1V (1s) → 0.2V (1s) → 0.2V (remaining)
+        
+        NOTE: Currently using pre_bias_time for both pre and post bias periods.
+        """
         import numpy as np
         v_smu = np.zeros_like(t)
         
+        # Calculate timing boundaries
         bias_start_time = max(0, pulse_start - pre_bias_time)
         pulse_start_time = pulse_start
         pulse_end_time = pulse_end
-        bias_after_pulse_end = pulse_end_time + post_bias_time
+        # Use pre_bias_time for post-bias period since post_bias_time isn't working yet
+        post_bias_end_time = pulse_end_time + pre_bias_time
         
+        # Before pre-bias: 0V
         initial_mask = t < bias_start_time
         v_smu[initial_mask] = 0.0
         
+        # Pre-bias period: bias_voltage for pre_bias_time duration
         bias_before_mask = (t >= bias_start_time) & (t < pulse_start_time)
         v_smu[bias_before_mask] = bias_voltage
         
+        # Pulse period: pulse_voltage (absolute voltage) for pulse duration
         pulse_mask = (t >= pulse_start_time) & (t <= pulse_end_time)
-        v_smu[pulse_mask] = bias_voltage + pulse_voltage
+        v_smu[pulse_mask] = pulse_voltage
         
-        bias_after_mask = (t > pulse_end_time) & (t <= bias_after_pulse_end)
+        # Post-bias period: back to bias_voltage for pre_bias_time duration (using pre_bias_time since post_bias_time not working)
+        bias_after_mask = (t > pulse_end_time) & (t <= post_bias_end_time)
         v_smu[bias_after_mask] = bias_voltage
         
-        final_mask = t > bias_after_pulse_end
-        v_smu[final_mask] = 0.0
+        # After post-bias: continue at bias_voltage (scope is still in post-bias mode)
+        final_mask = t > post_bias_end_time
+        v_smu[final_mask] = bias_voltage
         
         return v_smu
     
@@ -1232,17 +1251,25 @@ class OscilloscopePulseLayout:
         
         try:
             pulse_voltage = float(self.vars['pulse_voltage'].get())
-            pulse_duration = self.vars['align_pulse_duration'].get()
+            pulse_duration = float(self.vars['pulse_duration'].get())
             bias_voltage = float(self.vars['bias_voltage'].get())
-            pre_bias_time = self.vars['align_pre_bias_time'].get()
-            post_bias_time = self.vars['align_post_bias_time'].get()
+            # Use pre_bias_time from pulse parameters (for both pre and post until post_bias_time works)
+            pre_bias_time = float(self.vars['pre_bias_time'].get())
+            # Use pre_bias_time for post as well since post_bias_time isn't working yet
+            post_bias_time = pre_bias_time
         except:
             pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
             pulse_duration = float(metadata.get('pulse_duration', 0.001))
             bias_voltage = float(metadata.get('bias_voltage', 0.2))
-            pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
-            post_bias_time = float(metadata.get('post_bias_time', 1.0))
+            # Get from metadata/params
+            if 'params' in metadata:
+                pre_bias_time = float(metadata['params'].get('pre_bias_time', metadata.get('pre_bias_time', 0.1)))
+            else:
+                pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
+            # Use pre_bias_time for post as well
+            post_bias_time = pre_bias_time
         
+        # Get pulse start from metadata and apply alignment offset
         original_pulse_start = metadata.get('pulse_start_time', 0.0)
         if original_pulse_start is None:
             original_pulse_start = 0.0

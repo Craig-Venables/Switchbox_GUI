@@ -1,8 +1,8 @@
 {
-    "pulse_voltage": "2",
-    "pulse_duration": "2",
+    "pulse_voltage": "1",
+    "pulse_duration": "1",
     "compliance": "0.1",
-    "bias_voltage": "0.5",
+    "bias_voltage": "0.2",
     "bias_hold": "0.5",
     "pre_pulse_delay": "0.1",
     "post_pulse_hold": "0.1",
@@ -46,8 +46,8 @@
     "align_post_bias_hold": 1.0,
     "pre_bias_hold": "0.1",
     "post_bias_hold": "1.0",
-    "pre_bias_time": "0.2",
-    "post_bias_time": "1.0",
+    "pre_bias_time": "1",
+    "post_bias_time": "0",
     "align_pre_bias_time": 0.1,
     "align_post_bias_time": 1.0
 }
