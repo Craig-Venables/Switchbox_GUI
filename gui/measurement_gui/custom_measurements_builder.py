@@ -519,6 +519,19 @@ class CustomMeasurementsBuilder:
             step_delay = tk.StringVar(value=str(sweep_data.get("step_delay", "0.01")))
             tk.Entry(params_row, textvariable=step_delay, width=8).pack(side='left', padx=2)
             widgets['step_delay'] = step_delay
+            
+            # Sweep Type dropdown
+            tk.Label(params_row, text="Type:", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
+            sweep_type = tk.StringVar(value=str(sweep_data.get("Sweep_type", "FS")))
+            sweep_type_combo = ttk.Combobox(
+                params_row,
+                textvariable=sweep_type,
+                values=["FS", "PS", "NS", "HS"],
+                state="readonly",
+                width=6
+            )
+            sweep_type_combo.pack(side='left', padx=2)
+            widgets['Sweep_type'] = sweep_type
         
         elif measurement_type == "Endurance":
             tk.Label(params_row, text="Set V:", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
@@ -741,6 +754,9 @@ class CustomMeasurementsBuilder:
                         "sweeps": int(widgets.get('sweeps', tk.StringVar(value="1")).get()),
                         "step_delay": float(widgets.get('step_delay', tk.StringVar(value="0.01")).get())
                     })
+                    # Add sweep type if present
+                    if 'Sweep_type' in widgets:
+                        sweep_data["Sweep_type"] = widgets['Sweep_type'].get()
             
             elif sweep_type == "Endurance":
                 sweep_data.update({
