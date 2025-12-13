@@ -168,7 +168,9 @@
       "14": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3},
       "15": {"start_v": 0, "stop_v": 1, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3},
       "16": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3},
-      "17": {"start_v": 0, "stop_v": 0.3, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3}
+      "17": {"start_v": 0, "stop_v": 0.3, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3},
+      "18": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3,"Sweep_type": "PS"},
+      "19": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3,"Sweep_type": "FS"}
     }
  },
   "Manual_Endurance_Short": {
