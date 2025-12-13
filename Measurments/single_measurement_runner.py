@@ -240,15 +240,26 @@ class SingleMeasurementRunner:
                     source_mode=source_mode,
                 )
 
-                v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep_v2(
-                    keithley=self.keithley,
-                    config=config,
-                    smu_type=smu_type_str,
-                    psu=getattr(self, "psu", None),
-                    optical=getattr(self, "optical", None),
-                    should_stop=lambda: getattr(self, "stop_measurement_flag", False),
-                    on_point=None,
-                )
+                # Use unified API directly from IVControllerManager
+                if hasattr(self.keithley, 'do_iv_sweep'):
+                    v_arr, c_arr, timestamps = self.keithley.do_iv_sweep(
+                        config=config,
+                        psu=getattr(self, "psu", None),
+                        optical=getattr(self, "optical", None),
+                        should_stop=lambda: getattr(self, "stop_measurement_flag", False),
+                        on_point=None,
+                    )
+                else:
+                    # Fallback to measurement service (for backwards compatibility)
+                    v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep_v2(
+                        keithley=self.keithley,
+                        config=config,
+                        smu_type=smu_type_str,
+                        psu=getattr(self, "psu", None),
+                        optical=getattr(self, "optical", None),
+                        should_stop=lambda: getattr(self, "stop_measurement_flag", False),
+                        on_point=None,
+                    )
 
                 if timestamps:
                     self.set_status_message(
@@ -272,31 +283,61 @@ class SingleMeasurementRunner:
                 else:
                     source_mode = SourceMode.VOLTAGE
 
-                v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
-                    keithley=self.keithley,
-                    icc=icc_val,
-                    sweeps=sweeps,
-                    step_delay=step_delay,
-                    start_v=start_v,
-                    stop_v=stop_v,
-                    neg_stop_v=neg_stop_v,
-                    step_v=step_v,
-                    sweep_type=sweep_type,
-                    mode=mode,
-                    sweep_rate_v_per_s=sweep_rate,
-                    total_time_s=total_time,
-                    num_steps=nsteps,
-                    psu=getattr(self, "psu", None),
-                    led=bool(led),
-                    power=led_power,
-                    optical=getattr(self, "optical", None),
-                    sequence=sequence,
-                    pause_s=pause,
-                    smu_type=smu_type_str,
-                    should_stop=lambda: getattr(self, "stop_measurement_flag", False),
-                    on_point=_on_point,
-                    source_mode=source_mode,
-                )
+                # Use unified API directly from IVControllerManager
+                if hasattr(self.keithley, 'do_iv_sweep'):
+                    # Build SweepConfig for old-style parameters
+                    from Measurments.sweep_config import SweepConfig
+                    
+                    config = SweepConfig(
+                        start_v=start_v,
+                        stop_v=stop_v,
+                        step_v=step_v,
+                        neg_stop_v=neg_stop_v,
+                        step_delay=step_delay,
+                        sweep_type=sweep_type,
+                        sweeps=sweeps,
+                        pause_s=pause,
+                        icc=icc_val,
+                        led=bool(led),
+                        power=led_power,
+                        sequence=sequence,
+                        source_mode=source_mode,
+                    )
+                    
+                    v_arr, c_arr, timestamps = self.keithley.do_iv_sweep(
+                        config=config,
+                        psu=getattr(self, "psu", None),
+                        optical=getattr(self, "optical", None),
+                        should_stop=lambda: getattr(self, "stop_measurement_flag", False),
+                        on_point=_on_point,
+                    )
+                else:
+                    # Fallback to measurement service (backwards compatibility)
+                    v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                        keithley=self.keithley,
+                        icc=icc_val,
+                        sweeps=sweeps,
+                        step_delay=step_delay,
+                        start_v=start_v,
+                        stop_v=stop_v,
+                        neg_stop_v=neg_stop_v,
+                        step_v=step_v,
+                        sweep_type=sweep_type,
+                        mode=mode,
+                        sweep_rate_v_per_s=sweep_rate,
+                        total_time_s=total_time,
+                        num_steps=nsteps,
+                        psu=getattr(self, "psu", None),
+                        led=bool(led),
+                        power=led_power,
+                        optical=getattr(self, "optical", None),
+                        sequence=sequence,
+                        pause_s=pause,
+                        smu_type=smu_type_str,
+                        should_stop=lambda: getattr(self, "stop_measurement_flag", False),
+                        on_point=_on_point,
+                        source_mode=source_mode,
+                    )
 
             if hasattr(self, "endurance_ratios") and self.endurance_ratios:
                 self.ax_endurance.clear()
