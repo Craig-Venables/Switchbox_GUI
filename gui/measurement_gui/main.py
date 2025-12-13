@@ -346,6 +346,9 @@ class MeasurementGUI:
         # Set up window close protocol to notify sample_gui
         def on_closing():
             """Handle window close - notify sample_gui and cleanup"""
+            # Unregister from sample_gui
+            if hasattr(self.sample_gui, 'unregister_child_gui'):
+                self.sample_gui.unregister_child_gui(self)
             # Notify sample_gui that measurement window is closing
             if hasattr(self.sample_gui, '_on_measurement_window_closed'):
                 self.sample_gui._on_measurement_window_closed()
@@ -1202,6 +1205,14 @@ class MeasurementGUI:
                 loop_val = self.measurment_number
             if loop_val is not None:
                 self.loop_label.config(text=f"Loop: {loop_val}")
+            
+            # Update orange overlay box to stay in sync with sample/device changes
+            if hasattr(self, '_update_overlay_from_current_state'):
+                try:
+                    self._update_overlay_from_current_state()
+                except Exception as e:
+                    # Silently fail to avoid spamming errors
+                    pass
         finally:
             if self._status_updates_active and self.master.winfo_exists():
                 self.master.after(250, self._status_update_tick)
@@ -4368,6 +4379,179 @@ class MeasurementGUI:
             except Exception as e:
                 print(f"Error in sample name dialog: {e}")
                 self.sample_name_var.set("undefined")
+    
+    def _update_overlay_from_current_state(self) -> None:
+        """Helper method to update the orange overlay box with current state."""
+        if not hasattr(self, 'plot_panels') or not hasattr(self.plot_panels, 'update_overlay'):
+            return
+        
+        # Get sample name - prioritize in this order:
+        # 1. sample_name_var (user-entered or set from device)
+        # 2. current_device_name from sample_gui (saved device)
+        # 3. sample_type_var from sample_gui (selected sample type, even if no saved device)
+        sample_name = "—"
+        
+        # First try sample_name_var
+        if hasattr(self, 'sample_name_var'):
+            try:
+                name = self.sample_name_var.get().strip()
+                if name:
+                    sample_name = name
+            except Exception:
+                pass
+        
+        # If still empty, try current_device_name (saved device)
+        if sample_name == "—" or not sample_name:
+            if hasattr(self.sample_gui, 'current_device_name') and self.sample_gui.current_device_name:
+                sample_name = self.sample_gui.current_device_name
+        
+        # If still empty, fall back to sample_type_var (selected sample type)
+        # This ensures it updates even when no saved device is selected
+        if sample_name == "—" or not sample_name:
+            if hasattr(self.sample_gui, 'sample_type_var'):
+                try:
+                    sample_type = self.sample_gui.sample_type_var.get()
+                    if sample_type:
+                        sample_name = sample_type
+                except Exception:
+                    pass
+        
+        # Get device label
+        device_label = "—"
+        try:
+            # Try to get from device_section_and_number
+            if hasattr(self, 'device_section_and_number') and self.device_section_and_number:
+                device_label = self.device_section_and_number
+            # Fallback: get from sample_gui's current device selection
+            elif hasattr(self.sample_gui, 'device_var'):
+                try:
+                    device = self.sample_gui.device_var.get()
+                    if device:
+                        device_label = device
+                except Exception:
+                    pass
+            # Another fallback: use current_index to get device label
+            if device_label == "—" and hasattr(self, 'current_index') and hasattr(self.sample_gui, 'device_list'):
+                if 0 <= self.current_index < len(self.sample_gui.device_list):
+                    device_key = self.sample_gui.device_list[self.current_index]
+                    if hasattr(self.sample_gui, 'get_device_label'):
+                        device_label = self.sample_gui.get_device_label(device_key)
+                    else:
+                        device_label = str(device_key)
+        except Exception:
+            pass
+        
+        # Get current voltage
+        current_voltage = getattr(self, 'current_voltage', '0V')
+        if current_voltage == '0V' and hasattr(self, 'v_arr_disp') and self.v_arr_disp:
+            try:
+                v_now = float(self.v_arr_disp[-1])
+                current_voltage = f"{v_now:.3f}V"
+            except Exception:
+                pass
+        
+        # Get current loop
+        current_loop = getattr(self, 'current_loop', '#1')
+        if current_loop == '#1':
+            loop_val = None
+            if getattr(self, 'sweep_num', None) is not None:
+                loop_val = self.sweep_num
+            elif getattr(self, 'measurment_number', None) is not None:
+                loop_val = self.measurment_number
+            if loop_val is not None:
+                current_loop = f"#{loop_val}"
+        
+        # Update the overlay
+        self.plot_panels.update_overlay(
+            sample_name=sample_name,
+            device=device_label,
+            voltage=current_voltage,
+            loop=current_loop
+        )
+    
+    def on_sample_gui_change(self, change_type: str, **kwargs) -> None:
+        """Handle notifications from SampleGUI about changes.
+        
+        Args:
+            change_type: Type of change ('sample_type', 'section', 'device_name', 'device_selection')
+            **kwargs: Additional data about the change
+        """
+        try:
+            if change_type == 'device_name':
+                device_name = kwargs.get('device_name')
+                # Update sample_name_var if it exists
+                if hasattr(self, 'sample_name_var'):
+                    if device_name:
+                        self.sample_name_var.set(device_name)
+                    else:
+                        # If device name is cleared, try to get sample type as fallback
+                        if hasattr(self.sample_gui, 'sample_type_var'):
+                            try:
+                                sample_type = self.sample_gui.sample_type_var.get()
+                                if sample_type:
+                                    self.sample_name_var.set(sample_type)
+                            except Exception:
+                                pass
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+            
+            elif change_type == 'sample_type':
+                sample_type = kwargs.get('sample_type')
+                # Update sample_name_var if device_name is not set
+                if hasattr(self, 'sample_name_var'):
+                    current_name = self.sample_name_var.get().strip()
+                    # Only update if current name is empty or matches old sample type
+                    if not current_name or (hasattr(self.sample_gui, 'sample_type_var') and 
+                                           current_name == getattr(self.sample_gui, 'sample_type_var', None)):
+                        if sample_type:
+                            self.sample_name_var.set(sample_type)
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+            
+            elif change_type == 'section':
+                section = kwargs.get('section')
+                device = kwargs.get('device')
+                # Update current_index if device changed
+                if device and hasattr(self.sample_gui, 'device_list'):
+                    try:
+                        device_key = self.sample_gui.get_device_key_from_label(device)
+                        if device_key and device_key in self.sample_gui.device_list:
+                            new_index = self.sample_gui.device_list.index(device_key)
+                            if new_index != self.current_index:
+                                self.current_index = new_index
+                                # Update device-related attributes
+                                if hasattr(self, 'device_list') and self.current_index < len(self.device_list):
+                                    self.current_device = self.device_list[self.current_index]
+                                    self.device_section_and_number = self.convert_to_name(self.current_index)
+                                    self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
+                    except Exception:
+                        pass
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+            
+            elif change_type == 'device_selection':
+                selected_devices = kwargs.get('selected_devices', [])
+                selected_indices = kwargs.get('selected_indices', [])
+                # Update device_list if provided
+                if selected_devices:
+                    self.device_list = selected_devices.copy()
+                    # Update current_index if it's out of bounds
+                    if self.current_index >= len(self.device_list):
+                        self.current_index = 0 if self.device_list else 0
+                    # Update current_device and device_section_and_number
+                    if self.device_list and self.current_index < len(self.device_list):
+                        self.current_device = self.device_list[self.current_index]
+                        self.device_section_and_number = self.convert_to_name(self.current_index)
+                        self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+        except Exception as e:
+            print(f"Error handling sample_gui change notification ({change_type}): {e}")
+    
     def check_connection(self) -> None:
         self.connect_keithley()
         time.sleep(0.1)

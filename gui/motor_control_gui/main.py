@@ -51,6 +51,21 @@ import json
 import os
 from pathlib import Path
 import sys
+import threading
+import time
+
+# Camera imports
+try:
+    import cv2
+    import numpy as np
+    from PIL import Image, ImageTk
+    CAMERA_AVAILABLE = True
+except ImportError:
+    CAMERA_AVAILABLE = False
+    cv2 = None
+    np = None
+    Image = None
+    ImageTk = None
 
 # ---------- Optional FG Protocol (for type hints) ----------
 
@@ -98,19 +113,19 @@ class MotorControlWindow:
         The movement range mapped to the canvas in user units (mm).
     """
 
-    # Color scheme for modern UI
+    # Color scheme matching other GUIs (light theme)
     COLORS = {
-        'bg_dark': '#2b2b2b',
-        'bg_medium': '#3c3c3c',
-        'bg_light': '#4a4a4a',
-        'fg_primary': '#ffffff',
-        'fg_secondary': '#b0b0b0',
-        'accent_blue': '#4a9eff',
-        'accent_green': '#4ade80',
-        'accent_red': '#ef4444',
-        'accent_yellow': '#fbbf24',
-        'grid_light': '#555555',
-        'grid_dark': '#444444',
+        'bg_dark': '#f0f0f0',  # Light grey background
+        'bg_medium': '#f0f0f0',  # Light grey for frames
+        'bg_light': '#ffffff',  # White for entries/listboxes
+        'fg_primary': '#000000',  # Black text
+        'fg_secondary': '#888888',  # Grey secondary text
+        'accent_blue': '#569CD6',  # Blue for info/accents
+        'accent_green': '#4CAF50',  # Green for buttons/success
+        'accent_red': '#F44336',  # Red for errors/stop
+        'accent_yellow': '#FFA500',  # Orange for warnings
+        'grid_light': '#cccccc',  # Light grey grid lines
+        'grid_dark': '#999999',  # Darker grey grid lines
     }
 
     def __init__(
@@ -118,7 +133,7 @@ class MotorControlWindow:
         function_generator: Optional[FunctionGenerator] = None,
         default_amplitude_volts: float = 0.4,
         canvas_size_pixels: int = 500,
-        world_range_units: float = 50.0,
+        world_range_units: float = 25.0,
     ) -> None:
         # Motor controller (initialized on Connect)
         self.motor: Optional[KinesisController] = None
@@ -140,6 +155,24 @@ class MotorControlWindow:
         self.presets: Dict[str, Tuple[float, float]] = {}
         self.presets_file = Path("motor_presets.json")
         self._load_presets()
+        
+        # Camera feed - supports both direct USB and IP stream
+        self.camera: Optional[cv2.VideoCapture] = None
+        self.camera_index = 0
+        self.camera_running = False
+        self.camera_thread: Optional[threading.Thread] = None
+        self.current_camera_frame: Optional[np.ndarray] = None
+        self.camera_frame_lock = threading.Lock()
+        self.camera_label: Optional[tk.Label] = None
+        self.camera_index_var: Optional[tk.StringVar] = None
+        self.camera_ip_var: Optional[tk.StringVar] = None
+        self.camera_port_var: Optional[tk.StringVar] = None
+        self.camera_mode_var: Optional[tk.StringVar] = None
+        self.camera_start_button: Optional[tk.Button] = None
+        self.camera_stop_button: Optional[tk.Button] = None
+        self.camera_stream_url: Optional[str] = None
+        self.camera_photo: Optional[ImageTk.PhotoImage] = None  # Keep reference to prevent garbage collection
+        self._updating_display = False  # Flag to prevent overlapping updates
 
         # Create root window
         self.root = tk.Tk()
@@ -248,7 +281,7 @@ class MotorControlWindow:
             btn_frame,
             text="Help / Guide",
             command=self._show_help,
-            bg="#1565c0",
+            bg=self.COLORS['accent_blue'],
             fg="white",
             font=("Arial", 10, "bold"),
             padx=15,
@@ -772,7 +805,7 @@ class MotorControlWindow:
             canvas_frame,
             width=self.canvas_size,
             height=self.canvas_size,
-            background='#1a1a1a',
+            background='#ffffff',
             highlightthickness=0
         )
         self.canvas.pack(padx=10, pady=10)
@@ -784,12 +817,12 @@ class MotorControlWindow:
             10, 10,
             text="",
             anchor="nw",
-            fill=self.COLORS['accent_yellow'],
+            fill=self.COLORS['accent_blue'],
             font=("Consolas", 9)
         )
 
     def _build_camera_placeholder(self, parent: tk.Frame) -> None:
-        """Build camera feed placeholder."""
+        """Build camera feed display with controls."""
         camera_frame = tk.LabelFrame(
             parent,
             text="📷 Camera Feed",
@@ -800,34 +833,161 @@ class MotorControlWindow:
             borderwidth=2
         )
         camera_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        camera_frame.columnconfigure(0, weight=1)
+        camera_frame.rowconfigure(0, weight=1)
+        camera_frame.rowconfigure(1, weight=0)
 
-        # Placeholder content
-        placeholder = tk.Frame(camera_frame, bg='#1a1a1a')
-        placeholder.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Camera display area
+        display_frame = tk.Frame(camera_frame, bg='#ffffff')
+        display_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        display_frame.columnconfigure(0, weight=1)
+        display_frame.rowconfigure(0, weight=1)
 
-        tk.Label(
-            placeholder,
-            text="📹",
-            font=("Arial", 48),
-            fg=self.COLORS['grid_light'],
-            bg='#1a1a1a'
-        ).pack(expand=True)
+        # Camera display - use Label with persistent PhotoImage
+        if CAMERA_AVAILABLE:
+            # Label for displaying video
+            self.camera_label = tk.Label(
+                display_frame,
+                text="Camera not started",
+                bg='#000000',
+                fg=self.COLORS['fg_secondary'],
+                font=("Arial", 12),
+                anchor='center'
+            )
+            self.camera_label.grid(row=0, column=0, sticky="nsew")
+            
+            # CRITICAL: Keep a list of PhotoImage objects to prevent garbage collection
+            # Tkinter PhotoImage objects must be kept alive by maintaining references
+            self._camera_photo_list = []  # List to keep PhotoImage objects alive
+            self._camera_photo = None  # Current PhotoImage
+        else:
+            tk.Label(
+                display_frame,
+                text="📹\nCamera support not available\n(Install opencv-python and pillow)",
+                bg='#ffffff',
+                fg=self.COLORS['fg_secondary'],
+                font=("Arial", 12)
+            ).grid(row=0, column=0, sticky="nsew")
 
-        tk.Label(
-            placeholder,
-            text="CAMERA FEED\nCOMING SOON",
-            font=("Arial", 16, "bold"),
-            fg=self.COLORS['fg_secondary'],
-            bg='#1a1a1a'
-        ).pack()
-
-        tk.Label(
-            placeholder,
-            text="Real-time camera monitoring will be available in a future update",
-            font=("Arial", 9),
-            fg=self.COLORS['grid_light'],
-            bg='#1a1a1a'
-        ).pack(pady=(10, 0))
+        # Camera controls
+        controls_frame = tk.Frame(camera_frame, bg=self.COLORS['bg_medium'])
+        controls_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=5)
+        
+        if CAMERA_AVAILABLE:
+            # Camera mode selection
+            mode_frame = tk.Frame(controls_frame, bg=self.COLORS['bg_medium'])
+            mode_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+            
+            tk.Label(
+                mode_frame,
+                text="Mode:",
+                bg=self.COLORS['bg_medium'],
+                fg=self.COLORS['fg_primary'],
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+            
+            self.camera_mode_var = tk.StringVar(value="IP Stream")
+            mode_combo = ttk.Combobox(
+                mode_frame,
+                textvariable=self.camera_mode_var,
+                values=["IP Stream", "USB Camera"],
+                width=12,
+                state="readonly"
+            )
+            mode_combo.pack(side=tk.LEFT, padx=5)
+            mode_combo.bind("<<ComboboxSelected>>", lambda e: self._update_camera_mode_ui())
+            
+            # IP Stream settings
+            self.ip_frame = tk.Frame(controls_frame, bg=self.COLORS['bg_medium'])
+            self.ip_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+            
+            tk.Label(
+                self.ip_frame,
+                text="Stream IP:",
+                bg=self.COLORS['bg_medium'],
+                fg=self.COLORS['fg_primary'],
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+            
+            self.camera_ip_var = tk.StringVar(value="localhost")
+            ip_entry = tk.Entry(
+                self.ip_frame,
+                textvariable=self.camera_ip_var,
+                width=15,
+                font=("Arial", 9)
+            )
+            ip_entry.pack(side=tk.LEFT, padx=5)
+            
+            tk.Label(
+                self.ip_frame,
+                text="Port:",
+                bg=self.COLORS['bg_medium'],
+                fg=self.COLORS['fg_primary'],
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+            
+            self.camera_port_var = tk.StringVar(value="8080")
+            port_entry = tk.Entry(
+                self.ip_frame,
+                textvariable=self.camera_port_var,
+                width=6,
+                font=("Arial", 9)
+            )
+            port_entry.pack(side=tk.LEFT, padx=5)
+            
+            # USB Camera settings (hidden by default)
+            self.usb_frame = tk.Frame(controls_frame, bg=self.COLORS['bg_medium'])
+            
+            tk.Label(
+                self.usb_frame,
+                text="Camera Index:",
+                bg=self.COLORS['bg_medium'],
+                fg=self.COLORS['fg_primary'],
+                font=("Arial", 9)
+            ).pack(side=tk.LEFT, padx=5)
+            
+            self.camera_index_var = tk.StringVar(value="0")
+            camera_entry = tk.Entry(
+                self.usb_frame,
+                textvariable=self.camera_index_var,
+                width=5,
+                font=("Arial", 9)
+            )
+            camera_entry.pack(side=tk.LEFT, padx=5)
+            
+            # Start/Stop button
+            button_frame = tk.Frame(controls_frame, bg=self.COLORS['bg_medium'])
+            button_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+            
+            self.camera_start_button = tk.Button(
+                button_frame,
+                text="▶ Start Camera",
+                command=self._start_camera_feed,
+                bg=self.COLORS['accent_green'],
+                fg='white',
+                font=("Arial", 9, "bold"),
+                padx=10,
+                pady=5,
+                relief=tk.FLAT
+            )
+            self.camera_start_button.pack(side=tk.LEFT, padx=5)
+            
+            self.camera_stop_button = tk.Button(
+                button_frame,
+                text="⏹ Stop Camera",
+                command=self._stop_camera_feed,
+                bg=self.COLORS['accent_red'],
+                fg='white',
+                font=("Arial", 9, "bold"),
+                padx=10,
+                pady=5,
+                relief=tk.FLAT,
+                state=tk.DISABLED
+            )
+            self.camera_stop_button.pack(side=tk.LEFT, padx=5)
+            
+            # Initialize UI based on default mode
+            self._update_camera_mode_ui()
 
     def _build_status_bar(self) -> None:
         """Build bottom status bar."""
@@ -978,7 +1138,7 @@ class MotorControlWindow:
             10, 10,
             text="",
             anchor="nw",
-            fill=self.COLORS['accent_yellow'],
+            fill=self.COLORS['accent_blue'],
             font=("Consolas", 9),
             tags="coord_display"
         )
@@ -1512,7 +1672,7 @@ class MotorControlWindow:
         help_win = tk.Toplevel(self.root)
         help_win.title("Motor Control Guide")
         help_win.geometry("800x700")
-        help_win.configure(bg="#f0f0f0")
+        help_win.configure(bg=self.COLORS['bg_dark'])
         
         # Scrollable Content
         canvas = tk.Canvas(help_win, bg="#f0f0f0")
@@ -1595,10 +1755,392 @@ class MotorControlWindow:
         self.root.bind('S', lambda e: self._save_preset())
         self.root.bind('<Control-q>', lambda e: self.root.quit())
 
+    # ---------- Camera Feed Methods ----------
+    def _update_camera_mode_ui(self) -> None:
+        """Update UI based on selected camera mode."""
+        if not hasattr(self, 'camera_mode_var'):
+            return
+        
+        mode = self.camera_mode_var.get()
+        if mode == "IP Stream":
+            self.ip_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+            self.usb_frame.pack_forget()
+        else:  # USB Camera
+            self.usb_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+            self.ip_frame.pack_forget()
+    
+    def _start_camera_feed(self) -> None:
+        """Start camera feed (IP stream or USB camera)."""
+        if not CAMERA_AVAILABLE:
+            messagebox.showerror("Camera Unavailable", "Camera support not available. Install opencv-python and pillow.")
+            return
+        
+        mode = self.camera_mode_var.get()
+        
+        try:
+            if mode == "IP Stream":
+                self._start_ip_stream()
+            else:  # USB Camera
+                self._start_usb_camera()
+        except Exception as e:
+            messagebox.showerror("Camera Error", f"Failed to start camera:\n{e}")
+            self._stop_camera_feed()
+    
+    def _start_ip_stream(self) -> None:
+        """Start camera feed from IP stream."""
+        stream_ip = self.camera_ip_var.get().strip()
+        stream_port = int(self.camera_port_var.get())
+        
+        # Build stream URL - OpenCV needs the full MJPEG stream URL
+        self.camera_stream_url = f"http://{stream_ip}:{stream_port}/stream"
+        
+        print(f"Attempting to connect to: {self.camera_stream_url}")
+        
+        # OpenCV can open MJPEG streams via URL
+        # Use CAP_FFMPEG backend for better HTTP stream support
+        self.camera = cv2.VideoCapture(self.camera_stream_url, cv2.CAP_FFMPEG)
+        
+        if not self.camera.isOpened():
+            # Fallback to default backend
+            print("FFMPEG backend failed, trying default...")
+            self.camera = cv2.VideoCapture(self.camera_stream_url)
+        
+        if not self.camera.isOpened():
+            raise RuntimeError(
+                f"Failed to connect to camera stream at {self.camera_stream_url}.\n"
+                f"Make sure the Camera Stream Standalone app is running and streaming.\n"
+                f"Test the URL in your browser: {self.camera_stream_url}"
+            )
+        
+        print(f"Camera opened, testing frame read...")
+        
+        # Test if we can read a frame (try a few times)
+        ret = False
+        test_frame = None
+        for attempt in range(5):
+            ret, test_frame = self.camera.read()
+            if ret and test_frame is not None:
+                print(f"Successfully read test frame: {test_frame.shape[1]}x{test_frame.shape[0]}")
+                break
+            time.sleep(0.2)
+        
+        if not ret or test_frame is None:
+            raise RuntimeError(
+                f"Connected to stream but cannot read frames after 5 attempts.\n"
+                f"Check that the stream is active at {self.camera_stream_url}\n"
+                f"Try opening the URL in your browser to verify the stream works."
+            )
+        
+        # Set buffer size to 1 for low latency
+        self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # Initialize display update counter
+        self._display_update_count = 0
+        
+        # Start camera thread
+        self.camera_running = True
+        self.camera_thread = threading.Thread(target=self._camera_capture_loop, daemon=True)
+        self.camera_thread.start()
+        
+        # Start display update loop
+        self._update_camera_display()
+        
+        # Update UI
+        self.camera_start_button.config(state=tk.DISABLED)
+        self.camera_stop_button.config(state=tk.NORMAL)
+        
+        print(f"✓ Connected to camera stream: {self.camera_stream_url}")
+    
+    def _start_usb_camera(self) -> None:
+        """Start camera feed from USB camera."""
+        self.camera_index = int(self.camera_index_var.get())
+        
+        # Suppress OpenCV warnings temporarily
+        import os
+        os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
+        
+        # Initialize camera - use default backend to avoid DirectShow issues
+        self.camera = cv2.VideoCapture(self.camera_index)
+        
+        if not self.camera.isOpened():
+            raise RuntimeError(f"Failed to open camera {self.camera_index}. Try a different camera index (0, 1, 2, etc.)")
+        
+        # Set buffer size to 1 for low latency
+        self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # Test if we can actually read a frame
+        ret, test_frame = self.camera.read()
+        if not ret:
+            raise RuntimeError(f"Camera {self.camera_index} opened but cannot read frames. Camera may be in use by another application.")
+        
+        # Start camera thread
+        self.camera_running = True
+        self.camera_thread = threading.Thread(target=self._camera_capture_loop, daemon=True)
+        self.camera_thread.start()
+        
+        # Start display update loop
+        self._update_camera_display()
+        
+        # Update UI
+        self.camera_start_button.config(state=tk.DISABLED)
+        self.camera_stop_button.config(state=tk.NORMAL)
+        
+        print(f"Camera {self.camera_index} started successfully")
+    
+    def _stop_camera_feed(self) -> None:
+        """Stop camera feed."""
+        self.camera_running = False
+        
+        if self.camera:
+            self.camera.release()
+            self.camera = None
+        
+        # Update UI
+        self.camera_start_button.config(state=tk.NORMAL)
+        self.camera_stop_button.config(state=tk.DISABLED)
+        
+        if self.camera_label:
+            self.camera_label.config(image='', text="Camera stopped")
+            # Clear photo reference
+            if hasattr(self.camera_label, '_photo'):
+                self.camera_label._photo = None
+        
+        # Clear photo reference
+        self.camera_photo = None
+        if hasattr(self, '_camera_photo'):
+            self._camera_photo = None
+        if hasattr(self, 'camera_label') and self.camera_label:
+            self.camera_label.config(image='', text="Camera stopped")
+    
+    def _camera_capture_loop(self) -> None:
+        """Camera capture loop running in background thread."""
+        frame_count = 0
+        while self.camera_running and self.camera:
+            try:
+                ret, frame = self.camera.read()
+                if ret and frame is not None:
+                    # Resize frame to fit display (max 640x480 for performance)
+                    height, width = frame.shape[:2]
+                    max_width, max_height = 640, 480
+                    
+                    if width > max_width or height > max_height:
+                        scale = min(max_width / width, max_height / height)
+                        new_width = int(width * scale)
+                        new_height = int(height * scale)
+                        frame = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                    
+                    with self.camera_frame_lock:
+                        self.current_camera_frame = frame.copy()
+                    
+                    frame_count += 1
+                    if frame_count % 30 == 0:
+                        print(f"Camera: Captured {frame_count} frames (latest: {width}x{height})")
+                else:
+                    if frame_count == 0:
+                        print("Camera: Warning - No frames being captured from stream")
+                
+                time.sleep(1.0 / 30)  # Target 30 fps
+                
+            except Exception as e:
+                print(f"Camera capture error: {e}")
+                time.sleep(0.1)
+    
+    def _update_camera_display(self) -> None:
+        """Update camera display in GUI (called periodically)."""
+        if not self.camera_running or not hasattr(self, 'camera_label') or not self.camera_label or self._updating_display:
+            # Schedule next update even if skipping this one
+            if self.camera_running and hasattr(self, 'root') and self.root:
+                try:
+                    self.root.after(50, self._update_camera_display)
+                except tk.TclError:
+                    # Widget destroyed, stop updating
+                    self.camera_running = False
+            return
+        
+        self._updating_display = True
+        update_count = getattr(self, '_display_update_count', 0)
+        self._display_update_count = update_count + 1
+        
+        # Debug first few updates
+        if update_count < 5:
+            print(f"Display update #{update_count} starting...")
+        
+        try:
+            # Get frame from capture thread
+            frame = None
+            with self.camera_frame_lock:
+                if self.current_camera_frame is not None:
+                    # Make a copy to avoid holding the lock during processing
+                    frame = self.current_camera_frame.copy()
+                    if update_count < 5:
+                        print(f"Display update #{update_count}: Got frame, shape: {frame.shape if frame is not None else 'None'}")
+                else:
+                    if update_count < 5:
+                        print(f"Display update #{update_count}: current_camera_frame is None")
+            
+            if frame is not None:
+                # Check if it's a valid numpy array
+                if not isinstance(frame, np.ndarray):
+                    if update_count < 5 or update_count % 30 == 0:
+                        print(f"Display: Frame is not a numpy array: {type(frame)}")
+                    frame = None
+                elif frame.size == 0:
+                    if update_count < 5 or update_count % 30 == 0:
+                        print(f"Display: Frame has size 0")
+                    frame = None
+                elif len(frame.shape) < 2:
+                    if update_count < 5 or update_count % 30 == 0:
+                        print(f"Display: Invalid frame shape: {frame.shape}")
+                    frame = None
+            
+            if frame is not None and frame.size > 0:
+                try:
+                    if update_count < 5:
+                        print(f"Display update #{update_count}: Processing frame, shape: {frame.shape}")
+                    
+                    # Convert BGR to RGB
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    
+                    if update_count < 5:
+                        print(f"Display update #{update_count}: Converted to RGB, shape: {frame_rgb.shape}")
+                    
+                    # Get label size to resize image if needed (but don't force resize if label not ready)
+                    try:
+                        label_width = self.camera_label.winfo_width()
+                        label_height = self.camera_label.winfo_height()
+                        if update_count < 5:
+                            print(f"Display update #{update_count}: Label size: {label_width}x{label_height}")
+                        # Only resize if label has been rendered and has valid size
+                        if label_width > 1 and label_height > 1:
+                            # Resize frame to fit label (maintain aspect ratio)
+                            scale = min(label_width / frame_rgb.shape[1], label_height / frame_rgb.shape[0])
+                            if scale < 1.0:  # Only downscale, not upscale
+                                new_width = int(frame_rgb.shape[1] * scale)
+                                new_height = int(frame_rgb.shape[0] * scale)
+                                frame_rgb = cv2.resize(frame_rgb, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+                                if update_count < 5:
+                                    print(f"Display update #{update_count}: Resized to {new_width}x{new_height}")
+                    except Exception as size_err:
+                        # Label not yet sized, use frame as-is
+                        if update_count < 5:
+                            print(f"Display update #{update_count}: Could not get label size: {size_err}")
+                    
+                    # Convert to PIL Image
+                    pil_image = Image.fromarray(frame_rgb)
+                    
+                    if update_count < 5:
+                        print(f"Display update #{update_count}: Created PIL image, size: {pil_image.size}")
+                    
+                    # CRITICAL: Create PhotoImage using a workaround to prevent GC
+                    # Store PIL image temporarily and create PhotoImage in a way that prevents GC
+                    import gc
+                    gc.disable()  # Temporarily disable GC
+                    
+                    try:
+                        photo = ImageTk.PhotoImage(image=pil_image)
+                        
+                        if update_count < 5:
+                            print(f"Display update #{update_count}: Created PhotoImage, size: {photo.width()}x{photo.height()}, id: {id(photo)}")
+                        
+                        # CRITICAL: Store in list FIRST to keep it alive
+                        if not hasattr(self, '_camera_photo_list'):
+                            self._camera_photo_list = []
+                        self._camera_photo_list.append(photo)
+                        # Keep only last 3 to prevent memory buildup
+                        if len(self._camera_photo_list) > 3:
+                            old_photo = self._camera_photo_list.pop(0)
+                            del old_photo
+                        
+                        # Store in instance variables - multiple references
+                        self._camera_photo = photo
+                        self.camera_photo = photo
+                        
+                        # CRITICAL: Store on label widget - this MUST happen before config()
+                        self.camera_label.image = photo
+                        
+                        # Also store as an attribute on the root to keep it alive
+                        if not hasattr(self.root, '_camera_photos'):
+                            self.root._camera_photos = []
+                        self.root._camera_photos.append(photo)
+                        if len(self.root._camera_photos) > 3:
+                            self.root._camera_photos.pop(0)
+                        
+                        # Update the label with the PhotoImage
+                        if update_count < 5:
+                            print(f"Display update #{update_count}: Updating label, photo_id: {id(photo)}")
+                        
+                        # Update the label - use the photo directly
+                        self.camera_label.config(image=photo, text='')
+                        
+                        if update_count < 5:
+                            print(f"Display update #{update_count}: Label updated successfully, photo size: {photo.width()}x{photo.height()}")
+                        
+                        if update_count < 5 or update_count % 30 == 0:
+                            try:
+                                label_width = self.camera_label.winfo_width()
+                                label_height = self.camera_label.winfo_height()
+                            except:
+                                label_width = label_height = 0
+                            print(f"Display: Updated #{update_count}, frame: {frame.shape[1]}x{frame.shape[0]}, photo: {photo.width()}x{photo.height()}, label: {label_width}x{label_height}, visible: {self.camera_label.winfo_viewable()}")
+                    except tk.TclError as tcl_err:
+                        error_str = str(tcl_err)
+                        # Don't suppress errors for first few updates - we need to see them
+                        if update_count < 5 or "doesn't exist" not in error_str:
+                            print(f"Display TclError at update #{update_count}: {error_str}")
+                        # Don't raise - continue trying
+                    except Exception as update_err:
+                        if update_count < 5:
+                            print(f"Display update error at update #{update_count}: {update_err}")
+                            import traceback
+                            traceback.print_exc()
+                    finally:
+                        gc.enable()  # Re-enable GC
+                    
+                except Exception as img_error:
+                    # Don't suppress errors - we need to see what's wrong
+                    error_str = str(img_error)
+                    print(f"Image conversion error at update #{update_count}: {img_error}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                # Show status if no frame available
+                if self.camera_running:
+                    if update_count % 30 == 0:
+                        with self.camera_frame_lock:
+                            frame_status = "None" if self.current_camera_frame is None else f"exists (type: {type(self.current_camera_frame)})"
+                        print(f"Display: Waiting for frame (update #{update_count}), current_frame: {frame_status}")
+                    # Show label with status, hide canvas
+                    self.camera_canvas.grid_remove()
+                    self.camera_label.grid()
+                    self.camera_label.config(text="Waiting for camera frame...")
+        
+        except Exception as e:
+            error_msg = str(e)
+            # Suppress the "doesn't exist" error - it's a Tkinter GC warning
+            if "doesn't exist" not in error_msg:
+                print(f"Camera display update error: {e}")
+        finally:
+            self._updating_display = False
+        
+        # Schedule next update (20 fps to reduce load and prevent GC issues)
+        if self.camera_running and hasattr(self, 'root') and self.root:
+            try:
+                self.root.after(50, self._update_camera_display)  # ~20 fps
+            except tk.TclError as e:
+                # Widget might be destroyed, stop updating
+                print(f"Error scheduling display update: {e}")
+                self.camera_running = False
+    
     # ---------- Public API ----------
     def run(self) -> None:
         """Start the Tkinter main loop."""
         self.root.mainloop()
+    
+    def close(self) -> None:
+        """Clean up resources."""
+        self._stop_camera_feed()
+        if hasattr(self, 'root'):
+            self.root.destroy()
 
 
 def _self_test() -> None:
