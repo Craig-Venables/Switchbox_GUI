@@ -21,14 +21,12 @@ class SweepType(Enum):
     - POSITIVE (PS): Start to stop (positive direction)
     - NEGATIVE (NS): Start to stop (negative direction)
     - FULL (FS): Start to stop, then back to start
-    - HALF (HS): Start to stop only (same as POSITIVE, alias for clarity)
     - TRIANGLE: Start to stop to negative, then back to start
     - CUSTOM: User-defined pattern
     """
     POSITIVE = "PS"
     NEGATIVE = "NS"
     FULL = "FS"
-    HALF = "HS"
     TRIANGLE = "Triangle"
     CUSTOM = "Custom"
 
@@ -94,8 +92,8 @@ def build_sweep_values(
     # Build forward sweep
     forward = np.arange(start, stop + step/2, step)
     
-    if sweep_type == SweepType.POSITIVE or sweep_type == SweepType.HALF:
-        # Simple positive sweep (half sweep)
+    if sweep_type == SweepType.POSITIVE:
+        # Simple positive sweep
         return list(forward)
     
     elif sweep_type == SweepType.NEGATIVE:
@@ -256,7 +254,7 @@ def estimate_sweep_points(
         except ValueError:
             sweep_type = SweepType.FULL
     
-    if sweep_type == SweepType.POSITIVE or sweep_type == SweepType.NEGATIVE or sweep_type == SweepType.HALF:
+    if sweep_type == SweepType.POSITIVE or sweep_type == SweepType.NEGATIVE:
         points_per_sweep = forward_points
     elif sweep_type == SweepType.FULL:
         points_per_sweep = forward_points * 2 - 1  # Don't double-count endpoints

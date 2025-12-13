@@ -230,9 +230,6 @@ class MeasurementService:
                 self._frange(start_v, stop_v, abs(step))
                 + self._frange(stop_v, start_v, -abs(step))
             )
-        elif sweep_type == "HS":
-            # Half sweep: forward only (start to stop)
-            return self._frange(start_v, stop_v, abs(step))
         # Default: Full sweep (FS)
         neg_target = -abs(neg_stop_v if neg_stop_v is not None else stop_v)
         return (
@@ -893,9 +890,6 @@ class MeasurementService:
 
         if sweep_type == "PS":
             amps = _linrange(sv, ev, step_v, num_steps) + _linrange(ev, sv, step_v, num_steps)
-        elif sweep_type == "HS":
-            # Half sweep: forward only (start to stop)
-            amps = _linrange(sv, ev, step_v, num_steps)
         elif sweep_type == "NS":
             nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
             amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
@@ -1004,9 +998,6 @@ class MeasurementService:
             return out
         if sweep_type == "PS":
             amps = _linrange(sv, ev, step_v, num_steps) + _linrange(ev, sv, step_v, num_steps)
-        elif sweep_type == "HS":
-            # Half sweep: forward only (start to stop)
-            amps = _linrange(sv, ev, step_v, num_steps)
         elif sweep_type == "NS":
             nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
             amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
