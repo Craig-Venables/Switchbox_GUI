@@ -105,6 +105,16 @@ class PlotUpdaters:
             return
         try:
             line.set_data(list(x), list(y))
+            
+            # Update red dot for most recent value
+            recent_dot = self.plot_panels.recent_dots.get(key)
+            if recent_dot is not None and len(x) > 0 and len(y) > 0:
+                # Show red dot at the most recent point
+                recent_dot.set_data([x[-1]], [y[-1]])
+            elif recent_dot is not None:
+                # Hide red dot if no data
+                recent_dot.set_data([], [])
+            
             ax.relim()
             ax.autoscale_view()
             canvas.draw()

@@ -230,6 +230,9 @@ class SampleGUI:
         # Flags
         self.measurement_window: bool = False
 
+        # Child GUI registry for propagating changes
+        self._child_guis: List[Any] = []  # List of registered child GUI instances
+
         # Initialize multiplexer manager (will be set properly in update_multiplexer)
         self.mpx_manager = None
         
@@ -1888,6 +1891,10 @@ class SampleGUI:
         if not selection_text:
             selection_text = "None"
         self.log_terminal(f"Selected devices: {selection_text}", "INFO")
+        
+        # Notify child GUIs of device selection change
+        selected_device_list = [self.device_list[i] for i in self.selected_indices]
+        self._notify_child_guis('device_selection', selected_devices=selected_device_list, selected_indices=self.selected_indices.copy())
 
     def _update_status_bar(self) -> None:
         """Update the status bar with current device counts."""
@@ -2336,6 +2343,9 @@ class SampleGUI:
         
         self.current_device_name = device_name
         
+        # Notify child GUIs of device name change
+        self._notify_child_guis('device_name', device_name=device_name)
+        
         # Create device folder
         device_folder = self.get_device_folder()
         device_folder.mkdir(parents=True, exist_ok=True)
@@ -2370,6 +2380,8 @@ class SampleGUI:
             self.device_name_label.config(text="No Device", fg="#888888")
             self.update_device_info_display()
             self.log_terminal("Cleared current device", "INFO")
+            # Notify child GUIs that device name was cleared
+            self._notify_child_guis('device_name', device_name=None)
 
     def save_device_info(self) -> None:
         """Save device information to JSON file."""
@@ -2424,6 +2436,9 @@ class SampleGUI:
                 self.device_name_entry.delete(0, tk.END)
                 self.device_name_entry.insert(0, device_name)
                 self.device_name_label.config(text=device_name, fg="#4CAF50")
+                
+                # Notify child GUIs of device name change
+                self._notify_child_guis('device_name', device_name=device_name)
                 
                 # Update sample type if stored
                 if "sample_type" in self.device_info:
@@ -2824,10 +2839,14 @@ class SampleGUI:
             # Load quick scan results
             if not self._load_quick_scan_for_sample(sample, silent=True):
                 self.quick_scan_results.clear()
-                self._redraw_quick_scan_overlay()
-                if hasattr(self, 'quick_scan_save_button'):
-                    self.quick_scan_save_button.config(state=tk.DISABLED)
-                self._set_quick_scan_status("Idle")
+            
+            # Notify child GUIs of sample type change
+            self._notify_child_guis('sample_type', sample_type=sample)
+            
+            self._redraw_quick_scan_overlay()
+            if hasattr(self, 'quick_scan_save_button'):
+                self.quick_scan_save_button.config(state=tk.DISABLED)
+            self._set_quick_scan_status("Idle")
             
             # Update status bar
             self._update_status_bar()
@@ -2981,13 +3000,49 @@ class SampleGUI:
             # Open measurement window with empty device list
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
+            # Register the measurement GUI to receive updates
+            self.register_child_gui(self.measuremnt_gui)
         else:  # Yes - stay on Device Manager tab
             return
     
     def _on_measurement_window_closed(self) -> None:
         """Called when measurement window is closed - reset flags"""
         self.measurement_window = False
+        # Remove from registry if it exists
+        if hasattr(self, 'measuremnt_gui') and self.measuremnt_gui in self._child_guis:
+            self._child_guis.remove(self.measuremnt_gui)
         self.measuremnt_gui = None
+    
+    def register_child_gui(self, child_gui: Any) -> None:
+        """Register a child GUI to receive sample/device change notifications."""
+        if child_gui not in self._child_guis:
+            self._child_guis.append(child_gui)
+    
+    def unregister_child_gui(self, child_gui: Any) -> None:
+        """Unregister a child GUI from receiving notifications."""
+        if child_gui in self._child_guis:
+            self._child_guis.remove(child_gui)
+    
+    def _notify_child_guis(self, change_type: str, **kwargs) -> None:
+        """Notify all registered child GUIs of a change.
+        
+        Args:
+            change_type: Type of change ('sample_type', 'section', 'device_name', 'device_selection')
+            **kwargs: Additional data about the change
+        """
+        # Clean up any dead references
+        self._child_guis = [
+            gui for gui in self._child_guis 
+            if gui is not None and (hasattr(gui, 'master') and gui.master.winfo_exists() if hasattr(gui, 'master') else True)
+        ]
+        
+        # Notify all registered child GUIs
+        for child_gui in self._child_guis:
+            try:
+                if hasattr(child_gui, 'on_sample_gui_change'):
+                    child_gui.on_sample_gui_change(change_type, **kwargs)
+            except Exception as e:
+                print(f"Error notifying child GUI {child_gui}: {e}")
     
     def _show_help(self) -> None:
         """Display a help window with usage instructions."""
@@ -3119,6 +3174,8 @@ class SampleGUI:
             # For now, MeasurementGUI can access it via self.current_device_name
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
+            # Register the measurement GUI to receive updates
+            self.register_child_gui(self.measuremnt_gui)
         else:
             self.measuremnt_gui.bring_to_top()
     
@@ -3164,6 +3221,8 @@ class SampleGUI:
             # Open measurement window without device name
             self.measuremnt_gui = MeasurementGUI(self.root, sample_type, section, selected_device_list, self)
             self.measurement_window = True
+            # Register the measurement GUI to receive updates
+            self.register_child_gui(self.measuremnt_gui)
         else:  # Yes - stay on Device Manager tab to set device name
             return
 
@@ -3192,6 +3251,9 @@ class SampleGUI:
         selected_section = self.section_var.get()
         device_text = f"Current Device: {selected_sample} - {selected_section} - {selected_device}"
         self.info_box.config(text=device_text)
+        
+        # Notify child GUIs of section/device change
+        self._notify_child_guis('section', section=selected_section, device=selected_device)
 
     def change_relays(self) -> None:
         """Change relays for the current device using MultiplexerManager"""

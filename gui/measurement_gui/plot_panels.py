@@ -56,6 +56,7 @@ class MeasurementPlotPanels:
     canvases: Dict[str, FigureCanvasTkAgg] = field(default_factory=dict)
     lines: Dict[str, object] = field(default_factory=dict)
     last_sweep: PlotLine = field(default_factory=lambda: ([], []))
+    recent_dots: Dict[str, object] = field(default_factory=dict)  # Red dots for most recent values
     
     # New attributes for modern layout
     plot_frames: Dict[str, tk.Frame] = field(default_factory=dict)
@@ -243,7 +244,10 @@ class MeasurementPlotPanels:
         canvas_iv = FigureCanvasTkAgg(fig_iv, master=frame_iv)
         canvas_iv.get_tk_widget().pack(fill='both', expand=True)
         line_iv, = ax_iv.plot([], [], marker=".", markersize=3)
+        # Create red dot for most recent value
+        recent_dot_iv, = ax_iv.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
         self._register("rt_iv", fig_iv, ax_iv, canvas_iv, line_iv)
+        self.recent_dots["rt_iv"] = recent_dot_iv
         self.plot_frames["rt_iv"] = frame_iv
         
         # Log IV Plot
@@ -254,7 +258,10 @@ class MeasurementPlotPanels:
         canvas_log = FigureCanvasTkAgg(fig_log, master=frame_logiv)
         canvas_log.get_tk_widget().pack(fill='both', expand=True)
         line_log, = ax_log.plot([], [], marker=".", markersize=3)
+        # Create red dot for most recent value
+        recent_dot_log, = ax_log.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
         self._register("rt_logiv", fig_log, ax_log, canvas_log, line_log)
+        self.recent_dots["rt_logiv"] = recent_dot_log
         self.plot_frames["rt_logiv"] = frame_logiv
         
         # All Sweeps (combined IV and Log IV)
@@ -294,7 +301,10 @@ class MeasurementPlotPanels:
         canvas_logilogv = FigureCanvasTkAgg(fig_logilogv, master=frame_logilogv)
         canvas_logilogv.get_tk_widget().pack(fill='both', expand=True)
         line_logilogv, = ax_logilogv.plot([], [], marker=".", color="r", markersize=3)
+        # Create red dot for most recent value
+        recent_dot_logilogv, = ax_logilogv.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
         self._register("rt_logilogv", fig_logilogv, ax_logilogv, canvas_logilogv, line_logilogv)
+        self.recent_dots["rt_logilogv"] = recent_dot_logilogv
         self.plot_frames["logilogv"] = frame_logilogv
         
         # Current vs Time
@@ -304,7 +314,10 @@ class MeasurementPlotPanels:
         canvas_ct = FigureCanvasTkAgg(fig_ct, master=frame_ct)
         canvas_ct.get_tk_widget().pack(fill='both', expand=True)
         line_ct, = ax_ct.plot([], [], marker=".", markersize=3)
+        # Create red dot for most recent value
+        recent_dot_ct, = ax_ct.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
         self._register("ct_rt", fig_ct, ax_ct, canvas_ct, line_ct)
+        self.recent_dots["ct_rt"] = recent_dot_ct
         self.plot_frames["current_time"] = frame_ct
         
         # Temperature vs Time (if enabled)
@@ -315,7 +328,10 @@ class MeasurementPlotPanels:
             canvas_tt = FigureCanvasTkAgg(fig_tt, master=frame_tt)
             canvas_tt.get_tk_widget().pack(fill='both', expand=True)
             line_tt, = ax_tt.plot([], [], marker="x", markersize=3)
+            # Create red dot for most recent value
+            recent_dot_tt, = ax_tt.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
             self._register("tt_rt", fig_tt, ax_tt, canvas_tt, line_tt)
+            self.recent_dots["tt_rt"] = recent_dot_tt
             self.plot_frames["temp_time"] = frame_tt
         
         # Endurance
@@ -595,6 +611,14 @@ class MeasurementPlotPanels:
 
         line_iv, = ax_iv.plot([], [], marker=".")
         line_log, = ax_log.plot([], [], marker=".")
+        
+        # Create red dots for most recent values (legacy plots)
+        if "rt_iv" not in self.recent_dots:
+            recent_dot_iv, = ax_iv.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
+            self.recent_dots["rt_iv"] = recent_dot_iv
+        if "rt_logiv" not in self.recent_dots:
+            recent_dot_log, = ax_log.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
+            self.recent_dots["rt_logiv"] = recent_dot_log
 
         self._register("rt_iv", fig_iv, ax_iv, canvas_iv, line_iv)
         self._register("rt_logiv", fig_log, ax_log, canvas_log, line_log)
@@ -642,7 +666,10 @@ class MeasurementPlotPanels:
         frame.rowconfigure(0, weight=1)
 
         line_logilogv, = ax_logilogv.plot([], [], marker=".", color="r")
+        # Create red dot for most recent value (legacy plot)
+        recent_dot_logilogv, = ax_logilogv.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
         self._register("rt_logilogv", fig_logilogv, ax_logilogv, canvas_logilogv, line_logilogv)
+        self.recent_dots["rt_logilogv"] = recent_dot_logilogv
 
     def create_endurance_retention_plots(self, parent: tk.Misc) -> None:
         frame = tk.LabelFrame(parent, text="Endurance & Retention", padx=4, pady=3)
@@ -685,7 +712,10 @@ class MeasurementPlotPanels:
         frame.rowconfigure(0, weight=1)
 
         line_ct, = ax_ct.plot([], [], marker=".")
+        # Create red dot for most recent value (legacy plot)
+        recent_dot_ct, = ax_ct.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
         self._register("ct_rt", fig_ct, ax_ct, canvas_ct, line_ct)
+        self.recent_dots["ct_rt"] = recent_dot_ct
 
     def create_temp_time_plot(self, parent: tk.Misc, temp_enabled: bool) -> None:
         frame = tk.LabelFrame(parent, text="Temperature vs Time", padx=4, pady=3)
@@ -702,7 +732,10 @@ class MeasurementPlotPanels:
             frame.rowconfigure(0, weight=1)
 
             line_tt, = ax_tt.plot([], [], marker="x")
+            # Create red dot for most recent value (legacy plot)
+            recent_dot_tt, = ax_tt.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
             self._register("tt_rt", fig_tt, ax_tt, canvas_tt, line_tt)
+            self.recent_dots["tt_rt"] = recent_dot_tt
         else:
             label = tk.Label(frame, text="Temp plot disabled", fg="grey")
             label.grid(row=0, column=0, sticky="nsew")
