@@ -192,6 +192,43 @@ def _run_iv_sweep_mode(gui: Any) -> None:
         _update_status(gui, "Sequential measurement stopped.")
     else:
         _update_status(gui, "Sequential measurement complete.")
+        
+        # Run IV analysis on combined data if enabled
+        try:
+            if hasattr(gui, 'v_arr_disp') and hasattr(gui, 'c_arr_disp'):
+                v_arr = list(gui.v_arr_disp) if gui.v_arr_disp else []
+                c_arr = list(gui.c_arr_disp) if gui.c_arr_disp else []
+                
+                if len(v_arr) > 0 and len(c_arr) > 0:
+                    save_dir = gui._get_save_directory(
+                        gui.sample_name_var.get(),
+                        gui.final_device_letter,
+                        gui.final_device_number,
+                    )
+                    
+                    # Get timestamps if available
+                    t_arr = None
+                    if hasattr(gui, 't_arr_disp') and gui.t_arr_disp:
+                        t_arr = list(gui.t_arr_disp)
+                    
+                    # Build metadata
+                    metadata = {}
+                    
+                    # Use a generic filename for sequential measurements
+                    file_name = f"sequential_measurement_{passes}passes"
+                    
+                    # Call analysis helper
+                    gui._run_analysis_if_enabled(
+                        voltage=v_arr,
+                        current=c_arr,
+                        timestamps=t_arr,
+                        save_dir=save_dir,
+                        file_name=file_name,
+                        metadata=metadata
+                    )
+        except Exception as exc:
+            # Don't interrupt measurement flow if analysis fails
+            print(f"[ANALYSIS] Failed to run analysis in sequential measurement: {exc}")
 
     _safe_disable_output(gui)
 
@@ -365,6 +402,43 @@ def _run_single_avg_mode(gui: Any) -> None:
             start_index,
         )
         _update_status(gui, "Measurement Complete")
+        
+        # Run IV analysis on combined data if enabled (for single avg mode)
+        try:
+            if hasattr(gui, 'v_arr_disp') and hasattr(gui, 'c_arr_disp'):
+                v_arr = list(gui.v_arr_disp) if gui.v_arr_disp else []
+                c_arr = list(gui.c_arr_disp) if gui.c_arr_disp else []
+                
+                if len(v_arr) > 0 and len(c_arr) > 0:
+                    save_dir = gui._get_save_directory(
+                        gui.sample_name_var.get(),
+                        gui.final_device_letter,
+                        gui.final_device_number,
+                    )
+                    
+                    # Get timestamps if available
+                    t_arr = None
+                    if hasattr(gui, 't_arr_disp') and gui.t_arr_disp:
+                        t_arr = list(gui.t_arr_disp)
+                    
+                    # Build metadata
+                    metadata = {}
+                    
+                    # Use a generic filename for sequential measurements
+                    file_name = "sequential_single_avg"
+                    
+                    # Call analysis helper
+                    gui._run_analysis_if_enabled(
+                        voltage=v_arr,
+                        current=c_arr,
+                        timestamps=t_arr,
+                        save_dir=save_dir,
+                        file_name=file_name,
+                        metadata=metadata
+                    )
+        except Exception as exc:
+            # Don't interrupt measurement flow if analysis fails
+            print(f"[ANALYSIS] Failed to run analysis in sequential measurement: {exc}")
     else:
         _update_status(gui, "Sequential measurement stopped.")
 

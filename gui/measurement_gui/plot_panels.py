@@ -190,10 +190,11 @@ class MeasurementPlotPanels:
         
         # Layout strategy: IV and LogIV get priority (larger, side by side if both visible)
         # Others fill in below in a 2-column grid
-        # Stats panel can be shown separately if needed
+        # Stats panel goes to the right (column 2) and spans all rows vertically
         
         row = 0
         col = 0
+        max_row = 0
         
         # Priority plots (IV and LogIV) - always larger
         priority_plots = ["rt_iv", "rt_logiv"]
@@ -204,10 +205,12 @@ class MeasurementPlotPanels:
             self.plot_frames["rt_iv"].grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=(0, 5))
             self.plot_frames["rt_logiv"].grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=(0, 5))
             row = 1
+            max_row = 0
         elif len(priority_visible) == 1:
             # Only one priority plot - full width, large
             self.plot_frames[priority_visible[0]].grid(row=0, column=0, columnspan=2, sticky="nsew", pady=(0, 5))
             row = 1
+            max_row = 0
         
         # Secondary plots - 2 column grid
         secondary_plots = [p for p in visible if p not in priority_visible]
@@ -218,22 +221,44 @@ class MeasurementPlotPanels:
                     row += 1
                 pad_x = (0, 5) if col == 0 else (5, 0)
                 self.plot_frames[plot_key].grid(row=row, column=col, sticky="nsew", padx=pad_x, pady=(0, 5))
+                max_row = max(max_row, row)
         
-        # Add stats panel if visible (can span full width or be in grid)
+        # Add stats panel if visible - positioned to the right (column 2) and spans all rows
         if stats_visible and "analysis_stats" in self.plot_frames:
-            stats_row = row + 1 if secondary_plots else row
-            self.plot_frames["analysis_stats"].grid(row=stats_row, column=0, columnspan=2, sticky="nsew", pady=(0, 5))
-            row = stats_row
+            # Calculate the total number of rows used by plots
+            # If no plots are visible, stats panel should still span at least 1 row
+            if max_row == 0 and len(visible) == 0:
+                # No plots visible, stats panel takes full height
+                rowspan = 1
+            else:
+                # Span from row 0 to max_row
+                rowspan = max_row + 1
+            
+            self.plot_frames["analysis_stats"].grid(
+                row=0, 
+                column=2, 
+                rowspan=rowspan,
+                sticky="nsew", 
+                padx=(10, 0), 
+                pady=(0, 5)
+            )
         
         # Configure grid weights for responsive resizing
         if self.main_container:
             parent = list(self.plot_frames.values())[0].master
             parent.columnconfigure(0, weight=1)
             parent.columnconfigure(1, weight=1)
+            if stats_visible:
+                # Stats panel column gets less weight (narrower) - half the previous width (75px)
+                parent.columnconfigure(2, weight=0, minsize=75)
+            else:
+                # When stats are hidden, ensure column 2 doesn't take space
+                parent.columnconfigure(2, weight=0, minsize=0)
             # Priority row gets more weight
-            parent.rowconfigure(0, weight=3)
-            for r in range(1, row + 1):
-                parent.rowconfigure(r, weight=1)
+            if max_row >= 0:
+                parent.rowconfigure(0, weight=3)
+                for r in range(1, max_row + 1):
+                    parent.rowconfigure(r, weight=1)
     
     def _create_modern_plot_panels(self, parent: tk.Frame, temp_enabled: bool) -> None:
         """Create all plot panels in modern layout"""
@@ -472,10 +497,49 @@ class MeasurementPlotPanels:
             lines.append("=== Classification ===")
             lines.append(f"Device Type: {class_data.get('device_type', 'N/A')}")
             lines.append(f"Confidence: {self._format_stat_value(class_data.get('confidence', 0) * 100, '%', 1)}")
+            
+            # === ENHANCED: Memristivity Score ===
+            memristivity_score = class_data.get('memristivity_score')
+            if memristivity_score is not None:
+                lines.append(f"Memristivity Score: {self._format_stat_value(memristivity_score, '/100', 1)}")
+            
             lines.append(f"Conduction: {class_data.get('conduction_mechanism', 'N/A')}")
             if class_data.get('model_r2', 0) > 0:
                 lines.append(f"Model R²: {self._format_stat_value(class_data.get('model_r2', 0), '', 3)}")
             lines.append("")
+            
+            # === ENHANCED: Memory Window Quality ===
+            mw_quality = class_data.get('memory_window_quality', {})
+            if mw_quality and mw_quality.get('available', True) and mw_quality.get('overall_quality_score'):
+                lines.append("=== Memory Window Quality ===")
+                lines.append(f"Quality Score: {self._format_stat_value(mw_quality.get('overall_quality_score', 0), '/100', 1)}")
+                if 'avg_stability' in mw_quality:
+                    lines.append(f"Stability: {self._format_stat_value(mw_quality.get('avg_stability', 0), '/100', 1)}")
+                if 'separation_ratio' in mw_quality:
+                    lines.append(f"Separation: {self._format_stat_value(mw_quality.get('separation_ratio', 0), '', 2)}")
+                if 'reproducibility_score' in mw_quality:
+                    lines.append(f"Reproducibility: {self._format_stat_value(mw_quality.get('reproducibility_score', 0), '/100', 1)}")
+                lines.append("")
+            
+            # === ENHANCED: Hysteresis Shape Analysis ===
+            hyst_shape = class_data.get('hysteresis_shape', {})
+            if hyst_shape.get('has_hysteresis') and hyst_shape.get('figure_eight_quality'):
+                lines.append("=== Hysteresis Shape ===")
+                if 'figure_eight_quality' in hyst_shape:
+                    lines.append(f"Figure-8 Quality: {self._format_stat_value(hyst_shape.get('figure_eight_quality', 0), '/100', 1)}")
+                if 'lobe_asymmetry' in hyst_shape:
+                    lines.append(f"Lobe Asymmetry: {self._format_stat_value(hyst_shape.get('lobe_asymmetry', 0), '', 3)}")
+                if 'smoothness' in hyst_shape:
+                    lines.append(f"Smoothness: {self._format_stat_value(hyst_shape.get('smoothness', 0), '/100', 1)}")
+                lines.append("")
+            
+            # === ENHANCED: Warnings ===
+            warnings = class_data.get('warnings', [])
+            if warnings and len(warnings) > 0:
+                lines.append("=== ⚠ Warnings ===")
+                for warning in warnings[:5]:  # Show first 5 warnings
+                    lines.append(f"• {warning}")
+                lines.append("")
         
         # Performance (if available)
         if analysis_level in ['full', 'research']:

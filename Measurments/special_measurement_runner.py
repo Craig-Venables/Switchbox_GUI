@@ -139,6 +139,22 @@ class SpecialMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
+            
+            # Run IV analysis if enabled
+            try:
+                metadata = {}
+                # Call analysis helper
+                self._run_analysis_if_enabled(
+                    voltage=v_arr,
+                    current=c_arr,
+                    timestamps=t_arr,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis: {exc}")
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()
@@ -207,6 +223,22 @@ class SpecialMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save endurance file: {exc}")
+            
+            # Run IV analysis if enabled
+            try:
+                metadata = {}
+                # Call analysis helper
+                self._run_analysis_if_enabled(
+                    voltage=v_arr,
+                    current=c_arr,
+                    timestamps=t_arr,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis: {exc}")
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()
@@ -277,6 +309,22 @@ class SpecialMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save retention file: {exc}")
+            
+            # Run IV analysis if enabled
+            try:
+                metadata = {}
+                # Call analysis helper
+                self._run_analysis_if_enabled(
+                    voltage=v_arr,
+                    current=c_arr,
+                    timestamps=t_arr,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis: {exc}")
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()
@@ -341,6 +389,23 @@ class SpecialMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
+            
+            # Note: Pulse width sweep uses width arrays, not voltage arrays
+            # Analysis may not be directly applicable, but we'll try with width as "voltage"
+            try:
+                metadata = {}
+                # Use width array as voltage for analysis (may not be ideal, but allows analysis)
+                self._run_analysis_if_enabled(
+                    voltage=w_arr,  # Using width as voltage proxy
+                    current=i_arr,
+                    timestamps=t_arr,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis (pulse width sweep may not be suitable): {exc}")
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()
@@ -403,6 +468,22 @@ class SpecialMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
+            
+            # Run IV analysis if enabled
+            try:
+                metadata = {}
+                # Call analysis helper
+                self._run_analysis_if_enabled(
+                    voltage=v_arr,
+                    current=c_arr,
+                    timestamps=t_arr,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis: {exc}")
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()
@@ -457,6 +538,22 @@ class SpecialMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
+            
+            # Run IV analysis if enabled
+            try:
+                metadata = {}
+                # Call analysis helper
+                self._run_analysis_if_enabled(
+                    voltage=v_arr,
+                    current=i_arr,
+                    timestamps=t_arr,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis: {exc}")
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()

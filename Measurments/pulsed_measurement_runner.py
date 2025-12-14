@@ -141,6 +141,8 @@ class PulsedMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
+                # Store filename for analysis
+                self._last_pulsed_file_name = name
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -291,6 +293,8 @@ class PulsedMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                # Store filename for analysis
+                self._last_pulsed_file_name = name
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -367,6 +371,8 @@ class PulsedMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                # Store filename for analysis
+                self._last_pulsed_file_name = name
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -424,6 +430,8 @@ class PulsedMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                # Store filename for analysis
+                self._last_pulsed_file_name = name
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -445,6 +453,54 @@ class PulsedMeasurementRunner:
             return 1.0
 
     def _finalize_mode(self) -> None:
+        # Run analysis on collected data if available
+        try:
+            # Check if we have display arrays with data
+            if hasattr(self, 'v_arr_disp') and hasattr(self, 'c_arr_disp'):
+                v_arr = list(self.v_arr_disp) if self.v_arr_disp else []
+                c_arr = list(self.c_arr_disp) if self.c_arr_disp else []
+                
+                if len(v_arr) > 0 and len(c_arr) > 0:
+                    save_dir = self._get_save_directory(
+                        self.sample_name_var.get(),
+                        self.final_device_letter,
+                        self.final_device_number,
+                    )
+                    
+                    # Try to get the last saved filename from the most recent measurement
+                    # Use a generic name if we can't determine it
+                    file_name = "pulsed_measurement"
+                    if hasattr(self, '_last_pulsed_file_name'):
+                        file_name = self._last_pulsed_file_name
+                    
+                    # Build metadata
+                    metadata = {}
+                    if hasattr(self, 'optical') and self.optical is not None:
+                        try:
+                            caps = getattr(self.optical, 'capabilities', {})
+                            if caps.get('type'):
+                                metadata['led_type'] = str(caps.get('type', ''))
+                        except Exception:
+                            pass
+                    
+                    # Get timestamps if available
+                    t_arr = None
+                    if hasattr(self, 't_arr_disp') and self.t_arr_disp:
+                        t_arr = list(self.t_arr_disp)
+                    
+                    # Call analysis helper
+                    self._run_analysis_if_enabled(
+                        voltage=v_arr,
+                        current=c_arr,
+                        timestamps=t_arr,
+                        save_dir=save_dir,
+                        file_name=file_name,
+                        metadata=metadata
+                    )
+        except Exception as exc:
+            # Don't interrupt measurement flow if analysis fails
+            print(f"[ANALYSIS] Failed to run analysis in pulsed measurement: {exc}")
+        
         self._finalize_output()
         self.measuring = False
         self.set_status_message("Measurement Complete")

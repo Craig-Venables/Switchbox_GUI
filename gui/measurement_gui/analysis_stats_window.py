@@ -301,9 +301,51 @@ class AnalysisStatsWindow:
             class_section = self._add_section(self.content_frame, "Classification")
             self._add_stat_row(class_section, "Device Type", class_data.get('device_type', 'N/A'))
             self._add_stat_row(class_section, "Confidence", self._format_value(class_data.get('confidence', 0) * 100, "%", 1))
+            
+            # === ENHANCED: Memristivity Score ===
+            memristivity_score = class_data.get('memristivity_score')
+            if memristivity_score is not None:
+                self._add_stat_row(class_section, "Memristivity", self._format_value(memristivity_score, "/100", 1))
+            
             self._add_stat_row(class_section, "Conduction", class_data.get('conduction_mechanism', 'N/A'))
             if class_data.get('model_r2', 0) > 0:
                 self._add_stat_row(class_section, "Model R²", self._format_value(class_data.get('model_r2', 0), "", 3))
+            
+            # === ENHANCED: Memory Window Quality ===
+            mw_quality = class_data.get('memory_window_quality', {})
+            if mw_quality and mw_quality.get('available', True) and mw_quality.get('overall_quality_score'):
+                quality_section = self._add_section(self.content_frame, "Memory Window Quality")
+                self._add_stat_row(quality_section, "Quality Score", self._format_value(mw_quality.get('overall_quality_score', 0), "/100", 1))
+                if 'avg_stability' in mw_quality:
+                    self._add_stat_row(quality_section, "Stability", self._format_value(mw_quality.get('avg_stability', 0), "/100", 1))
+                if 'separation_ratio' in mw_quality:
+                    self._add_stat_row(quality_section, "Separation", self._format_value(mw_quality.get('separation_ratio', 0), "", 2))
+            
+            # === ENHANCED: Hysteresis Shape ===
+            hyst_shape = class_data.get('hysteresis_shape', {})
+            if hyst_shape.get('has_hysteresis') and hyst_shape.get('figure_eight_quality'):
+                shape_section = self._add_section(self.content_frame, "Hysteresis Shape")
+                if 'figure_eight_quality' in hyst_shape:
+                    self._add_stat_row(shape_section, "Figure-8", self._format_value(hyst_shape.get('figure_eight_quality', 0), "/100", 1))
+                if 'lobe_asymmetry' in hyst_shape:
+                    self._add_stat_row(shape_section, "Asymmetry", self._format_value(hyst_shape.get('lobe_asymmetry', 0), "", 3))
+            
+            # === ENHANCED: Warnings ===
+            warnings = class_data.get('warnings', [])
+            if warnings and len(warnings) > 0:
+                warn_section = self._add_section(self.content_frame, "⚠ Warnings")
+                for warning in warnings[:3]:  # Show first 3 warnings
+                    label = tk.Label(
+                        warn_section,
+                        text=f"• {warning[:40]}..." if len(warning) > 40 else f"• {warning}",
+                        font=("Segoe UI", 7),
+                        bg=self.COLOR_BG,
+                        fg="#d32f2f",  # Red color for warnings
+                        anchor='w',
+                        wraplength=250,
+                        justify='left'
+                    )
+                    label.pack(fill='x', pady=1)
         
         # Performance Metrics (shown for full, research)
         if level in ['full', 'research']:

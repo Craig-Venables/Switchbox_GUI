@@ -230,8 +230,17 @@ class MeasurementService:
                 self._frange(start_v, stop_v, abs(step))
                 + self._frange(stop_v, start_v, -abs(step))
             )
-        # Default: Full sweep (FS)
-        neg_target = -abs(neg_stop_v if neg_stop_v is not None else stop_v)
+        if sweep_type == "HS":
+            # Half sweep: start to midpoint between start and stop
+            midpoint = (start_v + stop_v) / 2.0
+            return self._frange(start_v, midpoint, abs(step))
+        # Default: Full sweep (FS) - triangle pattern (0 → +V → 0 → -V → 0)
+        # If neg_stop_v not provided, default to symmetric negative (-stop_v)
+        if neg_stop_v is None:
+            neg_target = -abs(stop_v)  # Default symmetric negative
+        else:
+            neg_target = -abs(neg_stop_v)
+        
         return (
             self._frange(start_v, stop_v, abs(step))
             + self._frange(stop_v, neg_target, -abs(step))
@@ -746,6 +755,10 @@ class MeasurementService:
         elif sweep_type == "NS":
             nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
             amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
+        elif sweep_type == "HS":
+            # Half sweep: start to midpoint between start and stop
+            midpoint = (sv + ev) / 2.0
+            amps = _linrange(sv, midpoint, step_v, num_steps)
         else:
             nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
             amps = (
@@ -2351,13 +2364,30 @@ class MeasurementService:
         # Estimate number of points
         num_points = config.num_points
         
+        # Hardware sweep limitation: Only supports simple bidirectional sweeps
+        # (start_v → stop_v → start_v). It does NOT support full triangle sweeps
+        # with negative voltages (0 → +V → 0 → -V → 0).
+        # 
+        # Therefore, if we need negative voltages, we must use point-by-point.
+        needs_negative_voltage = (
+            config.neg_stop_v is not None and config.neg_stop_v < 0
+        ) or (
+            config.sweep_type in ["FS", "FULL", "Triangle"] 
+            and config.start_v is not None 
+            and config.start_v >= 0 
+            and config.stop_v is not None 
+            and config.stop_v > 0
+            and config.neg_stop_v is None  # Will default to negative
+        )
+        
         # Use hardware sweep for:
-        # - Large sweeps (>20 points)
-        # - Fast sweeps (step_delay < 50ms)
-        if num_points > 5 and config.step_delay < 0.1:
+        # - Large sweeps (>5 points)
+        # - Fast sweeps (step_delay < 100ms)
+        # - BUT only if we don't need negative voltages
+        if num_points > 5 and config.step_delay < 0.1 and not needs_negative_voltage:
             return SweepMethod.HARDWARE_SWEEP
         
-        # Otherwise point-by-point (better for live plotting)
+        # Otherwise point-by-point (better for live plotting or when negative voltages needed)
         return SweepMethod.POINT_BY_POINT
     
     def _run_point_by_point_sweep(
