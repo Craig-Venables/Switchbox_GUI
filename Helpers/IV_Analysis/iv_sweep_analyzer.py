@@ -40,7 +40,20 @@ import json
 import numpy as np
 from typing import Dict, List, Optional, Union, Any
 
-from .sing_file_analyser import analyze_single_file, read_data_file
+# REQUIRED: single_file_metrics.py must be available - this is the core analysis engine
+# The analysis_level parameter only controls what metrics are computed, not which file is used
+# All analysis levels (basic/classification/full/research) use the same implementation from single_file_metrics.py
+try:
+    from .single_file_metrics import analyze_single_file, read_data_file
+    _USING_FULL_IMPLEMENTATION = True
+except ImportError as e:
+    # No fallback - raise clear error
+    raise ImportError(
+        "REQUIRED MODULE MISSING: Helpers.IV_Analysis.single_file_metrics is required for analysis.\n"
+        f"Original import error: {e}\n"
+        "Please ensure single_file_metrics.py exists in the Helpers/IV_Analysis/ directory.\n"
+        "The analysis module cannot function without this core implementation."
+    ) from e
 
 
 class IVSweepAnalyzer:
@@ -92,7 +105,10 @@ class IVSweepAnalyzer:
                      file_path: Optional[str] = None,
                      measurement_type: Optional[str] = None,
                      device_name: Optional[str] = None,
-                     metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                     metadata: Optional[Dict[str, Any]] = None,
+                     device_id: Optional[str] = None,
+                     cycle_number: Optional[int] = None,
+                     save_directory: Optional[str] = None) -> Dict[str, Any]:
         """
         Analyze an IV sweep and extract all relevant information.
         
@@ -173,8 +189,11 @@ class IVSweepAnalyzer:
         elif voltage is None or current is None:
             raise ValueError("Must provide either file_path OR both voltage and current data")
         
-        # Store metadata
+        # Store metadata and tracking info
         self.metadata = metadata or {}
+        self.device_id = device_id
+        self.cycle_number = cycle_number
+        self.save_directory = save_directory
         
         # Auto-detect measurement type if not provided
         if measurement_type is None:
@@ -201,6 +220,20 @@ class IVSweepAnalyzer:
             measurement_type=measurement_type,
             analysis_level=self.analysis_level
         )
+        
+        # === PHASE 2: Re-run enhanced classification with tracking info ===
+        # Enhanced classification was already run in _classify_device(), but without tracking info
+        # Re-run it now with device_id and save_directory for tracking/feedback features
+        if save_directory and device_id and hasattr(self.analyzer, 'calculate_enhanced_classification'):
+            self.analyzer.save_directory = save_directory
+            self.analyzer.device_id = device_id
+            self.analyzer.cycle_number = cycle_number
+            # Re-calculate with tracking enabled
+            self.analyzer.calculate_enhanced_classification(
+                save_directory=save_directory,
+                device_id=device_id,
+                cycle_number=cycle_number
+            )
         
         # Extract comprehensive information
         self.extracted_data = self._extract_all_information(device_name)
@@ -240,39 +273,46 @@ class IVSweepAnalyzer:
                 'model_r2': float(self.analyzer.model_parameters.get('R2', 0)) if isinstance(self.analyzer.model_parameters, dict) else 0.0,
                 'features': self.analyzer.classification_features if hasattr(self.analyzer, 'classification_features') else {},
                 'explanation': self.analyzer.classification_explanation if hasattr(self.analyzer, 'classification_explanation') else {},
+                # === ENHANCED CLASSIFICATION (Phase 1) ===
+                'memristivity_score': self.analyzer.memristivity_score if hasattr(self.analyzer, 'memristivity_score') else None,
+                'memristivity_breakdown': self.analyzer.memristivity_breakdown if hasattr(self.analyzer, 'memristivity_breakdown') else {},
+                'memory_window_quality': self.analyzer.memory_window_quality if hasattr(self.analyzer, 'memory_window_quality') else {},
+                'hysteresis_shape': self.analyzer.hysteresis_shape_features if hasattr(self.analyzer, 'hysteresis_shape_features') else {},
+                'adaptive_thresholds': self.analyzer.adaptive_thresholds if hasattr(self.analyzer, 'adaptive_thresholds') else {},
+                'warnings': self.analyzer.classification_warnings if hasattr(self.analyzer, 'classification_warnings') else [],
             },
             'resistance_metrics': {
-                'ron_mean': float(np.mean(self.analyzer.ron)) if self.analyzer.ron else 0.0,
-                'ron_std': float(np.std(self.analyzer.ron)) if self.analyzer.ron else 0.0,
-                'roff_mean': float(np.mean(self.analyzer.roff)) if self.analyzer.roff else 0.0,
-                'roff_std': float(np.std(self.analyzer.roff)) if self.analyzer.roff else 0.0,
-                'switching_ratio_mean': float(np.mean(self.analyzer.switching_ratio)) if self.analyzer.switching_ratio else 0.0,
-                'switching_ratio_std': float(np.std(self.analyzer.switching_ratio)) if self.analyzer.switching_ratio else 0.0,
-                'on_off_ratio_mean': float(np.mean(self.analyzer.on_off)) if self.analyzer.on_off else 0.0,
-                'window_margin_mean': float(np.mean(self.analyzer.window_margin)) if self.analyzer.window_margin else 0.0,
+                'ron_mean': float(np.mean(self.analyzer.ron)) if self.analyzer.ron is not None and len(self.analyzer.ron) > 0 else 0.0,
+                'ron_std': float(np.std(self.analyzer.ron)) if self.analyzer.ron is not None and len(self.analyzer.ron) > 0 else 0.0,
+                'roff_mean': float(np.mean(self.analyzer.roff)) if self.analyzer.roff is not None and len(self.analyzer.roff) > 0 else 0.0,
+                'roff_std': float(np.std(self.analyzer.roff)) if self.analyzer.roff is not None and len(self.analyzer.roff) > 0 else 0.0,
+                'switching_ratio_mean': float(np.mean(self.analyzer.switching_ratio)) if self.analyzer.switching_ratio is not None and len(self.analyzer.switching_ratio) > 0 else 0.0,
+                'switching_ratio_std': float(np.std(self.analyzer.switching_ratio)) if self.analyzer.switching_ratio is not None and len(self.analyzer.switching_ratio) > 0 else 0.0,
+                'on_off_ratio_mean': float(np.mean(self.analyzer.on_off)) if self.analyzer.on_off is not None and len(self.analyzer.on_off) > 0 else 0.0,
+                'window_margin_mean': float(np.mean(self.analyzer.window_margin)) if self.analyzer.window_margin is not None and len(self.analyzer.window_margin) > 0 else 0.0,
             },
             'voltage_metrics': {
-                'von_mean': float(np.mean(self.analyzer.von)) if self.analyzer.von else 0.0,
-                'voff_mean': float(np.mean(self.analyzer.voff)) if self.analyzer.voff else 0.0,
-                'max_voltage': float(np.max(np.abs(self.analyzer.voltage))),
-                'min_voltage': float(np.min(np.abs(self.analyzer.voltage))),
+                'von_mean': float(np.mean(self.analyzer.von)) if self.analyzer.von is not None and len(self.analyzer.von) > 0 else 0.0,
+                'voff_mean': float(np.mean(self.analyzer.voff)) if self.analyzer.voff is not None and len(self.analyzer.voff) > 0 else 0.0,
+                'max_voltage': float(np.max(np.abs(self.analyzer.voltage))) if self.analyzer.voltage is not None and len(self.analyzer.voltage) > 0 else 0.0,
+                'min_voltage': float(np.min(np.abs(self.analyzer.voltage))) if self.analyzer.voltage is not None and len(self.analyzer.voltage) > 0 else 0.0,
             },
             'hysteresis_metrics': {
-                'normalized_area_mean': float(np.mean(self.analyzer.normalized_areas)) if self.analyzer.normalized_areas else 0.0,
-                'normalized_area_std': float(np.std(self.analyzer.normalized_areas)) if self.analyzer.normalized_areas else 0.0,
-                'total_area': float(np.sum(self.analyzer.areas)) if self.analyzer.areas else 0.0,
+                'normalized_area_mean': float(np.mean(self.analyzer.normalized_areas)) if self.analyzer.normalized_areas is not None and len(self.analyzer.normalized_areas) > 0 else 0.0,
+                'normalized_area_std': float(np.std(self.analyzer.normalized_areas)) if self.analyzer.normalized_areas is not None and len(self.analyzer.normalized_areas) > 0 else 0.0,
+                'total_area': float(np.sum(self.analyzer.areas)) if self.analyzer.areas is not None and len(self.analyzer.areas) > 0 else 0.0,
                 'has_hysteresis': self.analyzer.classification_features.get('has_hysteresis', False) if hasattr(self.analyzer, 'classification_features') else False,
                 'pinched_hysteresis': self.analyzer.classification_features.get('pinched_hysteresis', False) if hasattr(self.analyzer, 'classification_features') else False,
             },
             'performance_metrics': {
                 'retention_score': float(self.analyzer.retention_score),
                 'endurance_score': float(self.analyzer.endurance_score),
-                'rectification_ratio_mean': float(np.mean(self.analyzer.rectification_ratio)) if self.analyzer.rectification_ratio else 1.0,
-                'nonlinearity_mean': float(np.mean(self.analyzer.nonlinearity_factor)) if self.analyzer.nonlinearity_factor else 0.0,
-                'asymmetry_mean': float(np.mean(self.analyzer.asymmetry_factor)) if self.analyzer.asymmetry_factor else 0.0,
-                'power_consumption_mean': float(np.mean(self.analyzer.power_consumption)) if self.analyzer.power_consumption else 0.0,
-                'energy_per_switch_mean': float(np.mean(self.analyzer.energy_per_switch)) if self.analyzer.energy_per_switch else 0.0,
-                'compliance_current': float(self.analyzer.compliance_current * 1e6) if self.analyzer.compliance_current else None,
+                'rectification_ratio_mean': float(np.mean(self.analyzer.rectification_ratio)) if self.analyzer.rectification_ratio is not None and len(self.analyzer.rectification_ratio) > 0 else 1.0,
+                'nonlinearity_mean': float(np.mean(self.analyzer.nonlinearity_factor)) if self.analyzer.nonlinearity_factor is not None and len(self.analyzer.nonlinearity_factor) > 0 else 0.0,
+                'asymmetry_mean': float(np.mean(self.analyzer.asymmetry_factor)) if self.analyzer.asymmetry_factor is not None and len(self.analyzer.asymmetry_factor) > 0 else 0.0,
+                'power_consumption_mean': float(np.mean(self.analyzer.power_consumption)) if self.analyzer.power_consumption is not None and len(self.analyzer.power_consumption) > 0 else 0.0,
+                'energy_per_switch_mean': float(np.mean(self.analyzer.energy_per_switch)) if self.analyzer.energy_per_switch is not None and len(self.analyzer.energy_per_switch) > 0 else 0.0,
+                'compliance_current': float(self.analyzer.compliance_current * 1e6) if self.analyzer.compliance_current is not None else None,
             },
             'summary_stats': self.analyzer.get_summary_stats(),
         }
@@ -341,6 +381,74 @@ class IVSweepAnalyzer:
             json.dump(serializable_result, f, indent=2)
         
         print(f"Analysis saved to {output_path}")
+    
+    # ========================================================================
+    # PHASE 2: Device Tracking & Feedback Methods
+    # ========================================================================
+    
+    def get_device_evolution_summary(self):
+        """
+        Get summary of device evolution over time.
+        
+        Returns:
+        --------
+        dict : Evolution summary with trends and statistics
+        """
+        if not hasattr(self, 'analyzer') or self.analyzer is None:
+            return {'available': False, 'message': 'No analysis performed'}
+        
+        return self.analyzer.get_device_evolution_summary()
+    
+    def save_feedback(self, user_classification: str, user_notes: str = ""):
+        """
+        Save user feedback on classification.
+        
+        Parameters:
+        -----------
+        user_classification : str
+            User's correction: 'memristive', 'capacitive', 'conductive', 'ohmic', 'uncertain'
+        user_notes : str
+            Optional notes explaining the correction
+            
+        Returns:
+        --------
+        bool : True if saved successfully
+        """
+        if not hasattr(self, 'analyzer') or self.analyzer is None:
+            return False
+        
+        return self.analyzer.save_classification_feedback(user_classification, user_notes)
+    
+    def get_similar_devices(self, max_results: int = 5):
+        """
+        Find devices with similar features in feedback database.
+        
+        Parameters:
+        -----------
+        max_results : int
+            Maximum number of similar devices to return
+            
+        Returns:
+        --------
+        list : Similar devices with their user classifications
+        """
+        if not hasattr(self, 'analyzer') or self.analyzer is None:
+            return []
+        
+        return self.analyzer.get_similar_classified_devices(max_results)
+    
+    def get_feedback_accuracy_stats(self):
+        """
+        Get classification accuracy statistics from feedback.
+        
+        Returns:
+        --------
+        dict : Accuracy stats and common misclassifications
+        """
+        if not hasattr(self, 'analyzer') or self.analyzer is None:
+            return {'available': False}
+        
+        return self.analyzer.analyze_feedback_accuracy()
 
 
 def analyze_sweep(file_path: Optional[str] = None,
@@ -349,7 +457,10 @@ def analyze_sweep(file_path: Optional[str] = None,
                   time: Optional[np.ndarray] = None,
                   metadata: Optional[Dict[str, Any]] = None,
                   analysis_level: str = 'full',
-                  save_path: Optional[str] = None) -> Dict[str, Any]:
+                  save_path: Optional[str] = None,
+                  device_id: Optional[str] = None,
+                  cycle_number: Optional[int] = None,
+                  save_directory: Optional[str] = None) -> Dict[str, Any]:
     """
     Convenience function for quick single-sweep analysis.
     
@@ -396,7 +507,10 @@ def analyze_sweep(file_path: Optional[str] = None,
         voltage=voltage,
         current=current,
         time=time,
-        metadata=metadata
+        metadata=metadata,
+        device_id=device_id,
+        cycle_number=cycle_number,
+        save_directory=save_directory
     )
     
     if save_path:

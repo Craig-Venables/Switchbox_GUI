@@ -21,12 +21,14 @@ class SweepType(Enum):
     - POSITIVE (PS): Start to stop (positive direction)
     - NEGATIVE (NS): Start to stop (negative direction)
     - FULL (FS): Start to stop, then back to start
+    - HALF (HS): Start to midpoint between start and stop
     - TRIANGLE: Start to stop to negative, then back to start
     - CUSTOM: User-defined pattern
     """
     POSITIVE = "PS"
     NEGATIVE = "NS"
     FULL = "FS"
+    HALF = "HS"
     TRIANGLE = "Triangle"
     CUSTOM = "Custom"
 
@@ -100,10 +102,26 @@ def build_sweep_values(
         # Negative sweep (flip the values)
         return list(-forward)
     
+    elif sweep_type == SweepType.HALF:
+        # Half sweep: start to midpoint between start and stop
+        midpoint = (start + stop) / 2.0
+        half_forward = np.arange(start, midpoint + step/2, step)
+        return list(half_forward)
+    
     elif sweep_type == SweepType.FULL:
-        # Full sweep: forward then reverse
-        reverse = np.arange(stop, start - step/2, -step)
-        return list(forward) + list(reverse)
+        # Full sweep: triangle pattern (0 → +V → 0 → -V → 0)
+        # If neg_stop not provided, default to symmetric negative (-stop_v)
+        if neg_stop is None:
+            neg_stop = -stop  # Default symmetric negative
+        
+        # Triangle pattern: forward, down through zero to negative, back up
+        # Forward: start to stop (e.g., 0 → +1V)
+        forward = np.arange(start, stop + step/2, step)
+        # Down: stop to neg_stop (e.g., +1V → 0 → -1V, stepping down)
+        down = np.arange(stop, neg_stop - step/2, -step)
+        # Back: neg_stop to start (e.g., -1V → 0, stepping up)
+        back = np.arange(neg_stop, start + step/2, step)
+        return list(forward) + list(down) + list(back)
     
     elif sweep_type == SweepType.TRIANGLE:
         # Triangle sweep: forward, negative, return
@@ -204,6 +222,9 @@ def get_sweep_extrema(
     
     if sweep_type == SweepType.NEGATIVE:
         return (-stop, -start)
+    elif sweep_type == SweepType.HALF:
+        midpoint = (start + stop) / 2.0
+        return (min(start, midpoint), max(start, midpoint))
     elif sweep_type == SweepType.TRIANGLE and neg_stop is not None:
         return (min(start, stop, neg_stop), max(start, stop, neg_stop))
     else:
@@ -256,6 +277,9 @@ def estimate_sweep_points(
     
     if sweep_type == SweepType.POSITIVE or sweep_type == SweepType.NEGATIVE:
         points_per_sweep = forward_points
+    elif sweep_type == SweepType.HALF:
+        # Half sweep: approximately half the points of a full forward sweep
+        points_per_sweep = max(1, forward_points // 2)
     elif sweep_type == SweepType.FULL:
         points_per_sweep = forward_points * 2 - 1  # Don't double-count endpoints
     elif sweep_type == SweepType.TRIANGLE:

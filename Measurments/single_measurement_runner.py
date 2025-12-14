@@ -415,6 +415,50 @@ class SingleMeasurementRunner:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
             self.graphs_show(v_arr, c_arr, "1", stop_v)
+            
+            # Run IV analysis if enabled
+            try:
+                # Build metadata for analysis
+                metadata = {}
+                if hasattr(self, 'optical') and self.optical is not None:
+                    try:
+                        caps = getattr(self.optical, 'capabilities', {})
+                        if bool(led):
+                            metadata['led_on'] = True
+                            if caps.get('type'):
+                                metadata['led_type'] = str(caps.get('type', ''))
+                            if hasattr(self, 'led_power'):
+                                try:
+                                    metadata['led_power'] = float(led_power)
+                                except Exception:
+                                    pass
+                        else:
+                            metadata['led_on'] = False
+                    except Exception:
+                        pass
+                
+                # Add temperature if available
+                if hasattr(self, 'temperature_controller') and self.temperature_controller is not None:
+                    try:
+                        temp = self.temperature_controller.get_temperature()
+                        if temp is not None:
+                            metadata['temperature'] = float(temp)
+                    except Exception:
+                        pass
+                
+                # Call analysis helper
+                self._run_analysis_if_enabled(
+                    voltage=v_arr,
+                    current=c_arr,
+                    timestamps=timestamps,
+                    save_dir=save_dir,
+                    file_name=name,
+                    metadata=metadata
+                )
+            except Exception as exc:
+                # Don't interrupt measurement flow if analysis fails
+                print(f"[ANALYSIS] Failed to run analysis: {exc}")
+            
             self.keithley.enable_output(False)
 
             if self.single_device_flag:

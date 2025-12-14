@@ -208,6 +208,16 @@ class MeasurementGUILayoutBuilder:
         )
         gui.device_var.pack(side='left')
         
+        # Classification display (updated after each measurement)
+        gui.classification_label = tk.Label(
+            device_info_frame,
+            text="",
+            font=("Segoe UI", 9),
+            bg='#e8f5e9',
+            fg=self.COLOR_PRIMARY
+        )
+        gui.classification_label.pack(side='left', padx=(5, 0))
+        
         # Right side: Utility buttons
         right_section = tk.Frame(frame, bg=self.COLOR_BG)
         right_section.pack(side='right', fill='y')
@@ -297,7 +307,7 @@ class MeasurementGUILayoutBuilder:
         self.widgets["top_control_bar"] = frame
     
     def _on_system_change_and_connect(self) -> None:
-        """Handle system change - do NOT auto-connect, user must click Connect button"""
+        """Handle system change and automatically connect to SMU"""
         gui = self.gui
         
         selected_system = gui.system_var.get()
@@ -316,8 +326,9 @@ class MeasurementGUILayoutBuilder:
         if system_change_cb:
             system_change_cb(selected_system)
         
-        # DO NOT automatically connect - user must click Connect button manually
-        # self._auto_connect_instruments()  # Removed auto-connect
+        # Automatically connect to SMU after system is selected
+        # Use a small delay to ensure system configuration is fully loaded
+        gui.master.after(100, self._auto_connect_instruments)
     
     def _auto_connect_instruments(self) -> None:
         """Automatically connect to instruments after system selection"""
@@ -482,6 +493,7 @@ class MeasurementGUILayoutBuilder:
         self._create_setup_tab(notebook)
         self._create_custom_measurements_tab(notebook)
         self._create_notes_tab(notebook)
+        self._create_stats_tab(notebook)  # NEW: Device tracking stats
         
         self.widgets["notebook"] = notebook
     
@@ -1139,6 +1151,10 @@ class MeasurementGUILayoutBuilder:
         def on_system_selected(event=None):
             if self._updating_system:
                 return
+            selected_system = gui.system_var.get()
+            # Don't do anything if "Please Select System" is selected
+            if not selected_system or selected_system == "Please Select System":
+                return
             # Load the system configuration
             load_system_cb = self.callbacks.get("load_system")
             if load_system_cb:
@@ -1146,11 +1162,17 @@ class MeasurementGUILayoutBuilder:
             # Also trigger system change for address updates
             system_change_cb = self.callbacks.get("on_system_change")
             if system_change_cb:
-                system_change_cb(gui.system_var.get())
+                system_change_cb(selected_system)
+            # Automatically connect to SMU after system is selected
+            gui.master.after(100, self._auto_connect_instruments)
         
         gui.system_combo.bind('<<ComboboxSelected>>', on_system_selected)
         
         def on_load_button_click():
+            selected_system = gui.system_var.get()
+            # Don't do anything if "Please Select System" is selected
+            if not selected_system or selected_system == "Please Select System":
+                return
             # Load the system configuration (StringVar trace will sync dropdowns)
             load_system_cb = self.callbacks.get("load_system")
             if load_system_cb:
@@ -1158,7 +1180,9 @@ class MeasurementGUILayoutBuilder:
             # Also trigger system change for address updates
             system_change_cb = self.callbacks.get("on_system_change")
             if system_change_cb:
-                system_change_cb(gui.system_var.get())
+                system_change_cb(selected_system)
+            # Automatically connect to SMU after system is loaded
+            gui.master.after(100, self._auto_connect_instruments)
         
         tk.Button(
             system_frame,
@@ -2188,6 +2212,109 @@ class MeasurementGUILayoutBuilder:
         self._start_sample_change_polling(gui)
         
         self.widgets["notes_tab"] = tab
+    
+    def _create_stats_tab(self, notebook: ttk.Notebook) -> None:
+        """
+        Create Stats tab showing device tracking and metrics.
+        """
+        gui = self.gui
+        
+        tab = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab, text="  Stats  ")
+        
+        # Configure grid
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(0, weight=0)  # Device selector
+        tab.rowconfigure(1, weight=1)  # Content area
+        
+        # TOP: Device selector
+        selector_frame = tk.Frame(tab, bg=self.COLOR_BG)
+        selector_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        tk.Label(
+            selector_frame,
+            text="Device:",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG
+        ).pack(side=tk.LEFT, padx=5)
+        
+        gui.stats_device_var = tk.StringVar()
+        device_combo = ttk.Combobox(
+            selector_frame,
+            textvariable=gui.stats_device_var,
+            width=30,
+            state="readonly"
+        )
+        device_combo.pack(side=tk.LEFT, padx=5)
+        device_combo.bind('<<ComboboxSelected>>', lambda e: gui.update_stats_display())
+        
+        refresh_btn = tk.Button(
+            selector_frame,
+            text="🔄 Refresh",
+            command=gui.refresh_stats_list,
+            bg=self.COLOR_PRIMARY,
+            fg="white",
+            font=("Segoe UI", 9, "bold"),
+            relief=tk.FLAT,
+            cursor="hand2"
+        )
+        refresh_btn.pack(side=tk.LEFT, padx=5)
+        
+        # CONTENT: Split view - Text on left, Plots on right
+        content_frame = tk.Frame(tab, bg=self.COLOR_BG)
+        content_frame.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        content_frame.columnconfigure(0, weight=1)  # Text side
+        content_frame.columnconfigure(1, weight=1)  # Plot side
+        content_frame.rowconfigure(0, weight=1)
+        
+        # LEFT SIDE: Text statistics
+        text_frame = tk.Frame(content_frame, bg="white", relief=tk.RIDGE, borderwidth=1)
+        text_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
+        
+        text_scroll = tk.Scrollbar(text_frame)
+        text_scroll.grid(row=0, column=1, sticky="ns")
+        
+        stats_text = tk.Text(
+            text_frame,
+            wrap=tk.WORD,
+            yscrollcommand=text_scroll.set,
+            font=("Consolas", 9),
+            bg="white",
+            relief=tk.FLAT
+        )
+        stats_text.grid(row=0, column=0, sticky="nsew")
+        text_scroll.config(command=stats_text.yview)
+        
+        gui.stats_text_widget = stats_text
+        
+        # RIGHT SIDE: Trend plots
+        plot_frame = tk.Frame(content_frame, bg="white", relief=tk.RIDGE, borderwidth=1)
+        plot_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        plot_frame.columnconfigure(0, weight=1)
+        plot_frame.rowconfigure(0, weight=1)
+        
+        # Create matplotlib figure for trends
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        from matplotlib.figure import Figure
+        
+        fig = Figure(figsize=(6, 8), dpi=100, facecolor='white')
+        canvas = FigureCanvasTkAgg(fig, master=plot_frame)
+        canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        
+        gui.stats_plot_figure = fig
+        gui.stats_plot_canvas = canvas
+        
+        # Store references
+        self.widgets["stats_tab"] = tab
+        gui.stats_device_combo = device_combo
+        
+        # Initial load
+        try:
+            gui.refresh_stats_list()
+        except Exception as e:
+            print(f"[STATS] Initial load failed: {e}")
     
     def _get_previous_devices(self, gui) -> List[Dict[str, Any]]:
         """Get the previous two devices from the same sample (e.g., if on A2, show A1; if on A3, show A2 and A1)"""

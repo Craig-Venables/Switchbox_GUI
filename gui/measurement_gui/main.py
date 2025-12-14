@@ -162,6 +162,16 @@ try:  # PMU testing GUI is optional (requires PMU hardware stack)
 except Exception:  # pragma: no cover - optional dependency
     PMUTestingGUI = None  # type: ignore
 
+try:  # Advanced tests GUI is optional
+    from Advanced_tests_GUI import AdvancedTestsGUI  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    AdvancedTestsGUI = None  # type: ignore
+
+try:  # Automated tester GUI is optional
+    from Automated_tester_GUI import AutomatedTesterGUI  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    AutomatedTesterGUI = None  # type: ignore
+
 try:  # Legacy live plotter utility (not always present)
     from Measurement_Plotter import MeasurementPlotter  # type: ignore
 except Exception:  # pragma: no cover - optional dependency
@@ -181,9 +191,18 @@ except Exception:  # pragma: no cover - optional dependency
 
 if TYPE_CHECKING:
     # Optional-only imports for typing; avoids runtime deps if unavailable
-    from Advanced_tests_GUI import AdvancedTestsGUI  # noqa: F401
-    from PMU_Testing_GUI import PMUTestingGUI as _PMUTestingGUIType  # noqa: F401
-    from Automated_tester_GUI import AutomatedTesterGUI as _AutomatedTesterGUIType  # noqa: F401
+    try:
+        from Advanced_tests_GUI import AdvancedTestsGUI  # noqa: F401, type: ignore
+    except ImportError:
+        AdvancedTestsGUI = None  # type: ignore
+    try:
+        from PMU_Testing_GUI import PMUTestingGUI as _PMUTestingGUIType  # noqa: F401, type: ignore
+    except ImportError:
+        _PMUTestingGUIType = None  # type: ignore
+    try:
+        from Automated_tester_GUI import AutomatedTesterGUI as _AutomatedTesterGUIType  # noqa: F401, type: ignore
+    except ImportError:
+        _AutomatedTesterGUIType = None  # type: ignore
     # Test framework types
     from typing import Protocol
     class _Thresholds(Protocol):
@@ -684,6 +703,1243 @@ class MeasurementGUI:
                 else:
                     self.analysis_stats_window.hide()
 
+    def _run_analysis_if_enabled(
+        self,
+        voltage: List[float],
+        current: List[float],
+        timestamps: Optional[List[float]],
+        save_dir: str,
+        file_name: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """
+        Run IV analysis if enabled, display results, and save to file.
+        
+        This method checks if analysis is enabled, runs quick_analyze() on the
+        measurement data, updates the stats window/panel, and saves results to
+        a "sweep_analysis" subfolder.
+        
+        Parameters:
+        -----------
+        voltage : List[float]
+            Voltage data array from measurement
+        current : List[float]
+            Current data array from measurement
+        timestamps : Optional[List[float]]
+            Timestamp data array (optional, for pulse/retention measurements)
+        save_dir : str
+            Directory where measurement data is saved
+        file_name : str
+            Base filename for the measurement (without extension)
+        metadata : Optional[Dict[str, Any]]
+            Additional metadata (LED state, temperature, etc.)
+        
+        Returns:
+        --------
+        None - Errors are logged but don't interrupt measurement flow
+        """
+        # ANALYSIS IS NOW AUTOMATIC - Always runs classification, background research for memristive
+        # (Checkbox is now redundant but kept for potential future use)
+        
+        # Validate input data
+        if not voltage or not current or len(voltage) == 0 or len(current) == 0:
+            print("[ANALYSIS] Skipping analysis: empty voltage or current arrays")
+            return
+        
+        if len(voltage) != len(current):
+            print(f"[ANALYSIS] Skipping analysis: array length mismatch (V:{len(voltage)}, I:{len(current)})")
+            return
+        
+        try:
+            # Import analysis module
+            from Helpers.IV_Analysis import quick_analyze
+            
+            # Get analysis level from GUI
+            # Always use 'classification' for speed (memristive devices get research in background)
+            analysis_level = 'classification'
+            if hasattr(self, 'analysis_level_var'):
+                # Allow user override if they really want different level
+                user_level = self.analysis_level_var.get()
+                if user_level in ['basic', 'full', 'research']:
+                    analysis_level = user_level
+            
+            # Convert to numpy arrays if needed
+            import numpy as np
+            v_arr = np.array(voltage) if not isinstance(voltage, np.ndarray) else voltage
+            i_arr = np.array(current) if not isinstance(current, np.ndarray) else current
+            t_arr = None
+            if timestamps and len(timestamps) > 0:
+                t_arr = np.array(timestamps) if not isinstance(timestamps, np.ndarray) else timestamps
+            
+            # Build metadata if not provided
+            if metadata is None:
+                metadata = {}
+            
+            # Add device info to metadata
+            if 'device_name' not in metadata:
+                device_name = f"{self.sample_name_var.get()}_{self.final_device_letter}{self.final_device_number}"
+                metadata['device_name'] = device_name
+            
+            # Add LED info if available
+            if hasattr(self, 'optical') and self.optical is not None:
+                try:
+                    caps = getattr(self.optical, 'capabilities', {})
+                    if caps.get('type', '').lower() == 'led':
+                        # Check if LED was on during measurement
+                        # This might need to be passed in metadata from the measurement runner
+                        pass
+                except Exception:
+                    pass
+            
+            # === PHASE 2: Build device tracking info ===
+            device_id = None
+            cycle_number = None
+            sample_save_dir = save_dir  # Default to device-level for sweep_analysis
+            
+            if hasattr(self, 'sample_name_var') and hasattr(self, 'final_device_letter') and hasattr(self, 'final_device_number'):
+                # Create unique device ID: sample_letter_number (e.g., "MyChip_A_1")
+                device_id = f"{self.sample_name_var.get()}_{self.final_device_letter}_{self.final_device_number}"
+                
+                # Use sample-level directory for tracking/research (not device-level)
+                sample_name = self.sample_name_var.get()
+                if sample_name:
+                    sample_save_dir = self._get_sample_save_directory(sample_name)
+            
+            # Try to get cycle number from measurement count (if available)
+            # This will be overridden in endurance/retention measurements with actual cycle count
+            if hasattr(self, 'measurement_count'):
+                cycle_number = getattr(self, 'measurement_count', None)
+            
+            # Run analysis
+            print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
+            analysis_data = quick_analyze(
+                voltage=v_arr,
+                current=i_arr,
+                time=t_arr,
+                metadata=metadata,
+                analysis_level=analysis_level,
+                device_id=device_id,
+                cycle_number=cycle_number,
+                save_directory=sample_save_dir  # Use sample-level for tracking/research
+            )
+            
+            # Update stats window and panel
+            self.update_analysis_stats(analysis_data, analysis_level)
+            
+            # Update top bar classification display
+            self.update_classification_display(analysis_data.get('classification', {}))
+            
+            # Save analysis results to file
+            self._save_analysis_results(analysis_data, save_dir, file_name, analysis_level)
+            
+            # === AUTO-TRIGGER RESEARCH ANALYSIS FOR MEMRISTIVE DEVICES ===
+            # If device is memristive, run full research analysis in background
+            device_type = analysis_data.get('classification', {}).get('device_type', '')
+            memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
+            
+            if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
+                # Spawn background thread for research-level analysis
+                import threading
+                
+                def run_research_analysis():
+                    try:
+                        print(f"[RESEARCH] Starting background research analysis for {file_name}...")
+                        
+                        # Use sample-level directory for research (same as tracking)
+                        research_save_dir = sample_save_dir
+                        
+                        # Run research-level analysis
+                        research_data = quick_analyze(
+                            voltage=v_arr,
+                            current=i_arr,
+                            time=t_arr,
+                            metadata=metadata,
+                            analysis_level='research',
+                            device_id=device_id,
+                            cycle_number=cycle_number,
+                            save_directory=research_save_dir  # Use sample-level
+                        )
+                        
+                        # Save to device-specific research folder (within sample-level directory)
+                        self._save_research_analysis(research_data, research_save_dir, file_name, device_id)
+                        
+                        print(f"[RESEARCH] Background research analysis complete for {file_name}")
+                    except Exception as e:
+                        print(f"[RESEARCH ERROR] Background analysis failed: {e}")
+                
+                # Start background thread (daemon so it doesn't block exit)
+                research_thread = threading.Thread(target=run_research_analysis, daemon=True)
+                research_thread.start()
+                
+                print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
+            
+            print("[ANALYSIS] Analysis complete and results saved")
+            
+        except Exception as exc:
+            # Log error but don't interrupt measurement flow
+            print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
+            import traceback
+            traceback.print_exc()
+    
+    def _save_analysis_results(
+        self,
+        analysis_data: Dict[str, Any],
+        save_dir: str,
+        file_name: str,
+        analysis_level: str
+    ) -> None:
+        """
+        Save analysis results to a formatted text file in the sweep_analysis subfolder.
+        
+        Parameters:
+        -----------
+        analysis_data : dict
+            Analysis results from quick_analyze()
+        save_dir : str
+            Base save directory for measurements
+        file_name : str
+            Base filename (without extension)
+        analysis_level : str
+            Analysis level used ('basic', 'classification', 'full', 'research')
+        """
+        try:
+            import os
+            from datetime import datetime
+            
+            # Create sweep_analysis subfolder
+            analysis_dir = os.path.join(save_dir, "sweep_analysis")
+            os.makedirs(analysis_dir, exist_ok=True)
+            
+            # Create output filename
+            analysis_file = os.path.join(analysis_dir, f"{file_name}_analysis.txt")
+            
+            # Format analysis results as readable text
+            lines = []
+            lines.append("=" * 80)
+            lines.append("IV SWEEP ANALYSIS RESULTS")
+            lines.append("=" * 80)
+            lines.append(f"Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"Analysis Level: {analysis_level.upper()}")
+            lines.append(f"Original File: {file_name}.txt")
+            lines.append("")
+            
+            # Device Information
+            device_info = analysis_data.get('device_info', {})
+            lines.append("DEVICE INFORMATION")
+            lines.append("-" * 80)
+            lines.append(f"Device Name: {device_info.get('name', 'N/A')}")
+            lines.append(f"Measurement Type: {device_info.get('measurement_type', 'N/A')}")
+            lines.append(f"Number of Loops: {device_info.get('num_loops', 0)}")
+            metadata = device_info.get('metadata', {})
+            if metadata:
+                if metadata.get('led_on') is not None:
+                    lines.append(f"LED State: {'ON' if metadata.get('led_on') else 'OFF'}")
+                if metadata.get('led_type'):
+                    lines.append(f"LED Type: {metadata.get('led_type')}")
+                if metadata.get('temperature') is not None:
+                    lines.append(f"Temperature: {metadata.get('temperature'):.1f} °C")
+            lines.append("")
+            
+            # Resistance Metrics
+            res_metrics = analysis_data.get('resistance_metrics', {})
+            lines.append("RESISTANCE METRICS")
+            lines.append("-" * 80)
+            lines.append(f"Ron (mean): {self._format_analysis_value(res_metrics.get('ron_mean', 0), 'Ω')}")
+            lines.append(f"Ron (std): {self._format_analysis_value(res_metrics.get('ron_std', 0), 'Ω')}")
+            lines.append(f"Roff (mean): {self._format_analysis_value(res_metrics.get('roff_mean', 0), 'Ω')}")
+            lines.append(f"Roff (std): {self._format_analysis_value(res_metrics.get('roff_std', 0), 'Ω')}")
+            lines.append(f"Switching Ratio (mean): {self._format_analysis_value(res_metrics.get('switching_ratio_mean', 0))}")
+            lines.append(f"ON/OFF Ratio (mean): {self._format_analysis_value(res_metrics.get('on_off_ratio_mean', 0))}")
+            lines.append("")
+            
+            # Voltage Metrics
+            volt_metrics = analysis_data.get('voltage_metrics', {})
+            lines.append("VOLTAGE METRICS")
+            lines.append("-" * 80)
+            lines.append(f"Von (mean): {self._format_analysis_value(volt_metrics.get('von_mean', 0), 'V')}")
+            lines.append(f"Voff (mean): {self._format_analysis_value(volt_metrics.get('voff_mean', 0), 'V')}")
+            lines.append(f"Max Voltage: {self._format_analysis_value(volt_metrics.get('max_voltage', 0), 'V')}")
+            lines.append("")
+            
+            # Hysteresis Metrics
+            hyst_metrics = analysis_data.get('hysteresis_metrics', {})
+            lines.append("HYSTERESIS METRICS")
+            lines.append("-" * 80)
+            lines.append(f"Normalized Area (mean): {self._format_analysis_value(hyst_metrics.get('normalized_area_mean', 0))}")
+            lines.append(f"Has Hysteresis: {'Yes' if hyst_metrics.get('has_hysteresis', False) else 'No'}")
+            lines.append(f"Pinched Hysteresis: {'Yes' if hyst_metrics.get('pinched_hysteresis', False) else 'No'}")
+            lines.append("")
+            
+            # Classification (if available)
+            if analysis_level in ['classification', 'full', 'research']:
+                class_data = analysis_data.get('classification', {})
+                lines.append("CLASSIFICATION")
+                lines.append("-" * 80)
+                lines.append(f"Device Type: {class_data.get('device_type', 'N/A')}")
+                lines.append(f"Confidence: {self._format_analysis_value(class_data.get('confidence', 0) * 100, '%', 1)}")
+                lines.append(f"Conduction Mechanism: {class_data.get('conduction_mechanism', 'N/A')}")
+                if class_data.get('model_r2', 0) > 0:
+                    lines.append(f"Model R²: {self._format_analysis_value(class_data.get('model_r2', 0), '', 3)}")
+                
+                # === ENHANCED CLASSIFICATION (Phase 1) ===
+                # Memristivity Score
+                memristivity_score = class_data.get('memristivity_score')
+                if memristivity_score is not None:
+                    lines.append("")
+                    lines.append(f"Memristivity Score: {memristivity_score:.1f}/100")
+                    
+                    # Breakdown of score
+                    breakdown = class_data.get('memristivity_breakdown', {})
+                    if breakdown:
+                        lines.append("  Score Breakdown:")
+                        for feature, score in breakdown.items():
+                            if score > 0:
+                                lines.append(f"    - {feature}: {score:.1f}/100")
+                
+                # Memory Window Quality
+                mw_quality = class_data.get('memory_window_quality', {})
+                if mw_quality.get('available', True):
+                    lines.append("")
+                    lines.append("Memory Window Quality:")
+                    if 'overall_quality_score' in mw_quality:
+                        lines.append(f"  Overall Quality: {mw_quality['overall_quality_score']:.1f}/100")
+                    if 'avg_stability' in mw_quality:
+                        lines.append(f"  State Stability: {mw_quality['avg_stability']:.1f}/100")
+                    if 'separation_ratio' in mw_quality:
+                        lines.append(f"  Separation Ratio: {mw_quality['separation_ratio']:.2f}")
+                    if 'reproducibility' in mw_quality:
+                        lines.append(f"  Reproducibility: {mw_quality['reproducibility']:.1f}/100")
+                    if 'avg_switching_voltage' in mw_quality:
+                        lines.append(f"  Avg Switching Voltage: {mw_quality['avg_switching_voltage']:.3f}V")
+                
+                # Hysteresis Shape
+                hyst_shape = class_data.get('hysteresis_shape', {})
+                if hyst_shape.get('has_hysteresis', False):
+                    lines.append("")
+                    lines.append("Hysteresis Shape Analysis:")
+                    if 'figure_eight_quality' in hyst_shape:
+                        lines.append(f"  Figure-8 Quality: {hyst_shape['figure_eight_quality']:.1f}/100")
+                    if 'lobe_asymmetry' in hyst_shape:
+                        lines.append(f"  Lobe Asymmetry: {hyst_shape['lobe_asymmetry']:.3f}")
+                    if 'avg_hysteresis_width' in hyst_shape:
+                        lines.append(f"  Avg Width: {self._format_analysis_value(hyst_shape['avg_hysteresis_width'], 'V')}")
+                    if 'num_kinks_detected' in hyst_shape:
+                        kinks = hyst_shape['num_kinks_detected']
+                        if kinks > 0:
+                            lines.append(f"  Kinks Detected: {kinks} (possible trapping)")
+                
+                # Warnings
+                warnings = class_data.get('warnings', [])
+                if warnings:
+                    lines.append("")
+                    lines.append("Classification Warnings:")
+                    for warning in warnings:
+                        lines.append(f"  ⚠ {warning}")
+                
+                lines.append("")
+            
+            # Performance Metrics (if available)
+            if analysis_level in ['full', 'research']:
+                perf_metrics = analysis_data.get('performance_metrics', {})
+                lines.append("PERFORMANCE METRICS")
+                lines.append("-" * 80)
+                lines.append(f"Retention Score: {self._format_analysis_value(perf_metrics.get('retention_score', 0), '', 3)}")
+                lines.append(f"Endurance Score: {self._format_analysis_value(perf_metrics.get('endurance_score', 0), '', 3)}")
+                lines.append(f"Rectification Ratio: {self._format_analysis_value(perf_metrics.get('rectification_ratio_mean', 1))}")
+                lines.append(f"Non-linearity: {self._format_analysis_value(perf_metrics.get('nonlinearity_mean', 0))}")
+                if perf_metrics.get('power_consumption_mean', 0) > 0:
+                    lines.append(f"Power Consumption: {self._format_analysis_value(perf_metrics.get('power_consumption_mean', 0), 'W')}")
+                if perf_metrics.get('compliance_current') is not None:
+                    lines.append(f"Compliance Current: {self._format_analysis_value(perf_metrics.get('compliance_current', 0), 'μA')}")
+                lines.append("")
+            
+            # Research Diagnostics (if available)
+            if analysis_level == 'research':
+                research_data = analysis_data.get('research_diagnostics', {})
+                if research_data:
+                    lines.append("RESEARCH DIAGNOSTICS")
+                    lines.append("-" * 80)
+                    if research_data.get('switching_polarity'):
+                        lines.append(f"Switching Polarity: {research_data.get('switching_polarity')}")
+                    if research_data.get('ndr_index') is not None:
+                        lines.append(f"NDR Index: {self._format_analysis_value(research_data.get('ndr_index', 0))}")
+                    if research_data.get('hysteresis_direction'):
+                        lines.append(f"Hysteresis Direction: {research_data.get('hysteresis_direction')}")
+                    if research_data.get('loop_similarity_score') is not None:
+                        lines.append(f"Loop Similarity Score: {self._format_analysis_value(research_data.get('loop_similarity_score', 0), '', 3)}")
+                    if research_data.get('noise_floor') is not None:
+                        lines.append(f"Noise Floor: {self._format_analysis_value(research_data.get('noise_floor', 0), 'A')}")
+                    lines.append("")
+            
+            lines.append("=" * 80)
+            lines.append("End of Analysis Report")
+            lines.append("=" * 80)
+            
+            # Write to file
+            with open(analysis_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+            
+            print(f"[ANALYSIS] Results saved to: {os.path.abspath(analysis_file)}")
+            
+        except Exception as exc:
+            print(f"[ANALYSIS ERROR] Failed to save analysis results: {exc}")
+            import traceback
+            traceback.print_exc()
+    
+    def _save_research_analysis(
+        self,
+        research_data: Dict[str, Any],
+        save_dir: str,
+        file_name: str,
+        device_id: str
+    ):
+        """
+        Save research-level analysis to device-specific folder.
+        
+        Parameters:
+        -----------
+        research_data : dict
+            Research analysis results
+        save_dir : str
+            Base save directory
+        file_name : str
+            Measurement filename
+        device_id : str
+            Device identifier
+        """
+        try:
+            import os
+            import json
+            from datetime import datetime
+            
+            # Create device research folder
+            research_dir = os.path.join(save_dir, "device_research", device_id)
+            os.makedirs(research_dir, exist_ok=True)
+            
+            # Save as JSON for easy parsing
+            research_file = os.path.join(research_dir, f"{file_name}_research.json")
+            
+            # Convert numpy types for JSON serialization
+            def convert_types(obj):
+                import numpy as np
+                if isinstance(obj, np.bool_):
+                    return bool(obj)
+                elif isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {key: convert_types(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_types(item) for item in obj]
+                return obj
+            
+            serializable_data = convert_types(research_data)
+            serializable_data['saved_timestamp'] = datetime.now().isoformat()
+            
+            with open(research_file, 'w') as f:
+                json.dump(serializable_data, f, indent=2)
+            
+            print(f"[RESEARCH] Saved to: {research_file}")
+            
+        except Exception as e:
+            print(f"[RESEARCH ERROR] Failed to save research analysis: {e}")
+    
+    def update_classification_display(self, classification_data: Dict[str, Any]) -> None:
+        """Update top bar with classification and score"""
+        try:
+            device_type = classification_data.get('device_type', '')
+            score = classification_data.get('memristivity_score')
+            
+            if not score:
+                return
+            
+            # Color based on score
+            if score >= 80:
+                color = "#4CAF50"  # Green
+            elif score >= 60:
+                color = "#FFA500"  # Orange
+            elif score >= 40:
+                color = "#FF9800"  # Deep orange
+            else:
+                color = "#F44336"  # Red
+            
+            if hasattr(self, 'classification_label'):
+                text = f"| {device_type.title()} ({score:.1f}/100)"
+                self.classification_label.config(text=text, fg=color)
+        except Exception as e:
+            print(f"[CLASSIFICATION DISPLAY] Error updating: {e}")
+    
+    def refresh_stats_list(self):
+        """Refresh list of tracked devices"""
+        try:
+            import os
+            
+            # Get save directory
+            sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else ""
+            if not sample_name:
+                # Show message in stats display
+                if hasattr(self, 'stats_text_widget'):
+                    self.stats_text_widget.config(state=tk.NORMAL)
+                    self.stats_text_widget.delete('1.0', tk.END)
+                    self.stats_text_widget.insert('1.0', 
+                        "No sample selected.\n\n"
+                        "Please select a sample in the Sample GUI first,\n"
+                        "then run some measurements to track devices.\n\n"
+                        "Device tracking data will appear here after\n"
+                        "you complete measurements."
+                    )
+                    self.stats_text_widget.config(state=tk.DISABLED)
+                print("[STATS] No sample name set - cannot load device tracking")
+                return
+            
+            # Use sample-level directory (not device-level)
+            save_root = self._get_sample_save_directory(sample_name)
+            tracking_dir = os.path.join(save_root, "device_tracking")
+            
+            # List all device history files
+            devices = []
+            if os.path.exists(tracking_dir):
+                for file in os.listdir(tracking_dir):
+                    if file.endswith('_history.json'):
+                        device_id = file.replace('_history.json', '')
+                        devices.append(device_id)
+            
+            # Update combobox
+            if hasattr(self, 'stats_device_combo'):
+                self.stats_device_combo['values'] = sorted(devices)
+                
+                if devices:
+                    # Select first device if none selected
+                    if not self.stats_device_var.get():
+                        self.stats_device_var.set(devices[0])
+                    self.update_stats_display()
+                    print(f"[STATS] Found {len(devices)} tracked device(s)")
+                else:
+                    # No devices found - show helpful message
+                    self.stats_device_var.set("")
+                    if hasattr(self, 'stats_text_widget'):
+                        self.stats_text_widget.config(state=tk.NORMAL)
+                        self.stats_text_widget.delete('1.0', tk.END)
+                        self.stats_text_widget.insert('1.0', 
+                            f"No device tracking data found for sample: {sample_name}\n\n"
+                            "Run some measurements to start tracking devices.\n\n"
+                            "After each measurement with analysis enabled,\n"
+                            "device statistics will be saved to:\n"
+                            f"{tracking_dir}\n\n"
+                            "Then refresh this tab to see tracked devices."
+                        )
+                        self.stats_text_widget.config(state=tk.DISABLED)
+                    
+                    # Clear plots
+                    self._clear_stats_plots()
+                    print(f"[STATS] No tracked devices found in {tracking_dir}")
+        
+        except Exception as e:
+            print(f"[STATS] Error refreshing device list: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_stats_display(self):
+        """Display device tracking stats"""
+        try:
+            import json
+            import os
+            from datetime import datetime
+            
+            device_id = self.stats_device_var.get()
+            if not device_id:
+                return
+            
+            # Load device history
+            sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else ""
+            # Use sample-level directory (not device-level)
+            save_root = self._get_sample_save_directory(sample_name)
+            history_file = os.path.join(save_root, "device_tracking", f"{device_id}_history.json")
+            
+            if not os.path.exists(history_file):
+                if hasattr(self, 'stats_text_widget'):
+                    self.stats_text_widget.config(state=tk.NORMAL)
+                    self.stats_text_widget.delete('1.0', tk.END)
+                    self.stats_text_widget.insert('1.0', f"Device tracking file not found:\n{history_file}")
+                    self.stats_text_widget.config(state=tk.DISABLED)
+                return
+            
+            with open(history_file, 'r') as f:
+                history = json.load(f)
+            
+            # Format display
+            lines = []
+            lines.append(f"{'='*80}")
+            lines.append(f"DEVICE STATISTICS: {device_id}")
+            lines.append(f"{'='*80}")
+            lines.append("")
+            
+            lines.append(f"Total Measurements: {history.get('total_measurements', 0)}")
+            
+            # === FORMING STATUS ===
+            # Only show if we have enough data
+            if len(measurements) >= 3:
+                from datetime import datetime
+                # Load measurements to analyze forming
+                mem_scores = []
+                sw_ratios = []
+                rs_on = []
+                rs_off = []
+                vs = []
+                for m in measurements:
+                    c = m.get('classification', {})
+                    if c.get('memristivity_score'):
+                        mem_scores.append(c['memristivity_score'])
+                    r = m.get('resistance', {})
+                    if r.get('ron_mean'):
+                        rs_on.append(r['ron_mean'])
+                    if r.get('roff_mean'):
+                        rs_off.append(r['roff_mean'])
+                    if r.get('switching_ratio'):
+                        sw_ratios.append(r['switching_ratio'])
+                    v = m.get('voltage', {})
+                    if v.get('max_voltage'):
+                        vs.append(abs(v['max_voltage']))
+                
+                forming_info = self._analyze_forming_process(mem_scores, sw_ratios, rs_on, rs_off, vs)
+                status = forming_info['status']
+                confidence = forming_info['confidence']
+                
+                status_display = {
+                    'forming': '🔧 FORMING',
+                    'formed': '✓ FORMED',
+                    'degrading': '⚠ DEGRADING',
+                    'unstable': '⚠ UNSTABLE',
+                    'stable': '→ STABLE'
+                }
+                status_text = status_display.get(status, status.upper())
+                lines.append(f"Device Status: {status_text} ({confidence*100:.0f}% confidence)")
+                
+                if status == 'forming':
+                    progress = forming_info['progress']
+                    lines.append(f"Forming Progress: {progress}% complete")
+                
+                if forming_info['indicators']:
+                    lines.append("Evidence:")
+                    for indicator in forming_info['indicators']:
+                        lines.append(f"  • {indicator}")
+                
+                lines.append("")
+            
+            # Format timestamps nicely
+            created = history.get('created', 'N/A')
+            if created != 'N/A':
+                try:
+                    dt = datetime.fromisoformat(created)
+                    created = dt.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    pass
+            lines.append(f"First Measurement: {created}")
+            
+            last_updated = history.get('last_updated', 'N/A')
+            if last_updated != 'N/A':
+                try:
+                    dt = datetime.fromisoformat(last_updated)
+                    last_updated = dt.strftime('%Y-%m-%d %H:%M:%S')
+                except:
+                    pass
+            lines.append(f"Last Updated: {last_updated}")
+            lines.append("")
+            
+            # Get recent measurements
+            measurements = history.get('measurements', [])
+            if measurements:
+                latest = measurements[-1]
+                
+                lines.append("LATEST MEASUREMENT")
+                lines.append("-" * 80)
+                
+                timestamp = latest.get('timestamp', 'N/A')
+                if timestamp != 'N/A':
+                    try:
+                        dt = datetime.fromisoformat(timestamp)
+                        timestamp = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except:
+                        pass
+                lines.append(f"Timestamp: {timestamp}")
+                lines.append(f"Cycle: {latest.get('cycle_number', 'N/A')}")
+                lines.append("")
+                
+                # Classification
+                classification = latest.get('classification', {})
+                lines.append("CLASSIFICATION")
+                lines.append("-" * 40)
+                lines.append(f"  Device Type: {classification.get('device_type', 'N/A').upper()}")
+                lines.append(f"  Confidence: {classification.get('confidence', 0)*100:.1f}%")
+                
+                score = classification.get('memristivity_score', 0)
+                score_str = f"{score:.1f}/100"
+                if score >= 80:
+                    score_str += " (Excellent)"
+                elif score >= 60:
+                    score_str += " (Good)"
+                elif score >= 40:
+                    score_str += " (Fair)"
+                else:
+                    score_str += " (Poor)"
+                lines.append(f"  Memristivity Score: {score_str}")
+                lines.append(f"  Conduction: {classification.get('conduction_mechanism', 'N/A')}")
+                lines.append("")
+                
+                # Resistance
+                resistance = latest.get('resistance', {})
+                lines.append("RESISTANCE METRICS")
+                lines.append("-" * 40)
+                ron = resistance.get('ron_mean')
+                roff = resistance.get('roff_mean')
+                if ron is not None:
+                    lines.append(f"  Ron (mean): {ron:.2e} Ω")
+                if roff is not None:
+                    lines.append(f"  Roff (mean): {roff:.2e} Ω")
+                if resistance.get('switching_ratio'):
+                    lines.append(f"  Switching Ratio: {resistance.get('switching_ratio', 0):.2f}")
+                if resistance.get('on_off_ratio'):
+                    lines.append(f"  ON/OFF Ratio: {resistance.get('on_off_ratio', 0):.2f}")
+                lines.append("")
+                
+                # Hysteresis
+                hysteresis = latest.get('hysteresis', {})
+                if hysteresis:
+                    lines.append("HYSTERESIS")
+                    lines.append("-" * 40)
+                    lines.append(f"  Has Hysteresis: {'Yes' if hysteresis.get('has_hysteresis') else 'No'}")
+                    lines.append(f"  Pinched: {'Yes' if hysteresis.get('pinched') else 'No'}")
+                    if hysteresis.get('normalized_area'):
+                        lines.append(f"  Normalized Area: {hysteresis.get('normalized_area'):.3f}")
+                    lines.append("")
+                
+                # Quality metrics
+                quality = latest.get('quality', {})
+                if quality and quality.get('memory_window_quality'):
+                    lines.append("QUALITY METRICS")
+                    lines.append("-" * 40)
+                    lines.append(f"  Memory Window: {quality.get('memory_window_quality'):.1f}/100")
+                    if quality.get('stability'):
+                        lines.append(f"  Stability: {quality.get('stability'):.1f}/100")
+                    lines.append("")
+                
+                # Trends over time
+                if len(measurements) > 1:
+                    lines.append("TRENDS OVER TIME")
+                    lines.append("-" * 40)
+                    lines.append(f"  Measurements: {len(measurements)}")
+                    
+                    # Memristivity scores
+                    scores = [m['classification'].get('memristivity_score') for m in measurements 
+                             if m.get('classification', {}).get('memristivity_score') is not None]
+                    if len(scores) > 1:
+                        trend = "↓ declining" if scores[-1] < scores[0] * 0.9 else "→ stable"
+                        if scores[-1] > scores[0] * 1.1:
+                            trend = "↑ improving"
+                        lines.append(f"  Memristivity: {scores[0]:.1f} → {scores[-1]:.1f} ({trend})")
+                    
+                    # Ron drift
+                    rons = [m['resistance'].get('ron_mean') for m in measurements
+                           if m.get('resistance', {}).get('ron_mean') is not None]
+                    if len(rons) > 1:
+                        drift_pct = (rons[-1] - rons[0]) / (rons[0] + 1e-20) * 100
+                        drift_str = f"{drift_pct:+.1f}%"
+                        if abs(drift_pct) > 20:
+                            drift_str += " (significant)"
+                        lines.append(f"  Ron Drift: {drift_str}")
+                    
+                    # Classification changes
+                    types = [m['classification'].get('device_type') for m in measurements 
+                            if m.get('classification', {}).get('device_type')]
+                    if len(set(types)) > 1:
+                        lines.append(f"  ⚠ Classification changed: {types[0]} → {types[-1]}")
+                    
+                    lines.append("")
+                
+                # Warnings
+                warnings = latest.get('warnings', [])
+                if warnings:
+                    lines.append("⚠ WARNINGS")
+                    lines.append("-" * 40)
+                    for i, warning in enumerate(warnings[:5], 1):  # Show max 5 warnings
+                        lines.append(f"  {i}. {warning}")
+                    if len(warnings) > 5:
+                        lines.append(f"  ... and {len(warnings)-5} more")
+                    lines.append("")
+                
+                # Data location
+                lines.append("DATA LOCATION")
+                lines.append("-" * 40)
+                lines.append(f"  Tracking: {history_file}")
+                
+                # Check for research data
+                research_dir = os.path.join(save_root, "device_research", device_id)
+                if os.path.exists(research_dir):
+                    research_files = [f for f in os.listdir(research_dir) if f.endswith('.json')]
+                    lines.append(f"  Research: {len(research_files)} file(s) in {research_dir}")
+            else:
+                lines.append("No measurements recorded yet.")
+            
+            # Update text widget
+            if hasattr(self, 'stats_text_widget'):
+                self.stats_text_widget.config(state=tk.NORMAL)
+                self.stats_text_widget.delete('1.0', tk.END)
+                self.stats_text_widget.insert('1.0', '\n'.join(lines))
+                self.stats_text_widget.config(state=tk.DISABLED)
+            
+            # Update trend plots
+            self._update_stats_plots(history, device_id)
+        
+        except Exception as e:
+            print(f"[STATS] Error updating display: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Show error in widget
+            if hasattr(self, 'stats_text_widget'):
+                self.stats_text_widget.config(state=tk.NORMAL)
+                self.stats_text_widget.delete('1.0', tk.END)
+                self.stats_text_widget.insert('1.0', f"Error loading device stats:\n\n{str(e)}\n\nCheck console for details.")
+                self.stats_text_widget.config(state=tk.DISABLED)
+    
+    def _analyze_forming_process(self, memristivity_scores, switching_ratios, rons, roffs, voltages):
+        """
+        Analyze if device is forming, formed, or degrading.
+        
+        Returns dict with:
+        - status: 'forming', 'formed', 'degrading', 'unstable', 'insufficient_data'
+        - confidence: 0-1
+        - indicators: list of evidence strings
+        - progress: 0-100 (for forming)
+        """
+        try:
+            import numpy as np
+            
+            result = {
+                'status': 'insufficient_data',
+                'confidence': 0.0,
+                'indicators': [],
+                'progress': 0,
+                'voltage_trend': 'unknown'
+            }
+            
+            # Need at least 3 measurements for trend analysis
+            if len(memristivity_scores) < 3:
+                return result
+            
+            # Calculate trends (recent vs initial)
+            # Use first 2 and last 2 points for robustness
+            initial_score = np.mean(memristivity_scores[:2]) if len(memristivity_scores) >= 2 else memristivity_scores[0]
+            recent_score = np.mean(memristivity_scores[-2:]) if len(memristivity_scores) >= 2 else memristivity_scores[-1]
+            score_change = recent_score - initial_score
+            score_change_pct = (score_change / (initial_score + 1e-6)) * 100
+            
+            # Switching ratio trend
+            ratio_improving = False
+            if len(switching_ratios) >= 3:
+                initial_ratio = np.mean(switching_ratios[:2])
+                recent_ratio = np.mean(switching_ratios[-2:])
+                ratio_change_pct = (recent_ratio - initial_ratio) / (initial_ratio + 1e-6) * 100
+                ratio_improving = ratio_change_pct > 10  # >10% improvement
+            
+            # Ron stability (should stay stable or decrease slightly during forming)
+            ron_stable = True
+            ron_trend = 0
+            if len(rons) >= 3:
+                initial_ron = np.mean(rons[:2])
+                recent_ron = np.mean(rons[-2:])
+                ron_change_pct = (recent_ron - initial_ron) / (initial_ron + 1e-20) * 100
+                ron_trend = ron_change_pct
+                ron_stable = abs(ron_change_pct) < 30  # Within 30%
+            
+            # Roff trend (should increase during forming)
+            roff_increasing = False
+            if len(roffs) >= 3:
+                initial_roff = np.mean(roffs[:2])
+                recent_roff = np.mean(roffs[-2:])
+                roff_change_pct = (recent_roff - initial_roff) / (initial_roff + 1e-20) * 100
+                roff_increasing = roff_change_pct > 15  # >15% increase
+            
+            # Voltage trend (increasing during forming)
+            voltage_increasing = False
+            if len(voltages) >= 3:
+                voltage_increasing = voltages[-1] > voltages[0] * 1.1  # 10% higher
+                result['voltage_trend'] = 'increasing' if voltage_increasing else 'stable'
+            
+            # DECISION LOGIC
+            evidence_count = 0
+            indicators = []
+            
+            # FORMING indicators
+            if score_change > 10:  # Score improved by >10 points
+                evidence_count += 2
+                indicators.append(f"Memristivity improving (+{score_change:.1f})")
+            
+            if ratio_improving:
+                evidence_count += 2
+                indicators.append(f"Switching ratio improving (+{ratio_change_pct:.0f}%)")
+            
+            if roff_increasing:
+                evidence_count += 1
+                indicators.append("Roff increasing (good)")
+            
+            if ron_stable:
+                evidence_count += 1
+                indicators.append("Ron stable")
+            
+            if voltage_increasing:
+                evidence_count += 1
+                indicators.append("Voltage ramping (forming protocol)")
+            
+            # Calculate forming progress (0-100)
+            if recent_score < 40:
+                progress = int((recent_score / 40) * 33)  # 0-33%: Poor to Fair
+            elif recent_score < 60:
+                progress = int(33 + ((recent_score - 40) / 20) * 33)  # 33-66%: Fair to Good
+            else:
+                progress = int(66 + ((recent_score - 60) / 40) * 34)  # 66-100%: Good to Excellent
+            
+            result['progress'] = min(100, max(0, progress))
+            
+            # FORMING status (improving + early stage)
+            if evidence_count >= 3 and score_change > 5:
+                result['status'] = 'forming'
+                result['confidence'] = min(1.0, evidence_count / 5)
+                result['indicators'] = indicators
+                return result
+            
+            # FORMED status (high score + stable)
+            if recent_score >= 70 and abs(score_change) < 10:
+                result['status'] = 'formed'
+                result['confidence'] = min(1.0, recent_score / 100)
+                result['indicators'] = ['High memristivity score', 'Stable characteristics']
+                if not ron_stable:
+                    result['indicators'].append(f"⚠ Ron drifting ({ron_trend:+.0f}%)")
+                return result
+            
+            # DEGRADING indicators
+            degrading_evidence = 0
+            degrade_indicators = []
+            
+            if score_change < -10:
+                degrading_evidence += 2
+                degrade_indicators.append(f"Memristivity declining ({score_change:.1f})")
+            
+            if not ratio_improving and len(switching_ratios) >= 3:
+                if ratio_change_pct < -20:
+                    degrading_evidence += 2
+                    degrade_indicators.append(f"Switching ratio declining ({ratio_change_pct:.0f}%)")
+            
+            if not ron_stable and ron_trend > 30:
+                degrading_evidence += 1
+                degrade_indicators.append(f"Ron increasing ({ron_trend:+.0f}%)")
+            
+            if degrading_evidence >= 2:
+                result['status'] = 'degrading'
+                result['confidence'] = min(1.0, degrading_evidence / 4)
+                result['indicators'] = degrade_indicators
+                return result
+            
+            # UNSTABLE status (fluctuating)
+            if len(memristivity_scores) >= 4:
+                score_std = np.std(memristivity_scores[-4:])  # Last 4 measurements
+                if score_std > 15:  # High variability
+                    result['status'] = 'unstable'
+                    result['confidence'] = 0.7
+                    result['indicators'] = [f'High score variability (±{score_std:.1f})']
+                    return result
+            
+            # DEFAULT: Stable (no clear trend)
+            result['status'] = 'stable'
+            result['confidence'] = 0.6
+            result['indicators'] = ['No significant trends detected']
+            return result
+            
+        except Exception as e:
+            print(f"[FORMING] Error analyzing forming: {e}")
+            return {
+                'status': 'unknown',
+                'confidence': 0.0,
+                'indicators': ['Analysis error'],
+                'progress': 0,
+                'voltage_trend': 'unknown'
+            }
+    
+    def _clear_stats_plots(self) -> None:
+        """Clear stats plots"""
+        try:
+            if hasattr(self, 'stats_plot_figure') and hasattr(self, 'stats_plot_canvas'):
+                fig = self.stats_plot_figure
+                fig.clear()
+                ax = fig.add_subplot(111)
+                ax.text(0.5, 0.5, 'No device selected\n\nSelect a device to view trends',
+                       ha='center', va='center', fontsize=14, color='gray')
+                ax.axis('off')
+                self.stats_plot_canvas.draw()
+        except Exception as e:
+            print(f"[STATS] Error clearing plots: {e}")
+    
+    def _update_stats_plots(self, history: Dict[str, Any], device_id: str) -> None:
+        """Update trend plots for device tracking"""
+        try:
+            if not hasattr(self, 'stats_plot_figure') or not hasattr(self, 'stats_plot_canvas'):
+                return
+            
+            measurements = history.get('measurements', [])
+            if len(measurements) < 2:
+                # Not enough data for trends - show message
+                fig = self.stats_plot_figure
+                fig.clear()
+                ax = fig.add_subplot(111)
+                ax.text(0.5, 0.5, 'Not enough data\nfor trend analysis\n\n(Need 2+ measurements)',
+                       ha='center', va='center', fontsize=14, color='gray')
+                ax.axis('off')
+                self.stats_plot_canvas.draw()
+                return
+            
+            import numpy as np
+            from datetime import datetime
+            
+            # Extract time series data
+            timestamps = []
+            memristivity_scores = []
+            rons = []
+            roffs = []
+            switching_ratios = []
+            confidences = []
+            device_types = []
+            voltages = []  # Track max voltage per measurement
+            
+            for i, m in enumerate(measurements):
+                timestamps.append(i + 1)  # Cycle number
+                
+                # Classification metrics
+                classification = m.get('classification', {})
+                score = classification.get('memristivity_score')
+                if score is not None:
+                    memristivity_scores.append(score)
+                confidence = classification.get('confidence')
+                if confidence is not None:
+                    confidences.append(confidence * 100)
+                device_types.append(classification.get('device_type', 'unknown'))
+                
+                # Resistance metrics
+                resistance = m.get('resistance', {})
+                ron = resistance.get('ron_mean')
+                if ron is not None:
+                    rons.append(ron)
+                roff = resistance.get('roff_mean')
+                if roff is not None:
+                    roffs.append(roff)
+                ratio = resistance.get('switching_ratio')
+                if ratio is not None:
+                    switching_ratios.append(ratio)
+                
+                # Voltage tracking (for forming analysis)
+                voltage_data = m.get('voltage', {})
+                max_v = voltage_data.get('max_voltage', 0)
+                voltages.append(abs(max_v) if max_v else 0)
+            
+            # FORMING ANALYSIS: Detect if device is forming vs degrading
+            forming_status = self._analyze_forming_process(
+                memristivity_scores, switching_ratios, rons, roffs, voltages
+            )
+            
+            # Create plots
+            fig = self.stats_plot_figure
+            fig.clear()
+            
+            # Title with forming status
+            status = forming_status['status']
+            status_colors = {
+                'forming': '#2196F3',  # Blue
+                'formed': '#4CAF50',   # Green
+                'degrading': '#F44336',  # Red
+                'unstable': '#FF9800',  # Orange
+                'stable': '#9E9E9E',   # Gray
+                'insufficient_data': '#9E9E9E',
+                'unknown': '#9E9E9E'
+            }
+            status_color = status_colors.get(status, '#000000')
+            
+            title_text = f'Device Evolution: {device_id}'
+            if status != 'insufficient_data':
+                confidence_pct = int(forming_status['confidence'] * 100)
+                title_text += f'  |  Status: {status.upper()} ({confidence_pct}%)'
+            
+            fig.suptitle(title_text, fontsize=11, fontweight='bold', color=status_color)
+            
+            # 4 subplots stacked vertically
+            gs = fig.add_gridspec(4, 1, hspace=0.4, left=0.15, right=0.95, top=0.93, bottom=0.05)
+            
+            # Plot 1: Memristivity Score over time
+            if memristivity_scores:
+                ax1 = fig.add_subplot(gs[0])
+                ax1.plot(timestamps[:len(memristivity_scores)], memristivity_scores, 
+                        'o-', color='#2196F3', linewidth=2, markersize=6)
+                ax1.axhline(y=80, color='green', linestyle='--', alpha=0.3, label='Excellent')
+                ax1.axhline(y=60, color='orange', linestyle='--', alpha=0.3, label='Good')
+                ax1.axhline(y=40, color='red', linestyle='--', alpha=0.3, label='Poor')
+                ax1.set_ylabel('Memristivity\nScore', fontsize=9)
+                ax1.set_ylim(0, 105)
+                ax1.grid(True, alpha=0.3)
+                ax1.legend(loc='upper right', fontsize=7)
+                ax1.tick_params(labelsize=8)
+                
+                # Add forming-aware indicators
+                if len(memristivity_scores) > 1:
+                    trend = memristivity_scores[-1] - memristivity_scores[0]
+                    if abs(trend) > 5:
+                        if status == 'forming' and trend > 0:
+                            # Forming - show progress
+                            progress = forming_status['progress']
+                            ax1.text(0.02, 0.98, f'🔧 Forming: {progress}%', 
+                                    transform=ax1.transAxes, fontsize=9, color='blue',
+                                    va='top', fontweight='bold')
+                        elif status == 'degrading' and trend < 0:
+                            # Degrading - show warning
+                            arrow = '↓'
+                            ax1.text(0.02, 0.98, f'⚠ {arrow} {abs(trend):.1f}', 
+                                    transform=ax1.transAxes, fontsize=10, color='red',
+                                    va='top', fontweight='bold')
+                        else:
+                            # Normal trend
+                            arrow = '↑' if trend > 0 else '↓'
+                            color = 'green' if trend > 0 else 'orange'
+                            ax1.text(0.02, 0.98, f'{arrow} {abs(trend):.1f}', 
+                                    transform=ax1.transAxes, fontsize=10, color=color,
+                                    va='top', fontweight='bold')
+            
+            # Plot 2: Ron/Roff over time
+            if rons and roffs:
+                ax2 = fig.add_subplot(gs[1])
+                x_ron = timestamps[:len(rons)]
+                x_roff = timestamps[:len(roffs)]
+                ax2.semilogy(x_ron, rons, 'o-', color='#4CAF50', linewidth=2, 
+                            markersize=6, label='Ron (ON)')
+                ax2.semilogy(x_roff, roffs, 's-', color='#F44336', linewidth=2, 
+                            markersize=6, label='Roff (OFF)')
+                ax2.set_ylabel('Resistance\n(Ω)', fontsize=9)
+                ax2.grid(True, alpha=0.3, which='both')
+                ax2.legend(loc='upper right', fontsize=7)
+                ax2.tick_params(labelsize=8)
+                
+                # Add drift indicators (only warn if not forming)
+                if len(rons) > 1:
+                    ron_drift = (rons[-1] - rons[0]) / (rons[0] + 1e-20) * 100
+                    if abs(ron_drift) > 10 and status != 'forming':
+                        arrow = '↑' if ron_drift > 0 else '↓'
+                        color = 'red' if abs(ron_drift) > 20 else 'orange'
+                        warning = '⚠ ' if abs(ron_drift) > 20 else ''
+                        ax2.text(0.02, 0.98, f'{warning}Ron {arrow} {abs(ron_drift):.0f}%', 
+                                transform=ax2.transAxes, fontsize=9, color=color,
+                                va='top', fontweight='bold')
+                    elif status == 'forming':
+                        ax2.text(0.02, 0.98, '🔧 Forming', 
+                                transform=ax2.transAxes, fontsize=9, color='blue',
+                                va='top', fontweight='bold')
+            
+            # Plot 3: Switching Ratio over time
+            if switching_ratios:
+                ax3 = fig.add_subplot(gs[2])
+                ax3.plot(timestamps[:len(switching_ratios)], switching_ratios, 
+                        'o-', color='#9C27B0', linewidth=2, markersize=6)
+                ax3.set_ylabel('Switching\nRatio', fontsize=9)
+                ax3.grid(True, alpha=0.3)
+                ax3.tick_params(labelsize=8)
+                
+                # Add mean line
+                mean_ratio = np.mean(switching_ratios)
+                ax3.axhline(y=mean_ratio, color='gray', linestyle='--', 
+                           alpha=0.5, label=f'Mean: {mean_ratio:.1f}')
+                ax3.legend(loc='upper right', fontsize=7)
+                
+                # Add forming-aware indicators
+                if len(switching_ratios) > 1:
+                    ratio_change = (switching_ratios[-1] - switching_ratios[0]) / (switching_ratios[0] + 1e-20) * 100
+                    
+                    if status == 'forming' and ratio_change > 10:
+                        # Forming and improving - positive indicator
+                        ax3.text(0.02, 0.98, f'🔧 Improving (+{ratio_change:.0f}%)', 
+                                transform=ax3.transAxes, fontsize=9, color='blue',
+                                va='top', fontweight='bold')
+                    elif status == 'degrading' and ratio_change < -20:
+                        # Degrading - strong warning
+                        ax3.text(0.02, 0.98, f'⚠ Degrading ({ratio_change:.0f}%)', 
+                                transform=ax3.transAxes, fontsize=9, color='red',
+                                va='top', fontweight='bold')
+                    elif ratio_change < -20 and status != 'forming':
+                        # Declining but not during forming
+                        ax3.text(0.02, 0.98, f'⚠ Declining ({ratio_change:.0f}%)', 
+                                transform=ax3.transAxes, fontsize=9, color='orange',
+                                va='top', fontweight='bold')
+            
+            # Plot 4: Classification confidence & type changes
+            if confidences:
+                ax4 = fig.add_subplot(gs[3])
+                ax4.plot(timestamps[:len(confidences)], confidences, 
+                        'o-', color='#FF9800', linewidth=2, markersize=6)
+                ax4.set_ylabel('Confidence\n(%)', fontsize=9)
+                ax4.set_xlabel('Measurement #', fontsize=9)
+                ax4.set_ylim(0, 105)
+                ax4.grid(True, alpha=0.3)
+                ax4.tick_params(labelsize=8)
+                
+                # Mark classification changes
+                for i in range(1, len(device_types)):
+                    if device_types[i] != device_types[i-1]:
+                        ax4.axvline(x=timestamps[i], color='red', linestyle=':', alpha=0.5)
+                        ax4.text(timestamps[i], 5, 'Type\nChanged', 
+                                rotation=90, fontsize=7, color='red', va='bottom')
+            
+            # Update canvas
+            self.stats_plot_canvas.draw()
+            
+        except Exception as e:
+            print(f"[STATS] Error updating plots: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _format_analysis_value(self, value: Any, unit: str = "", precision: int = 3) -> str:
+        """
+        Format a numeric value for analysis output.
+        
+        Parameters:
+        -----------
+        value : Any
+            Value to format
+        unit : str
+            Unit to append (e.g., "V", "Ω", "%")
+        precision : int
+            Number of decimal places
+        
+        Returns:
+        --------
+        str : Formatted value string
+        """
+        if value is None:
+            return "N/A"
+        
+        try:
+            if isinstance(value, (int, float)):
+                if abs(value) >= 1e6:
+                    return f"{value/1e6:.{precision}f} M{unit}"
+                elif abs(value) >= 1e3:
+                    return f"{value/1e3:.{precision}f} k{unit}"
+                elif abs(value) < 1e-3 and abs(value) > 0:
+                    return f"{value*1e6:.{precision}f} μ{unit}"
+                elif abs(value) < 1e-6 and abs(value) > 0:
+                    return f"{value*1e9:.{precision}f} n{unit}"
+                else:
+                    return f"{value:.{precision}f} {unit}".strip()
+            else:
+                return str(value)
+        except (ValueError, TypeError):
+            return str(value) if value is not None else "N/A"
+
     def load_custom_sweeps(self, path: str) -> Dict[str, Dict[str, Any]]:
         """Load custom measurement definitions from JSON (backward compatible)."""
         file_path = Path(path)
@@ -897,6 +2153,10 @@ class MeasurementGUI:
                 except Exception:
                     return None
 
+            if AutomatedTesterGUI is None:
+                messagebox.showerror("AutoTester", "AutomatedTesterGUI module not available")
+                return
+            
             AutomatedTesterGUI(
                 self.master,
                 instrument=adapter,
@@ -1991,7 +3251,7 @@ class MeasurementGUI:
                 tk.Label(self._excitation_params_frame, text="Sweep Type:", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 # Get current SMU type to conditionally show CYCLICAL option
                 smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
-                sweep_type_values = ["FS", "PS", "NS"]
+                sweep_type_values = ["FS", "PS", "NS", "HS"]
                 if smu_type == 'Keithley 4200A':
                     sweep_type_values.append("CYCLICAL")  # Add cyclical option for 4200A only
                 sweep_type_menu = ttk.Combobox(self._excitation_params_frame, textvariable=self.sweep_type_var,
@@ -3443,6 +4703,45 @@ class MeasurementGUI:
                 except Exception as exc:
                     print(f"[SAVE ERROR] Failed to save summary plots: {exc}")
                     self._last_combined_summary_path = None
+                
+                # Run IV analysis on combined data from all sweeps if enabled
+                try:
+                    if hasattr(self, 'v_arr_disp') and hasattr(self, 'c_arr_disp'):
+                        v_arr = list(self.v_arr_disp) if self.v_arr_disp else []
+                        c_arr = list(self.c_arr_disp) if self.c_arr_disp else []
+                        
+                        if len(v_arr) > 0 and len(c_arr) > 0:
+                            # Get timestamps if available
+                            t_arr = None
+                            if hasattr(self, 't_arr_disp') and self.t_arr_disp:
+                                t_arr = list(self.t_arr_disp)
+                            
+                            # Build metadata
+                            metadata = {}
+                            if hasattr(self, 'optical') and self.optical is not None:
+                                try:
+                                    caps = getattr(self.optical, 'capabilities', {})
+                                    if caps.get('type'):
+                                        metadata['led_type'] = str(caps.get('type', ''))
+                                except Exception:
+                                    pass
+                            
+                            # Use measurement name as filename
+                            file_name = f"custom_{selected_measurement}"
+                            
+                            # Call analysis helper
+                            self._run_analysis_if_enabled(
+                                voltage=v_arr,
+                                current=c_arr,
+                                timestamps=t_arr,
+                                save_dir=save_dir,
+                                file_name=file_name,
+                                metadata=metadata
+                            )
+                except Exception as exc:
+                    # Don't interrupt measurement flow if analysis fails
+                    print(f"[ANALYSIS] Failed to run analysis in custom measurement: {exc}")
+                
                 self.ax_all_iv.clear()
                 self.ax_all_logiv.clear()
                 self.keithley.enable_output(False)
@@ -4372,6 +5671,21 @@ class MeasurementGUI:
         device_path = base_path / sample_name / device_letter / str(device_number)
         device_path.mkdir(parents=True, exist_ok=True)
         return str(device_path)
+    
+    def _get_sample_save_directory(self, sample_name: str) -> str:
+        """
+        Get sample-level save directory (for tracking/research that should be at sample level).
+        
+        Args:
+            sample_name: Sample name
+        
+        Returns:
+            String path to sample-level directory (e.g., base/test/)
+        """
+        base_path = Path(self._get_base_save_path())
+        sample_path = base_path / sample_name
+        sample_path.mkdir(parents=True, exist_ok=True)
+        return str(sample_path)
     
     def check_for_sample_name(self) -> None:
         """Check if sample name is set, prompt if not (thread-safe)."""

@@ -2,56 +2,58 @@
 
 This script wraps the `EX A_Iv_Sweep smu_ivsweep(...)` command,
 executes it on a Keithley 4200A-SCS SMU via KXCI, and retrieves the voltage
-and current data from the cyclical IV sweep.
+and current data from the step-based IV sweep.
 
 Purpose:
 --------
-This script performs a cyclical voltage-current (IV) sweep using the SMU (Source
+This script performs a step-based voltage-current (IV) sweep using the SMU (Source
 Measurement Unit) of the Keithley 4200A-SCS. It:
-1. Sweeps in pattern: 0V → +Vpos → Vneg → 0V
-2. Repeats this pattern NumCycles times
-3. At each voltage point, waits for settling time
-4. Measures current
-5. Returns voltage and current arrays for plotting IV curves
+1. Sweeps in pattern: 0V → Vhigh → 0V → Vlow → 0V
+2. Distributes NumSteps evenly across the full sweep path
+3. Repeats this pattern NumCycles times
+4. At each step, waits for step delay
+5. Measures current
+6. Returns voltage and current arrays for plotting IV curves
 
-Pattern: (0V → +Vpos → Vneg → 0V) × NumCycles
-Total points = 4 × NumCycles
+Pattern: (0V → Vhigh → 0V → Vlow → 0V) × NumCycles
+Total points = (NumSteps + 1) × NumCycles
 
 Key Features:
 -------------
-- Cyclical pattern: 0V → +Vpos → Vneg → 0V, repeated n times
-- Symmetric or asymmetric sweeps (Vneg=0 uses -Vpos automatically)
-- Settling time at each voltage point (allows device to stabilize before measurement)
+- Step-based pattern: 0V → Vhigh → 0V → Vlow → 0V, repeated n times
+- Configurable number of steps distributed across 4 segments
+- Step delay at each voltage point (allows device to stabilize before measurement)
 - Current compliance limit protection
 - Error handling for invalid parameters
 - Returns both forced voltage and measured current arrays
 
 Parameters:
 -----------
-- Vpos: Positive voltage (V), range: 0 to 200 V (default: 5.0)
-- Vneg: Negative voltage (V), range: -200 to 0 V (default: 0.0)
-         If Vneg=0, automatically uses -Vpos (symmetric sweep)
+- Vhigh: Positive voltage limit (V), range: 0 to 200 V (default: 5.0)
+- Vlow: Negative voltage limit (V), range: -200 to 0 V (default: -5.0)
+- NumSteps: Total steps across full sweep path (default: 20, range: 4-10000)
+            Steps are distributed evenly across 4 segments
 - NumCycles: Number of cycles to repeat (default: 1, range: 1-1000)
-             Total points = 4 × NumCycles
-- SettleTime: Settling time at each voltage point (seconds, default: 0.001 s = 1 ms)
+             Total points = (NumSteps + 1) × NumCycles
+- StepDelay: Delay at each step before measurement (seconds, default: 0.001 s = 1 ms)
 - Ilimit: Current compliance limit (A, default: 0.1 A)
 
 Usage examples:
 
-    # Basic symmetric sweep: 0V → +5V → -5V → 0V (1 cycle = 4 points)
-    python run_smu_vi_sweep.py --vpos 5
+    # Basic sweep: 0V → 5V → 0V → -5V → 0V (20 steps = 21 points)
+    python run_smu_vi_sweep.py --vhigh 5 --vlow -5 --num-steps 20
 
-    # Asymmetric sweep: 0V → +5V → -2V → 0V (1 cycle = 4 points)
-    python run_smu_vi_sweep.py --vpos 5 --vneg -2
+    # High-resolution sweep: 0V → 3V → 0V → -2V → 0V (100 steps = 101 points)
+    python run_smu_vi_sweep.py --vhigh 3 --vlow -2 --num-steps 100
 
-    # Multiple cycles: (0V → +5V → -5V → 0V) × 3 (12 points total)
-    python run_smu_vi_sweep.py --vpos 5 --num-cycles 3
+    # Multiple cycles: (0V → 5V → 0V → -5V → 0V) × 3 (63 points total)
+    python run_smu_vi_sweep.py --vhigh 5 --vlow -5 --num-steps 20 --num-cycles 3
 
-    # Fast sweep with minimal settling time
-    python run_smu_vi_sweep.py --vpos 3 --settle-time 0.0001
+    # Fast sweep with minimal step delay
+    python run_smu_vi_sweep.py --vhigh 3 --vlow -3 --num-steps 20 --step-delay 0.0001
 
     # Custom current limit for high-resistance devices
-    python run_smu_vi_sweep.py --vpos 5 --ilimit 1e-6
+    python run_smu_vi_sweep.py --vhigh 5 --vlow -5 --num-steps 20 --ilimit 1e-6
 
 Pass `--dry-run` to print the generated EX command without contacting the instrument.
 """
@@ -132,7 +134,7 @@ class KXCIClient:
             time.sleep(0.03)
             # Wait for measurement to complete (configurable wait time)
             # For IV sweeps, this should be calculated based on:
-            # (4 × num_cycles) × (settle_time + integration_time × 0.01) × safety_factor
+            # ((num_steps + 1) × num_cycles) × (step_delay + integration_time × 0.01) × safety_factor
             wait_seconds = max(0.5, wait_seconds)  # Minimum 0.5s
             time.sleep(wait_seconds)
             response = self._safe_read()
@@ -238,11 +240,12 @@ def format_param(value: float | int | str) -> str:
 
 
 def build_ex_command(
-    vpos: float,
-    vneg: float,
+    vhigh: float,
+    vlow: float,
+    num_steps: int,
     num_cycles: int,
     num_points: int,
-    settle_time: float,
+    step_delay: float,
     ilimit: float,
     integration_time: float,
     clarius_debug: int,
@@ -250,49 +253,51 @@ def build_ex_command(
     """Build EX command for smu_ivsweep.
     
     Function signature:
-    int smu_ivsweep(double Vpos, double Vneg, int NumCycles, double *Imeas, int NumIPoints,
-                    double *Vforce, int NumVPoints, double SettleTime, double Ilimit,
+    int smu_ivsweep(double Vhigh, double Vlow, int NumSteps, int NumCycles, double *Imeas, int NumIPoints,
+                    double *Vforce, int NumVPoints, double StepDelay, double Ilimit,
                     double IntegrationTime, int ClariusDebug)
     
-    Parameters (10 total):
-    1. Vpos (double, Input) - Positive voltage (V), must be >= 0
-    2. Vneg (double, Input) - Negative voltage (V), must be <= 0. If 0, uses -Vpos (symmetric)
-    3. NumCycles (int, Input) - Number of cycles to repeat (1-1000)
-    4. Imeas (D_ARRAY_T, Output) - GP parameter 4 (empty string in EX command)
-    5. NumIPoints (int, Input) - array size for Imeas (must equal 4 × NumCycles)
-    6. Vforce (D_ARRAY_T, Output) - GP parameter 6 (empty string in EX command)
-    7. NumVPoints (int, Input) - array size for Vforce (must equal 4 × NumCycles)
-    8. SettleTime (double, Input)
-    9. Ilimit (double, Input)
-    10. IntegrationTime (double, Input) - PLC (Power Line Cycles)
-    11. ClariusDebug (int, Input) - 0=off, 1=on
+    Parameters (11 total):
+    1. Vhigh (double, Input) - Positive voltage limit (V), must be >= 0
+    2. Vlow (double, Input) - Negative voltage limit (V), must be <= 0
+    3. NumSteps (int, Input) - Total steps across full sweep path (4-10000)
+    4. NumCycles (int, Input) - Number of cycles to repeat (1-1000)
+    5. Imeas (D_ARRAY_T, Output) - GP parameter 5 (empty string in EX command)
+    6. NumIPoints (int, Input) - array size for Imeas (must equal (NumSteps + 1) × NumCycles)
+    7. Vforce (D_ARRAY_T, Output) - GP parameter 7 (empty string in EX command)
+    8. NumVPoints (int, Input) - array size for Vforce (must equal (NumSteps + 1) × NumCycles)
+    9. StepDelay (double, Input) - Delay per step (seconds)
+    10. Ilimit (double, Input) - Current compliance limit (A)
+    11. IntegrationTime (double, Input) - PLC (Power Line Cycles)
+    12. ClariusDebug (int, Input) - 0=off, 1=on
     
-    Pattern: (0V → +Vpos → Vneg → 0V) × NumCycles
-    Total points = 4 × NumCycles
+    Pattern: (0V → Vhigh → 0V → Vlow → 0V) × NumCycles
+    Total points = (NumSteps + 1) × NumCycles
     
     Note: Output arrays are passed as empty strings ("") in the EX command.
-    They are retrieved via GP commands after execution (GP 4 for Imeas, GP 6 for Vforce).
+    They are retrieved via GP commands after execution (GP 5 for Imeas, GP 7 for Vforce).
     """
     
     # Ensure clarius_debug is an integer (0 or 1)
     clarius_debug = int(bool(clarius_debug))  # Convert to 0 or 1
     
     params = [
-        format_param(vpos),            # 1: Vpos
-        format_param(vneg),            # 2: Vneg (0 for auto-symmetric with -Vpos)
-        format_param(num_cycles),      # 3: NumCycles
-        "",                             # 4: Imeas output array (empty string)
-        format_param(num_points),       # 5: NumIPoints (array size, must be 4 × NumCycles)
-        "",                             # 6: Vforce output array (empty string)
-        format_param(num_points),       # 7: NumVPoints (array size, must equal NumIPoints)
-        format_param(settle_time),      # 8: SettleTime
-        format_param(ilimit),           # 9: Ilimit
-        format_param(integration_time), # 10: IntegrationTime
-        format_param(clarius_debug),    # 11: ClariusDebug
+        format_param(vhigh),            # 1: Vhigh
+        format_param(vlow),             # 2: Vlow
+        format_param(num_steps),        # 3: NumSteps
+        format_param(num_cycles),       # 4: NumCycles
+        "",                             # 5: Imeas output array (empty string)
+        format_param(num_points),       # 6: NumIPoints (array size, must be (NumSteps + 1) × NumCycles)
+        "",                             # 7: Vforce output array (empty string)
+        format_param(num_points),       # 8: NumVPoints (array size, must equal NumIPoints)
+        format_param(step_delay),       # 9: StepDelay
+        format_param(ilimit),           # 10: Ilimit
+        format_param(integration_time), # 11: IntegrationTime
+        format_param(clarius_debug),    # 12: ClariusDebug
     ]
     
     # Debug: verify the debug flag is correctly formatted
-    debug_param = params[10]  # 11th parameter (0-indexed: 10)
+    debug_param = params[11]  # 12th parameter (0-indexed: 11)
     if clarius_debug == 1 and debug_param != "1":
         print(f"[WARNING] Debug flag mismatch: clarius_debug={clarius_debug}, formatted='{debug_param}'")
     
@@ -323,30 +328,36 @@ def main() -> None:
     
     # Sweep parameters
     parser.add_argument(
-        "--vpos",
+        "--vhigh",
         type=float,
-        default=2.0,
-        help="Positive voltage (V), range: 0 to 200 (default: 5.0). Pattern: 0V → +Vpos → Vneg → 0V"
+        default=5.0,
+        help="Positive voltage limit (V), range: 0 to 200 (default: 5.0). Pattern: 0V → Vhigh → 0V → Vlow → 0V"
     )
     parser.add_argument(
-        "--vneg",
+        "--vlow",
         type=float,
-        default=0.0,
-        help="Negative voltage (V), range: -200 to 0 (default: 0.0). If 0, automatically uses -Vpos for symmetric sweep. Pattern: 0V → +Vpos → Vneg → 0V"
+        default=-5.0,
+        help="Negative voltage limit (V), range: -200 to 0 (default: -5.0). Pattern: 0V → Vhigh → 0V → Vlow → 0V"
+    )
+    parser.add_argument(
+        "--num-steps",
+        type=int,
+        default=20,
+        help="Total number of steps across full sweep path (default: 20, range: 4-10000). Steps are distributed across 4 segments"
     )
     parser.add_argument(
         "--num-cycles",
         type=int,
         default=1,
-        help="Number of cycles to repeat (default: 1, range: 1-1000). Each cycle: 0V → +Vpos → Vneg → 0V. Total points = 4 × num-cycles"
+        help="Number of cycles to repeat (default: 1, range: 1-1000). Each cycle: 0V → Vhigh → 0V → Vlow → 0V. Total points = (num-steps + 1) × num-cycles"
     )
     
     # Measurement parameters
     parser.add_argument(
-        "--settle-time",
+        "--step-delay",
         type=float,
         default=0.001,
-        help="Settling time at each voltage point (seconds, default: 0.001 = 1 ms, range: 0.0001 to 10.0)"
+        help="Delay at each step before measurement (seconds, default: 0.001 = 1 ms, range: 0.0001 to 10.0)"
     )
     parser.add_argument(
         "--ilimit",
@@ -381,17 +392,19 @@ def main() -> None:
     args = parser.parse_args()
     
     # Validate parameters
-    if args.vpos < 0:
-        parser.error(f"vpos={args.vpos} must be >= 0")
-    if args.vneg > 0:
-        parser.error(f"vneg={args.vneg} must be <= 0 (use 0 for auto-symmetric with -vpos)")
+    if args.vhigh < 0:
+        parser.error(f"vhigh={args.vhigh} must be >= 0")
+    if args.vlow > 0:
+        parser.error(f"vlow={args.vlow} must be <= 0")
+    if not (4 <= args.num_steps <= 10000):
+        parser.error(f"num-steps={args.num_steps} must be in range [4, 10000]")
     if not (1 <= args.num_cycles <= 1000):
         parser.error(f"num-cycles={args.num_cycles} must be in range [1, 1000]")
     
-    # Calculate total points (4 points per cycle)
-    num_points = 4 * args.num_cycles
-    if not (0.0001 <= args.settle_time <= 10.0):
-        parser.error(f"settle-time={args.settle_time} must be in range [0.0001, 10.0]")
+    # Calculate total points ((num_steps + 1) points per cycle)
+    num_points = (args.num_steps + 1) * args.num_cycles
+    if not (0.0001 <= args.step_delay <= 10.0):
+        parser.error(f"step-delay={args.step_delay} must be in range [0.0001, 10.0]")
     if not (1e-9 <= args.ilimit <= 1.0):
         parser.error(f"ilimit={args.ilimit} must be in range [1e-9, 1.0]")
     
@@ -402,11 +415,12 @@ def main() -> None:
     # Build command
     clarius_debug = 1 if args.debug else 0
     command = build_ex_command(
-        vpos=args.vpos,
-        vneg=args.vneg,
+        vhigh=args.vhigh,
+        vlow=args.vlow,
+        num_steps=args.num_steps,
         num_cycles=args.num_cycles,
         num_points=num_points,
-        settle_time=args.settle_time,
+        step_delay=args.step_delay,
         ilimit=args.ilimit,
         integration_time=args.integration_time,
         clarius_debug=clarius_debug,
@@ -432,13 +446,14 @@ def main() -> None:
             raise RuntimeError("Failed to enter UL mode")
         
         print("\n[KXCI] Sending command to instrument...")
-        vneg_display = args.vneg if args.vneg != 0 else -args.vpos
-        print(f"[KXCI] Pattern: (0V → +{args.vpos}V → {vneg_display}V → 0V) × {args.num_cycles} cycles")
-        print(f"[KXCI] Vpos: {args.vpos} V")
-        print(f"[KXCI] Vneg: {args.vneg} V" + (f" (auto → {vneg_display} V)" if args.vneg == 0 else ""))
+        print(f"[KXCI] Pattern: (0V → {args.vhigh}V → 0V → {args.vlow}V → 0V) × {args.num_cycles} cycles")
+        print(f"[KXCI] Vhigh: {args.vhigh} V")
+        print(f"[KXCI] Vlow: {args.vlow} V")
+        print(f"[KXCI] NumSteps: {args.num_steps} (distributed across 4 segments)")
         print(f"[KXCI] NumCycles: {args.num_cycles}")
-        print(f"[KXCI] Total points: {num_points} (4 × {args.num_cycles})")
-        print(f"[KXCI] Settle time: {args.settle_time*1000:.1f} ms per point")
+        print(f"[KXCI] Points per cycle: {args.num_steps + 1}")
+        print(f"[KXCI] Total points: {num_points} (({args.num_steps} + 1) × {args.num_cycles})")
+        print(f"[KXCI] Step delay: {args.step_delay*1000:.1f} ms per step")
         print(f"[KXCI] Current limit: {args.ilimit:.2e} A")
         print(f"[KXCI] Integration time: {args.integration_time:.6f} PLC")
         print(f"[KXCI] Debug output: {'ON' if args.debug else 'OFF'}")
@@ -451,15 +466,13 @@ def main() -> None:
             print(f"Return value: {return_value}")
             if return_value < 0:
                 error_messages = {
-                    -1: "Invalid Vpos (must be >= 0) or Vneg (must be <= 0)",
+                    -1: "Invalid Vhigh (must be >= 0) or Vlow (must be <= 0)",
                     -2: "NumIPoints != NumVPoints (array size mismatch)",
-                    -3: "NumIPoints != 4 × NumCycles (array size must equal 4 × number of cycles)",
-                    -4: "Invalid array sizes (NumIPoints or NumVPoints < 4)",
-                    -5: "Invalid NumCycles (must be >= 1 and <= 1000)",
-                    -6: "forcev() failed (check SMU connection and voltage range)",
+                    -3: "NumIPoints != (NumSteps + 1) × NumCycles (array size mismatch)",
+                    -4: "Invalid array sizes (NumIPoints or NumVPoints < NumSteps + 1)",
+                    -5: "Invalid NumSteps (must be >= 4 and <= 10000) or NumCycles (must be >= 1 and <= 1000)",
+                    -6: "limiti() failed (check current limit value)",
                     -7: "measi() failed (check SMU connection)",
-                    -8: "limiti() failed (check current limit value)",
-                    -9: "setmode() failed (check SMU connection)",
                 }
                 msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
                 raise RuntimeError(f"EX command returned error code: {return_value} - {msg}")
@@ -471,7 +484,7 @@ def main() -> None:
         
         # Query data from GP parameters
         # Based on function signature: 
-        # 1=Vpos, 2=Vneg, 3=NumCycles, 4=Imeas (output), 5=NumIPoints, 6=Vforce (output), 7=NumVPoints, 8=SettleTime, 9=Ilimit, 10=IntegrationTime, 11=ClariusDebug
+        # 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas (output), 6=NumIPoints, 7=Vforce (output), 8=NumVPoints, 9=StepDelay, 10=Ilimit, 11=IntegrationTime, 12=ClariusDebug
         def safe_query(param: int, count: int, name: str = "") -> List[float]:
             """Query GP parameter with retry."""
             for attempt in range(3):
@@ -490,10 +503,10 @@ def main() -> None:
             return []
         
         print(f"[KXCI] Requesting {num_points} points")
-        # GP parameter 6 = Vforce (6th parameter in function signature, after NumIPoints)
-        # GP parameter 4 = Imeas (4th parameter in function signature, after NumCycles)
-        voltage = safe_query(6, num_points, "Vforce")
-        current = safe_query(4, num_points, "Imeas")
+        # GP parameter 7 = Vforce (7th parameter in function signature, after NumIPoints)
+        # GP parameter 5 = Imeas (5th parameter in function signature, after NumCycles)
+        voltage = safe_query(7, num_points, "Vforce")
+        current = safe_query(5, num_points, "Imeas")
         
         print(f"[KXCI] Received: {len(voltage)} voltage, {len(current)} current samples")
         

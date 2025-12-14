@@ -38,7 +38,7 @@ The Custom_Sweeps.json file now supports comprehensive automated testing with al
 - **step_v**: `float` (step size)
 - **sweeps**: `int` (number of sweeps)
 - **step_delay**: `float` (delay between steps, seconds)
-- **Sweep_type**: `"FS"` | `"PS"` | `"NS"` | `"Triangle"`
+- **Sweep_type**: `"FS"` | `"PS"` | `"NS"` | `"HS"` | `"Triangle"`
 - **pause**: `float` (pause at extrema, seconds)
 
 #### Endurance-Specific Parameters

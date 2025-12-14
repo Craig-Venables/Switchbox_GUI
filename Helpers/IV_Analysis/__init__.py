@@ -6,7 +6,7 @@ This module provides comprehensive analysis tools for IV sweep data, including
 data extraction and optional LLM-powered insights.
 
 Main Components:
-- sing_file_analyser: Core analysis engine (analyze_single_file class)
+- single_file_metrics: Core analysis engine (analyze_single_file class)
 - IVSweepAnalyzer: Fast data extraction wrapper with metadata support
 - IVSweepLLMAnalyzer: Adds LLM insights (optional, slower)
 

@@ -63,13 +63,37 @@ def _manual_endurance_worker(gui: Any) -> None:
         icc = gui.icc.get()
 
         gui.endurance_ratios = []
+        # Track current cycle measurements (SET and RESET currents)
+        # We'll track pairs: each cycle has SET_read and RESET_read
+        cycle_reads = []  # List of current measurements (should come in pairs)
+        
+        # Helper to schedule plot update on main thread
+        def _schedule_plot_update():
+            if hasattr(gui, 'plot_panels') and gui.plot_panels:
+                if hasattr(gui.plot_panels, 'update_endurance_plot'):
+                    # Schedule on main GUI thread
+                    gui.master.after(0, lambda: gui.plot_panels.update_endurance_plot(gui.endurance_ratios))
         
         # Use unified API if available
         if hasattr(gui.keithley, 'do_endurance_measurement'):
-            # Define on_point callback to track ON/OFF ratios
+            # Define on_point callback to track ON/OFF ratios incrementally
             def _on_point(v, i, t):
-                # Track ratios (endurance measurement returns data per cycle)
-                pass  # Will be handled after measurement
+                # Track all current measurements
+                # Endurance pattern: SET_pulse -> SET_read -> RESET_pulse -> RESET_read
+                # The on_point callback should be called for read measurements
+                cycle_reads.append(abs(i))
+                
+                # When we have a pair (SET_read and RESET_read), calculate ratio
+                # Process pairs: every two measurements form a cycle
+                if len(cycle_reads) >= 2:
+                    i_on = cycle_reads[-2]  # SET_read (second to last)
+                    i_off = cycle_reads[-1]  # RESET_read (last)
+                    ratio = (i_on + 1e-12) / (i_off + 1e-12)
+                    gui.endurance_ratios.append(ratio)
+                    cycle_reads.clear()  # Reset for next cycle
+                    
+                    # Schedule plot update on main thread
+                    _schedule_plot_update()
             
             # Run endurance measurement using unified API
             v_arr, c_arr, t_arr = gui.keithley.do_endurance_measurement(
@@ -86,19 +110,20 @@ def _manual_endurance_worker(gui: Any) -> None:
                 on_point=_on_point,
             )
             
-            # Extract ON/OFF ratios from measurements
+            # Extract ON/OFF ratios from measurements (fallback if on_point didn't work)
             # Endurance returns pairs: (SET_read, RESET_read) per cycle
-            for i in range(0, len(c_arr) - 1, 2):
-                if i + 1 < len(c_arr):
-                    i_on = abs(c_arr[i])
-                    i_off = abs(c_arr[i + 1])
-                    ratio = (i_on + 1e-12) / (i_off + 1e-12)
-                    gui.endurance_ratios.append(ratio)
+            if not gui.endurance_ratios and len(c_arr) >= 2:
+                # Process in pairs: assume even indices are SET, odd are RESET
+                # Or process sequentially: pairs of consecutive measurements
+                for i in range(0, len(c_arr) - 1, 2):
+                    if i + 1 < len(c_arr):
+                        i_on = abs(c_arr[i])
+                        i_off = abs(c_arr[i + 1])
+                        ratio = (i_on + 1e-12) / (i_off + 1e-12)
+                        gui.endurance_ratios.append(ratio)
             
-            # Update plot
-            if hasattr(gui, 'plot_panels') and gui.plot_panels:
-                if hasattr(gui.plot_panels, 'update_endurance_plot'):
-                    gui.plot_panels.update_endurance_plot(gui.endurance_ratios)
+            # Final plot update
+            _schedule_plot_update()
         else:
             # Fallback to old method (for backwards compatibility)
             gui.keithley.enable_output(True)
@@ -122,16 +147,39 @@ def _manual_endurance_worker(gui: Any) -> None:
                 ratio = (abs(i_on) + 1e-12) / (abs(i_off) + 1e-12)
                 gui.endurance_ratios.append(ratio)
 
-                gui.ax_endurance.clear()
-                gui.ax_endurance.set_title("Endurance (ON/OFF)")
-                gui.ax_endurance.set_xlabel("Cycle")
-                gui.ax_endurance.set_ylabel("ON/OFF Ratio")
-                gui.ax_endurance.plot(
-                    range(1, len(gui.endurance_ratios) + 1),
-                    gui.endurance_ratios,
-                    marker="o",
-                )
-                gui.canvas_endurance.draw()
+                # Schedule plot update on main thread
+                def _update_plot():
+                    try:
+                        if hasattr(gui, 'plot_panels') and gui.plot_panels:
+                            if hasattr(gui.plot_panels, 'update_endurance_plot'):
+                                gui.plot_panels.update_endurance_plot(gui.endurance_ratios)
+                            else:
+                                # Fallback to legacy plotting
+                                gui.ax_endurance.clear()
+                                gui.ax_endurance.set_title("Endurance (ON/OFF)")
+                                gui.ax_endurance.set_xlabel("Cycle")
+                                gui.ax_endurance.set_ylabel("ON/OFF Ratio")
+                                gui.ax_endurance.plot(
+                                    range(1, len(gui.endurance_ratios) + 1),
+                                    gui.endurance_ratios,
+                                    marker="o",
+                                )
+                                gui.canvas_endurance.draw()
+                        else:
+                            # Legacy plotting
+                            gui.ax_endurance.clear()
+                            gui.ax_endurance.set_title("Endurance (ON/OFF)")
+                            gui.ax_endurance.set_xlabel("Cycle")
+                            gui.ax_endurance.set_ylabel("ON/OFF Ratio")
+                            gui.ax_endurance.plot(
+                                range(1, len(gui.endurance_ratios) + 1),
+                                gui.endurance_ratios,
+                                marker="o",
+                            )
+                            gui.canvas_endurance.draw()
+                    except Exception:
+                        pass
+                gui.master.after(0, _update_plot)
             gui.keithley.enable_output(False)
     except Exception as exc:
         print("Manual endurance error:", exc)
@@ -156,35 +204,42 @@ def _manual_retention_worker(gui: Any) -> None:
             num_reads = len(times)
             read_delay_s = times[1] - times[0] if len(times) > 1 else 0.1
             
+            # Helper to schedule plot update on main thread
+            def _schedule_plot_update():
+                if hasattr(gui, 'plot_panels') and gui.plot_panels:
+                    if hasattr(gui.plot_panels, 'update_retention_plot'):
+                        # Schedule on main GUI thread
+                        gui.master.after(0, lambda: gui.plot_panels.update_retention_plot(
+                            list(gui.retention_times),
+                            list(gui.retention_currents)
+                        ))
+                else:
+                    # Fallback to legacy plotting on main thread
+                    def _legacy_plot():
+                        try:
+                            gui.ax_retention.clear()
+                            gui.ax_retention.set_title("Retention")
+                            gui.ax_retention.set_xlabel("Time (s)")
+                            gui.ax_retention.set_ylabel("Current (A)")
+                            gui.ax_retention.set_xscale("log")
+                            gui.ax_retention.set_yscale("log")
+                            gui.ax_retention.plot(
+                                gui.retention_times,
+                                gui.retention_currents,
+                                marker="x",
+                            )
+                            gui.canvas_retention.draw()
+                        except Exception:
+                            pass
+                    gui.master.after(0, _legacy_plot)
+            
             # Define on_point callback for live plotting
             def _on_point(v, i, t):
                 gui.retention_times.append(t)
                 gui.retention_currents.append(abs(i))
                 
-                # Update plot using plot_panels if available
-                if hasattr(gui, 'plot_panels') and gui.plot_panels:
-                    if hasattr(gui.plot_panels, 'update_retention_plot'):
-                        gui.plot_panels.update_retention_plot(
-                            gui.retention_times,
-                            gui.retention_currents
-                        )
-                else:
-                    # Fallback to legacy plotting
-                    try:
-                        gui.ax_retention.clear()
-                        gui.ax_retention.set_title("Retention")
-                        gui.ax_retention.set_xlabel("Time (s)")
-                        gui.ax_retention.set_ylabel("Current (A)")
-                        gui.ax_retention.set_xscale("log")
-                        gui.ax_retention.set_yscale("log")
-                        gui.ax_retention.plot(
-                            gui.retention_times,
-                            gui.retention_currents,
-                            marker="x",
-                        )
-                        gui.canvas_retention.draw()
-                    except Exception:
-                        pass
+                # Schedule plot update on main thread
+                _schedule_plot_update()
             
             # Run retention measurement using unified API
             v_arr, c_arr, t_arr = gui.keithley.do_retention_measurement(
@@ -200,13 +255,11 @@ def _manual_retention_worker(gui: Any) -> None:
                 on_point=_on_point,
             )
             
-            # Final plot update
-            if hasattr(gui, 'plot_panels') and gui.plot_panels:
-                if hasattr(gui.plot_panels, 'update_retention_plot'):
-                    gui.plot_panels.update_retention_plot(
-                        list(t_arr),
-                        [abs(c) for c in c_arr]
-                    )
+            # Final plot update (ensure we have all data)
+            if len(t_arr) > 0 and len(c_arr) > 0:
+                gui.retention_times = list(t_arr)
+                gui.retention_currents = [abs(c) for c in c_arr]
+                _schedule_plot_update()
         else:
             # Fallback to old method (for backwards compatibility)
             gui.keithley.enable_output(True)
@@ -226,18 +279,24 @@ def _manual_retention_worker(gui: Any) -> None:
                 gui.retention_times.append(target)
                 gui.retention_currents.append(abs(current))
 
-                gui.ax_retention.clear()
-                gui.ax_retention.set_title("Retention")
-                gui.ax_retention.set_xlabel("Time (s)")
-                gui.ax_retention.set_ylabel("Current (A)")
-                gui.ax_retention.set_xscale("log")
-                gui.ax_retention.set_yscale("log")
-                gui.ax_retention.plot(
-                    gui.retention_times,
-                    gui.retention_currents,
-                    marker="x",
-                )
-                gui.canvas_retention.draw()
+                # Schedule plot update on main thread
+                def _update_plot():
+                    try:
+                        gui.ax_retention.clear()
+                        gui.ax_retention.set_title("Retention")
+                        gui.ax_retention.set_xlabel("Time (s)")
+                        gui.ax_retention.set_ylabel("Current (A)")
+                        gui.ax_retention.set_xscale("log")
+                        gui.ax_retention.set_yscale("log")
+                        gui.ax_retention.plot(
+                            gui.retention_times,
+                            gui.retention_currents,
+                            marker="x",
+                        )
+                        gui.canvas_retention.draw()
+                    except Exception:
+                        pass
+                gui.master.after(0, _update_plot)
             gui.keithley.enable_output(False)
     except Exception as exc:
         print("Manual retention error:", exc)

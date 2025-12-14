@@ -1810,12 +1810,10 @@ class IVControllerManager:
             return v_arr, c_arr, t_arr
         
         # Check if we need fine-grained control
-        # C module only provides 4 points per cycle, so for fine-grained sweeps
-        # or when LED/pausing is needed, fall back to point-by-point
+        # For LED/pausing, fall back to point-by-point
         num_sweep_points = len(v_list)
         
         needs_fine_control = (
-            num_sweep_points > 20 or  # Too many points for C module efficiency
             (context.sequence is not None and len(context.sequence) > 0) or  # LED sequence
             config.pause_s > 0 or  # Pausing needed
             config.sweeps > 1  # Multiple sweeps with different LED states
@@ -1846,48 +1844,68 @@ class IVControllerManager:
             )
         
         # Determine sweep parameters for C module
-        # The C module does (0 → +V → -V → 0) pattern per cycle
-        # Total points = 4 × num_cycles (exactly, required by C module)
+        # The C module does (0 → Vhigh → 0 → Vlow → 0) pattern per cycle
+        # Steps are distributed across the full sweep path
         
         if config.sweep_type in ["FS", "FULL"]:
-            # Full sweep: 0 → stop_v → neg_stop_v → 0
-            vpos = abs(config.stop_v)
-            vneg = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
+            # Full sweep: 0 → stop_v → 0 → neg_stop_v → 0
+            vhigh = abs(config.stop_v)
+            vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
             num_cycles = config.sweeps
         elif config.sweep_type == "PS":
-            # Positive sweep: 0 → stop_v → 0 (vneg=0 means auto-symmetric)
-            vpos = abs(config.stop_v)
-            vneg = 0.0  # Will auto-use -vpos internally
+            # Positive sweep: 0 → stop_v → 0 (vlow=0 means only positive)
+            vhigh = abs(config.stop_v)
+            vlow = 0.0  # Only sweep positive
             num_cycles = config.sweeps
         elif config.sweep_type == "NS":
             # Negative sweep: 0 → -stop_v → 0
-            vpos = abs(config.stop_v)
-            vneg = -abs(config.stop_v)
+            vhigh = 0.0  # Start at 0
+            vlow = -abs(config.stop_v)
             num_cycles = config.sweeps
         elif config.sweep_type == "Triangle":
-            # Triangle: 0 → stop_v → neg_stop_v → 0
-            vpos = abs(config.stop_v)
-            vneg = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
+            # Triangle: 0 → stop_v → 0 → neg_stop_v → 0
+            vhigh = abs(config.stop_v)
+            vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
             num_cycles = config.sweeps
         else:
             # Default to full sweep
-            vpos = abs(config.stop_v)
-            vneg = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
+            vhigh = abs(config.stop_v)
+            vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
             num_cycles = config.sweeps
         
-        # C module requires exactly 4 points per cycle
-        # Total points = 4 × num_cycles (must be exact)
-        num_points = 4 * num_cycles
+        # Calculate number of steps from step_v
+        # The C module distributes steps across the full path (0→Vhigh→0→Vlow→0)
+        # We need to calculate how many steps fit in the voltage range
+        if config.step_v > 0:
+            # Calculate steps based on step size
+            # Full path length = |Vhigh| + |Vhigh| + |Vlow| + |Vlow| = 2*(|Vhigh| + |Vlow|)
+            total_path_length = 2 * (abs(vhigh) + abs(vlow))
+            if total_path_length > 0:
+                num_steps = max(4, int(total_path_length / config.step_v))
+            else:
+                num_steps = 4  # Minimum steps
+        else:
+            # If no step_v specified, use a reasonable default
+            num_steps = 20
+        
+        # Ensure num_steps is within valid range
+        num_steps = max(4, min(num_steps, 10000))
+        
+        # Calculate total points: (NumSteps + 1) × NumCycles
+        points_per_cycle = num_steps + 1
+        num_points = points_per_cycle * num_cycles
         
         # Ensure we don't exceed max points
         if num_points > caps.max_points_per_sweep:
-            max_cycles = caps.max_points_per_sweep // 4
+            max_points_per_cycle = caps.max_points_per_sweep // num_cycles
+            max_steps = max_points_per_cycle - 1
             raise ValueError(
-                f"Requested {num_cycles} cycles ({num_points} points) exceeds maximum "
-                f"for {self.smu_type} ({caps.max_points_per_sweep} points = {max_cycles} cycles max)"
+                f"Requested {num_steps} steps × {num_cycles} cycles ({num_points} points) exceeds maximum "
+                f"for {self.smu_type} ({caps.max_points_per_sweep} points). "
+                f"Maximum steps per cycle: {max_steps}"
             )
         
-        # Get build_ex_command function
+        # Get build_ex_command function from wrapper (already imported)
         build_ex_command = kxci_wrapper._build_ex_command
         
         # Initialize optical controller
@@ -1909,24 +1927,27 @@ class IVControllerManager:
             
             try:
                 # Build EX command
-                settle_time = config.step_delay  # Use step_delay as settle time
+                step_delay = config.step_delay  # Use step_delay
                 integration_time = 0.01  # 0.01 PLC (default)
                 
                 print(f"[4200A Sweep] Building EX command...")
-                print(f"  - vpos: {vpos}V")
-                print(f"  - vneg: {vneg}V")
+                print(f"  - vhigh: {vhigh}V")
+                print(f"  - vlow: {vlow}V")
+                print(f"  - num_steps: {num_steps}")
                 print(f"  - num_cycles: {num_cycles}")
+                print(f"  - points_per_cycle: {points_per_cycle}")
                 print(f"  - num_points: {num_points}")
-                print(f"  - settle_time: {settle_time}s")
+                print(f"  - step_delay: {step_delay}s")
                 print(f"  - ilimit: {config.icc}A")
                 print(f"  - integration_time: {integration_time} PLC")
                 
                 command = build_ex_command(
-                    vpos=vpos,
-                    vneg=vneg,
+                    vhigh=vhigh,
+                    vlow=vlow,
+                    num_steps=num_steps,
                     num_cycles=num_cycles,
                     num_points=num_points,
-                    settle_time=settle_time,
+                    step_delay=step_delay,
                     ilimit=config.icc,
                     integration_time=integration_time,
                     clarius_debug=0
@@ -1946,15 +1967,13 @@ class IVControllerManager:
                 if return_value is not None and return_value != 0:
                     if return_value < 0:
                         error_messages = {
-                            -1: "Invalid Vpos (must be >= 0) or Vneg (must be <= 0)",
+                            -1: "Invalid Vhigh (must be >= 0) or Vlow (must be <= 0)",
                             -2: "NumIPoints != NumVPoints (array size mismatch)",
-                            -3: "NumIPoints != 4 × NumCycles (array size must equal 4 × number of cycles)",
-                            -4: "Invalid array sizes (NumIPoints or NumVPoints < 4)",
-                            -5: "Invalid NumCycles (must be >= 1 and <= 1000)",
-                            -6: "forcev() failed (check SMU connection and voltage range)",
+                            -3: "NumIPoints != (NumSteps + 1) × NumCycles (array size mismatch)",
+                            -4: "Invalid array sizes (NumIPoints or NumVPoints < NumSteps + 1)",
+                            -5: "Invalid NumSteps (must be >= 4 and <= 10000) or NumCycles (must be >= 1 and <= 1000)",
+                            -6: "limiti() failed (check current limit value)",
                             -7: "measi() failed (check SMU connection)",
-                            -8: "limiti() failed (check current limit value)",
-                            -9: "setmode() failed (check SMU connection)",
                         }
                         msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
                         raise RuntimeError(f"4200A EX command returned error code: {return_value} - {msg}")
@@ -1970,13 +1989,14 @@ class IVControllerManager:
                 time.sleep(0.5)  # Wait for mode transition
                 
                 # Retrieve data via GP commands
+                # GP parameter positions: 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas, 6=NumIPoints, 7=Vforce, ...
                 print(f"[4200A Sweep] Querying GP parameters for {num_points} points...")
-                print(f"[4200A Sweep] Querying GP 6 (Vforce)...")
-                vforce = kxci._query_gp(6, num_points)  # GP 6 = Vforce
+                print(f"[4200A Sweep] Querying GP 7 (Vforce)...")
+                vforce = kxci._query_gp(7, num_points)  # GP 7 = Vforce
                 print(f"[4200A Sweep] Got {len(vforce)} voltage points")
                 
-                print(f"[4200A Sweep] Querying GP 4 (Imeas)...")
-                imeas = kxci._query_gp(4, num_points)   # GP 4 = Imeas
+                print(f"[4200A Sweep] Querying GP 5 (Imeas)...")
+                imeas = kxci._query_gp(5, num_points)   # GP 5 = Imeas
                 print(f"[4200A Sweep] Got {len(imeas)} current points")
                 
                 if len(vforce) != len(imeas):
