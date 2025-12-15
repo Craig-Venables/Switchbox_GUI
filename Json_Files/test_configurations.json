@@ -1,132 +1,426 @@
 {
     "St_v1": {
         "sweep_combinations": [
-            {   "sweeps": [1, 19],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [2, 18],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [3, 17],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [4, 16],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [5, 15],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [6, 14],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [7, 13],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [8, 12],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [9, 11],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [10],
-                "title": "Main Sweep"},
-            {   "sweeps": [20, 21, 22, 23],
-                "title": "Combination of Half Sweeps All"},
-            {   "sweeps": [20, 22],
-                "title": "Combination of Half Sweeps Ps_Ng"},
-            {   "sweeps": [24, 25, 26],
-                "title": "Change in sweep frequency - 1.5V"},
-            {   "sweeps": [27, 28, 29],
-                "title": "Change in sweep frequency - 2V"},
-            {   "sweeps": [30, 31, 32],
-                "title": "Change in sweep frequency - 2.5"}],
-        "main_sweep": 10},
-
+            {
+                "sweeps": [
+                    1,
+                    19
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    18
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    17
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    16
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    15
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    6,
+                    14
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    8,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    9,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    10
+                ],
+                "title": "Main Sweep"
+            },
+            {
+                "sweeps": [
+                    20,
+                    21,
+                    22,
+                    23
+                ],
+                "title": "Combination of Half Sweeps All"
+            },
+            {
+                "sweeps": [
+                    20,
+                    22
+                ],
+                "title": "Combination of Half Sweeps Ps_Ng"
+            },
+            {
+                "sweeps": [
+                    24,
+                    25,
+                    26
+                ],
+                "title": "Change in sweep frequency - 1.5V"
+            },
+            {
+                "sweeps": [
+                    27,
+                    28,
+                    29
+                ],
+                "title": "Change in sweep frequency - 2V"
+            },
+            {
+                "sweeps": [
+                    30,
+                    31,
+                    32
+                ],
+                "title": "Change in sweep frequency - 2.5"
+            }
+        ],
+        "main_sweep": 10
+    },
     "St_v2_led": {
         "sweep_combinations": [
-            {   "sweeps": [1, 13],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [2, 12],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [3, 11],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [4, 10],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [5, 9],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [8, 6],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [7],
-                "title": "Last Forming"},
-            {   "sweeps": [14, 15, 16,17],
-                "title": "Combination of Half Sweeps All"},
-            {   "sweeps": [14, 16],
-                "title": "Combination of Half Sweeps Ps Ng"},
-            {   "sweeps": [18, 19, 20],
-                "title": "Change in sweep frequency - 2.8"},
-            {   "sweeps": [21],
-                "title": "Main Sweep"},
-            {   "sweeps": [22],
-                "title": "Uv_LED (01010)"},
-            {   "sweeps": [23, 24, 25],
-                "title": "lED Testing - Orange = On"}],
-        "main_sweep": 19},
-
+            {
+                "sweeps": [
+                    1,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    10
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    9
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    8,
+                    6
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7
+                ],
+                "title": "Last Forming"
+            },
+            {
+                "sweeps": [
+                    14,
+                    15,
+                    16,
+                    17
+                ],
+                "title": "Combination of Half Sweeps All"
+            },
+            {
+                "sweeps": [
+                    14,
+                    16
+                ],
+                "title": "Combination of Half Sweeps Ps Ng"
+            },
+            {
+                "sweeps": [
+                    18,
+                    19,
+                    20
+                ],
+                "title": "Change in sweep frequency - 2.8"
+            },
+            {
+                "sweeps": [
+                    21
+                ],
+                "title": "Main Sweep"
+            },
+            {
+                "sweeps": [
+                    22
+                ],
+                "title": "Uv_LED (01010)"
+            },
+            {
+                "sweeps": [
+                    23,
+                    24,
+                    25
+                ],
+                "title": "lED Testing - Orange = On"
+            }
+        ],
+        "main_sweep": 19
+    },
     "St_v2": {
         "sweep_combinations": [
-            {   "sweeps": [1, 13],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [2, 12],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [3, 11],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [4, 10],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [5, 9],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [8, 6],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [7],
-                "title": "Last Forming"},
-            {   "sweeps": [14, 15, 16,17],
-                "title": "Combination of Half Sweeps All"},
-            {   "sweeps": [14, 16],
-                "title": "Combination of Half Sweeps Ps Ng"},
-            {   "sweeps": [18, 19, 20],
-                "title": "Change in sweep frequency - 2.8"},
-            {   "sweeps": [21],
-                "title": "Main Sweep"}],
-        "main_sweep": 19},
-
+            {
+                "sweeps": [
+                    1,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    10
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    9
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    8,
+                    6
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7
+                ],
+                "title": "Last Forming"
+            },
+            {
+                "sweeps": [
+                    14,
+                    15,
+                    16,
+                    17
+                ],
+                "title": "Combination of Half Sweeps All"
+            },
+            {
+                "sweeps": [
+                    14,
+                    16
+                ],
+                "title": "Combination of Half Sweeps Ps Ng"
+            },
+            {
+                "sweeps": [
+                    18,
+                    19,
+                    20
+                ],
+                "title": "Change in sweep frequency - 2.8"
+            },
+            {
+                "sweeps": [
+                    21
+                ],
+                "title": "Main Sweep"
+            }
+        ],
+        "main_sweep": 19
+    },
     "St_form(2.2v)": {
         "sweep_combinations": [
-            {   "sweeps": [1, 9],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [2, 8],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [3, 7],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [4, 6],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [5],
-                "title": "Main Sweep"}],
-        "main_sweep": 5},
-        
+            {
+                "sweeps": [
+                    1,
+                    9
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    8
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    7
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    6
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5
+                ],
+                "title": "Main Sweep"
+            }
+        ],
+        "main_sweep": 5
+    },
     "Chris_Devices": {
         "sweep_combinations": [
-            {   "sweeps": [1, 17],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [2, 16],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [3, 15],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [4, 14],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [5, 13],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [6, 12],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [7, 11],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [8, 10],
-                "title": "Same voltage sweep before and after forming"},
-            {   "sweeps": [9],
-                "title": "Highest voltage sweep"},
-            {   "sweeps": [18],
-                "title": "postive only sweep"},
-            {   "sweeps": [19],
-                "title": "Final main sweep "}],
-
-        "main_sweep": 19}
+            {
+                "sweeps": [
+                    1,
+                    17
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    16
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    15
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    14
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    6,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    8,
+                    10
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    9
+                ],
+                "title": "Highest voltage sweep"
+            },
+            {
+                "sweeps": [
+                    18
+                ],
+                "title": "postive only sweep"
+            },
+            {
+                "sweeps": [
+                    19
+                ],
+                "title": "Final main sweep "
+            }
+        ],
+        "main_sweep": 19
+    },
+    "dts_v1": {
+        "sweep_combinations": [
+            {
+                "sweeps": [
+                    1,
+                    2
+                ],
+                "title": "1,2"
+            }
+        ],
+        "main_sweep": null
+    }
 }

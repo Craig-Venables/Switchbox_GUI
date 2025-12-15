@@ -338,7 +338,6 @@ class MeasurementService:
             power=float(power),
             sequence=sequence_list,
             source_mode=source_mode,
-            pause_s=float(pause_s),
             should_stop=should_stop,
             on_point=on_point,
         )

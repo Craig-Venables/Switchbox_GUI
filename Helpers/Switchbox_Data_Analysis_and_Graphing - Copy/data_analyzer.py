@@ -22,6 +22,12 @@ try:
 except ImportError:
     AnalyzeSingleFile = None
 
+# Get project root (assuming this file is in Helpers/Switchbox_Data_Analysis_and_Graphing - Copy/)
+# File structure: project_root/Helpers/Switchbox_Data_Analysis_and_Graphing - Copy/data_analyzer.py
+# So we need to go up 2 levels: data_analyzer.py -> folder -> Helpers -> project_root
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]  # Go up to project root
+_DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "Json_Files" / "test_configurations.json"
+
 
 class TestTypeAnalyzer:
     """
@@ -31,16 +37,18 @@ class TestTypeAnalyzer:
     different test types (e.g., St_v1, St_v2, etc.) from a configuration file.
     """
     
-    def __init__(self, config_path='test_configurations.json'):
+    def __init__(self, config_path=None):
         """
         Initialize the test type analyzer.
         
         Parameters:
         -----------
         config_path : str or Path, optional
-            Path to the JSON configuration file. Defaults to 'test_configurations.json'
-            in the current working directory.
+            Path to the JSON configuration file. If None, defaults to
+            'Json_Files/test_configurations.json' in the project root.
         """
+        if config_path is None:
+            config_path = _DEFAULT_CONFIG_PATH
         self.config_path = Path(config_path)
         self.test_configs = {}
         self.load_test_configurations()
