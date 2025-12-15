@@ -26,6 +26,7 @@ Dependencies:
     - opencv-python (cv2)
     - flask (for HTTP streaming)
     - numpy
+    - pylablib (optional; enables Thorlabs TLCamera support)
 """
 
 import cv2
@@ -38,6 +39,20 @@ from tkinter import ttk, messagebox
 import sys
 import os
 import numpy as np
+
+# Optional: Thorlabs scientific camera support via pylablib.
+# In frozen (exe) builds we deliberately disable this backend to avoid
+# heavy bundling issues; Thorlabs mode is intended for script use only.
+try:
+    import pylablib as pll
+    from pylablib.devices import Thorlabs
+    THORLABS_AVAILABLE = True
+except ImportError:
+    THORLABS_AVAILABLE = False
+
+IS_FROZEN = getattr(sys, "frozen", False)
+if IS_FROZEN:
+    THORLABS_AVAILABLE = False
 
 # Try to import Flask for HTTP streaming
 try:
@@ -55,7 +70,10 @@ class CameraStreamApp:
     def __init__(self):
         """Initialize the application."""
         self.camera: Optional[cv2.VideoCapture] = None
+        self.tl_camera = None  # pylablib camera handle when using Thorlabs backend
         self.camera_index = 0
+        self.camera_backend = "OpenCV (index)"
+        self.tl_serial: Optional[str] = None
         self.streaming = False
         self.displaying = False
         self.paused = False  # Pause state
@@ -95,7 +113,8 @@ class CameraStreamApp:
         """Build the configuration GUI."""
         self.root = tk.Tk()
         self.root.title("Camera Stream Application")
-        self.root.geometry("700x800")
+        # Increase default window size so all controls are clearly visible
+        self.root.geometry("900x900")
         self.root.configure(bg="#f0f0f0")
         
         # Title
@@ -119,21 +138,91 @@ class CameraStreamApp:
         )
         config_frame.pack(padx=20, pady=10, fill="x")
         
+        # Camera backend selection
+        tk.Label(
+            config_frame,
+            text="Camera Type:",
+            bg="#f0f0f0",
+            font=("Arial", 9)
+        ).grid(row=0, column=0, sticky="w", pady=5)
+        # In frozen/exe builds we only expose the OpenCV backend; Thorlabs
+        # support is intended for script use where pylablib is installed.
+        if THORLABS_AVAILABLE:
+            backend_options = ["OpenCV (index)", "Thorlabs (pylablib)"]
+        else:
+            backend_options = ["OpenCV (index)"]
+        self.camera_backend = backend_options[0]
+        self.backend_var = tk.StringVar(value=self.camera_backend)
+        backend_combo = ttk.Combobox(
+            config_frame,
+            textvariable=self.backend_var,
+            values=backend_options,
+            width=18,
+            state="readonly"
+        )
+        backend_combo.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        backend_combo.bind("<<ComboboxSelected>>", lambda e: self._toggle_backend_fields())
+        
         # Camera index
         tk.Label(
             config_frame,
             text="Camera Index:",
             bg="#f0f0f0",
             font=("Arial", 9)
-        ).grid(row=0, column=0, sticky="w", pady=5)
+        ).grid(row=1, column=0, sticky="w", pady=5)
         self.camera_var = tk.StringVar(value="0")
-        camera_entry = tk.Entry(
+        self.camera_entry = tk.Entry(
             config_frame,
             textvariable=self.camera_var,
             width=10,
             font=("Arial", 9)
         )
-        camera_entry.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        self.camera_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        # Thorlabs serial (when using pylablib) – only show when available (script mode)
+        if THORLABS_AVAILABLE:
+            tk.Label(
+                config_frame,
+                text="Thorlabs Serial:",
+                bg="#f0f0f0",
+                font=("Arial", 9)
+            ).grid(row=2, column=0, sticky="w", pady=5)
+            self.serial_var = tk.StringVar(value="")
+            self.serial_entry = tk.Entry(
+                config_frame,
+                textvariable=self.serial_var,
+                width=15,
+                font=("Arial", 9),
+                state=tk.NORMAL
+            )
+            self.serial_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
+            
+            self.detect_btn = tk.Button(
+                config_frame,
+                text="Detect Thorlabs",
+                command=self._detect_thorlabs_cameras,
+                bg="#569CD6",
+                fg="white",
+                font=("Arial", 8, "bold"),
+                padx=8,
+                pady=3,
+                relief=tk.FLAT,
+                state=tk.NORMAL
+            )
+            self.detect_btn.grid(row=2, column=2, sticky="w", padx=5, pady=5)
+            
+            self.detect_result_var = tk.StringVar(
+                value="Click Detect to list cameras"
+            )
+            tk.Label(
+                config_frame,
+                textvariable=self.detect_result_var,
+                bg="#f0f0f0",
+                font=("Arial", 8),
+                fg="#666",
+                justify=tk.LEFT,
+                wraplength=200
+            ).grid(row=2, column=3, sticky="w", padx=5, pady=5)
         
         # Stream IP - Make it optional/clearer
         tk.Label(
@@ -141,7 +230,7 @@ class CameraStreamApp:
             text="Stream IP Address:",
             bg="#f0f0f0",
             font=("Arial", 9)
-        ).grid(row=1, column=0, sticky="w", pady=5)
+        ).grid(row=3, column=0, sticky="w", pady=5)
         self.ip_var = tk.StringVar(value="0.0.0.0")
         ip_entry = tk.Entry(
             config_frame,
@@ -149,7 +238,7 @@ class CameraStreamApp:
             width=15,
             font=("Arial", 9)
         )
-        ip_entry.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        ip_entry.grid(row=3, column=1, sticky="w", padx=10, pady=5)
         
         # Help text with better explanation
         help_text = tk.Label(
@@ -162,7 +251,7 @@ class CameraStreamApp:
             justify=tk.LEFT,
             wraplength=200
         )
-        help_text.grid(row=1, column=2, sticky="w", padx=5)
+        help_text.grid(row=3, column=2, sticky="w", padx=5)
         
         # Stream Port
         tk.Label(
@@ -170,7 +259,7 @@ class CameraStreamApp:
             text="Stream Port:",
             bg="#f0f0f0",
             font=("Arial", 9)
-        ).grid(row=2, column=0, sticky="w", pady=5)
+        ).grid(row=4, column=0, sticky="w", pady=5)
         self.port_var = tk.StringVar(value="8080")
         port_entry = tk.Entry(
             config_frame,
@@ -178,7 +267,7 @@ class CameraStreamApp:
             width=10,
             font=("Arial", 9)
         )
-        port_entry.grid(row=2, column=1, sticky="w", padx=10, pady=5)
+        port_entry.grid(row=4, column=1, sticky="w", padx=10, pady=5)
         
         # Resolution
         tk.Label(
@@ -186,7 +275,7 @@ class CameraStreamApp:
             text="Resolution:",
             bg="#f0f0f0",
             font=("Arial", 9)
-        ).grid(row=3, column=0, sticky="w", pady=5)
+        ).grid(row=5, column=0, sticky="w", pady=5)
         self.resolution_var = tk.StringVar(value="1280x720")
         resolution_combo = ttk.Combobox(
             config_frame,
@@ -247,7 +336,7 @@ class CameraStreamApp:
             bg="#f0f0f0",
             font=("Arial", 8),
             fg="#666"
-        ).grid(row=1, column=2, sticky="w", padx=5)
+        ).grid(row=3, column=2, sticky="w", padx=5)
         
         # Brightness
         tk.Label(
@@ -453,6 +542,47 @@ class CameraStreamApp:
         
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
+
+    def _toggle_backend_fields(self):
+        """Enable/disable fields depending on selected backend."""
+        self.camera_backend = self.backend_var.get()
+        use_thorlabs = self.camera_backend == "Thorlabs (pylablib)"
+        if THORLABS_AVAILABLE and use_thorlabs:
+            self.camera_entry.config(state=tk.DISABLED)
+            if hasattr(self, "serial_entry"):
+                self.serial_entry.config(state=tk.NORMAL)
+            if hasattr(self, "detect_btn"):
+                self.detect_btn.config(state=tk.NORMAL)
+            if hasattr(self, "detect_result_var"):
+                self.detect_result_var.set("Click Detect to list cameras")
+        else:
+            # Default OpenCV path or exe builds where Thorlabs is disabled
+            self.camera_entry.config(state=tk.NORMAL)
+            if hasattr(self, "serial_entry"):
+                self.serial_entry.config(state=tk.DISABLED)
+            if hasattr(self, "detect_btn"):
+                self.detect_btn.config(state=tk.DISABLED)
+            if hasattr(self, "detect_result_var"):
+                self.detect_result_var.set("")
+
+    def _detect_thorlabs_cameras(self):
+        """List connected Thorlabs cameras using pylablib."""
+        if not THORLABS_AVAILABLE:
+            # In exe builds Thorlabs mode is disabled entirely; in script
+            # mode user should only reach here if pylablib imported OK.
+            messagebox.showerror("Thorlabs", "Thorlabs backend is not available in this build.")
+            return
+        try:
+            serials = Thorlabs.list_cameras_tlcam()
+            if serials:
+                self.detect_result_var.set(f"Found: {', '.join(serials)}")
+                if not self.serial_var.get():
+                    self.serial_var.set(serials[0])
+            else:
+                self.detect_result_var.set("No Thorlabs cameras detected")
+        except Exception as exc:
+            self.detect_result_var.set(f"Error detecting cameras: {exc}")
+            messagebox.showerror("Thorlabs detection error", str(exc))
     
     def _get_local_ip(self) -> str:
         """Get local IP address."""
@@ -470,7 +600,9 @@ class CameraStreamApp:
         """Start camera capture and streaming."""
         try:
             # Get configuration
-            self.camera_index = int(self.camera_var.get())
+            self.camera_backend = self.backend_var.get()
+            self.camera_index = int(self.camera_var.get()) if self.camera_var.get() else 0
+            self.tl_serial = self.serial_var.get().strip() or None
             self.stream_ip = self.ip_var.get().strip()
             self.stream_port = int(self.port_var.get())
             
@@ -483,35 +615,14 @@ class CameraStreamApp:
             if not self.stream_ip:
                 self.stream_ip = "0.0.0.0"
             
-            # Initialize camera
             self.status_var.set("Initializing camera...")
             self.root.update()
-            
-            # Open camera - try DirectShow on Windows, fallback gracefully
-            if sys.platform == 'win32':
-                # Try DirectShow first (faster on Windows)
-                self.camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
-                if not self.camera.isOpened():
-                    # Fallback to default backend if DirectShow fails
-                    self.camera = cv2.VideoCapture(self.camera_index)
+
+            # Initialize selected backend
+            if self.camera_backend == "Thorlabs (pylablib)":
+                self._open_thorlabs_camera()
             else:
-                # Use default backend on other platforms
-                self.camera = cv2.VideoCapture(self.camera_index)
-            
-            if not self.camera.isOpened():
-                raise RuntimeError(f"Failed to open camera {self.camera_index}. Try a different camera index (0, 1, 2, etc.)")
-            
-            # Set camera properties efficiently (set all at once)
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
-            self.camera.set(cv2.CAP_PROP_FPS, self.fps)
-            
-            # Set buffer size to 1 to reduce latency
-            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            # Don't apply manual settings initially - let camera use auto mode
-            # Settings will only be applied when user explicitly changes them
-            print("Camera started with auto exposure/brightness/contrast/gain")
+                self._open_opencv_camera()
             
             # Start frame capture thread
             self.streaming = True
@@ -548,6 +659,53 @@ class CameraStreamApp:
             messagebox.showerror("Error", f"Failed to start camera:\n{e}")
             self.status_var.set("Error: " + str(e))
             self._stop_camera()
+
+    def _open_opencv_camera(self):
+        """Open a camera using OpenCV backends."""
+        if sys.platform == 'win32':
+            self.camera = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            if not self.camera.isOpened():
+                self.camera = cv2.VideoCapture(self.camera_index)
+        else:
+            self.camera = cv2.VideoCapture(self.camera_index)
+
+        if not self.camera.isOpened():
+            raise RuntimeError(f"Failed to open camera {self.camera_index}. Try a different camera index (0, 1, 2, etc.)")
+
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+        self.camera.set(cv2.CAP_PROP_FPS, self.fps)
+        self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        print("Camera started with auto exposure/brightness/contrast/gain")
+
+    def _open_thorlabs_camera(self):
+        """Open a Thorlabs TLCamera using pylablib."""
+        if not THORLABS_AVAILABLE:
+            raise RuntimeError("pylablib not installed. Run `pip install pylablib` to enable Thorlabs support.")
+
+        # If a previous camera exists, close it first
+        self.camera = None  # ensure OpenCV handle is unused
+        if self.tl_camera:
+            try:
+                self.tl_camera.stop_acquisition()
+            except Exception:
+                pass
+            try:
+                self.tl_camera.close()
+            except Exception:
+                pass
+            self.tl_camera = None
+
+        # Optionally allow overriding DLL path via environment variable
+        dll_override = os.environ.get("THORLABS_TLCAM_DLL_DIR")
+        if dll_override:
+            pll.par["devices/dlls/thorlabs_tlcam"] = dll_override
+
+        # Connect
+        self.tl_camera = Thorlabs.ThorlabsTLCamera(serial=self.tl_serial or None)
+        # Start acquisition immediately so capture loop can read frames
+        self.tl_camera.start_acquisition()
+        print(f"Thorlabs camera started (serial={self.tl_serial or 'first available'})")
     
     def _pause_camera(self):
         """Pause or resume camera capture."""
@@ -585,9 +743,21 @@ class CameraStreamApp:
             pass
         
         # Stop camera
-        if self.camera:
-            self.camera.release()
-            self.camera = None
+        if self.camera_backend == "Thorlabs (pylablib)":
+            if self.tl_camera:
+                try:
+                    self.tl_camera.stop_acquisition()
+                except Exception:
+                    pass
+                try:
+                    self.tl_camera.close()
+                except Exception:
+                    pass
+                self.tl_camera = None
+        else:
+            if self.camera:
+                self.camera.release()
+                self.camera = None
         
         # Close OpenCV windows
         cv2.destroyAllWindows()
@@ -613,18 +783,24 @@ class CameraStreamApp:
         # Use high-precision timing
         last_time = time.perf_counter()
         
-        while self.streaming and self.camera:
+        while self.streaming and (self.camera or self.tl_camera):
             try:
                 # Skip frame capture if paused
                 if self.paused:
                     time.sleep(0.1)
                     continue
                 
-                # Read frame
-                ret, frame = self.camera.read()
-                if not ret:
-                    time.sleep(0.01)  # Short sleep on read failure
-                    continue
+                # Read frame depending on backend
+                if self.camera_backend == "Thorlabs (pylablib)":
+                    frame = self._get_thorlabs_frame()
+                    if frame is None:
+                        time.sleep(0.01)
+                        continue
+                else:
+                    ret, frame = self.camera.read()
+                    if not ret:
+                        time.sleep(0.01)  # Short sleep on read failure
+                        continue
                 
                 # Resize if needed (only if necessary)
                 if frame.shape[1] != self.resolution[0] or frame.shape[0] != self.resolution[1]:
@@ -654,6 +830,20 @@ class CameraStreamApp:
             except Exception as e:
                 print(f"Error capturing frame: {e}")
                 time.sleep(0.01)
+
+    def _get_thorlabs_frame(self):
+        """Grab a frame from Thorlabs TLCamera."""
+        if not self.tl_camera:
+            return None
+        try:
+            frame = self.tl_camera.get_frame(timeout=1.0)
+            # pylablib returns (frame, meta) for most cameras
+            if isinstance(frame, tuple) and len(frame) >= 1:
+                frame = frame[0]
+            return np.array(frame)
+        except Exception as exc:
+            print(f"Thorlabs frame error: {exc}")
+            return None
     
     def _display_frames(self):
         """Display frames locally using OpenCV - optimized for speed."""
@@ -879,6 +1069,15 @@ class CameraStreamApp:
     
     def _update_camera_settings(self):
         """Update camera settings from GUI values (only when user explicitly changes them)."""
+        if self.camera_backend == "Thorlabs (pylablib)":
+            # For Thorlabs we only adjust FPS limiter; hardware settings should be set in vendor tools or via pylablib directly.
+            try:
+                self.fps = float(self.fps_var.get())
+                self.status_var.set("Thorlabs FPS limiter updated; exposure/brightness unchanged")
+            except ValueError as e:
+                print(f"Invalid FPS value: {e}")
+            return
+
         if not self.camera or not self.camera.isOpened():
             return
         
@@ -921,6 +1120,9 @@ class CameraStreamApp:
     
     def _reset_to_auto(self):
         """Reset camera to auto mode (let camera control exposure, brightness, contrast, gain)."""
+        if self.camera_backend == "Thorlabs (pylablib)":
+            self.status_var.set("Auto reset not required for Thorlabs; camera manages exposure internally.")
+            return
         if not self.camera or not self.camera.isOpened():
             return
         

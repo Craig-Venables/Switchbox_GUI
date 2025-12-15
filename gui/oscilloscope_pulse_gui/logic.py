@@ -5,16 +5,27 @@ from typing import Optional, Callable, Dict, Any, Tuple
 import traceback
 
 # ==================== DEBUG CONTROL ====================
-# Set to False to disable all debug print statements
-DEBUG_ENABLED = True
+# Set to True only when actively debugging. In normal use this should stay False
+# so the console isn't flooded with messages.
+DEBUG_ENABLED = False
 
 def debug_print(*args, **kwargs):
-    """Print debug messages only if DEBUG_ENABLED is True."""
+    """
+    Lightweight debug logger.
+
+    NOTE: Kept for future troubleshooting, but disabled by default via
+    DEBUG_ENABLED=False to keep runtime output clean for end users.
+    """
     if DEBUG_ENABLED:
         print(*args, **kwargs)
 
 def timing_log(message: str):
-    """Log message with timestamp for timing/alignment debugging."""
+    """
+    Timing / alignment logger.
+
+    Uses the same global DEBUG_ENABLED flag, so all high‑volume logs can be
+    turned off by default. Enable only when chasing a specific bug.
+    """
     if DEBUG_ENABLED:
         timestamp = time.perf_counter()
         print(f"[{timestamp:.6f}s] ⏱️ {message}")
@@ -235,6 +246,31 @@ class PulseMeasurementLogic:
             'scope_ch': scope_ch,
             'simulation_mode': params.get('simulation_mode', False),
         }
+
+    def _log_pulse_summary(self, meas_params: Dict[str, Any], system_name: str):
+        """
+        Emit a concise pulse summary once per run to avoid noisy scattershot prints.
+        This makes it easier to correlate what we *intend* to send with what the instruments do.
+        """
+        bias_v = meas_params['bias_voltage']
+        pulse_v = meas_params['pulse_voltage']
+        dur = meas_params['duration']
+        pre_hold = meas_params['pre_bias_time']
+        post_hold = meas_params['post_bias_time']
+        comp = meas_params['compliance']
+        shunt = meas_params['shunt_r']
+
+        debug_print("=== PULSE PLAN ===")
+        debug_print(f"  System          : {system_name}")
+        debug_print(f"  Bias Voltage    : {bias_v:.6f} V")
+        debug_print(f"  Pulse Voltage   : {pulse_v:.6f} V (absolute level)")
+        debug_print(f"  Pulse Duration  : {dur:.6f} s")
+        debug_print(f"  Pre-Bias Hold   : {pre_hold:.6f} s")
+        debug_print(f"  Post-Bias Hold  : {post_hold:.6f} s"
+                    f"{' (mirrored from pre-bias for 4200A)' if system_name == 'keithley4200a' else ''}")
+        debug_print(f"  Compliance      : {comp:.6e} A")
+        debug_print(f"  Shunt (for I calc): {shunt:.3f} Ω")
+        debug_print("===================")
 
     def _get_smu_system_name(self) -> str:
         """Get SMU system name (cached to avoid repeated VISA calls)."""
@@ -484,12 +520,13 @@ class PulseMeasurementLogic:
             ]
             command = f"EX a_SMU_Pulse SMU_pulse_only_craig({','.join(params_list)})"
             
-            timing_log(f"SMU: Executing C function SMU_pulse_only_craig")
-            timing_log(f"SMU: Parameters - duration={meas_params['duration']:.6f}s, "
-                      f"pulse_voltage={meas_params['pulse_voltage']:.3f}V, "
-                      f"bias_voltage={meas_params['bias_voltage']:.3f}V, "
-                      f"biasHold={meas_params['pre_bias_time']:.6f}s (C function uses this for both pre and post bias)")
-            timing_log(f"SMU: Command: {command}")
+            timing_log("SMU: Executing C function SMU_pulse_only_craig")
+            timing_log(f"  duration    : {meas_params['duration']:.6f} s")
+            timing_log(f"  pulse_volt  : {meas_params['pulse_voltage']:.6f} V")
+            timing_log(f"  bias_volt   : {meas_params['bias_voltage']:.6f} V")
+            timing_log(f"  bias_hold   : {meas_params['pre_bias_time']:.6f} s (used for both pre and post)")
+            timing_log(f"  compliance  : {meas_params['compliance']:.6e} A")
+            timing_log(f"  Command     : {command}")
             
             return_value, error = kxci._execute_ex_command(command)
             
@@ -542,6 +579,7 @@ class PulseMeasurementLogic:
         # Pulse execution
         timing_log(f"=== PULSE EXECUTION START ===")
         on_progress("Pulsing...")
+        self._log_pulse_summary(meas_params, system_name)
         
         if system_name == 'keithley4200a':
             # C function handles pre-bias, pulse, and post-bias internally
