@@ -1,8 +1,16 @@
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Disable LaTeX/math text globally for this module
+matplotlib.rcParams['text.usetex'] = False
+matplotlib.rcParams['mathtext.default'] = 'regular'
+matplotlib.rcParams['axes.formatter.use_mathtext'] = False
+matplotlib.rcParams['axes.formatter.min_exponent'] = 0
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 from .base import PlotManager
 
@@ -33,6 +41,14 @@ class SCLCFitPlotter:
         min_points: int = 8,
         save_name: Optional[str] = None,
     ):
+        # Disable LaTeX to prevent parsing errors in background threads
+        plt.rcParams['text.usetex'] = False
+        plt.rcParams['mathtext.default'] = 'regular'
+        plt.rcParams['axes.formatter.use_mathtext'] = False
+        
+        # Import formatter to force plain text
+        from matplotlib.ticker import LogFormatter
+        
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
 
@@ -45,6 +61,9 @@ class SCLCFitPlotter:
             fig.suptitle(title)
 
         ax.loglog(v_pos, i_pos, "ko", markersize=4, label=device_label or "data")
+        # Force plain text formatters for log scales (rcParams already disable math text)
+        ax.xaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+        ax.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
 
         # Global fit on all positive points
         if len(v_pos) >= 2:

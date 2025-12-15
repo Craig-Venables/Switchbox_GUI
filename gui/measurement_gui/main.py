@@ -703,6 +703,75 @@ class MeasurementGUI:
                 else:
                     self.analysis_stats_window.hide()
 
+    def _update_live_classification_display(
+        self, 
+        sweep_num: int, 
+        total_sweeps: int, 
+        classification_data: Dict[str, Any]
+    ) -> None:
+        """
+        Update GUI with live classification progress during custom measurements.
+        Shows: "Sweep 5/20: Memristive (Score: 75.2)"
+        
+        Parameters:
+        -----------
+        sweep_num : int
+            Current sweep number (1-indexed)
+        total_sweeps : int
+            Total number of sweeps in sequence
+        classification_data : Dict[str, Any]
+            Classification data from analysis (device_type, memristivity_score, etc.)
+        """
+        try:
+            device_type = classification_data.get('device_type', 'unknown')
+            score = classification_data.get('memristivity_score', 0)
+            
+            # Build status message
+            status_msg = f"Sweep {sweep_num}/{total_sweeps}: "
+            status_msg += f"{device_type.title()} "
+            status_msg += f"(Score: {score:.1f}/100)"
+            
+            # Update status bar or label if available
+            if hasattr(self, 'status_label'):
+                self.status_label.config(text=status_msg)
+            
+            # Force GUI update
+            self.master.update_idletasks()
+            
+            print(f"[LIVE] {status_msg}")
+            
+        except Exception as e:
+            print(f"[LIVE] Error updating display: {e}")
+
+    def _send_classification_notification(
+        self, 
+        device_id: str, 
+        classification_data: Dict[str, Any]
+    ) -> None:
+        """
+        PLACEHOLDER for future notification system.
+        
+        TODO: Implement notifications for:
+        - Device becomes memristive during forming
+        - Score exceeds threshold
+        - Degradation detected
+        - Sequence complete
+        
+        Integration options:
+        - Telegram bot
+        - Email alerts
+        - System notifications
+        - Webhook POST
+        
+        Parameters:
+        -----------
+        device_id : str
+            Device identifier (e.g., "sample_A_1")
+        classification_data : Dict[str, Any]
+            Classification data from analysis
+        """
+        pass
+
     def _run_analysis_if_enabled(
         self,
         voltage: List[float],
@@ -710,14 +779,21 @@ class MeasurementGUI:
         timestamps: Optional[List[float]],
         save_dir: str,
         file_name: str,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> None:
+        metadata: Optional[Dict[str, Any]] = None,
+        is_custom_sequence: bool = False,
+        sweep_number: int = 1,
+        device_memristive_flag: bool = None
+    ) -> Optional[Dict[str, Any]]:
         """
         Run IV analysis if enabled, display results, and save to file.
         
         This method checks if analysis is enabled, runs quick_analyze() on the
         measurement data, updates the stats window/panel, and saves results to
         a "sweep_analysis" subfolder.
+        
+        For custom sequences:
+        - Sweep 1: Always analyze to determine if memristive
+        - Sweeps 2+: Only analyze if device_memristive_flag == True
         
         Parameters:
         -----------
@@ -733,22 +809,36 @@ class MeasurementGUI:
             Base filename for the measurement (without extension)
         metadata : Optional[Dict[str, Any]]
             Additional metadata (LED state, temperature, etc.)
+        is_custom_sequence : bool
+            Whether this is part of a custom measurement sequence
+        sweep_number : int
+            Sweep number within the sequence (1-indexed)
+        device_memristive_flag : bool, optional
+            Whether device is known to be memristive (for sweeps 2+)
         
         Returns:
         --------
-        None - Errors are logged but don't interrupt measurement flow
+        Optional[Dict[str, Any]] - Analysis data dict, or None if skipped.
+            For custom sequences, first sweep returns {'analysis_data': ..., 'is_memristive': bool}
         """
         # ANALYSIS IS NOW AUTOMATIC - Always runs classification, background research for memristive
         # (Checkbox is now redundant but kept for potential future use)
         
+        # === CONDITIONAL LOGIC FOR CUSTOM SEQUENCES ===
+        # Skip if not first sweep AND device is not memristive
+        if is_custom_sequence and sweep_number > 1:
+            if not device_memristive_flag:
+                print(f"[ANALYSIS] Skipping sweep {sweep_number} - device not memristive")
+                return None
+        
         # Validate input data
         if not voltage or not current or len(voltage) == 0 or len(current) == 0:
             print("[ANALYSIS] Skipping analysis: empty voltage or current arrays")
-            return
+            return None
         
         if len(voltage) != len(current):
             print(f"[ANALYSIS] Skipping analysis: array length mismatch (V:{len(voltage)}, I:{len(current)})")
-            return
+            return None
         
         try:
             # Import analysis module
@@ -823,63 +913,118 @@ class MeasurementGUI:
                 save_directory=sample_save_dir  # Use sample-level for tracking/research
             )
             
-            # Update stats window and panel
-            self.update_analysis_stats(analysis_data, analysis_level)
+            # Update stats window and panel (separate try-except to not block other operations)
+            try:
+                self.update_analysis_stats(analysis_data, analysis_level)
+            except Exception as stats_exc:
+                print(f"[ANALYSIS] Failed to update stats window: {stats_exc}")
             
-            # Update top bar classification display
-            self.update_classification_display(analysis_data.get('classification', {}))
+            # Update top bar classification display (separate try-except)
+            try:
+                self.update_classification_display(analysis_data.get('classification', {}))
+            except Exception as display_exc:
+                print(f"[ANALYSIS] Failed to update classification display: {display_exc}")
             
-            # Save analysis results to file
-            self._save_analysis_results(analysis_data, save_dir, file_name, analysis_level)
+            # Save analysis results to file (separate try-except)
+            try:
+                self._save_analysis_results(analysis_data, save_dir, file_name, analysis_level)
+            except Exception as save_exc:
+                print(f"[ANALYSIS] Failed to save analysis results: {save_exc}")
+            
+            # Store analysis result for plotting (if not custom sequence - custom sequences handle plotting separately)
+            if not is_custom_sequence:
+                self._last_analysis_result = analysis_data
             
             # === AUTO-TRIGGER RESEARCH ANALYSIS FOR MEMRISTIVE DEVICES ===
             # If device is memristive, run full research analysis in background
-            device_type = analysis_data.get('classification', {}).get('device_type', '')
-            memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
-            
-            if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
-                # Spawn background thread for research-level analysis
-                import threading
+            # Wrap in try-except to ensure it doesn't block main analysis
+            try:
+                device_type = analysis_data.get('classification', {}).get('device_type', '')
+                memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
                 
-                def run_research_analysis():
-                    try:
-                        print(f"[RESEARCH] Starting background research analysis for {file_name}...")
-                        
-                        # Use sample-level directory for research (same as tracking)
-                        research_save_dir = sample_save_dir
-                        
-                        # Run research-level analysis
-                        research_data = quick_analyze(
-                            voltage=v_arr,
-                            current=i_arr,
-                            time=t_arr,
-                            metadata=metadata,
-                            analysis_level='research',
-                            device_id=device_id,
-                            cycle_number=cycle_number,
-                            save_directory=research_save_dir  # Use sample-level
-                        )
-                        
-                        # Save to device-specific research folder (within sample-level directory)
-                        self._save_research_analysis(research_data, research_save_dir, file_name, device_id)
-                        
-                        print(f"[RESEARCH] Background research analysis complete for {file_name}")
-                    except Exception as e:
-                        print(f"[RESEARCH ERROR] Background analysis failed: {e}")
-                
-                # Start background thread (daemon so it doesn't block exit)
-                research_thread = threading.Thread(target=run_research_analysis, daemon=True)
-                research_thread.start()
-                
-                print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
+                if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
+                    # Spawn background thread for research-level analysis
+                    import threading
+                    
+                    def run_research_analysis():
+                        try:
+                            print(f"[RESEARCH] Starting background research analysis for {file_name}...")
+                            
+                            # Use sample-level directory for research (same as tracking)
+                            research_save_dir = sample_save_dir
+                            
+                            # Run research-level analysis
+                            research_data = quick_analyze(
+                                voltage=v_arr,
+                                current=i_arr,
+                                time=t_arr,
+                                metadata=metadata,
+                                analysis_level='research',
+                                device_id=device_id,
+                                cycle_number=cycle_number,
+                                save_directory=research_save_dir  # Use sample-level
+                            )
+                            
+                            # Save to device-specific research folder (within sample-level directory)
+                            self._save_research_analysis(research_data, research_save_dir, file_name, device_id)
+                            
+                            print(f"[RESEARCH] Background research analysis complete for {file_name}")
+                        except Exception as e:
+                            print(f"[RESEARCH ERROR] Background analysis failed: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    
+                    # Start background thread (daemon so it doesn't block exit)
+                    research_thread = threading.Thread(target=run_research_analysis, daemon=True)
+                    research_thread.start()
+                    
+                    print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
+            except Exception as research_exc:
+                print(f"[RESEARCH] Failed to queue background research analysis: {research_exc}")
+                # Don't fail the main analysis if research queuing fails
             
             print("[ANALYSIS] Analysis complete and results saved")
+            
+            # === RETURN FOR CUSTOM SEQUENCES ===
+            # For first sweep in custom sequence, return memristive flag
+            if is_custom_sequence and sweep_number == 1:
+                is_memristive = device_type == 'memristive' or (memristivity_score and memristivity_score > 60)
+                print(f"[ANALYSIS] First sweep: score={memristivity_score:.1f}, memristive={is_memristive}")
+                return {'analysis_data': analysis_data, 'is_memristive': is_memristive}
+            
+            # For non-custom or subsequent sweeps, return analysis data
+            # Also trigger automatic plotting for non-custom measurements
+            try:
+                # Determine if memristive
+                classification = analysis_data.get('classification', {})
+                is_memristive = classification.get('memristivity_score', 0) > 60
+                
+                # Get device name and save directory
+                device_name = f"{self.final_device_letter}{self.final_device_number}" if hasattr(self, 'final_device_letter') else "device"
+                
+                # Plot in background (only if we have save_dir and it's not a custom sequence)
+                if save_dir and not is_custom_sequence:
+                    self._plot_measurement_in_background(
+                        voltage=voltage,
+                        current=current,
+                        timestamps=timestamps,
+                        save_dir=save_dir,
+                        device_name=device_name,
+                        sweep_number=1,  # For non-custom, typically single sweep
+                        is_memristive=is_memristive,
+                        filename=file_name  # Pass the filename for subfolder organization
+                    )
+            except Exception as plot_exc:
+                print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
+            
+            return analysis_data
             
         except Exception as exc:
             # Log error but don't interrupt measurement flow
             print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
             import traceback
             traceback.print_exc()
+            return None
     
     def _save_analysis_results(
         self,
@@ -1146,6 +1291,414 @@ class MeasurementGUI:
             
         except Exception as e:
             print(f"[RESEARCH ERROR] Failed to save research analysis: {e}")
+
+    def _plot_measurement_in_background(
+        self,
+        voltage,
+        current,
+        timestamps,
+        save_dir: str,
+        device_name: str,
+        sweep_number: int,
+        is_memristive: Optional[bool] = None,
+        filename: Optional[str] = None
+    ) -> None:
+        """
+        Plot measurement graphs in background thread using UnifiedPlotter.
+        
+        Always plots basic IV dashboard. If memristive, also plots advanced analysis.
+        Saves to {save_dir}/Graphs/{filename}_graph/, {filename}_conduction/, {filename}_sclc_fit/ folders.
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+            timestamps: Optional time array
+            save_dir: Directory where measurement was saved
+            device_name: Device identifier (e.g., "A1", "B5")
+            sweep_number: Sweep number
+            is_memristive: Optional memristive flag. If None, will check from analysis.
+            filename: Optional measurement filename (without .txt). If None, will try to extract from save_dir.
+        """
+        def run_plotting():
+            try:
+                import sys
+                from pathlib import Path
+                import matplotlib
+                
+                # Set non-interactive backend for background thread (prevents GUI/LaTeX issues)
+                matplotlib.use('Agg')
+                
+                # Import UnifiedPlotter from plotting_core
+                # Try direct import first, then add to path if needed
+                try:
+                    from Helpers.plotting_core import UnifiedPlotter
+                except ImportError:
+                    # Fallback: add to path and import
+                    plotting_core_path = Path(__file__).resolve().parents[2] / "Helpers" / "plotting_core"
+                    if str(plotting_core_path.parent) not in sys.path:
+                        sys.path.insert(0, str(plotting_core_path.parent))
+                    from plotting_core import UnifiedPlotter
+                
+                # Disable LaTeX rendering FIRST to avoid parsing errors in background thread
+                import matplotlib.pyplot as plt
+                import matplotlib
+                # Set backend first
+                matplotlib.use('Agg')
+                # Disable all LaTeX/math text
+                plt.rcParams['text.usetex'] = False
+                plt.rcParams['mathtext.default'] = 'regular'
+                plt.rcParams['axes.formatter.use_mathtext'] = False
+                # Force plain text for all formatters
+                plt.rcParams['axes.formatter.min_exponent'] = 0
+                plt.rcParams['axes.unicode_minus'] = False
+                
+                # Create Graphs folder in device directory
+                graphs_dir = os.path.join(save_dir, "Graphs")
+                os.makedirs(graphs_dir, exist_ok=True)
+                
+                # Determine filename if not provided (use local variable to avoid scoping issues)
+                plot_filename = filename  # Capture from outer scope
+                if plot_filename is None:
+                    # Try to find the most recent .txt file in save_dir
+                    try:
+                        txt_files = [f for f in os.listdir(save_dir) if f.endswith('.txt')]
+                        if txt_files:
+                            # Get the most recently modified file
+                            txt_files_with_time = [(f, os.path.getmtime(os.path.join(save_dir, f))) for f in txt_files]
+                            txt_files_with_time.sort(key=lambda x: x[1], reverse=True)
+                            latest_file = txt_files_with_time[0][0]
+                            # Remove .txt extension
+                            plot_filename = os.path.splitext(latest_file)[0]
+                        else:
+                            # Fallback: construct from device name and sweep number
+                            plot_filename = f"{device_name}_sweep_{sweep_number}"
+                    except Exception:
+                        plot_filename = f"{device_name}_sweep_{sweep_number}"
+                
+                # Create folder structure:
+                # - Graphs/ for dashboard plots (directly in Graphs folder)
+                # - Graphs/sclc_fit/ for all SCLC plots (shared folder)
+                # - Graphs/conduction/ for all conduction plots (shared folder)
+                conduction_dir = os.path.join(graphs_dir, "conduction")
+                sclc_dir = os.path.join(graphs_dir, "sclc_fit")
+                
+                # Dashboard goes directly in Graphs folder (no subfolder)
+                if is_memristive:
+                    os.makedirs(conduction_dir, exist_ok=True)
+                    os.makedirs(sclc_dir, exist_ok=True)
+                
+                # Determine if memristive (check from analysis if not provided)
+                if is_memristive is None:
+                    # Try to get from latest analysis result
+                    try:
+                        # Check if we have analysis data for this sweep
+                        # This will be set by _run_analysis_if_enabled
+                        memristivity_score = 0
+                        if hasattr(self, '_last_analysis_result'):
+                            analysis = self._last_analysis_result
+                            if isinstance(analysis, dict):
+                                classification = analysis.get('classification', {})
+                                memristivity_score = classification.get('memristivity_score', 0)
+                        
+                        is_memristive_flag = memristivity_score > 60
+                    except Exception:
+                        is_memristive_flag = False
+                else:
+                    is_memristive_flag = is_memristive
+                
+                # Use filename for plot names instead of device_name_sweep_number
+                sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else ""
+                title_prefix = f"{sample_name} {device_name}" if sample_name else device_name
+                
+                # Plot basic IV dashboard (always) - save directly in Graphs folder
+                plotter_graph = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                # Use plot_iv_dashboard directly to specify exact filename
+                plotter_graph.plot_iv_dashboard(
+                    voltage=voltage,
+                    current=current,
+                    time=timestamps,
+                    device_name=plot_filename,  # Use filename instead of device_name_sweep
+                    title=f"{title_prefix} {plot_filename} - IV Dashboard",
+                    save_name=f"{plot_filename}_iv_dashboard.png"
+                )
+                
+                # Plot advanced analysis if memristive - save with filename in shared folders
+                if is_memristive_flag:
+                    plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
+                    plotter_cond.plot_conduction_analysis(
+                        voltage=voltage,
+                        current=current,
+                        device_name=plot_filename,  # Use filename
+                        title=f"{title_prefix} {plot_filename} - Conduction Analysis",
+                        save_name=f"{plot_filename}_conduction.png"  # Explicit filename
+                    )
+                    
+                    plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
+                    plotter_sclc.plot_sclc_fit(
+                        voltage=voltage,
+                        current=current,
+                        device_name=plot_filename,  # Use filename
+                        title=f"{title_prefix} {plot_filename} - SCLC Fit",
+                        save_name=f"{plot_filename}_sclc_fit.png"  # Explicit filename
+                    )
+                
+                print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
+                print(f"[PLOT] Dashboard saved to: {graphs_dir}")
+                if is_memristive_flag:
+                    print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
+                    print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
+                
+            except ImportError as e:
+                print(f"[PLOT ERROR] Failed to import UnifiedPlotter: {e}")
+                print(f"[PLOT ERROR] Make sure plotting_core is available")
+            except Exception as e:
+                print(f"[PLOT ERROR] Background plotting failed: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Start background thread (daemon so it doesn't block exit)
+        plot_thread = threading.Thread(target=run_plotting, daemon=True)
+        plot_thread.start()
+        print(f"[PLOT] Background plotting queued for {device_name} sweep {sweep_number}")
+
+    def _generate_sequence_summary(
+        self,
+        device_id: str,
+        sequence_name: str,
+        sequence_results: List[Dict[str, Any]],
+        save_dir: str,
+        total_sweeps: int
+    ) -> None:
+        """
+        Generate comprehensive summary report for custom measurement sequence.
+        
+        Designed for batch overnight testing (100+ devices).
+        
+        Creates:
+        - Text summary (sample_analysis/device_summaries/{device_id}_{sequence_name}_summary.txt)
+        - JSON data (sample_analysis/device_summaries/{device_id}_{sequence_name}_summary.json)
+        
+        Parameters:
+        -----------
+        device_id : str
+            Device identifier (e.g., "sample_A_1")
+        sequence_name : str
+            Name of the custom measurement sequence
+        sequence_results : List[Dict[str, Any]]
+            List of analysis results for each analyzed sweep
+            Each dict should have: {'sweep_number': int, 'voltage': float, 'analysis': dict}
+        save_dir : str
+            Base save directory (device-level)
+        total_sweeps : int
+            Total number of sweeps in sequence
+        """
+        try:
+            import os
+            import json
+            from datetime import datetime
+            import numpy as np
+            
+            # Create summaries directory at sample level
+            sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
+            if not sample_name:
+                print("[SUMMARY ERROR] No sample name available")
+                return
+            
+            sample_save_dir = self._get_sample_save_directory(sample_name)
+            # Use unified sample_analysis folder structure
+            summary_dir = os.path.join(sample_save_dir, "sample_analysis", "device_summaries")
+            os.makedirs(summary_dir, exist_ok=True)
+            
+            # Extract key metrics from all analyzed sweeps
+            scores = []
+            voltages = []
+            best_sweep = None
+            worst_sweep = None
+            
+            for result in sequence_results:
+                classification = result['analysis'].get('classification', {})
+                score = classification.get('memristivity_score', 0)
+                scores.append(score)
+                voltages.append(result['voltage'])
+                
+                # Track best/worst
+                if best_sweep is None or score > best_sweep['score']:
+                    best_sweep = {'sweep': result['sweep_number'], 'score': score, 'voltage': result['voltage']}
+                if worst_sweep is None or score < worst_sweep['score']:
+                    worst_sweep = {'sweep': result['sweep_number'], 'score': score, 'voltage': result['voltage']}
+            
+            # Calculate overall device score (weighted average favoring later sweeps)
+            # Later sweeps more important for formed devices
+            weights = np.linspace(0.5, 1.0, len(scores)) if len(scores) > 0 else np.array([1.0])
+            overall_score = np.average(scores, weights=weights) if scores else 0
+            
+            # Determine final device status
+            final_classification = sequence_results[-1]['analysis'].get('classification', {}) if sequence_results else {}
+            final_device_type = final_classification.get('device_type', 'unknown')
+            
+            # Detect forming process
+            score_improvement = scores[-1] - scores[0] if len(scores) > 1 else 0
+            is_forming = score_improvement > 15  # >15 point improvement
+            
+            # === TEXT SUMMARY ===
+            lines = []
+            lines.append("=" * 80)
+            lines.append(f"CUSTOM MEASUREMENT SEQUENCE SUMMARY")
+            lines.append("=" * 80)
+            lines.append(f"Device: {device_id}")
+            lines.append(f"Sequence: {sequence_name}")
+            lines.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"Total Sweeps: {total_sweeps}")
+            lines.append(f"Analyzed Sweeps: {len(scores)} (memristive sweeps only)")
+            lines.append("")
+            
+            lines.append("OVERALL ASSESSMENT")
+            lines.append("-" * 80)
+            lines.append(f"Overall Device Score: {overall_score:.1f}/100")
+            lines.append(f"Final Classification: {final_device_type.upper()}")
+            
+            # Rating
+            if overall_score >= 80:
+                rating = "EXCELLENT - Ready for advanced testing"
+            elif overall_score >= 60:
+                rating = "GOOD - Suitable for basic memristive applications"
+            elif overall_score >= 40:
+                rating = "FAIR - May need additional forming"
+            else:
+                rating = "POOR - Not suitable for memristive applications"
+            lines.append(f"Rating: {rating}")
+            
+            if is_forming:
+                lines.append(f"Forming Detected: YES (improved {score_improvement:.1f} points)")
+            lines.append("")
+            
+            lines.append("KEY SWEEPS")
+            lines.append("-" * 80)
+            if best_sweep:
+                lines.append(f"Best Sweep: #{best_sweep['sweep']} @ {best_sweep['voltage']:.1f}V (Score: {best_sweep['score']:.1f})")
+            if worst_sweep and worst_sweep['sweep'] != best_sweep['sweep']:
+                lines.append(f"Worst Sweep: #{worst_sweep['sweep']} @ {worst_sweep['voltage']:.1f}V (Score: {worst_sweep['score']:.1f})")
+            lines.append("")
+            
+            lines.append("SWEEP-BY-SWEEP PROGRESSION")
+            lines.append("-" * 80)
+            for result in sequence_results:
+                classification = result['analysis'].get('classification', {})
+                score = classification.get('memristivity_score', 0)
+                device_type = classification.get('device_type', 'unknown')
+                lines.append(f"Sweep #{result['sweep_number']:2d} @ {result['voltage']:4.1f}V: "
+                            f"{device_type:12s} Score: {score:5.1f}/100")
+            lines.append("")
+            
+            lines.append("DETAILED METRICS (Final Sweep)")
+            lines.append("-" * 80)
+            if sequence_results:
+                final_analysis = sequence_results[-1]['analysis']
+                
+                # Resistance
+                resistance = final_analysis.get('resistance_metrics', {})
+                lines.append(f"Ron (mean):  {resistance.get('ron_mean', 0):.2e} Ω")
+                lines.append(f"Roff (mean): {resistance.get('roff_mean', 0):.2e} Ω")
+                lines.append(f"Switching Ratio: {resistance.get('switching_ratio_mean', 0):.1f}")
+                lines.append("")
+                
+                # Hysteresis
+                hysteresis = final_analysis.get('hysteresis_metrics', {})
+                lines.append(f"Hysteresis: {('Yes' if hysteresis.get('has_hysteresis') else 'No')}")
+                lines.append(f"Pinched: {('Yes' if hysteresis.get('pinched_hysteresis') else 'No')}")
+                lines.append("")
+                
+                # Quality metrics
+                if 'memory_window_quality' in final_classification:
+                    quality = final_classification['memory_window_quality']
+                    lines.append(f"Memory Window Quality: {quality.get('overall_quality_score', 0):.1f}/100")
+                lines.append("")
+            
+            lines.append("=" * 80)
+            lines.append("NOTES FOR BATCH PROCESSING:")
+            lines.append(f"- Data Location: {save_dir}")
+            lines.append(f"- Device Tracking: {sample_save_dir}/device_tracking/{device_id}_history.json")
+            if overall_score > 60:
+                lines.append(f"- Research Data: {sample_save_dir}/device_research/{device_id}/")
+            lines.append("")
+            lines.append("FUTURE ENHANCEMENTS:")
+            lines.append("- [ ] Trend plots (score vs voltage, Ron/Roff evolution)")
+            lines.append("- [ ] Comparative analysis across devices")
+            lines.append("- [ ] Statistical summary for entire sample (100+ devices)")
+            lines.append("- [ ] Automated report generation (PDF/HTML)")
+            lines.append("=" * 80)
+            
+            # Save text summary
+            text_file = os.path.join(summary_dir, f"{device_id}_{sequence_name}_summary.txt")
+            with open(text_file, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+            
+            # === JSON SUMMARY (for programmatic access) ===
+            json_summary = {
+                'device_id': device_id,
+                'sequence_name': sequence_name,
+                'timestamp': datetime.now().isoformat(),
+                'total_sweeps': total_sweeps,
+                'analyzed_sweeps': len(scores),
+                'overall_score': float(overall_score),
+                'final_device_type': final_device_type,
+                'forming_detected': is_forming,
+                'score_improvement': float(score_improvement) if score_improvement else 0,
+                'best_sweep': best_sweep,
+                'worst_sweep': worst_sweep,
+                'sweep_progression': [
+                    {
+                        'sweep_number': r['sweep_number'],
+                        'voltage': r['voltage'],
+                        'score': r['analysis'].get('classification', {}).get('memristivity_score', 0),
+                        'device_type': r['analysis'].get('classification', {}).get('device_type', 'unknown')
+                    }
+                    for r in sequence_results
+                ],
+                'final_metrics': {
+                    'resistance': sequence_results[-1]['analysis'].get('resistance_metrics', {}) if sequence_results else {},
+                    'hysteresis': sequence_results[-1]['analysis'].get('hysteresis_metrics', {}) if sequence_results else {},
+                    'classification': final_classification
+                },
+                'data_locations': {
+                    'raw_data': save_dir,
+                    'tracking': f"{sample_save_dir}/device_tracking/{device_id}_history.json",
+                    'research': f"{sample_save_dir}/device_research/{device_id}/" if overall_score > 60 else None
+                }
+            }
+            
+            # Convert numpy types for JSON serialization
+            def convert_types(obj):
+                if isinstance(obj, np.bool_):
+                    return bool(obj)
+                elif isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {key: convert_types(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_types(item) for item in obj]
+                return obj
+            
+            serializable_summary = convert_types(json_summary)
+            
+            # Save JSON summary
+            json_file = os.path.join(summary_dir, f"{device_id}_{sequence_name}_summary.json")
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(serializable_summary, f, indent=2, ensure_ascii=False)
+            
+            print(f"[SUMMARY] Sequence summary saved:")
+            print(f"[SUMMARY]   Text: {text_file}")
+            print(f"[SUMMARY]   JSON: {json_file}")
+            print(f"[SUMMARY]   Overall Score: {overall_score:.1f}/100 ({final_device_type.upper()})")
+            
+        except Exception as e:
+            print(f"[SUMMARY ERROR] Failed to generate sequence summary: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_classification_display(self, classification_data: Dict[str, Any]) -> None:
         """Update top bar with classification and score"""
@@ -1281,6 +1834,7 @@ class MeasurementGUI:
             
             # === FORMING STATUS ===
             # Only show if we have enough data
+            measurements = history.get('all_measurements', [])
             if len(measurements) >= 3:
                 from datetime import datetime
                 # Load measurements to analyze forming
@@ -1681,6 +2235,1186 @@ class MeasurementGUI:
                 self.stats_plot_canvas.draw()
         except Exception as e:
             print(f"[STATS] Error clearing plots: {e}")
+    
+    def browse_sample_folder_for_analysis(self) -> None:
+        """Browse for a sample folder to analyze retroactively."""
+        try:
+            from tkinter import filedialog
+            import os
+            
+            # Get default directory (current sample or data folder)
+            initial_dir = None
+            if hasattr(self, 'sample_name_var') and self.sample_name_var.get():
+                try:
+                    initial_dir = self._get_sample_save_directory(self.sample_name_var.get())
+                    # Go up one level to show all samples
+                    initial_dir = os.path.dirname(initial_dir) if os.path.exists(initial_dir) else None
+                except:
+                    pass
+            
+            # If no initial dir, try to get data folder from settings
+            if not initial_dir:
+                try:
+                    # Try to get from data saver or settings
+                    if hasattr(self, 'data_saver') and hasattr(self.data_saver, 'base_directory'):
+                        initial_dir = self.data_saver.base_directory
+                except:
+                    pass
+            
+            # Browse for folder
+            folder = filedialog.askdirectory(
+                title="Select Sample Folder to Analyze",
+                initialdir=initial_dir
+            )
+            
+            if folder:
+                # Accept folder if it has device_tracking/research OR if it has device subfolders (for retroactive analysis)
+                has_tracking = os.path.exists(os.path.join(folder, "device_tracking")) or \
+                               os.path.exists(os.path.join(folder, "device_research"))
+                
+                # Check for device subfolders (letter/number structure)
+                has_device_folders = False
+                try:
+                    for item in os.listdir(folder):
+                        item_path = os.path.join(folder, item)
+                        if os.path.isdir(item_path):
+                            # Check if it contains numbered subfolders (device structure)
+                            for subitem in os.listdir(item_path):
+                                subitem_path = os.path.join(item_path, subitem)
+                                if os.path.isdir(subitem_path):
+                                    # Check if it contains .txt files (measurement files)
+                                    txt_files = [f for f in os.listdir(subitem_path) if f.endswith('.txt')]
+                                    if txt_files:
+                                        has_device_folders = True
+                                        break
+                            if has_device_folders:
+                                break
+                except:
+                    pass
+                
+                if has_tracking or has_device_folders:
+                    if hasattr(self, 'analysis_folder_var'):
+                        self.analysis_folder_var.set(folder)
+                        print(f"[ANALYSIS] Selected folder: {folder}")
+                        if has_device_folders and not has_tracking:
+                            print(f"[ANALYSIS] Note: Folder contains raw data - will run retroactive analysis first")
+                else:
+                    from tkinter import messagebox
+                    messagebox.showwarning(
+                        "Invalid Folder",
+                        "Selected folder doesn't appear to be a sample folder.\n\n"
+                        "Expected either:\n"
+                        "- 'device_tracking' or 'device_research' subfolder, OR\n"
+                        "- Device subfolders (letter/number) containing .txt measurement files"
+                    )
+        except Exception as e:
+            print(f"[ANALYSIS] Error browsing folder: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def clear_sample_folder_selection(self) -> None:
+        """Clear the selected sample folder (use current sample instead)."""
+        if hasattr(self, 'analysis_folder_var'):
+            self.analysis_folder_var.set("(Use current sample)")
+            print("[ANALYSIS] Cleared folder selection - will use current sample")
+    
+    def plot_all_device_graphs(self) -> None:
+        """
+        Plot all graphs (dashboard, conduction, SCLC) for all measurement files 
+        in the currently selected device.
+        
+        This is separate from the automatic plotting and is useful for retroactive
+        plotting of old data.
+        """
+        try:
+            from tkinter import messagebox
+            import numpy as np
+            import threading
+            
+            # Get current device info
+            if not hasattr(self, 'sample_name_var') or not self.sample_name_var.get():
+                messagebox.showwarning(
+                    "No Sample Selected",
+                    "Please select a sample name first."
+                )
+                return
+            
+            if not hasattr(self, 'final_device_letter') or not hasattr(self, 'final_device_number'):
+                messagebox.showwarning(
+                    "No Device Selected",
+                    "Please select a device (letter and number) first."
+                )
+                return
+            
+            sample_name = self.sample_name_var.get()
+            device_letter = self.final_device_letter
+            device_number = self.final_device_number
+            device_name = f"{device_letter}{device_number}"
+            
+            # Get device directory
+            device_dir = self._get_save_directory(sample_name, device_letter, device_number)
+            
+            if not os.path.exists(device_dir):
+                messagebox.showerror(
+                    "Directory Not Found",
+                    f"Device directory not found:\n{device_dir}"
+                )
+                return
+            
+            # Find all .txt measurement files
+            txt_files = [f for f in os.listdir(device_dir) if f.endswith('.txt')]
+            txt_files = sorted(txt_files)  # Sort for consistent processing
+            
+            if not txt_files:
+                messagebox.showinfo(
+                    "No Files Found",
+                    f"No measurement files (.txt) found in:\n{device_dir}"
+                )
+                return
+            
+            # Confirm with user
+            response = messagebox.askyesno(
+                "Plot All Device Graphs",
+                f"Found {len(txt_files)} measurement file(s) for device {device_name}.\n\n"
+                f"This will:\n"
+                f"• Load each measurement file\n"
+                f"• Run analysis to determine if memristive\n"
+                f"• Plot dashboard graphs (all files)\n"
+                f"• Plot conduction & SCLC graphs (memristive files only)\n\n"
+                f"Continue?"
+            )
+            
+            if not response:
+                return
+            
+            # Update status if label exists
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(
+                    text=f"Plotting graphs for {len(txt_files)} file(s)...",
+                    fg="#2196F3"
+                )
+                self.root.update()
+            
+            # Run in background thread to avoid blocking GUI
+            def run_plotting():
+                try:
+                    from Helpers.IV_Analysis import quick_analyze
+                    from Helpers.plotting_core import UnifiedPlotter
+                    import matplotlib
+                    matplotlib.use('Agg')
+                    
+                    success_count = 0
+                    error_count = 0
+                    
+                    for idx, txt_file in enumerate(txt_files, 1):
+                        try:
+                            file_path = os.path.join(device_dir, txt_file)
+                            filename = os.path.splitext(txt_file)[0]
+                            
+                            print(f"[DEVICE PLOT] Processing {idx}/{len(txt_files)}: {txt_file}")
+                            
+                            # Load data
+                            try:
+                                data = np.loadtxt(file_path, skiprows=1)
+                                if data.shape[1] < 2:
+                                    print(f"[DEVICE PLOT] Skipping {txt_file}: insufficient columns")
+                                    error_count += 1
+                                    continue
+                                
+                                voltage = data[:, 0]
+                                current = data[:, 1]
+                                timestamps = data[:, 2] if data.shape[1] > 2 else None
+                            except Exception as e:
+                                print(f"[DEVICE PLOT] Error loading {txt_file}: {e}")
+                                error_count += 1
+                                continue
+                            
+                            # Run analysis to determine if memristive
+                            try:
+                                analysis_data = quick_analyze(
+                                    voltage=list(voltage),
+                                    current=list(current),
+                                    time=list(timestamps) if timestamps is not None else None,
+                                    analysis_level='full'
+                                )
+                                classification = analysis_data.get('classification', {})
+                                memristivity_score = classification.get('memristivity_score', 0)
+                                is_memristive = memristivity_score > 60
+                            except Exception as e:
+                                print(f"[DEVICE PLOT] Analysis error for {txt_file}: {e}")
+                                is_memristive = False  # Default to non-memristive if analysis fails
+                            
+                            # Plot graphs using the same logic as background plotting
+                            try:
+                                self._plot_measurement_in_background(
+                                    voltage=voltage,
+                                    current=current,
+                                    timestamps=timestamps,
+                                    save_dir=device_dir,
+                                    device_name=device_name,
+                                    sweep_number=idx,  # Use index as sweep number
+                                    is_memristive=is_memristive,
+                                    filename=filename
+                                )
+                                success_count += 1
+                                print(f"[DEVICE PLOT] ✓ Plotted {txt_file} (memristive={is_memristive})")
+                            except Exception as e:
+                                print(f"[DEVICE PLOT] Plotting error for {txt_file}: {e}")
+                                error_count += 1
+                                
+                        except Exception as e:
+                            print(f"[DEVICE PLOT] Unexpected error processing {txt_file}: {e}")
+                            error_count += 1
+                            continue
+                    
+                    # Update status
+                    if hasattr(self, 'analysis_status_label'):
+                        status_text = f"Completed: {success_count} plotted, {error_count} errors"
+                        self.analysis_status_label.config(
+                            text=status_text,
+                            fg="#4CAF50" if error_count == 0 else "#FF9800"
+                        )
+                    
+                    # Show completion message
+                    messagebox.showinfo(
+                        "Plotting Complete",
+                        f"Finished plotting graphs for device {device_name}.\n\n"
+                        f"Success: {success_count} file(s)\n"
+                        f"Errors: {error_count} file(s)\n\n"
+                        f"Graphs saved to:\n{os.path.join(device_dir, 'Graphs')}"
+                    )
+                    
+                except Exception as e:
+                    print(f"[DEVICE PLOT] Fatal error: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    if hasattr(self, 'analysis_status_label'):
+                        self.analysis_status_label.config(
+                            text=f"Error: {str(e)}",
+                            fg="#F44336"
+                        )
+                    messagebox.showerror(
+                        "Plotting Error",
+                        f"Error during plotting:\n{str(e)}"
+                    )
+            
+            # Start background thread
+            plot_thread = threading.Thread(target=run_plotting, daemon=True)
+            plot_thread.start()
+            
+        except Exception as e:
+            print(f"[DEVICE PLOT] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror(
+                "Error",
+                f"Failed to start plotting:\n{str(e)}"
+            )
+    
+    def run_full_sample_analysis(self) -> None:
+        """Run comprehensive sample analysis with all plots."""
+        try:
+            import os
+            import subprocess
+            from tkinter import messagebox
+            
+            # Check if a folder was selected via browse button
+            sample_dir = None
+            sample_name = None
+            
+            if hasattr(self, 'analysis_folder_var'):
+                selected_folder = self.analysis_folder_var.get()
+                if selected_folder and selected_folder != "(Use current sample)":
+                    if os.path.exists(selected_folder):
+                        sample_dir = selected_folder
+                        sample_name = os.path.basename(selected_folder)
+                        print(f"[SAMPLE ANALYSIS] Using selected folder: {sample_dir}")
+                    else:
+                        messagebox.showerror("Error", f"Selected folder not found: {selected_folder}")
+                        return
+            
+            # If no folder selected, use current sample
+            if not sample_dir:
+                sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
+                if not sample_name:
+                    messagebox.showwarning(
+                        "No Sample",
+                        "Please either:\n"
+                        "1. Select a sample in the GUI, OR\n"
+                        "2. Click 'Browse...' to select a sample folder"
+                    )
+                    return
+                
+                # Get sample directory
+                sample_dir = self._get_sample_save_directory(sample_name)
+            
+            if not os.path.exists(sample_dir):
+                messagebox.showerror("Error", f"Sample directory not found: {sample_dir}")
+                return
+            
+            # Update status
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(text="Checking for existing analysis data...")
+                self.master.update_idletasks()
+            
+            print(f"[SAMPLE ANALYSIS] Starting analysis for: {sample_name or os.path.basename(sample_dir)}")
+            
+            # Check if we need to run retroactive analysis on raw data
+            tracking_dir = os.path.join(sample_dir, "device_tracking")
+            has_tracking = os.path.exists(tracking_dir) and os.listdir(tracking_dir)
+            
+            if not has_tracking:
+                # Need to run retroactive analysis on raw measurement files
+                if hasattr(self, 'analysis_status_label'):
+                    self.analysis_status_label.config(text="Running retroactive analysis on raw data...")
+                    self.master.update_idletasks()
+                
+                print(f"[RETROACTIVE] No tracking data found - analyzing raw measurement files...")
+                analyzed_count = self._run_retroactive_analysis(sample_dir, sample_name or os.path.basename(sample_dir))
+                
+                if analyzed_count == 0:
+                    messagebox.showwarning(
+                        "No Data",
+                        "No measurement files found to analyze.\n\n"
+                        "Expected device subfolders (letter/number) containing .txt files."
+                    )
+                    if hasattr(self, 'analysis_status_label'):
+                        self.analysis_status_label.config(text="✗ No data found")
+                    return
+                
+                print(f"[RETROACTIVE] Analyzed {analyzed_count} measurement files")
+            
+            # Update status
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(text="Loading device data...")
+                self.master.update_idletasks()
+            
+            # Use comprehensive analyzer for one-stop shop analysis
+            from Helpers.Sample_Analysis.comprehensive_analyzer import ComprehensiveAnalyzer
+            
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(text="Running comprehensive analysis (all code_names)...")
+                self.master.update_idletasks()
+            
+            comprehensive = ComprehensiveAnalyzer(sample_dir)
+            comprehensive.run_comprehensive_analysis()
+            
+            # Count devices for status message
+            device_count = 0
+            tracking_dir = os.path.join(sample_dir, "device_tracking")
+            if os.path.exists(tracking_dir):
+                device_count = len([f for f in os.listdir(tracking_dir) if f.endswith('_history.json')])
+            
+            # Success
+            output_dir = os.path.join(sample_dir, "sample_analysis")
+            
+            messagebox.showinfo(
+                "Comprehensive Analysis Complete",
+                f"Comprehensive analysis complete!\n\n"
+                f"Devices analyzed: {device_count}\n"
+                f"Code names processed: {len(comprehensive.discovered_code_names)}\n"
+                f"Output: {output_dir}\n\n"
+                f"Generated:\n"
+                f"• Device-level combined sweep plots\n"
+                f"• Sample-level analysis for each code_name\n"
+                f"• Overall sample analysis\n"
+                f"• Origin-ready data exports\n\n"
+                f"Check the output folders for all results."
+            )
+            
+            # Update status
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(text=f"✓ Complete - {device_count} devices, {len(comprehensive.discovered_code_names)} code_names")
+            
+            print(f"[COMPREHENSIVE ANALYSIS] Complete!")
+            print(f"[COMPREHENSIVE ANALYSIS] Code names: {sorted(comprehensive.discovered_code_names)}")
+            print(f"[COMPREHENSIVE ANALYSIS] Output: {output_dir}")
+            
+            # Optionally open output folder
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer "{output_dir}"')
+            except Exception:
+                pass  # Ignore if explorer fails
+        
+        except Exception as e:
+            error_msg = f"Sample analysis failed: {e}"
+            print(f"[SAMPLE ANALYSIS ERROR] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            
+            from tkinter import messagebox
+            messagebox.showerror("Analysis Error", error_msg)
+            
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(text=f"✗ Error: {e}")
+    
+    # ======================================================================
+    # Custom Sweeps Graphing Methods
+    # ======================================================================
+    
+    def load_custom_sweep_methods(self) -> None:
+        """Load available custom sweep methods from Custom_Sweeps.json"""
+        try:
+            custom_sweeps_path = _PROJECT_ROOT / "Json_Files" / "Custom_Sweeps.json"
+            if not custom_sweeps_path.exists():
+                if hasattr(self, 'custom_sweep_status_label'):
+                    self.custom_sweep_status_label.config(text="✗ Custom_Sweeps.json not found", fg="#F44336")
+                from tkinter import messagebox
+                messagebox.showerror("File Not Found", f"Custom_Sweeps.json not found at:\n{custom_sweeps_path}")
+                return
+            
+            custom_sweeps = self.load_custom_sweeps(str(custom_sweeps_path))
+            
+            # Build list of method names (identifier or code_name)
+            method_list = []
+            for identifier, method_data in custom_sweeps.items():
+                code_name = method_data.get("code_name", "")
+                # Show both identifier and code_name for clarity
+                if code_name:
+                    display_name = f"{identifier} ({code_name})"
+                else:
+                    display_name = identifier
+                method_list.append(display_name)
+            
+            if not method_list:
+                if hasattr(self, 'custom_sweep_status_label'):
+                    self.custom_sweep_status_label.config(text="✗ No methods found in file", fg="#F44336")
+                return
+            
+            # Update combobox
+            if hasattr(self, 'custom_sweep_method_combo'):
+                self.custom_sweep_method_combo['values'] = method_list
+                if method_list:
+                    self.custom_sweep_method_combo.current(0)
+                    self.on_custom_sweep_method_selected()
+            
+            # Store the mapping for later use
+            self.custom_sweeps_data = custom_sweeps
+            self.custom_sweeps_method_map = {}
+            for identifier, method_data in custom_sweeps.items():
+                code_name = method_data.get("code_name", "")
+                display_name = f"{identifier} ({code_name})" if code_name else identifier
+                self.custom_sweeps_method_map[display_name] = {
+                    'identifier': identifier,
+                    'code_name': code_name,
+                    'data': method_data
+                }
+            
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✓ Loaded {len(method_list)} method(s)", fg="#4CAF50")
+        
+        except Exception as e:
+            error_msg = f"Error loading custom sweep methods: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
+            from tkinter import messagebox
+            messagebox.showerror("Error", error_msg)
+    
+    def on_custom_sweep_method_selected(self) -> None:
+        """Handle custom sweep method selection"""
+        try:
+            if not hasattr(self, 'custom_sweep_method_var') or not self.custom_sweep_method_var.get():
+                return
+            
+            # Load combinations for the selected method
+            self.load_custom_sweep_combinations()
+        
+        except Exception as e:
+            print(f"[CUSTOM SWEEPS] Error handling method selection: {e}")
+    
+    def load_custom_sweep_combinations(self) -> None:
+        """Load sweep combinations from test_configurations.json for selected method"""
+        try:
+            if not hasattr(self, 'custom_sweep_method_var') or not self.custom_sweep_method_var.get():
+                if hasattr(self, 'custom_sweep_combinations_listbox'):
+                    self.custom_sweep_combinations_listbox.delete(0, tk.END)
+                return
+            
+            # Get selected method
+            selected_display = self.custom_sweep_method_var.get()
+            if not hasattr(self, 'custom_sweeps_method_map') or selected_display not in self.custom_sweeps_method_map:
+                return
+            
+            method_info = self.custom_sweeps_method_map[selected_display]
+            code_name = method_info['code_name']
+            
+            # Load test configurations
+            test_config_path = _PROJECT_ROOT / "Json_Files" / "test_configurations.json"
+            if not test_config_path.exists():
+                if hasattr(self, 'custom_sweep_status_label'):
+                    self.custom_sweep_status_label.config(text="✗ test_configurations.json not found", fg="#F44336")
+                return
+            
+            with test_config_path.open("r", encoding="utf-8") as f:
+                test_configs = json.load(f)
+            
+            # Find configurations for this code_name
+            if code_name not in test_configs:
+                if hasattr(self, 'custom_sweep_combinations_listbox'):
+                    self.custom_sweep_combinations_listbox.delete(0, tk.END)
+                    self.custom_sweep_combinations_listbox.insert(0, f"No combinations found for {code_name}")
+                if hasattr(self, 'custom_sweep_status_label'):
+                    self.custom_sweep_status_label.config(text=f"✗ No combinations for {code_name}", fg="#F44336")
+                return
+            
+            config = test_configs[code_name]
+            combinations = config.get("sweep_combinations", [])
+            
+            # Store combinations (make a copy so we can modify it)
+            self.custom_sweep_combinations = [combo.copy() for combo in combinations]
+            
+            # Update listbox
+            if hasattr(self, 'custom_sweep_combinations_listbox'):
+                self.custom_sweep_combinations_listbox.delete(0, tk.END)
+                for combo in self.custom_sweep_combinations:
+                    sweeps_str = ", ".join(map(str, combo.get("sweeps", [])))
+                    title = combo.get("title", "Untitled")
+                    display_text = f"{title} [Sweeps: {sweeps_str}]"
+                    self.custom_sweep_combinations_listbox.insert(tk.END, display_text)
+            
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(
+                    text=f"✓ Loaded {len(combinations)} combination(s) for {code_name}",
+                    fg="#4CAF50"
+                )
+        
+        except Exception as e:
+            error_msg = f"Error loading combinations: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
+    
+    def add_sweep_combination(self) -> None:
+        """Add a new sweep combination to the current list."""
+        try:
+            if not hasattr(self, 'custom_sweep_method_var') or not self.custom_sweep_method_var.get():
+                messagebox.showwarning("No Method Selected", "Please select a method first")
+                return
+            
+            # Get sweep numbers
+            sweeps_str = self.new_combination_sweeps_var.get().strip()
+            if not sweeps_str:
+                messagebox.showwarning("Invalid Input", "Please enter sweep numbers (e.g., 1,2 or 1,2,3)")
+                return
+            
+            # Parse sweep numbers
+            try:
+                sweeps = [int(x.strip()) for x in sweeps_str.split(',')]
+                if not sweeps:
+                    raise ValueError("No valid sweep numbers")
+            except ValueError as e:
+                messagebox.showerror("Invalid Format", f"Invalid sweep numbers format. Use comma-separated numbers.\nError: {e}")
+                return
+            
+            # Get title
+            title = self.new_combination_title_var.get().strip()
+            if not title:
+                title = f"Combined sweeps {sweeps_str}"
+            
+            # Create new combination
+            new_combo = {
+                "sweeps": sweeps,
+                "title": title
+            }
+            
+            # Add to current combinations
+            if not hasattr(self, 'custom_sweep_combinations'):
+                self.custom_sweep_combinations = []
+            
+            self.custom_sweep_combinations.append(new_combo)
+            
+            # Update listbox
+            if hasattr(self, 'custom_sweep_combinations_listbox'):
+                sweeps_str_display = ", ".join(map(str, sweeps))
+                display_text = f"{title} [Sweeps: {sweeps_str_display}]"
+                self.custom_sweep_combinations_listbox.insert(tk.END, display_text)
+            
+            # Clear input fields
+            self.new_combination_sweeps_var.set("")
+            self.new_combination_title_var.set("")
+            
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(
+                    text=f"✓ Added combination: {title}",
+                    fg="#4CAF50"
+                )
+            
+            print(f"[CUSTOM SWEEPS] Added combination: {title} - Sweeps: {sweeps}")
+        
+        except Exception as e:
+            error_msg = f"Error adding combination: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            messagebox.showerror("Error", error_msg)
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
+    
+    def edit_sweep_combination(self) -> None:
+        """Edit the selected sweep combination."""
+        try:
+            if not hasattr(self, 'custom_sweep_combinations_listbox'):
+                return
+            
+            selection = self.custom_sweep_combinations_listbox.curselection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Please select a combination to edit")
+                return
+            
+            idx = selection[0]
+            
+            if not hasattr(self, 'custom_sweep_combinations') or idx >= len(self.custom_sweep_combinations):
+                messagebox.showerror("Error", "Invalid selection")
+                return
+            
+            # Get current combination
+            combo = self.custom_sweep_combinations[idx]
+            
+            # Pre-fill input fields
+            sweeps_str = ", ".join(map(str, combo.get("sweeps", [])))
+            self.new_combination_sweeps_var.set(sweeps_str)
+            self.new_combination_title_var.set(combo.get("title", ""))
+            
+            # Delete old entry
+            self.delete_sweep_combination(silent=True, index=idx)
+            
+            # Focus on input fields for editing
+            if hasattr(self, 'new_combination_sweeps_var'):
+                # User can now modify and click "Add" to save
+                messagebox.showinfo(
+                    "Edit Mode",
+                    "Combination removed from list.\n"
+                    "Modify the values above and click 'Add Combination' to save changes."
+                )
+        
+        except Exception as e:
+            error_msg = f"Error editing combination: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            messagebox.showerror("Error", error_msg)
+    
+    def delete_sweep_combination(self, silent: bool = False, index: int = None) -> None:
+        """Delete the selected sweep combination."""
+        try:
+            if not hasattr(self, 'custom_sweep_combinations_listbox'):
+                return
+            
+            if index is None:
+                selection = self.custom_sweep_combinations_listbox.curselection()
+                if not selection:
+                    if not silent:
+                        messagebox.showwarning("No Selection", "Please select a combination to delete")
+                    return
+                idx = selection[0]
+            else:
+                idx = index
+            
+            if not hasattr(self, 'custom_sweep_combinations') or idx >= len(self.custom_sweep_combinations):
+                if not silent:
+                    messagebox.showerror("Error", "Invalid selection")
+                return
+            
+            # Confirm deletion
+            if not silent:
+                combo = self.custom_sweep_combinations[idx]
+                title = combo.get("title", "Untitled")
+                if not messagebox.askyesno("Confirm Delete", f"Delete combination: {title}?"):
+                    return
+            
+            # Remove from list
+            self.custom_sweep_combinations.pop(idx)
+            
+            # Update listbox
+            self.custom_sweep_combinations_listbox.delete(idx)
+            
+            if hasattr(self, 'custom_sweep_status_label') and not silent:
+                self.custom_sweep_status_label.config(
+                    text="✓ Combination deleted",
+                    fg="#4CAF50"
+                )
+            
+            print(f"[CUSTOM SWEEPS] Deleted combination at index {idx}")
+        
+        except Exception as e:
+            error_msg = f"Error deleting combination: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            if not silent:
+                messagebox.showerror("Error", error_msg)
+    
+    def save_sweep_combinations_to_json(self) -> None:
+        """Save current sweep combinations to test_configurations.json"""
+        try:
+            if not hasattr(self, 'custom_sweep_method_var') or not self.custom_sweep_method_var.get():
+                messagebox.showwarning("No Method Selected", "Please select a method first")
+                return
+            
+            if not hasattr(self, 'custom_sweep_combinations') or not self.custom_sweep_combinations:
+                messagebox.showwarning("No Combinations", "No combinations to save. Add some combinations first.")
+                return
+            
+            # Get selected method
+            selected_display = self.custom_sweep_method_var.get()
+            if not hasattr(self, 'custom_sweeps_method_map') or selected_display not in self.custom_sweeps_method_map:
+                messagebox.showerror("Error", "Invalid method selection")
+                return
+            
+            method_info = self.custom_sweeps_method_map[selected_display]
+            code_name = method_info['code_name']
+            
+            # Load existing config
+            test_config_path = _PROJECT_ROOT / "Json_Files" / "test_configurations.json"
+            if not test_config_path.exists():
+                test_configs = {}
+            else:
+                with test_config_path.open("r", encoding="utf-8") as f:
+                    test_configs = json.load(f)
+            
+            # Update or create config for this code_name
+            if code_name not in test_configs:
+                test_configs[code_name] = {}
+            
+            # Update combinations
+            test_configs[code_name]["sweep_combinations"] = self.custom_sweep_combinations
+            
+            # Preserve main_sweep if it exists, otherwise set to None
+            if "main_sweep" not in test_configs[code_name]:
+                test_configs[code_name]["main_sweep"] = None
+            
+            # Save to file
+            with test_config_path.open("w", encoding="utf-8") as f:
+                json.dump(test_configs, f, indent=4, ensure_ascii=False)
+            
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(
+                    text=f"✓ Saved {len(self.custom_sweep_combinations)} combination(s) to JSON",
+                    fg="#4CAF50"
+                )
+            
+            messagebox.showinfo(
+                "Saved",
+                f"Successfully saved {len(self.custom_sweep_combinations)} combination(s)\n"
+                f"to test_configurations.json for method: {code_name}"
+            )
+            
+            print(f"[CUSTOM SWEEPS] Saved {len(self.custom_sweep_combinations)} combinations to {test_config_path}")
+        
+        except Exception as e:
+            error_msg = f"Error saving combinations: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Error", error_msg)
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
+    
+    def browse_custom_sweep_sample_folder(self) -> None:
+        """Browse for sample folder containing measurement data"""
+        try:
+            from tkinter import filedialog
+            import os
+            
+            # Get default directory
+            initial_dir = None
+            if hasattr(self, 'sample_name_var') and self.sample_name_var.get():
+                try:
+                    initial_dir = self._get_sample_save_directory(self.sample_name_var.get())
+                    initial_dir = os.path.dirname(initial_dir) if os.path.exists(initial_dir) else None
+                except:
+                    pass
+            
+            if not initial_dir:
+                try:
+                    if hasattr(self, 'data_saver') and hasattr(self.data_saver, 'base_directory'):
+                        initial_dir = self.data_saver.base_directory
+                except:
+                    pass
+            
+            folder = filedialog.askdirectory(
+                title="Select Sample Folder with Measurement Data",
+                initialdir=initial_dir
+            )
+            
+            if folder:
+                self.custom_sweep_sample_folder_var.set(folder)
+                if hasattr(self, 'custom_sweep_status_label'):
+                    self.custom_sweep_status_label.config(text=f"✓ Selected: {os.path.basename(folder)}", fg="#4CAF50")
+        
+        except Exception as e:
+            error_msg = f"Error browsing folder: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
+    
+    def clear_custom_sweep_sample_folder(self) -> None:
+        """Clear sample folder selection"""
+        if hasattr(self, 'custom_sweep_sample_folder_var'):
+            self.custom_sweep_sample_folder_var.set("(Use current sample)")
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text="", fg="#666666")
+    
+    def plot_custom_sweeps(self) -> None:
+        """Plot selected sweep combinations"""
+        try:
+            import numpy as np
+            from pathlib import Path
+            import os
+            
+            # Get selected combinations
+            if not hasattr(self, 'custom_sweep_combinations_listbox'):
+                return
+            
+            selected_indices = self.custom_sweep_combinations_listbox.curselection()
+            if not selected_indices:
+                from tkinter import messagebox
+                messagebox.showwarning("No Selection", "Please select at least one sweep combination to plot.")
+                return
+            
+            # Get selected combinations
+            selected_combos = []
+            for idx in selected_indices:
+                if idx < len(self.custom_sweep_combinations):
+                    selected_combos.append(self.custom_sweep_combinations[idx])
+            
+            if not selected_combos:
+                return
+            
+            # Get sample folder
+            sample_folder = None
+            if hasattr(self, 'custom_sweep_sample_folder_var'):
+                folder_str = self.custom_sweep_sample_folder_var.get()
+                if folder_str and folder_str != "(Use current sample)":
+                    sample_folder = Path(folder_str)
+                elif hasattr(self, 'sample_name_var') and self.sample_name_var.get():
+                    try:
+                        sample_folder = Path(self._get_sample_save_directory(self.sample_name_var.get()))
+                    except:
+                        pass
+            
+            if not sample_folder or not sample_folder.exists():
+                from tkinter import messagebox
+                messagebox.showerror("Error", "Please select a valid sample folder containing measurement data.")
+                return
+            
+            # Update status
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text="Loading data files...", fg="#2196F3")
+            self.master.update_idletasks()
+            
+            # Clear plot
+            if hasattr(self, 'custom_sweep_ax'):
+                self.custom_sweep_ax.clear()
+            
+            # Plot each combination
+            colors = ['#2196F3', '#4CAF50', '#FF9800', '#F44336', '#9C27B0', '#00BCD4', '#FFC107', '#795548']
+            color_idx = 0
+            
+            all_plotted = False
+            
+            for combo_idx, combo in enumerate(selected_combos):
+                sweeps = combo.get("sweeps", [])
+                title = combo.get("title", f"Combination {combo_idx + 1}")
+                
+                # Try to find and load data files for each sweep number
+                for sweep_num in sweeps:
+                    sweep_files = []
+                    
+                    # Search in Multiplexer_IV_sweep subfolder (standard location)
+                    iv_sweep_folder = sample_folder / "Multiplexer_IV_sweep"
+                    if iv_sweep_folder.exists():
+                        # Search in device number subfolders
+                        for device_num_dir in iv_sweep_folder.iterdir():
+                            if not device_num_dir.is_dir():
+                                continue
+                            
+                            # Look for .txt files that start with sweep number
+                            for txt_file in device_num_dir.glob("*.txt"):
+                                filename = txt_file.stem
+                                # Check if filename starts with sweep number (e.g., "1-FS-..." or "1_...")
+                                if filename.startswith(f"{sweep_num}-") or filename.startswith(f"{sweep_num}_"):
+                                    sweep_files.append(txt_file)
+                    
+                    # Also search in direct device subfolders (letter/number structure)
+                    for letter_dir in sample_folder.iterdir():
+                        if not letter_dir.is_dir() or letter_dir.name.startswith('.'):
+                            continue
+                        
+                        for number_dir in letter_dir.iterdir():
+                            if not number_dir.is_dir():
+                                continue
+                            
+                            # Look for .txt files
+                            for txt_file in number_dir.glob("*.txt"):
+                                filename = txt_file.stem
+                                if filename.startswith(f"{sweep_num}-") or filename.startswith(f"{sweep_num}_"):
+                                    if txt_file not in sweep_files:
+                                        sweep_files.append(txt_file)
+                    
+                    # If no files found with sweep number prefix, try to find by index in each device folder
+                    if not sweep_files:
+                        # Search in Multiplexer_IV_sweep first
+                        if iv_sweep_folder.exists():
+                            for device_num_dir in iv_sweep_folder.iterdir():
+                                if not device_num_dir.is_dir():
+                                    continue
+                                all_txt_files = sorted(device_num_dir.glob("*.txt"))
+                                # Use sweep_num as 1-based index
+                                if 1 <= sweep_num <= len(all_txt_files):
+                                    sweep_files.append(all_txt_files[sweep_num - 1])
+                                    break
+                        
+                        # If still not found, try device subfolders
+                        if not sweep_files:
+                            for letter_dir in sample_folder.iterdir():
+                                if not letter_dir.is_dir() or letter_dir.name.startswith('.'):
+                                    continue
+                                for number_dir in letter_dir.iterdir():
+                                    if not number_dir.is_dir():
+                                        continue
+                                    all_txt_files = sorted(number_dir.glob("*.txt"))
+                                    if 1 <= sweep_num <= len(all_txt_files):
+                                        sweep_files.append(all_txt_files[sweep_num - 1])
+                                        break
+                                if sweep_files:
+                                    break
+                    
+                    # Load and plot the first matching file
+                    for file_path in sweep_files[:1]:  # Only plot first match
+                        try:
+                            # Load data file
+                            data = np.loadtxt(file_path, skiprows=1)
+                            if data.shape[1] < 2:
+                                continue
+                            
+                            voltage = data[:, 0]
+                            current = data[:, 1]
+                            
+                            # Plot
+                            label = f"{title} - Sweep {sweep_num}"
+                            color = colors[color_idx % len(colors)]
+                            self.custom_sweep_ax.plot(
+                                voltage, current,
+                                marker='o', markersize=3,
+                                linewidth=1.5,
+                                label=label,
+                                color=color,
+                                alpha=0.8
+                            )
+                            all_plotted = True
+                            break
+                        except Exception as e:
+                            print(f"[CUSTOM SWEEPS] Error loading {file_path}: {e}")
+                            continue
+                
+                color_idx += 1
+            
+            if not all_plotted:
+                from tkinter import messagebox
+                messagebox.showwarning(
+                    "No Data Found",
+                    "Could not find measurement files matching the selected sweeps.\n\n"
+                    "Make sure:\n"
+                    "- Files are named with sweep numbers (e.g., '1-FS-...' or '1_...')\n"
+                    "- Sample folder contains device subfolders with .txt files"
+                )
+                if hasattr(self, 'custom_sweep_status_label'):
+                    self.custom_sweep_status_label.config(text="✗ No data files found", fg="#F44336")
+                return
+            
+            # Set plot title
+            plot_title = "Custom Sweeps Comparison"
+            if hasattr(self, 'custom_sweep_plot_title_var') and self.custom_sweep_plot_title_var.get():
+                plot_title = self.custom_sweep_plot_title_var.get()
+            
+            self.custom_sweep_ax.set_title(plot_title, fontsize=12, fontweight='bold')
+            self.custom_sweep_ax.set_xlabel("Voltage (V)", fontsize=11)
+            self.custom_sweep_ax.set_ylabel("Current (A)", fontsize=11)
+            self.custom_sweep_ax.grid(True, alpha=0.3)
+            self.custom_sweep_ax.legend(loc='best', fontsize=8)
+            
+            # Update canvas
+            if hasattr(self, 'custom_sweep_canvas'):
+                self.custom_sweep_canvas.draw()
+            
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(
+                    text=f"✓ Plotted {len(selected_combos)} combination(s)",
+                    fg="#4CAF50"
+                )
+        
+        except Exception as e:
+            error_msg = f"Error plotting sweeps: {e}"
+            print(f"[CUSTOM SWEEPS] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            
+            if hasattr(self, 'custom_sweep_status_label'):
+                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
+            
+            from tkinter import messagebox
+            messagebox.showerror("Plot Error", error_msg)
+    
+    def _run_retroactive_analysis(self, sample_dir: str, sample_name: str) -> int:
+        """
+        Run analysis on raw measurement files retroactively.
+        
+        Scans sample folder for device subfolders (letter/number) containing .txt files,
+        loads the data, and runs quick_analyze() to generate device_tracking and device_research data.
+        
+        Args:
+            sample_dir: Path to sample folder
+            sample_name: Sample name (for device ID construction)
+        
+        Returns:
+            Number of files analyzed
+        """
+        try:
+            import numpy as np
+            from Helpers.IV_Analysis import quick_analyze
+            from pathlib import Path
+            
+            analyzed_count = 0
+            
+            # Scan for device subfolders (letter/number structure)
+            sample_path = Path(sample_dir)
+            
+            for letter_dir in sample_path.iterdir():
+                if not letter_dir.is_dir() or letter_dir.name.startswith('.'):
+                    continue
+                
+                letter = letter_dir.name
+                
+                # Check if this is a device letter folder (contains numbered subfolders)
+                for number_dir in letter_dir.iterdir():
+                    if not number_dir.is_dir():
+                        continue
+                    
+                    try:
+                        device_number = number_dir.name
+                    except:
+                        continue
+                    
+                    # Find .txt measurement files in this device folder
+                    txt_files = list(number_dir.glob("*.txt"))
+                    
+                    if not txt_files:
+                        continue
+                    
+                    # Construct device ID
+                    device_id = f"{sample_name}_{letter}_{device_number}"
+                    
+                    print(f"[RETROACTIVE] Processing device {device_id}: {len(txt_files)} file(s)")
+                    
+                    # Process each measurement file
+                    for txt_file in txt_files:
+                        try:
+                            # Load data from file
+                            # Format: tab-delimited, header "Voltage Current Time", scientific notation
+                            # Try to load with skiprows=1 first (standard format)
+                            try:
+                                data = np.loadtxt(txt_file, skiprows=1)
+                            except:
+                                # If that fails, try without skiprows (no header)
+                                try:
+                                    data = np.loadtxt(txt_file)
+                                except:
+                                    # If still fails, try reading line by line to skip header
+                                    with open(txt_file, 'r') as f:
+                                        lines = f.readlines()
+                                        # Skip first line if it looks like a header
+                                        if lines and ('Voltage' in lines[0] or 'voltage' in lines[0].lower()):
+                                            lines = lines[1:]
+                                        # Parse remaining lines
+                                        data_lines = []
+                                        for line in lines:
+                                            if line.strip() and not line.strip().startswith('#'):
+                                                try:
+                                                    values = [float(x) for x in line.strip().split()]
+                                                    if len(values) >= 2:
+                                                        data_lines.append(values)
+                                                except:
+                                                    continue
+                                        if not data_lines:
+                                            raise ValueError("No valid data found")
+                                        data = np.array(data_lines)
+                            
+                            if len(data.shape) < 2 or data.shape[1] < 2:
+                                print(f"[RETROACTIVE] Skipping {txt_file.name}: insufficient columns")
+                                continue
+                            
+                            # Extract voltage, current, time
+                            voltage = data[:, 0]
+                            current = data[:, 1]
+                            timestamps = data[:, 2] if data.shape[1] > 2 else None
+                            
+                            if len(voltage) == 0 or len(current) == 0:
+                                print(f"[RETROACTIVE] Skipping {txt_file.name}: empty data")
+                                continue
+                            
+                            # Build metadata
+                            metadata = {
+                                'device_name': device_id,
+                                'file_name': txt_file.stem,
+                                'retroactive_analysis': True
+                            }
+                            
+                            # Run classification-level analysis
+                            print(f"[RETROACTIVE] Analyzing {txt_file.name}...")
+                            analysis_data = quick_analyze(
+                                voltage=voltage,
+                                current=current,
+                                time=timestamps,
+                                metadata=metadata,
+                                analysis_level='classification',
+                                device_id=device_id,
+                                cycle_number=None,
+                                save_directory=sample_dir
+                            )
+                            
+                            # If memristive, also run research analysis
+                            device_type = analysis_data.get('classification', {}).get('device_type', '')
+                            memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
+                            
+                            if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
+                                print(f"[RETROACTIVE] Running research analysis for {txt_file.name}...")
+                                try:
+                                    research_data = quick_analyze(
+                                        voltage=voltage,
+                                        current=current,
+                                        time=timestamps,
+                                        metadata=metadata,
+                                        analysis_level='research',
+                                        device_id=device_id,
+                                        cycle_number=None,
+                                        save_directory=sample_dir
+                                    )
+                                    
+                                    # Save research data
+                                    self._save_research_analysis(
+                                        research_data, 
+                                        sample_dir, 
+                                        txt_file.stem, 
+                                        device_id
+                                    )
+                                except Exception as research_exc:
+                                    print(f"[RETROACTIVE] Research analysis failed for {txt_file.name}: {research_exc}")
+                            
+                            analyzed_count += 1
+                            
+                        except Exception as file_exc:
+                            print(f"[RETROACTIVE] Error processing {txt_file.name}: {file_exc}")
+                            continue
+                    
+                    # Update status periodically
+                    if hasattr(self, 'analysis_status_label') and analyzed_count % 5 == 0:
+                        self.analysis_status_label.config(text=f"Analyzed {analyzed_count} files...")
+                        self.master.update_idletasks()
+            
+            return analyzed_count
+            
+        except Exception as e:
+            print(f"[RETROACTIVE ERROR] Failed to run retroactive analysis: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
     
     def _update_stats_plots(self, history: Dict[str, Any], device_id: str) -> None:
         """Update trend plots for device tracking"""
@@ -4216,8 +5950,16 @@ class MeasurementGUI:
                 start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
                 sweeps = self.custom_sweeps[selected_measurement]["sweeps"]
+                # Store total count before loop (sweeps dict may be shadowed inside loop)
+                total_sweeps_count = len(sweeps)
                 # Initial merge disabled; we now apply live edits per-sweep inside the loop
                 code_name = self.custom_sweeps[selected_measurement].get("code_name", "unknown")
+                
+                # === CUSTOM MEASUREMENT ANALYSIS TRACKING ===
+                # Track device memristive status across sweeps
+                device_is_memristive = None  # Unknown until first sweep analyzed
+                sequence_analysis_results = []  # Collect all analysis results
+                sweep_classifications = {}  # Track score per sweep
 
                 # checks psu connection only if any sweep explicitly requires LED
                 def _is_truthy(val) -> bool:
@@ -4292,7 +6034,7 @@ class MeasurementGUI:
                                 stop_v = float(override["stop_v"])
                         except Exception:
                             pass
-                    sweeps = params.get("sweeps", 1)
+                    num_sweeps_in_measurement = params.get("sweeps", 1)  # Renamed to avoid shadowing outer 'sweeps' dict
                     step_v = params.get("step_v", 0.1)
                     step_delay = params.get("step_delay", 0.05)
                     sweep_type = params.get("Sweep_type", "FS")
@@ -4480,7 +6222,7 @@ class MeasurementGUI:
                                 start_v=start_v,
                                 stop_v=stop_v,
                                 step_v=step_v,
-                                sweeps=sweeps,
+                                sweeps=num_sweeps_in_measurement,
                                 step_delay=step_delay,
                                 sweep_type=sweep_type,
                                 icc=icc_val,
@@ -4655,7 +6397,7 @@ class MeasurementGUI:
                     else:
                         extra_info = ""
 
-                    name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}-{sweeps}{extra_info}"
+                    name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}{extra_info}"
                     file_path = f"{save_dir}\\{name}.txt"
 
                     if os.path.exists(file_path):
@@ -4673,6 +6415,92 @@ class MeasurementGUI:
 
                     # show graphs on main display
                     self.graphs_show(v_arr, c_arr, key, stop_v)
+                    
+                    # === PER-SWEEP ANALYSIS FOR CUSTOM SEQUENCES ===
+                    try:
+                        # Build metadata for this sweep
+                        sweep_metadata = {}
+                        if hasattr(self, 'optical') and self.optical is not None:
+                            try:
+                                caps = getattr(self.optical, 'capabilities', {})
+                                if caps.get('type'):
+                                    sweep_metadata['led_type'] = str(caps.get('type', ''))
+                            except Exception:
+                                pass
+                        
+                        # Use sweep-specific filename (without extra_info for analysis)
+                        sweep_file_name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}"
+                        
+                        # Run analysis with conditional logic
+                        analysis_result = self._run_analysis_if_enabled(
+                            voltage=list(v_arr),
+                            current=list(c_arr),
+                            timestamps=list(timestamps) if timestamps is not None else None,
+                            save_dir=save_dir,
+                            file_name=sweep_file_name,
+                            metadata=sweep_metadata,
+                            is_custom_sequence=True,
+                            sweep_number=int(str(key)),  # Convert key to int
+                            device_memristive_flag=device_is_memristive
+                        )
+                        
+                        # Update memristive flag after first sweep
+                        if int(str(key)) == 1 and analysis_result:
+                            device_is_memristive = analysis_result.get('is_memristive', False)
+                            print(f"[CUSTOM ANALYSIS] First sweep complete: memristive={device_is_memristive}")
+                        
+                        # Collect analysis data
+                        if analysis_result:
+                            try:
+                                analysis_data = analysis_result.get('analysis_data') or analysis_result
+                                sequence_analysis_results.append({
+                                    'sweep_number': int(str(key)),
+                                    'voltage': stop_v,
+                                    'analysis': analysis_data
+                                })
+                                
+                                # === AUTOMATIC PLOTTING AFTER ANALYSIS ===
+                                # Plot graphs in background (basic always, advanced if memristive)
+                                # Use the actual saved filename (name) which includes extra_info
+                                try:
+                                    classification = analysis_data.get('classification', {})
+                                    is_memristive = classification.get('memristivity_score', 0) > 60
+                                    self._plot_measurement_in_background(
+                                        voltage=v_arr,
+                                        current=c_arr,
+                                        timestamps=timestamps,
+                                        save_dir=save_dir,
+                                        device_name=f"{self.final_device_letter}{self.final_device_number}",
+                                        sweep_number=int(str(key)),
+                                        is_memristive=is_memristive,
+                                        filename=name  # Use actual saved filename (includes extra_info if present)
+                                    )
+                                except Exception as plot_exc:
+                                    print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
+                                
+                                # Update live display (separate try-except to not block data collection)
+                                try:
+                                    self._update_live_classification_display(
+                                        sweep_num=int(str(key)),
+                                        total_sweeps=total_sweeps_count,
+                                        classification_data=classification
+                                    )
+                                except Exception as display_exc:
+                                    print(f"[LIVE DISPLAY ERROR] Failed to update display: {display_exc}")
+                                
+                                # Store classification for summary
+                                try:
+                                    sweep_classifications[int(str(key))] = {
+                                        'score': classification.get('memristivity_score', 0),
+                                        'device_type': classification.get('device_type', 'unknown')
+                                    }
+                                except Exception as class_exc:
+                                    print(f"[CLASSIFICATION ERROR] Failed to store classification: {class_exc}")
+                            except Exception as data_exc:
+                                print(f"[DATA COLLECTION ERROR] Failed to collect analysis data: {data_exc}")
+                    except Exception as exc:
+                        # Don't interrupt measurement flow if analysis fails
+                        print(f"[CUSTOM ANALYSIS] Failed to run per-sweep analysis: {exc}")
 
                     # Handle inter-sweep delay (NEW - optional)
                     delay_after_sweep = params.get("delay_after_sweep_s", None)
@@ -4750,6 +6578,42 @@ class MeasurementGUI:
                 print("total time for ", selected_measurement, "=", end - start, " - ")
 
                 self.data_saver.create_log_file(save_dir, start_time, selected_measurement)
+                
+                # === GENERATE SEQUENCE SUMMARY ===
+                # Wrap in try-except to ensure measurement flow is never interrupted
+                try:
+                    if sequence_analysis_results:
+                        device_id = f"{self.sample_name_var.get()}_{self.final_device_letter}_{self.final_device_number}"
+                        self._generate_sequence_summary(
+                            device_id=device_id,
+                            sequence_name=selected_measurement,
+                            sequence_results=sequence_analysis_results,
+                            save_dir=save_dir,
+                            total_sweeps=total_sweeps_count
+                        )
+                except Exception as exc:
+                    # Don't interrupt measurement flow if summary generation fails
+                    print(f"[SUMMARY ERROR] Failed to generate sequence summary: {exc}")
+                    import traceback
+                    traceback.print_exc()
+                
+                # === AUTOMATIC COMPREHENSIVE ANALYSIS AFTER CUSTOM MEASUREMENT ===
+                # Generate all combined plots and analysis automatically
+                try:
+                    print("[COMPREHENSIVE] Starting automatic comprehensive analysis after custom measurement...")
+                    sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
+                    if sample_name:
+                        sample_dir = self._get_sample_save_directory(sample_name)
+                        if os.path.exists(sample_dir):
+                            from Helpers.Sample_Analysis.comprehensive_analyzer import ComprehensiveAnalyzer
+                            comprehensive = ComprehensiveAnalyzer(sample_dir)
+                            comprehensive.run_comprehensive_analysis()
+                            print("[COMPREHENSIVE] Automatic analysis complete!")
+                except Exception as exc:
+                    # Don't interrupt measurement flow if comprehensive analysis fails
+                    print(f"[COMPREHENSIVE ERROR] Failed to run comprehensive analysis: {exc}")
+                    import traceback
+                    traceback.print_exc()
 
                 print(self.single_device_flag,device_count)
                 

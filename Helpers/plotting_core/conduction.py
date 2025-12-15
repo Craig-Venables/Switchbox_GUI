@@ -1,8 +1,16 @@
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Disable LaTeX/math text globally for this module
+matplotlib.rcParams['text.usetex'] = False
+matplotlib.rcParams['mathtext.default'] = 'regular'
+matplotlib.rcParams['axes.formatter.use_mathtext'] = False
+matplotlib.rcParams['axes.formatter.min_exponent'] = 0
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 from .base import PlotManager
 
@@ -54,6 +62,14 @@ class ConductionPlotter:
         device_label: str = "",
         save_name: Optional[str] = None,
     ):
+        # Disable LaTeX to prevent parsing errors in background threads
+        plt.rcParams['text.usetex'] = False
+        plt.rcParams['mathtext.default'] = 'regular'
+        plt.rcParams['axes.formatter.use_mathtext'] = False
+        
+        # Import formatter to force plain text
+        from matplotlib.ticker import ScalarFormatter, LogFormatter
+        
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
 
@@ -75,6 +91,9 @@ class ConductionPlotter:
         self._plot_loglog_with_windows(ax_loglog, v, i, device_label)
         ax_loglog.set_xlabel("|Voltage| (V)")
         ax_loglog.set_ylabel("|Current| (A)")
+        # Force plain text formatters for log scales (rcParams already disable math text)
+        ax_loglog.xaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+        ax_loglog.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
         ax_loglog.grid(True, which="both", alpha=0.3)
 
         # Schottky: ln(I) vs sqrt(V)
@@ -84,6 +103,8 @@ class ConductionPlotter:
             sqrt_v = np.sqrt(v[pos_mask])
             i_pos = np.abs(i[pos_mask])
             ax_schottky.semilogy(sqrt_v, i_pos, "ko", markersize=3)
+            # Force plain text formatter for log scale (rcParams already disable math text)
+            ax_schottky.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
             if self.enable_schottky_overlays:
                 self._overlay_linear_windows(
                     ax_schottky,
@@ -107,6 +128,8 @@ class ConductionPlotter:
                 pf_y = np.abs(safe_i / safe_v)
             sqrt_v = np.sqrt(safe_v)
             ax_pf.semilogy(sqrt_v, pf_y, "ko", markersize=3)
+            # Force plain text formatter for log scale (rcParams already disable math text)
+            ax_pf.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
             if self.enable_pf_overlays:
                 self._overlay_linear_windows(
                     ax_pf,

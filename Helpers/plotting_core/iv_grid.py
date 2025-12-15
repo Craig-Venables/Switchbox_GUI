@@ -1,8 +1,16 @@
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Disable LaTeX/math text globally for this module
+matplotlib.rcParams['text.usetex'] = False
+matplotlib.rcParams['mathtext.default'] = 'regular'
+matplotlib.rcParams['axes.formatter.use_mathtext'] = False
+matplotlib.rcParams['axes.formatter.min_exponent'] = 0
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 from .base import PlotManager
 
@@ -32,6 +40,11 @@ class IVGridPlotter:
         arrows_points: int = 12,
         save_name: Optional[str] = None,
     ):
+        # Disable LaTeX to prevent parsing errors in background threads
+        plt.rcParams['text.usetex'] = False
+        plt.rcParams['mathtext.default'] = 'regular'
+        plt.rcParams['axes.formatter.use_mathtext'] = False
+        
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
         t = np.asarray(time, dtype=float) if time is not None else None
@@ -72,8 +85,11 @@ class IVGridPlotter:
 
     @staticmethod
     def _plot_log(ax, v: np.ndarray, i: np.ndarray, label: str):
+        from matplotlib.ticker import LogFormatter
         ax.plot(v, np.abs(i), "o-", markersize=2, label=label or "IV |log|")
         ax.set_yscale("log")
+        # Force plain text formatter to avoid LaTeX parsing
+        ax.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
         ax.set_xlabel("Voltage (V)")
         ax.set_ylabel("|Current| (A)")
         if label:

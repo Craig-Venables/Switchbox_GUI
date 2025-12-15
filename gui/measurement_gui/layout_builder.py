@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Third-party imports
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 
 # Get project root (go up from gui/measurement_gui/ to project root)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]  # gui/measurement_gui/layout_builder.py -> gui -> root
@@ -494,6 +494,8 @@ class MeasurementGUILayoutBuilder:
         self._create_custom_measurements_tab(notebook)
         self._create_notes_tab(notebook)
         self._create_stats_tab(notebook)  # NEW: Device tracking stats
+        self._create_graphing_tab(notebook)  # NEW: Sample analysis and plotting
+        self._create_custom_sweeps_graphing_tab(notebook)  # NEW: Custom sweeps graphing
         
         self.widgets["notebook"] = notebook
     
@@ -2315,6 +2317,605 @@ class MeasurementGUILayoutBuilder:
             gui.refresh_stats_list()
         except Exception as e:
             print(f"[STATS] Initial load failed: {e}")
+    
+    def _create_graphing_tab(self, notebook: ttk.Notebook) -> None:
+        """
+        Create Graphing tab for sample analysis and plotting.
+        """
+        gui = self.gui
+        
+        tab = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab, text="  Graphing  ")
+        
+        # Configure grid
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+        
+        # Title
+        title_frame = tk.Frame(tab, bg=self.COLOR_BG)
+        title_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        
+        tk.Label(
+            title_frame,
+            text="Sample Analysis & Plotting",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.COLOR_BG
+        ).pack()
+        
+        tk.Label(
+            title_frame,
+            text="Generate comprehensive analysis plots for entire sample using existing data",
+            font=("Segoe UI", 10),
+            bg=self.COLOR_BG,
+            wraplength=600
+        ).pack(pady=5)
+        
+        # Main content frame
+        content_frame = tk.Frame(tab, bg=self.COLOR_BG)
+        content_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
+        content_frame.columnconfigure(0, weight=1)
+        
+        # Sample selection frame
+        selection_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
+        selection_frame.grid(row=0, column=0, sticky="ew", pady=10)
+        selection_frame.columnconfigure(1, weight=1)
+        
+        tk.Label(
+            selection_frame,
+            text="Sample Folder:",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG
+        ).grid(row=0, column=0, padx=5, sticky="w")
+        
+        # Folder path display
+        gui.analysis_folder_var = tk.StringVar()
+        gui.analysis_folder_var.set("(Use current sample)")
+        folder_entry = tk.Entry(
+            selection_frame,
+            textvariable=gui.analysis_folder_var,
+            font=("Segoe UI", 9),
+            state="readonly",
+            width=50
+        )
+        folder_entry.grid(row=0, column=1, padx=5, sticky="ew")
+        
+        # Browse button
+        browse_btn = tk.Button(
+            selection_frame,
+            text="Browse...",
+            command=lambda: gui.browse_sample_folder_for_analysis(),
+            font=("Segoe UI", 9),
+            bg="#2196F3",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        browse_btn.grid(row=0, column=2, padx=5)
+        
+        # Clear selection button
+        clear_btn = tk.Button(
+            selection_frame,
+            text="Clear",
+            command=lambda: gui.clear_sample_folder_selection(),
+            font=("Segoe UI", 9),
+            bg="#757575",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        clear_btn.grid(row=0, column=3, padx=5)
+        
+        # Code name filter (like old module)
+        filter_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
+        filter_frame.grid(row=1, column=0, pady=(10, 5), padx=20, sticky="ew")
+        
+        tk.Label(
+            filter_frame,
+            text="Filter by Code Name (optional):",
+            font=("Segoe UI", 10),
+            bg=self.COLOR_BG
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        
+        gui.analysis_code_name_var = tk.StringVar(value="")
+        code_name_combo = ttk.Combobox(
+            filter_frame,
+            textvariable=gui.analysis_code_name_var,
+            values=[""] + list(gui.code_names.values()) if hasattr(gui, 'code_names') else [""],
+            state="readonly",
+            width=20
+        )
+        code_name_combo.pack(side=tk.LEFT)
+        
+        tk.Label(
+            filter_frame,
+            text="(Leave empty to analyze all measurements)",
+            font=("Segoe UI", 8),
+            bg=self.COLOR_BG,
+            fg="#666666"
+        ).pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Button frame
+        btn_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
+        btn_frame.grid(row=2, column=0, pady=20)
+        
+        # Main analysis button
+        analyze_btn = tk.Button(
+            btn_frame,
+            text="Run Full Sample Analysis",
+            command=gui.run_full_sample_analysis,
+            font=("Segoe UI", 11, "bold"),
+            bg="#4CAF50",
+            fg="white",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            relief=tk.RAISED,
+            bd=2
+        )
+        analyze_btn.pack(pady=10)
+        
+        # Device plotting button (separate from sample analysis)
+        plot_device_btn = tk.Button(
+            btn_frame,
+            text="Plot All Graphs for Current Device",
+            command=gui.plot_all_device_graphs,
+            font=("Segoe UI", 10, "bold"),
+            bg="#FF9800",
+            fg="white",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            relief=tk.RAISED,
+            bd=2
+        )
+        plot_device_btn.pack(pady=10)
+        
+        tk.Label(
+            btn_frame,
+            text="(Plots dashboard, conduction, and SCLC graphs for all measurement files in current device)",
+            font=("Segoe UI", 8),
+            bg=self.COLOR_BG,
+            fg="#666666"
+        ).pack(pady=(0, 10))
+        
+        # Status label
+        gui.analysis_status_label = tk.Label(
+            content_frame,
+            text="",
+            font=("Segoe UI", 10),
+            bg=self.COLOR_BG,
+            fg="#666666"
+        )
+        gui.analysis_status_label.grid(row=3, column=0, pady=10)
+        
+        # Info text
+        info_text = """
+This will:
+• Analyze raw measurement files if needed (retroactive analysis)
+• Load all device tracking data
+• Generate 12 advanced plot types
+• Export Origin-ready data files
+• Create comprehensive sample report
+
+For old data: If no tracking data exists, will automatically
+analyze raw .txt measurement files first, then generate plots.
+
+Options:
+• Use current sample: Automatically uses the selected sample
+• Browse for folder: Select any sample folder to analyze retroactively
+
+Output location: {sample_dir}/sample_analysis/
+  - plots/ : All PNG figures
+  - origin_data/ : CSV files for Origin import
+        """
+        
+        info_label = tk.Label(
+            content_frame,
+            text=info_text.strip(),
+            font=("Segoe UI", 9),
+            bg="#f0f0f0",
+            justify=tk.LEFT,
+            anchor="w",
+            padx=15,
+            pady=10
+        )
+        info_label.grid(row=4, column=0, sticky="ew", pady=10)
+        
+        # Store reference
+        self.widgets["graphing_tab"] = tab
+    
+    def _create_custom_sweeps_graphing_tab(self, notebook: ttk.Notebook) -> None:
+        """
+        Create Custom Sweeps Graphing tab for comparing sweeps from custom measurement methods.
+        """
+        gui = self.gui
+        
+        tab = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab, text="  Custom Sweeps Graphing  ")
+        
+        # Configure grid
+        tab.columnconfigure(0, weight=0, minsize=400)  # Left panel - controls
+        tab.columnconfigure(1, weight=1)  # Right panel - plot
+        tab.rowconfigure(0, weight=1)
+        
+        # LEFT PANEL - Controls
+        left_panel = self._create_scrollable_panel(tab)
+        left_panel._container.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+        
+        # Title
+        title_frame = tk.Frame(left_panel, bg=self.COLOR_BG)
+        title_frame.pack(fill='x', pady=(0, 15))
+        
+        tk.Label(
+            title_frame,
+            text="Custom Sweeps Graphing",
+            font=("Segoe UI", 14, "bold"),
+            bg=self.COLOR_BG
+        ).pack()
+        
+        tk.Label(
+            title_frame,
+            text="Compare sweeps from custom measurement methods",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG,
+            fg="#666666"
+        ).pack(pady=(5, 0))
+        
+        # Section 1: Select Custom Sweep Method
+        method_frame = tk.LabelFrame(
+            left_panel,
+            text="1. Select Custom Sweep Method",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG,
+            padx=10,
+            pady=10
+        )
+        method_frame.pack(fill='x', pady=10)
+        
+        tk.Label(
+            method_frame,
+            text="Method (by code name or identifier):",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG
+        ).pack(anchor='w', pady=(0, 5))
+        
+        gui.custom_sweep_method_var = tk.StringVar()
+        gui.custom_sweep_method_combo = ttk.Combobox(
+            method_frame,
+            textvariable=gui.custom_sweep_method_var,
+            font=("Segoe UI", 9),
+            state="readonly",
+            width=30
+        )
+        gui.custom_sweep_method_combo.pack(fill='x', pady=(0, 10))
+        gui.custom_sweep_method_combo.bind("<<ComboboxSelected>>", lambda e: gui.on_custom_sweep_method_selected())
+        
+        # Load button
+        load_methods_btn = tk.Button(
+            method_frame,
+            text="Load Methods",
+            command=gui.load_custom_sweep_methods,
+            font=("Segoe UI", 9),
+            bg="#2196F3",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        load_methods_btn.pack(pady=5)
+        
+        # Section 2: Select Sweep Combinations
+        combo_frame = tk.LabelFrame(
+            left_panel,
+            text="2. Select Sweep Combinations",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG,
+            padx=10,
+            pady=10
+        )
+        combo_frame.pack(fill='x', pady=10)
+        
+        # Listbox for sweep combinations
+        tk.Label(
+            combo_frame,
+            text="Available combinations:",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG
+        ).pack(anchor='w', pady=(0, 5))
+        
+        # Frame for listbox and scrollbar
+        listbox_frame = tk.Frame(combo_frame, bg=self.COLOR_BG)
+        listbox_frame.pack(fill='both', expand=True, pady=(0, 10))
+        
+        gui.custom_sweep_combinations_listbox = tk.Listbox(
+            listbox_frame,
+            font=("Segoe UI", 9),
+            selectmode=tk.MULTIPLE,
+            height=8
+        )
+        scrollbar_combos = tk.Scrollbar(listbox_frame, orient="vertical", command=gui.custom_sweep_combinations_listbox.yview)
+        gui.custom_sweep_combinations_listbox.config(yscrollcommand=scrollbar_combos.set)
+        
+        gui.custom_sweep_combinations_listbox.pack(side="left", fill="both", expand=True)
+        scrollbar_combos.pack(side="right", fill="y")
+        
+        # Load combinations button
+        load_combos_btn = tk.Button(
+            combo_frame,
+            text="Load Combinations",
+            command=gui.load_custom_sweep_combinations,
+            font=("Segoe UI", 9),
+            bg="#2196F3",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        load_combos_btn.pack(pady=5)
+        
+        # Section 2.5: Manage Sweep Combinations (Add/Edit/Delete)
+        manage_frame = tk.LabelFrame(
+            left_panel,
+            text="2.5. Manage Sweep Combinations",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG,
+            padx=10,
+            pady=10
+        )
+        manage_frame.pack(fill='x', pady=10)
+        
+        # Add new combination
+        tk.Label(
+            manage_frame,
+            text="Add New Combination:",
+            font=("Segoe UI", 9, "bold"),
+            bg=self.COLOR_BG
+        ).pack(anchor='w', pady=(0, 5))
+        
+        # Sweep numbers input
+        sweep_input_frame = tk.Frame(manage_frame, bg=self.COLOR_BG)
+        sweep_input_frame.pack(fill='x', pady=(0, 5))
+        
+        tk.Label(
+            sweep_input_frame,
+            text="Sweep Numbers:",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG
+        ).pack(side='left', padx=(0, 5))
+        
+        gui.new_combination_sweeps_var = tk.StringVar()
+        sweeps_entry = tk.Entry(
+            sweep_input_frame,
+            textvariable=gui.new_combination_sweeps_var,
+            font=("Segoe UI", 9),
+            width=20
+        )
+        sweeps_entry.pack(side='left', padx=(0, 5))
+        tk.Label(
+            sweep_input_frame,
+            text="(e.g., 1,2 or 1,2,3)",
+            font=("Segoe UI", 8),
+            bg=self.COLOR_BG,
+            fg="#666666"
+        ).pack(side='left')
+        
+        # Title input
+        title_input_frame = tk.Frame(manage_frame, bg=self.COLOR_BG)
+        title_input_frame.pack(fill='x', pady=(0, 5))
+        
+        tk.Label(
+            title_input_frame,
+            text="Title:",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG
+        ).pack(side='left', padx=(0, 5))
+        
+        gui.new_combination_title_var = tk.StringVar()
+        title_entry = tk.Entry(
+            title_input_frame,
+            textvariable=gui.new_combination_title_var,
+            font=("Segoe UI", 9),
+            width=30
+        )
+        title_entry.pack(side='left', fill='x', expand=True)
+        
+        # Buttons frame
+        manage_btn_frame = tk.Frame(manage_frame, bg=self.COLOR_BG)
+        manage_btn_frame.pack(fill='x', pady=5)
+        
+        add_combo_btn = tk.Button(
+            manage_btn_frame,
+            text="Add Combination",
+            command=gui.add_sweep_combination,
+            font=("Segoe UI", 9),
+            bg="#4CAF50",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        add_combo_btn.pack(side='left', padx=(0, 5))
+        
+        edit_combo_btn = tk.Button(
+            manage_btn_frame,
+            text="Edit Selected",
+            command=gui.edit_sweep_combination,
+            font=("Segoe UI", 9),
+            bg="#FF9800",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        edit_combo_btn.pack(side='left', padx=(0, 5))
+        
+        delete_combo_btn = tk.Button(
+            manage_btn_frame,
+            text="Delete Selected",
+            command=gui.delete_sweep_combination,
+            font=("Segoe UI", 9),
+            bg="#F44336",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        delete_combo_btn.pack(side='left')
+        
+        # Save button
+        save_combos_btn = tk.Button(
+            manage_frame,
+            text="Save to JSON",
+            command=gui.save_sweep_combinations_to_json,
+            font=("Segoe UI", 9, "bold"),
+            bg="#2196F3",
+            fg="white",
+            padx=15,
+            pady=5,
+            cursor="hand2"
+        )
+        save_combos_btn.pack(pady=(10, 0))
+        
+        # Section 3: Custom Title (optional)
+        title_custom_frame = tk.LabelFrame(
+            left_panel,
+            text="3. Custom Title (Optional)",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG,
+            padx=10,
+            pady=10
+        )
+        title_custom_frame.pack(fill='x', pady=10)
+        
+        tk.Label(
+            title_custom_frame,
+            text="Plot title:",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG
+        ).pack(anchor='w', pady=(0, 5))
+        
+        gui.custom_sweep_plot_title_var = tk.StringVar()
+        title_entry = tk.Entry(
+            title_custom_frame,
+            textvariable=gui.custom_sweep_plot_title_var,
+            font=("Segoe UI", 9),
+            width=30
+        )
+        title_entry.pack(fill='x', pady=(0, 10))
+        
+        # Section 4: Sample Folder Selection
+        folder_frame = tk.LabelFrame(
+            left_panel,
+            text="4. Sample Data Location",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG,
+            padx=10,
+            pady=10
+        )
+        folder_frame.pack(fill='x', pady=10)
+        
+        tk.Label(
+            folder_frame,
+            text="Sample folder:",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG
+        ).pack(anchor='w', pady=(0, 5))
+        
+        gui.custom_sweep_sample_folder_var = tk.StringVar()
+        gui.custom_sweep_sample_folder_var.set("(Use current sample)")
+        folder_entry = tk.Entry(
+            folder_frame,
+            textvariable=gui.custom_sweep_sample_folder_var,
+            font=("Segoe UI", 9),
+            state="readonly",
+            width=30
+        )
+        folder_entry.pack(fill='x', pady=(0, 5))
+        
+        folder_btn_frame = tk.Frame(folder_frame, bg=self.COLOR_BG)
+        folder_btn_frame.pack(fill='x')
+        
+        browse_folder_btn = tk.Button(
+            folder_btn_frame,
+            text="Browse...",
+            command=gui.browse_custom_sweep_sample_folder,
+            font=("Segoe UI", 9),
+            bg="#757575",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        browse_folder_btn.pack(side='left', padx=(0, 5))
+        
+        clear_folder_btn = tk.Button(
+            folder_btn_frame,
+            text="Clear",
+            command=gui.clear_custom_sweep_sample_folder,
+            font=("Segoe UI", 9),
+            bg="#757575",
+            fg="white",
+            padx=10,
+            pady=5,
+            cursor="hand2"
+        )
+        clear_folder_btn.pack(side='left')
+        
+        # Section 5: Plot Button
+        plot_frame = tk.Frame(left_panel, bg=self.COLOR_BG)
+        plot_frame.pack(fill='x', pady=20)
+        
+        plot_btn = tk.Button(
+            plot_frame,
+            text="Plot Selected Sweeps",
+            command=gui.plot_custom_sweeps,
+            font=("Segoe UI", 11, "bold"),
+            bg="#4CAF50",
+            fg="white",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            relief=tk.RAISED,
+            bd=2
+        )
+        plot_btn.pack(fill='x')
+        
+        # Status label
+        gui.custom_sweep_status_label = tk.Label(
+            left_panel,
+            text="",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG,
+            fg="#666666",
+            wraplength=350
+        )
+        gui.custom_sweep_status_label.pack(pady=10)
+        
+        # RIGHT PANEL - Plot
+        right_panel = tk.Frame(tab, bg=self.COLOR_BG)
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
+        right_panel.columnconfigure(0, weight=1)
+        right_panel.rowconfigure(0, weight=1)
+        
+        # Matplotlib figure
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+        
+        gui.custom_sweep_fig = Figure(figsize=(10, 6), dpi=100)
+        gui.custom_sweep_ax = gui.custom_sweep_fig.add_subplot(111)
+        gui.custom_sweep_ax.set_xlabel("Voltage (V)", fontsize=11)
+        gui.custom_sweep_ax.set_ylabel("Current (A)", fontsize=11)
+        gui.custom_sweep_ax.set_title("Custom Sweeps Comparison", fontsize=12, fontweight='bold')
+        gui.custom_sweep_ax.grid(True, alpha=0.3)
+        
+        gui.custom_sweep_canvas = FigureCanvasTkAgg(gui.custom_sweep_fig, right_panel)
+        gui.custom_sweep_canvas.draw()
+        gui.custom_sweep_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Store reference
+        self.widgets["custom_sweeps_graphing_tab"] = tab
     
     def _get_previous_devices(self, gui) -> List[Dict[str, Any]]:
         """Get the previous two devices from the same sample (e.g., if on A2, show A1; if on A3, show A2 and A1)"""

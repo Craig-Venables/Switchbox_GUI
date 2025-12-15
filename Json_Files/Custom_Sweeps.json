@@ -2,8 +2,8 @@
  "Debug_testing_sweep": {
     "code_name": "dts_v1",
     "sweeps": {
-        "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 1,"step_v": 0.1},
-        "2": {"start_v": 0,"stop_v": 1,"sweeps": 1,"step_v": 0.1}}
+        "1": {"start_v": 0,"stop_v": 1,"sweeps": 1,"step_v": 0.1},
+        "2": {"start_v": 0,"stop_v": 2,"sweeps": 1,"step_v": 0.1}}
     },
     "Sdt V1-(~75 mins)": {
       "code_name": "St_v1",
