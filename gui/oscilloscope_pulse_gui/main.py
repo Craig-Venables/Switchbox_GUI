@@ -451,7 +451,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
             v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
             
             # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
-            v_memristor = np.maximum(v_smu - v_shunt, 0.0)
+            # Can be negative for negative pulses
+            v_memristor = v_smu - v_shunt
             
             # R_memristor = V_memristor / I (Ohm's law)
             with np.errstate(divide='ignore', invalid='ignore'):
@@ -459,7 +460,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 r_memristor = np.where(np.isfinite(r_memristor) & (r_memristor < 1e12), r_memristor, np.nan)
             
             # P_memristor = V_memristor × I
-            p_memristor = np.maximum(v_memristor * i, 0.0)
+            # Should be positive for resistive devices (V and I same sign)
+            p_memristor = v_memristor * i
             
             if filename.endswith('.txt'):
                 with open(filename, 'w', encoding='utf-8') as f:

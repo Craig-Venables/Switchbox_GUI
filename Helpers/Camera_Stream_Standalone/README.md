@@ -10,6 +10,7 @@ Standalone application that displays camera feed locally and streams it over IP 
 - **Click-to-Mark**: Click on the camera window to place markers (red dots with crosshairs)
 - **Configurable**: Set camera index, IP address, port, and resolution
 - **Standalone**: Can be converted to executable (.exe) for easy distribution
+- **Thorlabs TLCamera support**: Detect and stream Kiralux/Zelux-class cameras via pylablib
 
 ## Installation
 
@@ -17,6 +18,8 @@ Standalone application that displays camera feed locally and streams it over IP 
 ```bash
 pip install -r requirements.txt
 ```
+
+If you need Thorlabs TLCamera support, ensure ThorCam is installed so that the Thorlabs DLLs are present, then install pylablib (already included in `requirements.txt`). You can override the DLL search path with the environment variable `THORLABS_TLCAM_DLL_DIR` if the SDK is in a non-default location. See the pylablib guide for details: [Thorlabs Scientific Cameras interface](https://pylablib.readthedocs.io/en/stable/devices/Thorlabs_TLCamera.html).
 
 ## Usage
 
@@ -28,7 +31,9 @@ python camera_stream_app.py
 
 ### Configuration
 
-1. **Camera Index**: Select which camera to use (usually 0 for default)
+1. **Camera Type**: Choose `OpenCV (index)` for generic webcams or `Thorlabs (pylablib)` for Kiralux/Zelux class cameras.
+2. **Camera Index**: When using OpenCV, select which camera to use (usually 0 for default).
+3. **Thorlabs Serial**: When using the Thorlabs backend, click **Detect Thorlabs** to populate connected serials and pick one.
 2. **Stream IP Address** (Usually leave as default):
    - **`0.0.0.0` (Recommended)**: Streams on all network interfaces
      - Makes the stream accessible from any device on your network
@@ -36,8 +41,8 @@ python camera_stream_app.py
      - **This is what you want 99% of the time!**
    - **Specific IP**: Only streams on that specific network interface
      - Only use if you have multiple network adapters and want to restrict access
-3. **Stream Port**: Port number for HTTP streaming (default: 8080 is fine)
-4. **Resolution**: Select camera resolution
+4. **Stream Port**: Port number for HTTP streaming (default: 8080 is fine)
+5. **Resolution**: Select camera resolution
 
 **Quick Answer**: You don't need to change the IP address! Just leave it as `0.0.0.0` and it will work perfectly. The application will show you the exact URLs to access the stream after you start it.
 
@@ -160,6 +165,24 @@ To access the stream from another device on the same network:
 - **Pause/Resume**: Temporarily pause the camera feed (stops capturing new frames but keeps connection alive)
 - **Stop**: Completely stop the camera and close all connections
 - **Clear Marker**: Remove the marker from the display
+
+## Quick Test
+
+1. Install requirements: `pip install -r requirements.txt`
+2. Launch the app: `python camera_stream_app.py`
+3. For Thorlabs: choose `Thorlabs (pylablib)`, click **Detect Thorlabs**, pick a serial, then start.
+4. Confirm local view appears and browse to `http://localhost:8080/stream`.
+
+## Portable Use on a PC Without Python
+
+If you need Thorlabs support on a PC that does not have Python installed:
+
+1. On a development machine **with Python + pylablib working**, create a virtual environment and install deps (if you don’t already have one).
+2. Copy this whole folder (including your venv if desired) to a USB drive or network share.
+3. On the target PC, place the folder somewhere (e.g. `C:\CameraStreamPortable`) and double‑click `run_camera_stream.bat`.
+   - If a local venv is present alongside the app, the `.bat` will use it.
+   - Otherwise it falls back to any `python` on PATH.
+4. Use the GUI normally, including the **Thorlabs (pylablib)** option when `pylablib` is available in the environment used by the `.bat`.
 
 ## Keyboard Shortcuts
 

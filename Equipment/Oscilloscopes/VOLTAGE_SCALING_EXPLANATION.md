@@ -198,3 +198,4 @@ If voltages still don't match:
 - Test script: `Equipment/Oscilloscopes/TektronixTBS1000C_example_scripts/test_all_data_formats.py`
 - Implementation: `Equipment/Oscilloscopes/TektronixTBS1000C.py`
 
+

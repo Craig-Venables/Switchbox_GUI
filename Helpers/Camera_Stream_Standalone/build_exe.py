@@ -51,15 +51,18 @@ def build_exe():
         "--noconfirm",            # Overwrite output without asking
         # Hidden imports (modules that PyInstaller might miss)
         "--hidden-import", "cv2",
+        "--hidden-import", "opencv_python",
         "--hidden-import", "flask",
         "--hidden-import", "numpy",
-        "--hidden-import", "PIL",
-        "--hidden-import", "PIL.Image",
         "--hidden-import", "tkinter",
         "--hidden-import", "tkinter.ttk",
         # Collect all submodules
         "--collect-all", "cv2",
+        "--collect-all", "opencv_python",
         "--collect-all", "flask",
+        # Note: Thorlabs/pylablib backend is disabled in the exe build to keep
+        # packaging simple and avoid bundling issues. Use the Python script
+        # version for Thorlabs cameras.
         script_name
     ]
     

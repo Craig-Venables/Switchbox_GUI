@@ -3,8 +3,10 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['cv2', 'flask', 'numpy', 'PIL', 'PIL.Image', 'tkinter', 'tkinter.ttk']
+hiddenimports = ['cv2', 'opencv_python', 'flask', 'numpy', 'tkinter', 'tkinter.ttk']
 tmp_ret = collect_all('cv2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('opencv_python')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('flask')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

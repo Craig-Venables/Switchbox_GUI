@@ -69,11 +69,9 @@ class OscilloscopePulseLayout:
         left_panel.grid(row=0, column=0, sticky="nsew")
         
         self._build_connection_frame(left_panel)
-        self._build_pulse_frame(left_panel)
         self._build_scope_frame(left_panel)
+        self._build_pulse_frame(left_panel)
         self._build_measurement_frame(left_panel)
-        self._build_calculator_frame(left_panel)
-        self._build_save_options_frame(left_panel)
         self._build_action_buttons(left_panel)
         self._build_status_bar(left_panel)
 
@@ -338,58 +336,37 @@ class OscilloscopePulseLayout:
                        ToolTipText="Time at bias voltage after the pulse")
 
     def _build_scope_frame(self, parent):
-        """Build oscilloscope settings frame"""
-        frame = ttk.Labelframe(parent, text="Oscilloscope Settings", padding=10)
+        """Build oscilloscope settings frame - simplified for manual setup"""
+        frame = ttk.Labelframe(parent, text="1️⃣ Oscilloscope Setup (Manual)", padding=10)
         frame.pack(fill="x", pady=5)
         
-        # Auto-configure checkbox
-        auto_config_frame = ttk.Frame(frame)
-        auto_config_frame.pack(fill="x", pady=(0, 5))
-        self.vars['auto_configure_scope'] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            auto_config_frame, 
-            text="Auto-configure scope (trigger, timebase, voltage scale)",
-            variable=self.vars['auto_configure_scope']
-        ).pack(side="left")
+        # Instructions
+        instructions = (
+            "Set up your oscilloscope MANUALLY:\n"
+            "• Timebase: to capture full pulse (e.g., 500 ms/div for 1s pulse)\n"
+            "• V/div: appropriate for signal level (e.g., 200 mV/div)\n"
+            "• Trigger: set to capture pulse start\n"
+            "• Channel: use CH1 (or set below)"
+        )
+        instr_label = tk.Label(frame, text=instructions, justify="left", bg="#fff3cd", 
+                              font=("Segoe UI", 8), fg="#856404", relief=tk.SOLID, bd=1, padx=5, pady=5)
+        instr_label.pack(fill="x", pady=(0, 10))
         
-        # Read scope settings button
-        ttk.Button(
-            auto_config_frame,
-            text="📖 Read Current Scope Settings",
-            command=self._read_scope_settings,
-            width=25
-        ).pack(side="right", padx=(5, 0))
-        
-        # Scope Type (for connection)
-        scope_type_frame = ttk.Frame(frame)
-        scope_type_frame.pack(fill="x", pady=2)
-        ttk.Label(scope_type_frame, text="Scope Type:").pack(side="left")
-        self.vars['scope_type'] = tk.StringVar(value=self.config.get("scope_type", "Tektronix TBS1000C"))
-        scope_type_combo = ttk.Combobox(scope_type_frame, textvariable=self.vars['scope_type'], 
-                                       values=["Tektronix TBS1000C", "GW Instek GDS-2062", "Auto-Detect"], 
-                                       width=20, state="readonly")
-        scope_type_combo.pack(side="right")
-        self.widgets['scope_type_combo'] = scope_type_combo
-        
-        scope_type_combo.pack(side="right")
-        self.widgets['scope_type_combo'] = scope_type_combo
-        
-        self._add_param(frame, "Channel:", "scope_channel", "CH1", 
+        # Just the essentials for reading
+        self._add_param(frame, "Scope Channel:", "scope_channel", "CH1", 
                        options=["CH1", "CH2", "CH3", "CH4"],
-                       ToolTipText="Oscilloscope channel to use")
-                       
-        self._add_param(frame, "Timebase (s/div):", "scope_timebase", "0.0001",
-                       ToolTipText="Oscilloscope timebase setting")
-        self._add_param(frame, "Voltage Scale (V/div):", "scope_vscale", "0.1",
-                       ToolTipText="Oscilloscope voltage scale")
+                       ToolTipText="Which channel to read from")
 
     def _build_measurement_frame(self, parent):
-        """Build measurement method frame"""
-        frame = ttk.Labelframe(parent, text="Measurement Settings", padding=10)
+        """Build measurement settings frame"""
+        frame = ttk.Labelframe(parent, text="Analysis Parameters (Critical!)", padding=10)
         frame.pack(fill="x", pady=5)
         
-        self._add_param(frame, "R_shunt (Ω):", "r_shunt", "1.0",
-                       ToolTipText="Value of shunt resistor used for current measurement")
+        tk.Label(frame, text="⚠️ R_shunt must match your actual resistor for correct current calculation!", 
+                bg="#f0f0f0", fg="#d32f2f", font=("Segoe UI", 8, "bold")).pack(fill="x", pady=(0, 5))
+        
+        self._add_param(frame, "R_shunt (Ω):", "r_shunt", "100000",
+                       ToolTipText="Actual value of your shunt resistor - measure with DMM if unsure!")
     
     def _build_calculator_frame(self, parent):
         """Build shunt resistor calculator frame"""
@@ -575,40 +552,47 @@ class OscilloscopePulseLayout:
         ToolTip(auto_save_check, "Automatically save measurement data after completion")
     
     def _build_action_buttons(self, parent):
-        """Build action buttons frame"""
-        frame = ttk.Frame(parent, padding=10)
+        """Build action buttons frame - simplified workflow"""
+        frame = ttk.LabelFrame(parent, text="📋 Measurement Workflow", padding=10)
         frame.pack(fill="x", pady=5)
         
-        # Row 1: Main actions
-        btn_frame1 = ttk.Frame(frame)
-        btn_frame1.pack(fill="x", pady=2)
+        # Workflow instructions
+        instructions = (
+            "1️⃣ Manually set up your oscilloscope (timebase, V/div, trigger)\n"
+            "2️⃣ Click 'Send Pulse' to fire the SMU pulse\n"
+            "3️⃣ Verify pulse captured on scope screen\n"
+            "4️⃣ Click 'Read & Analyze' to get the data and calculate I/V/R"
+        )
+        instr_label = tk.Label(frame, text=instructions, justify="left", bg="#f0f0f0", 
+                              font=("Segoe UI", 9), fg="#1565c0")
+        instr_label.pack(fill="x", pady=(0, 10))
         
-        self.widgets['run_btn'] = ttk.Button(btn_frame1, text="▶ Start Measurement", 
-                                             command=self.callbacks.get('start', lambda: None),
-                                             style="Action.TButton")
-        self.widgets['run_btn'].pack(side="left", padx=2, fill="x", expand=True)
+        # Main workflow buttons
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill="x", pady=2)
         
-        self.widgets['grab_scope_btn'] = ttk.Button(btn_frame1, text="📺 Read Screen", 
-                                                     command=self.callbacks.get('grab_scope', lambda: None))
-        self.widgets['grab_scope_btn'].pack(side="left", padx=2, fill="x", expand=True)
-        
-        self.widgets['pulse_only_btn'] = ttk.Button(btn_frame1, text="⚡ Send Pulse Only", 
-                                                     command=self.callbacks.get('pulse_only', lambda: None))
+        self.widgets['pulse_only_btn'] = ttk.Button(btn_frame, text="2️⃣ Send Pulse", 
+                                                     command=self.callbacks.get('pulse_only', lambda: None),
+                                                     style="Action.TButton")
         self.widgets['pulse_only_btn'].pack(side="left", padx=2, fill="x", expand=True)
         
-        # Row 2: Secondary actions
+        self.widgets['grab_scope_btn'] = ttk.Button(btn_frame, text="4️⃣ Read & Analyze", 
+                                                     command=self.callbacks.get('grab_scope', lambda: None),
+                                                     style="Action.TButton")
+        self.widgets['grab_scope_btn'].pack(side="left", padx=2, fill="x", expand=True)
+        
+        # Secondary actions
         btn_frame2 = ttk.Frame(frame)
-        btn_frame2.pack(fill="x", pady=2)
+        btn_frame2.pack(fill="x", pady=(5, 0))
+        
+        save_btn = ttk.Button(btn_frame2, text="💾 Save Data", 
+                             command=self.callbacks.get('save', lambda: None))
+        save_btn.pack(side="left", padx=2, fill="x", expand=True)
         
         self.widgets['stop_btn'] = ttk.Button(btn_frame2, text="⏹ Stop", 
                                              command=self.callbacks.get('stop', lambda: None),
                                              style="Stop.TButton", state="disabled")
         self.widgets['stop_btn'].pack(side="left", padx=2, fill="x", expand=True)
-        
-        save_btn = ttk.Button(btn_frame2, text="💾 Save", 
-                             command=self.callbacks.get('save', lambda: None),
-                             style="Action.TButton")
-        save_btn.pack(side="left", padx=2, fill="x", expand=True)
 
     def _build_status_bar(self, parent):
         """Build status bar"""
@@ -620,32 +604,45 @@ class OscilloscopePulseLayout:
         status_label.pack(side="left")
 
     def _build_plots(self, parent):
-        """Build matplotlib plots in tabbed interface"""
-        # Create notebook for tabs
-        self.plot_notebook = ttk.Notebook(parent)
-        self.plot_notebook.pack(fill="both", expand=True)
-        
+        """Build matplotlib plots - simplified to show only voltage overlay"""
         # Store plot data for line visibility toggles
         self.plot_data = {}
         self.plot_lines = {}
         
-        # Create Overview tab with all plots in grid
-        self._create_overview_tab()
+        # Create main voltage overlay plot (no tabs, just one big plot)
+        plot_frame = ttk.Frame(parent)
+        plot_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Create individual tabs for each plot
-        self._create_plot_tab("Voltage Breakdown", "Voltage Distribution: SMU, Shunt, and Memristor")
-        self._create_plot_tab("Current", "Current Through Circuit (I = V_shunt / R_shunt)")
-        self._create_plot_tab("Resistance", "Memristor Resistance: R = (V_SMU - V_shunt) / I")
-        self._create_plot_tab("Power", "Power Dissipation in Memristor: P = V_memristor × I")
+        # Create figure with single plot
+        fig = plt.Figure(figsize=(12, 6), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.set_ylabel("Voltage (V)", fontweight='bold', fontsize=12)
+        ax.set_title("Voltage Overlay: V_SMU (Programmed) vs V_shunt (Measured) vs V_DUT (Calculated)", 
+                    fontsize=12, fontweight='bold', pad=10)
+        ax.set_xlabel("Time (s)", fontsize=11)
+        ax.grid(True, alpha=0.3)
         
-        # Create Alignment tab with individual timing controls
-        self._create_alignment_tab()
+        # Create canvas
+        canvas = FigureCanvasTkAgg(fig, plot_frame)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
         
-        # Store axes references for compatibility
-        self.ax_voltage_breakdown = self.plot_lines['Overview']['axes']['voltage']
-        self.ax_current = self.plot_lines['Overview']['axes']['current']
-        self.ax_resistance = self.plot_lines['Overview']['axes']['resistance']
-        self.ax_power = self.plot_lines['Overview']['axes']['power']
+        # Create toolbar
+        toolbar = NavigationToolbar2Tk(canvas, plot_frame)
+        toolbar.update()
+        toolbar.pack(side="bottom", fill="x")
+        
+        # Store references
+        self.plot_lines['Main'] = {
+            'fig': fig,
+            'ax': ax,
+            'canvas': canvas,
+            'toolbar': toolbar,
+            'lines': {}
+        }
+        
+        # For compatibility with old code
+        self.ax_voltage_breakdown = ax
     
     def _create_overview_tab(self):
         """Create overview tab with all plots in 2x2 grid"""
@@ -760,6 +757,15 @@ class OscilloscopePulseLayout:
         control_panel = ttk.LabelFrame(tab_frame, text="Timing & Alignment Controls", padding=8)
         control_panel.pack(fill="x", padx=8, pady=5)
         
+        # Add help text
+        help_text = ("Alignment Tool: Use this to sync the programmed V_SMU pulse with the measured V_shunt waveform.\n"
+                    "• V_SMU (green dashed) = What you programmed the SMU to output (reconstructed from parameters)\n"
+                    "• V_shunt (red solid) = What the oscilloscope actually measured\n"
+                    "• Use 'Auto-Fit' to automatically detect and align the pulse, or manually adjust timing/offsets.")
+        help_label = tk.Label(control_panel, text=help_text, bg="#f0f0f0", fg="#555", 
+                             font=("Segoe UI", 8), justify="left", wraplength=700)
+        help_label.pack(fill="x", pady=(0, 10))
+        
         # Store offsets
         self.alignment_offset = 0.0
         self.zero_offset = 0.0
@@ -777,8 +783,11 @@ class OscilloscopePulseLayout:
             self.vars['zero_offset'] = tk.DoubleVar(value=0.0)
         
         # === TIMING CONTROLS SECTION ===
-        timing_frame = ttk.LabelFrame(control_panel, text="Individual Timing Controls", padding=10)
+        timing_frame = ttk.LabelFrame(control_panel, text="3️⃣ Fine-Tune: Individual Timing Controls", padding=10)
         timing_frame.pack(fill="x", pady=(0, 10))
+        
+        tk.Label(timing_frame, text="Adjust these to match the actual pulse timing if auto-fit doesn't work perfectly", 
+                bg="#f0f0f0", fg="#555", font=("Segoe UI", 7, "italic")).pack(fill="x", pady=(0, 5))
         
         timing_grid = ttk.Frame(timing_frame)
         timing_grid.pack(fill="x")
@@ -842,8 +851,11 @@ class OscilloscopePulseLayout:
         create_timing_control(timing_grid, "Post-Bias Time", "align_post_bias_time", 1.0, 0.0, 100.0)
         
         # === ALIGNMENT OFFSETS SECTION ===
-        offset_frame = ttk.LabelFrame(control_panel, text="Alignment Offsets", padding=8)
+        offset_frame = ttk.LabelFrame(control_panel, text="3️⃣ Fine-Tune: Alignment Offsets", padding=8)
         offset_frame.pack(fill="x", pady=(0, 8))
+        
+        tk.Label(offset_frame, text="Shift the V_SMU reference waveform to align with measured data", 
+                bg="#f0f0f0", fg="#555", font=("Segoe UI", 7, "italic")).pack(fill="x", pady=(0, 5))
         
         # Horizontal offset with slider
         h_row = ttk.Frame(offset_frame)
@@ -944,26 +956,33 @@ class OscilloscopePulseLayout:
         v_slider.configure(command=on_v_slider_change)
         
         # === BUTTONS SECTION ===
-        button_frame = ttk.Frame(control_panel)
+        button_frame = ttk.LabelFrame(control_panel, text="Alignment Workflow", padding=5)
         button_frame.pack(fill="x", pady=(4, 0))
         
-        # Row 1: Primary buttons
+        # Workflow instructions
+        workflow_text = "Step 1: Load Params → Step 2: Auto-Fit → Step 3: Fine-tune manually → Step 4: Apply"
+        tk.Label(button_frame, text=workflow_text, bg="#f0f0f0", fg="#1565c0", 
+                font=("Segoe UI", 8, "bold"), justify="center").pack(fill="x", pady=(0, 5))
+        
+        # Row 1: Primary buttons with tooltips
         btn_row1 = ttk.Frame(button_frame)
         btn_row1.pack(fill="x", pady=1)
         
-        auto_fit_btn = ttk.Button(
-            btn_row1,
-            text="🎯 Auto-Fit",
-            command=self._auto_fit_pulse
-        )
-        auto_fit_btn.pack(side="left", padx=2, fill="x", expand=True)
-        
         load_params_btn = ttk.Button(
             btn_row1,
-            text="📥 Load Params",
+            text="1️⃣ Load Params",
             command=self._load_timings_from_params
         )
         load_params_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(load_params_btn, "Load timing parameters from the Pulse Parameters tab")
+        
+        auto_fit_btn = ttk.Button(
+            btn_row1,
+            text="2️⃣ Auto-Fit",
+            command=self._auto_fit_pulse
+        )
+        auto_fit_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(auto_fit_btn, "Automatically detect pulse and align V_SMU to measured data")
         
         # Row 2: Secondary buttons
         btn_row2 = ttk.Frame(button_frame)
@@ -971,17 +990,19 @@ class OscilloscopePulseLayout:
         
         apply_btn = ttk.Button(
             btn_row2,
-            text="✓ Apply",
+            text="4️⃣ Apply Changes",
             command=self._apply_alignment
         )
         apply_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(apply_btn, "Apply alignment changes and recalculate all plots")
         
         reset_btn = ttk.Button(
             btn_row2,
-            text="↻ Reset",
+            text="↻ Reset All",
             command=self._reset_alignment
         )
         reset_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(reset_btn, "Reset all alignment settings to defaults")
         
         # === PLOT AREA ===
         fig = plt.Figure(figsize=(12, 5), dpi=100)
@@ -1035,7 +1056,7 @@ class OscilloscopePulseLayout:
         self._apply_alignment()
     
     def _auto_fit_pulse(self):
-        """Automatically fit the pulse to the measured signal"""
+        """Automatically fit the pulse to the measured signal using improved detection"""
         if not hasattr(self, 'plot_data') or 't' not in self.plot_data:
             return
         
@@ -1054,49 +1075,63 @@ class OscilloscopePulseLayout:
             bias_voltage = float(metadata.get('bias_voltage', 0.2))
             pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
         
+        # Apply current zero offset
         zero_offset = self.vars['zero_offset'].get()
         v_shunt = v_shunt_raw - zero_offset
         
-        expected_pulse_level = bias_voltage + pulse_voltage
-        transition_threshold = bias_voltage + (pulse_voltage * 0.5)
+        # First, auto-detect baseline offset (DC level adjustment)
+        baseline_len = max(10, len(v_shunt) // 10)
+        baseline = np.median(v_shunt[:baseline_len])
         
-        if pulse_voltage > 0:
-            rising_edges = np.where(v_shunt > transition_threshold)[0]
-            if len(rising_edges) > 0:
-                pulse_start_idx = rising_edges[0]
-                falling_edges = np.where((v_shunt[pulse_start_idx:] < transition_threshold))[0]
-                if len(falling_edges) > 0:
-                    pulse_end_idx = pulse_start_idx + falling_edges[0]
-                else:
-                    pulse_end_idx = pulse_start_idx + len(v_shunt) // 10
-            else:
-                return
-        else:
-            falling_edges = np.where(v_shunt < transition_threshold)[0]
-            if len(falling_edges) > 0:
-                pulse_start_idx = falling_edges[0]
-                rising_edges = np.where((v_shunt[pulse_start_idx:] > transition_threshold))[0]
-                if len(rising_edges) > 0:
-                    pulse_end_idx = pulse_start_idx + rising_edges[0]
-                else:
-                    pulse_end_idx = pulse_start_idx + len(v_shunt) // 10
-            else:
-                return
-        
-        detected_pulse_start = t[pulse_start_idx]
-        detected_pulse_duration = t[pulse_end_idx] - t[pulse_start_idx]
-        
-        self.vars['align_pulse_duration'].set(detected_pulse_duration)
-        
-        pre_bias_time = self.vars['align_pre_bias_time'].get()
-        expected_start = pre_bias_time
-        
-        offset = detected_pulse_start - expected_start
-        self.vars['pulse_alignment'].set(offset)
-        
-        baseline = np.median(v_shunt[:len(v_shunt)//10])
+        # Auto-adjust zero offset to center baseline
         v_offset = -baseline
         self.vars['zero_offset'].set(v_offset)
+        v_shunt = v_shunt_raw - v_offset  # Apply corrected offset
+        
+        # Use improved pulse detection
+        detected_start = self._detect_pulse_start_improved(t, v_shunt, bias_voltage, pulse_voltage)
+        
+        if detected_start is None:
+            print("Auto-fit: Could not detect pulse start")
+            return
+        
+        # Detect pulse end (find where signal returns below/above threshold)
+        pulse_amplitude = pulse_voltage - bias_voltage
+        threshold = baseline + (pulse_amplitude * 0.5)
+        
+        # Find pulse end
+        start_idx = np.where(t >= detected_start)[0]
+        if len(start_idx) == 0:
+            return
+        start_idx = start_idx[0]
+        
+        if pulse_amplitude > 0:
+            # Look for falling edge after start
+            end_candidates = np.where((t > detected_start) & (v_shunt < threshold))[0]
+        else:
+            # Look for rising edge after start
+            end_candidates = np.where((t > detected_start) & (v_shunt > threshold))[0]
+        
+        if len(end_candidates) > 0:
+            end_idx = end_candidates[0]
+            detected_duration = t[end_idx] - detected_start
+        else:
+            # Use GUI parameter as fallback
+            try:
+                detected_duration = float(self.vars['pulse_duration'].get())
+            except:
+                detected_duration = 0.001
+        
+        # Update alignment parameters
+        self.vars['align_pulse_duration'].set(detected_duration)
+        
+        # Calculate time offset needed
+        pre_bias_time = self.vars['align_pre_bias_time'].get()
+        expected_start = pre_bias_time
+        offset = detected_start - expected_start
+        self.vars['pulse_alignment'].set(offset)
+        
+        print(f"Auto-fit complete: pulse starts at {detected_start:.6f}s, duration {detected_duration:.6f}s, offset {offset:.6f}s")
         
         self._update_alignment_preview()
     
@@ -1122,18 +1157,10 @@ class OscilloscopePulseLayout:
             pulse_voltage = float(self.vars['pulse_voltage'].get())
             pulse_duration = self.vars['align_pulse_duration'].get()
             bias_voltage = float(self.vars['bias_voltage'].get())
-            pre_bias_hold = self.vars['align_pre_bias_hold'].get()
-            pre_delay = self.vars['align_pre_delay'].get()
-            post_delay = self.vars['align_post_delay'].get()
-            post_bias_hold = self.vars['align_post_bias_hold'].get()
         except:
             pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
             pulse_duration = float(metadata.get('pulse_duration', 0.001))
             bias_voltage = float(metadata.get('bias_voltage', 0.2))
-            pre_bias_hold = float(metadata.get('pre_bias_hold', 0.1))
-            pre_delay = float(metadata.get('params', {}).get('pre_pulse_delay', 0.1))
-            post_delay = float(metadata.get('params', {}).get('post_pulse_hold', 0.1))
-            post_bias_hold = float(metadata.get('post_bias_hold', 1.0))
         
         original_pulse_start = metadata.get('pulse_start_time', 0.0)
         if original_pulse_start is None:
@@ -1143,6 +1170,7 @@ class OscilloscopePulseLayout:
         pulse_start = original_pulse_start + preview_h_offset
         pulse_end = pulse_start + pulse_duration
         
+        # Build V_SMU preview as 0 V outside, bias_voltage (e.g. 0.2V) before/after, and pulse_voltage during pulse
         v_smu_preview = self._create_v_smu_waveform(
             t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
             pre_bias_time, post_bias_time
@@ -1182,34 +1210,49 @@ class OscilloscopePulseLayout:
     def _create_v_smu_waveform(self, t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
                                pre_bias_time, post_bias_time):
         """
-        Create V_SMU waveform from pulse parameters with pre/post bias times.
+        Create V_SMU waveform from pulse parameters.
         
-        Waveform shows: bias_voltage -> pulse_voltage -> bias_voltage
-        Example: 0.2V -> 1V -> 0.2V (where pulse_voltage is the absolute voltage during pulse)
+        V_SMU represents the PROGRAMMED voltage from the SMU (idealized reference).
+        This is NOT measured data - it's reconstructed from pulse parameters to show
+        what the SMU was commanded to output.
+        
+        Shape:
+            bias_voltage              for pre_bias_time before pulse_start
+            pulse_voltage (ABSOLUTE)  between pulse_start and pulse_end
+            bias_voltage              for post_bias_time after pulse_end
+            0 V                       outside these windows
+        
+        Args:
+            t: Time array
+            pulse_start: Start time of pulse
+            pulse_end: End time of pulse
+            bias_voltage: Bias level (e.g., 0.2V)
+            pulse_voltage: Pulse level ABSOLUTE (e.g., 2.0V, not +1.8V relative)
+            pre_bias_time: Duration of pre-bias
+            post_bias_time: Duration of post-bias
         """
         import numpy as np
         v_smu = np.zeros_like(t)
         
-        bias_start_time = max(0, pulse_start - pre_bias_time)
-        pulse_start_time = pulse_start
-        pulse_end_time = pulse_end
-        bias_after_pulse_end = pulse_end_time + post_bias_time
+        # Define windows
+        pre_start = max(0.0, pulse_start - pre_bias_time)
+        pre_end = pulse_start
+        post_start = pulse_end
+        post_end = pulse_end + post_bias_time
         
-        initial_mask = t < bias_start_time
-        v_smu[initial_mask] = 0.0
+        # Pre-bias window: bias_voltage
+        pre_mask = (t >= pre_start) & (t < pre_end)
+        v_smu[pre_mask] = bias_voltage
         
-        # Pre-bias: bias_voltage (e.g., 0.2V)
-        bias_before_mask = (t >= bias_start_time) & (t < pulse_start_time)
-        v_smu[bias_before_mask] = bias_voltage
+        # Pulse window: pulse_voltage (absolute level, not relative)
+        pulse_mask = (t >= pulse_start) & (t <= pulse_end)
+        v_smu[pulse_mask] = pulse_voltage
         
-        # Pulse: pulse_voltage (absolute voltage, e.g., 1V, not bias + pulse)
-        pulse_mask = (t >= pulse_start_time) & (t <= pulse_end_time)
-        v_smu[pulse_mask] = pulse_voltage  # Use absolute pulse voltage
+        # Post-bias window: bias_voltage again
+        post_mask = (t > post_start) & (t <= post_end)
+        v_smu[post_mask] = bias_voltage
         
-        # Post-bias: back to bias_voltage (e.g., 0.2V) and keep it there
-        bias_after_mask = t > pulse_end_time
-        v_smu[bias_after_mask] = bias_voltage
-        
+        # Outside these windows v_smu remains 0.0
         return v_smu
     
     def _apply_alignment(self):
@@ -1240,13 +1283,14 @@ class OscilloscopePulseLayout:
             pulse_duration = self.vars['align_pulse_duration'].get()
             bias_voltage = float(self.vars['bias_voltage'].get())
             pre_bias_time = self.vars['align_pre_bias_time'].get()
-            post_bias_time = self.vars['align_post_bias_time'].get()
+            # For 4200A we use the same hold on both sides; mirror pre-bias time
+            post_bias_time = pre_bias_time
         except:
             pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
             pulse_duration = float(metadata.get('pulse_duration', 0.001))
             bias_voltage = float(metadata.get('bias_voltage', 0.2))
             pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
-            post_bias_time = float(metadata.get('post_bias_time', 1.0))
+            post_bias_time = pre_bias_time
         
         original_pulse_start = metadata.get('pulse_start_time', 0.0)
         if original_pulse_start is None:
@@ -1255,6 +1299,7 @@ class OscilloscopePulseLayout:
         pulse_start = original_pulse_start + self.alignment_offset
         pulse_end = pulse_start + pulse_duration
         
+        # Build V_SMU as 0 V outside, bias_voltage before/after, and pulse_voltage during pulse
         v_smu = self._create_v_smu_waveform(
             t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
             pre_bias_time, post_bias_time
@@ -1283,6 +1328,62 @@ class OscilloscopePulseLayout:
         metadata['pulse_start_time'] = pulse_start
         
         self.update_plots(t, v_shunt, current, metadata)
+    
+    def _detect_pulse_start_improved(self, t, v_shunt, bias_voltage, pulse_voltage):
+        """
+        Improved pulse start detection using multiple methods.
+        
+        Args:
+            t: Time array
+            v_shunt: Measured voltage array (from oscilloscope)
+            bias_voltage: Expected bias voltage level
+            pulse_voltage: Expected pulse voltage level
+        
+        Returns:
+            Detected pulse start time, or None if detection fails
+        """
+        if len(t) < 10 or len(v_shunt) < 10:
+            return None
+        
+        import numpy as np
+        
+        # Calculate baseline from first 10% of data
+        baseline_len = max(10, len(v_shunt) // 10)
+        baseline = np.median(v_shunt[:baseline_len])
+        
+        # Calculate transition threshold (50% of expected pulse amplitude)
+        # Handle both positive and negative pulses
+        pulse_amplitude = pulse_voltage - bias_voltage
+        threshold = baseline + (pulse_amplitude * 0.5)
+        
+        # Method 1: Threshold crossing
+        if pulse_amplitude > 0:
+            # Positive pulse - look for rising edge
+            crossings = np.where(v_shunt > threshold)[0]
+        else:
+            # Negative pulse - look for falling edge
+            crossings = np.where(v_shunt < threshold)[0]
+        
+        if len(crossings) > 0:
+            pulse_start_idx = crossings[0]
+            return t[pulse_start_idx]
+        
+        # Method 2: Maximum derivative (rapid change)
+        dv = np.diff(v_shunt)
+        if pulse_amplitude > 0:
+            # Look for maximum positive derivative
+            rapid_change_idx = np.argmax(dv)
+        else:
+            # Look for maximum negative derivative
+            rapid_change_idx = np.argmin(dv)
+        
+        if rapid_change_idx > 0 and rapid_change_idx < len(t) - 1:
+            # Verify this is a significant change (not noise)
+            if abs(dv[rapid_change_idx]) > abs(pulse_amplitude) * 0.1:
+                return t[rapid_change_idx]
+        
+        # Detection failed
+        return None
     
     def _calculate_shunt(self):
         """Calculate recommended shunt resistor values based on device parameters"""
@@ -1479,56 +1580,58 @@ class OscilloscopePulseLayout:
             ToolTip(widget, ToolTipText)
     
     def reset_plots(self):
-        """Reset all plots to empty state"""
-        if not hasattr(self, 'plot_lines'):
+        """Reset plot to empty state"""
+        if not hasattr(self, 'plot_lines') or 'Main' not in self.plot_lines:
             return
         
-        for tab_name, plot_info in self.plot_lines.items():
-            if tab_name == "Overview":
-                # Clear all axes in overview
-                for ax in plot_info['axes'].values():
-                    ax.clear()
-                    ax.set_xlabel("Time (s)")
-                    ax.grid(True, alpha=0.3)
-                # Re-add titles
-                plot_info['axes']['voltage'].set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=11, fontweight='bold')
-                plot_info['axes']['voltage'].set_ylabel("Voltage (V)")
-                plot_info['axes']['current'].set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=11, fontweight='bold')
-                plot_info['axes']['current'].set_ylabel("Current (A)")
-                plot_info['axes']['resistance'].set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=11, fontweight='bold')
-                plot_info['axes']['resistance'].set_ylabel("Resistance (Ω)")
-                plot_info['axes']['power'].set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=11, fontweight='bold')
-                plot_info['axes']['power'].set_ylabel("Power (W)")
-            else:
-                # Individual tabs
-                plot_info['ax'].clear()
-                plot_info['lines'].clear()
-                # Re-add title and labels
-                if tab_name == "Voltage Breakdown":
-                    plot_info['ax'].set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=12, fontweight='bold')
-                    plot_info['ax'].set_ylabel("Voltage (V)")
-                elif tab_name == "Current":
-                    plot_info['ax'].set_title("Current Through Circuit (I = V_shunt / R_shunt)", fontsize=12, fontweight='bold')
-                    plot_info['ax'].set_ylabel("Current (A)")
-                elif tab_name == "Resistance":
-                    plot_info['ax'].set_title("Memristor Resistance: R = (V_SMU - V_shunt) / I", fontsize=12, fontweight='bold')
-                    plot_info['ax'].set_ylabel("Resistance (Ω)")
-                elif tab_name == "Power":
-                    plot_info['ax'].set_title("Power Dissipation in Memristor: P = V_memristor × I", fontsize=12, fontweight='bold')
-                    plot_info['ax'].set_ylabel("Power (W)")
-                plot_info['ax'].set_xlabel("Time (s)")
-                plot_info['ax'].grid(True, alpha=0.3)
-            
-            plot_info['canvas'].draw()
+        plot_info = self.plot_lines['Main']
+        ax = plot_info['ax']
+        ax.clear()
+        ax.set_xlabel("Time (s)", fontsize=11)
+        ax.set_ylabel("Voltage (V)", fontweight='bold', fontsize=12)
+        ax.set_title("Voltage Overlay: V_SMU (Programmed) vs V_shunt (Measured) vs V_DUT (Calculated)", 
+                    fontsize=12, fontweight='bold', pad=10)
+        ax.grid(True, alpha=0.3)
+        plot_info['canvas'].draw()
         
     def update_plots(self, t, v, i, metadata=None):
         """Update plots with new data - works with tabbed interface
         
+        MEASUREMENT MODEL EXPLANATION:
+        ===============================
+        In this setup, we measure V_shunt across a series shunt resistor using the oscilloscope.
+        The SMU applies a programmed pulse V_SMU, which gets divided between the device and shunt.
+        
+        Circuit: [SMU+] → [Device] → [Shunt R] → [SMU-]
+                                         ↓
+                                    [Scope CH1]
+        
+        What we MEASURE:
+            • V_shunt = Voltage across shunt resistor (measured by oscilloscope)
+        
+        What we CALCULATE:
+            • I = V_shunt / R_shunt (current through circuit - Ohm's law)
+            • V_DUT = V_SMU - V_shunt (voltage across device - Kirchhoff's voltage law)
+            • R_DUT = V_DUT / I (device resistance - Ohm's law)
+            • P_DUT = V_DUT × I (power dissipated in device)
+        
+        What is V_SMU?
+            • V_SMU is the PROGRAMMED voltage from the SMU (what we commanded it to output)
+            • It is RECONSTRUCTED from pulse parameters (pulse_voltage, bias_voltage, timing)
+            • It is NOT directly measured - we only have one scope channel measuring V_shunt
+            • It represents an IDEALIZED reference waveform for comparison
+            • In reality, the SMU output may have rise times, overshoot, etc.
+        
+        Alignment:
+            • The pulse start time is auto-detected from the measured V_shunt waveform
+            • V_SMU is then drawn starting at this detected time for alignment
+            • Use the Alignment tab to manually adjust if auto-detection fails
+        
         Args:
-            t: Time array
+            t: Time array (from oscilloscope)
             v: Voltage array (V_shunt from oscilloscope)
-            i: Current array (calculated from V_shunt / R_shunt)
-            metadata: Dictionary containing 'pulse_voltage' and 'shunt_resistance'
+            i: Current array (pre-calculated as V_shunt / R_shunt)
+            metadata: Dictionary containing pulse parameters and measurement info
         """
         if not hasattr(self, 'plot_lines'):
             return
@@ -1537,97 +1640,148 @@ class OscilloscopePulseLayout:
         if metadata is None:
             metadata = {}
 
-        # Normalize time to start at 0s (scope already returns time in seconds)
+        # Normalize time to start at 0s
         if t is not None and len(t) > 0:
             t = t - t[0]
         
+        # ---- Extract pulse parameters from metadata ----
         pulse_voltage = metadata.get('pulse_voltage', 1.0)
         pulse_duration = metadata.get('pulse_duration', 0.001)
+        bias_voltage = float(metadata.get('bias_voltage', 0.2))
+        pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
+        post_bias_time = float(metadata.get('post_bias_time', 0.1))
         
+        # If original params dict is present, prefer those (they come directly from the GUI)
         if 'params' in metadata:
             params = metadata['params']
-            pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
-            pulse_duration = float(params.get('pulse_duration', pulse_duration))
+            try:
+                pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
+            except (TypeError, ValueError):
+                pass
+            try:
+                pulse_duration = float(params.get('pulse_duration', pulse_duration))
+            except (TypeError, ValueError):
+                pass
+            try:
+                bias_voltage = float(params.get('bias_voltage', bias_voltage))
+            except (TypeError, ValueError):
+                pass
+            try:
+                pre_bias_time = float(params.get('pre_bias_time', pre_bias_time))
+            except (TypeError, ValueError):
+                pass
+            try:
+                post_bias_time = float(params.get('post_bias_time', post_bias_time))
+            except (TypeError, ValueError):
+                pass
         
-        shunt_r = metadata.get('shunt_resistance', 50.0)
+        # ---- Detect pulse start from measured waveform ----
+        # This is where we detect the ACTUAL pulse start in the measured data
+        detected_start = self._detect_pulse_start_improved(t, v, bias_voltage, pulse_voltage)
+        if detected_start is None:
+            # Fallback: use pre_bias_time as expected start
+            detected_start = pre_bias_time
         
-        # Calculate derived quantities
+        # Store detected start for alignment tools
+        metadata['pulse_start_time'] = detected_start
+        
+        pulse_start = detected_start
+        pulse_end = pulse_start + pulse_duration
+        
         v_shunt = v
-        
-        # Detect pulse start from v_shunt signal (works with normalized time)
-        if len(t) > 0 and len(v_shunt) > 10:
-            v_max = np.max(np.abs(v_shunt))
-            threshold = max(v_max * 0.1, 0.01)  # 10% of max or 10mV minimum
-            
-            if pulse_voltage > 0:
-                pulse_indices = np.where(v_shunt > threshold)[0]
-            else:
-                pulse_indices = np.where(v_shunt < -threshold)[0]
-            
-            if len(pulse_indices) > 0:
-                pulse_start_idx = pulse_indices[0]
-                pulse_start = t[pulse_start_idx]
-            else:
-                # Fallback: use metadata pulse_start_time (already relative to normalized time)
-                pulse_start_time_abs = metadata.get('pulse_start_time', 0.0)
-                # After normalization, pulse_start_time needs to be relative to original t[0]
-                # Since we don't have original t[0], try to find it from the first significant signal
-                pulse_start = max(0.0, t[0] if len(t) > 0 else 0.0)
-            
-            pulse_end = pulse_start + pulse_duration
-            
-            # Get all pulse parameters from metadata or vars to create proper V_SMU waveform
-            bias_voltage = float(metadata.get('bias_voltage', 0.2))
-            if 'params' in metadata:
-                pre_bias_time = float(metadata['params'].get('pre_bias_time', metadata.get('pre_bias_time', 0.1)))
-                post_bias_time = float(metadata['params'].get('post_bias_time', metadata.get('post_bias_time', 1.0)))
-            else:
-                pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
-                post_bias_time = float(metadata.get('post_bias_time', 1.0))
-            
-            # Create proper V_SMU waveform with all timing parameters
-            v_smu = self._create_v_smu_waveform(
-                t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
-                pre_bias_time, post_bias_time
-            )
-        else:
-            # Fallback: create simple waveform
-            bias_voltage = float(metadata.get('bias_voltage', 0.2))
-            pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
-            post_bias_time = float(metadata.get('post_bias_time', 1.0))
-            
-            pulse_start = 0.0
-            pulse_end = pulse_duration
-            v_smu = self._create_v_smu_waveform(
-                t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
-                pre_bias_time, post_bias_time
-            ) if len(v_shunt) > 0 else np.array([])
+        v_smu = self._create_v_smu_waveform(
+            t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
+            pre_bias_time, post_bias_time
+        ) if len(v_shunt) > 0 else np.array([])
         
         # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
-        v_memristor = np.maximum(v_smu - v_shunt, 0.0)  # Ensure non-negative
+        # Note: Can be negative for negative pulses - this is correct!
+        v_memristor = v_smu - v_shunt
         
         # R_memristor = V_memristor / I (Ohm's law)
+        # Note: Resistance magnitude should be positive, but sign indicates current direction
         with np.errstate(divide='ignore', invalid='ignore'):
             r_memristor = np.divide(v_memristor, i, out=np.full_like(v_memristor, np.nan), where=i!=0)
             r_memristor = np.where(np.isfinite(r_memristor) & (r_memristor < 1e12), r_memristor, np.nan)
         
-        # P_memristor = V_memristor × I (always positive)
-        p_memristor = np.maximum(v_memristor * i, 0.0)
+        # P_memristor = V_memristor × I 
+        # For resistive devices: power dissipation is positive when V and I have same sign
+        # Negative power would indicate measurement/calculation issue
+        p_memristor = v_memristor * i
         
-        # Store data for line visibility toggles
+        # Store data for line visibility toggles and calculations
         self.plot_data = {
             't': t, 'v_smu': v_smu, 'v_shunt': v_shunt, 'v_memristor': v_memristor,
-            'i': i, 'r_memristor': r_memristor, 'p_memristor': p_memristor
+            'i': i, 'r_memristor': r_memristor, 'p_memristor': p_memristor,
+            'metadata': metadata
         }
         
-        # Update overview tab (all plots)
-        self._update_overview_tab()
+        # Update main voltage overlay plot
+        self._update_main_plot()
+    
+    def _update_main_plot(self):
+        """Update main voltage overlay plot with clear annotations"""
+        if 'Main' not in self.plot_lines:
+            return
         
-        # Update individual tabs
-        self._update_voltage_tab()
-        self._update_current_tab()
-        self._update_resistance_tab()
-        self._update_power_tab()
+        plot_info = self.plot_lines['Main']
+        ax = plot_info['ax']
+        
+        t = self.plot_data['t']
+        v_smu = self.plot_data['v_smu']
+        v_shunt = self.plot_data['v_shunt']
+        v_memristor = self.plot_data['v_memristor']
+        
+        # Clear plot
+        ax.clear()
+        
+        # Plot all three traces
+        line1 = ax.plot(t, v_smu, 'g--', label='V_SMU (Programmed)', linewidth=2.5, alpha=0.7)[0]
+        line2 = ax.plot(t, v_shunt, 'b-', label='V_shunt (Measured from Scope)', linewidth=2, alpha=0.9)[0]
+        line3 = ax.plot(t, v_memristor, 'r-', label='V_DUT (Across Device)', linewidth=2, alpha=0.8)[0]
+        
+        # Store line references
+        plot_info['lines'] = {
+            'V_SMU': line1,
+            'V_shunt': line2,
+            'V_DUT': line3
+        }
+        
+        # Styling
+        ax.set_ylabel("Voltage (V)", fontweight='bold', fontsize=12)
+        ax.set_title("Voltage Overlay: Compare Programmed vs Measured vs Calculated", 
+                    fontsize=12, fontweight='bold', pad=10)
+        ax.set_xlabel("Time (s)", fontsize=11)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.legend(loc='best', fontsize=10, framealpha=0.9)
+        
+        # Add helpful annotation
+        if len(t) > 0 and len(v_smu) > 0:
+            max_v = max(np.max(v_smu) if len(v_smu) > 0 else 0,
+                       np.max(v_shunt) if len(v_shunt) > 0 else 0)
+            if max_v > 0:
+                ax.text(0.5, 0.98, 
+                       'V_SMU (green dashed) = Programmed reference | V_shunt (blue) = Raw scope data | V_DUT (red) = V_SMU - V_shunt', 
+                       transform=ax.transAxes,
+                       fontsize=8, style='italic', ha='center', va='top',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
+        
+        # Calculate and display key metrics
+        shunt_r = self.plot_data.get('metadata', {}).get('shunt_resistance', 100000.0)
+        i = self.plot_data['i']
+        
+        if len(i) > 0:
+            peak_current = np.nanmax(np.abs(i))
+            mean_current = np.nanmean(np.abs(i[i != 0])) if np.any(i != 0) else 0.0
+            
+            metrics_text = f"Peak I: {peak_current*1e6:.2f} µA | Mean I: {mean_current*1e6:.2f} µA | R_shunt: {shunt_r/1e3:.1f} kΩ"
+            ax.text(0.02, 0.02, metrics_text,
+                   transform=ax.transAxes,
+                   fontsize=9, ha='left', va='bottom',
+                   bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8))
+        
+        plot_info['fig'].tight_layout()
+        plot_info['canvas'].draw()
     
     def _update_overview_tab(self):
         """Update overview tab with all plots"""
@@ -1649,15 +1803,28 @@ class OscilloscopePulseLayout:
         for ax in axes.values():
             ax.clear()
         
-        # Plot 1: Voltage Breakdown
-        axes['voltage'].plot(t, v_smu, 'g-', label='V_SMU (Applied)', linewidth=2, alpha=0.7)
-        axes['voltage'].plot(t, v_shunt, 'b-', label='V_shunt (Measured)', linewidth=2)
-        axes['voltage'].plot(t, v_memristor, 'r-', label='V_memristor (Calculated)', linewidth=2)
-        axes['voltage'].set_ylabel("Voltage (V)")
-        axes['voltage'].set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=11, fontweight='bold')
+        # Plot 1: Voltage Breakdown with clear annotations
+        axes['voltage'].plot(t, v_smu, 'g--', label='V_SMU (Programmed Reference)', linewidth=2.5, alpha=0.7)
+        axes['voltage'].plot(t, v_shunt, 'b-', label='V_shunt (Measured from Scope)', linewidth=2, alpha=0.9)
+        axes['voltage'].plot(t, v_memristor, 'r-', label='V_DUT (Across Device)', linewidth=2, alpha=0.8)
+        axes['voltage'].set_ylabel("Voltage (V)", fontweight='bold')
+        axes['voltage'].set_title("Voltage Distribution\nV_SMU (dashed) = Programmed | V_shunt (blue) = Measured | V_DUT (red) = Calculated", 
+                                  fontsize=10, fontweight='bold')
         axes['voltage'].set_xlabel("Time (s)")
         axes['voltage'].grid(True, alpha=0.3)
         axes['voltage'].legend(loc='best', fontsize=8)
+        
+        # Add annotation explaining V_SMU
+        if len(t) > 0:
+            # Find a good spot for annotation (middle of plot)
+            mid_t = t[len(t) // 2]
+            max_v = max(np.max(v_smu) if len(v_smu) > 0 else 0, 
+                       np.max(v_shunt) if len(v_shunt) > 0 else 0)
+            if max_v > 0:
+                axes['voltage'].text(mid_t, max_v * 0.95, 
+                                    'Note: V_SMU is reconstructed from parameters (not measured)', 
+                                    fontsize=7, style='italic', ha='center',
+                                    bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
         
         # Plot 2: Current
         axes['current'].plot(t, i, 'r-', linewidth=2, label='Current')
@@ -1761,24 +1928,34 @@ class OscilloscopePulseLayout:
         v_memristor = self.plot_data['v_memristor']
         
         # Plot lines and store references
-        line1 = ax.plot(t, v_smu, 'g-', label='V_SMU (Applied)', linewidth=2, alpha=0.7)[0]
-        line2 = ax.plot(t, v_shunt, 'b-', label='V_shunt (Measured)', linewidth=2)[0]
-        line3 = ax.plot(t, v_memristor, 'r-', label='V_memristor (Calculated)', linewidth=2)[0]
+        line1 = ax.plot(t, v_smu, 'g--', label='V_SMU (Programmed Reference)', linewidth=2.5, alpha=0.7)[0]
+        line2 = ax.plot(t, v_shunt, 'b-', label='V_shunt (Measured from Scope)', linewidth=2, alpha=0.9)[0]
+        line3 = ax.plot(t, v_memristor, 'r-', label='V_DUT (Across Device)', linewidth=2, alpha=0.8)[0]
         
         plot_info['lines'] = {
             'V_SMU': line1,
             'V_shunt': line2,
-            'V_memristor': line3
+            'V_DUT': line3
         }
         
-        ax.set_ylabel("Voltage (V)")
-        ax.set_title("Voltage Distribution: SMU, Shunt, and Memristor", fontsize=12, fontweight='bold')
+        ax.set_ylabel("Voltage (V)", fontweight='bold')
+        ax.set_title("Voltage Distribution\nV_SMU (dashed green) = Programmed Pulse | V_shunt (blue) = Measured Scope | V_DUT (red) = Across Device", 
+                    fontsize=11, fontweight='bold')
         ax.set_xlabel("Time (s)")
         ax.grid(True, alpha=0.3)
         ax.legend(loc='best', fontsize=9)
         
+        # Add explanatory note
+        if len(t) > 0 and len(v_smu) > 0:
+            max_v = max(np.max(v_smu), np.max(v_shunt) if len(v_shunt) > 0 else 0)
+            if max_v > 0:
+                ax.text(t[len(t)//2], max_v * 0.95, 
+                       'V_SMU is reconstructed from pulse parameters (idealized reference)', 
+                       fontsize=8, style='italic', ha='center',
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.3))
+        
         # Add checkboxes for line visibility
-        self._add_line_visibility_controls('Voltage Breakdown', ['V_SMU', 'V_shunt', 'V_memristor'])
+        self._add_line_visibility_controls('Voltage Breakdown', ['V_SMU', 'V_shunt', 'V_DUT'])
         
         plot_info['canvas'].draw()
     

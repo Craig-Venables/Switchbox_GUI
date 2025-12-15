@@ -1,4 +1,5 @@
 opencv-python>=4.5.0
 flask>=2.0.0
 numpy>=1.19.0
+pylablib>=1.4.3
 
