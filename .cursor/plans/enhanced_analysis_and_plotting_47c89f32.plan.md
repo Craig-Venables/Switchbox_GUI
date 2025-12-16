@@ -957,8 +957,8 @@ test_A_2,5.0e+03,5.5e+03,1.1,12.5,ohmic,False
 
 - **Type**: Dual scatter plots
 - **Plots**: 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                - Power consumption vs memristivity score
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                - Energy per switch distribution (box plot by device type)
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                - Power consumption vs memristivity score
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                - Energy per switch distribution (box plot by device type)
 - **Features**: Efficiency frontier highlighting
 
 ### Plot 10: Device Leaderboard
@@ -1056,104 +1056,104 @@ test_A_2,5.0e+03,5.5e+03,1.1,12.5,ohmic,False
 
 1. **Conditional Analysis Logic** ✅
 
-            - `_run_analysis_if_enabled()` modified with conditional logic (lines 775-996 in main.py)
-            - Skips analysis for sweeps 2+ if device is not memristive
-            - Returns memristive flag after first sweep
+                                                - `_run_analysis_if_enabled()` modified with conditional logic (lines 775-996 in main.py)
+                                                - Skips analysis for sweeps 2+ if device is not memristive
+                                                - Returns memristive flag after first sweep
 
 2. **Custom Measurement Tracking** ✅
 
-            - `run_custom_measurement()` tracks `device_is_memristive` flag (line 5767)
-            - Collects `sequence_analysis_results` across all sweeps (lines 6260-6307)
-            - Updates memristive flag after first sweep analysis (lines 6254-6257)
+                                                - `run_custom_measurement()` tracks `device_is_memristive` flag (line 5767)
+                                                - Collects `sequence_analysis_results` across all sweeps (lines 6260-6307)
+                                                - Updates memristive flag after first sweep analysis (lines 6254-6257)
 
 3. **Live Classification Display** ✅
 
-            - `_update_live_classification_display()` method implemented (lines 706-744)
-            - Called during custom measurements (lines 6290-6294)
-            - Shows: "Sweep X/Y: DeviceType (Score: Z.Z/100)"
+                                                - `_update_live_classification_display()` method implemented (lines 706-744)
+                                                - Called during custom measurements (lines 6290-6294)
+                                                - Shows: "Sweep X/Y: DeviceType (Score: Z.Z/100)"
 
 4. **Notification Placeholder** ✅
 
-            - `_send_classification_notification()` placeholder method exists (lines 746-751)
-            - Ready for future integration (Telegram/Email/Webhook)
+                                                - `_send_classification_notification()` placeholder method exists (lines 746-751)
+                                                - Ready for future integration (Telegram/Email/Webhook)
 
 5. **Sequence Summary Generator** ✅
 
-            - `_generate_sequence_summary()` fully implemented (lines 1464-1497)
-            - Generates text and JSON summary files
-            - Calculates overall score, best/worst sweeps, forming detection
-            - Called after custom measurement completion (lines 6392-6399)
+                                                - `_generate_sequence_summary()` fully implemented (lines 1464-1497)
+                                                - Generates text and JSON summary files
+                                                - Calculates overall score, best/worst sweeps, forming detection
+                                                - Called after custom measurement completion (lines 6392-6399)
 
 #### Part 2: Sample Analysis System
 
 6. **Sample Analysis Orchestrator** ✅
 
-            - `SampleAnalysisOrchestrator` class fully implemented (`Helpers/Sample_Analysis/sample_analyzer.py`)
-            - `load_all_devices()` method loads tracking data
-            - Supports code_name filtering for measurement-specific analysis
+                                                - `SampleAnalysisOrchestrator` class fully implemented (`Helpers/Sample_Analysis/sample_analyzer.py`)
+                                                - `load_all_devices()` method loads tracking data
+                                                - Supports code_name filtering for measurement-specific analysis
 
 7. **All 12 Plot Types** ✅
 
-            - Plot 1: Memristivity Score Heatmap (lines 288-370)
-            - Plot 2: Conduction Mechanism Distribution (lines 403-449)
-            - Plot 3: Memory Window Quality Distribution (lines 466-536)
-            - Plot 4: Hysteresis Shape Radar (lines 568-632)
-            - Plot 5: Enhanced Classification Scatter (lines 635-712)
-            - Plot 6: Forming Progress Tracking (lines 739-795)
-            - Plot 7: Warning Flag Summary (lines 798-849)
-            - Plot 8: Research Diagnostics Scatter Matrix (lines 851-901)
-            - Plot 9: Power & Energy Efficiency (lines 903-962)
-            - Plot 10: Device Leaderboard (lines 987-1070)
-            - Plot 11: Spatial Distribution Maps (lines 1108-1243)
-            - Plot 12: Forming Status Distribution (lines 1245-1312)
+                                                - Plot 1: Memristivity Score Heatmap (lines 288-370)
+                                                - Plot 2: Conduction Mechanism Distribution (lines 403-449)
+                                                - Plot 3: Memory Window Quality Distribution (lines 466-536)
+                                                - Plot 4: Hysteresis Shape Radar (lines 568-632)
+                                                - Plot 5: Enhanced Classification Scatter (lines 635-712)
+                                                - Plot 6: Forming Progress Tracking (lines 739-795)
+                                                - Plot 7: Warning Flag Summary (lines 798-849)
+                                                - Plot 8: Research Diagnostics Scatter Matrix (lines 851-901)
+                                                - Plot 9: Power & Energy Efficiency (lines 903-962)
+                                                - Plot 10: Device Leaderboard (lines 987-1070)
+                                                - Plot 11: Spatial Distribution Maps (lines 1108-1243)
+                                                - Plot 12: Forming Status Distribution (lines 1245-1312)
 
 8. **Origin Data Export** ✅
 
-            - All export methods implemented:
-                    - `_export_device_summary_csv()` (lines 1356-1379)
-                    - `_export_memristivity_heatmap_data()` (lines 371-401)
-                    - `_export_conduction_mechanism_data()` (lines 450-464)
-                    - `_export_memory_window_data()` (lines 537-566)
-                    - `_export_classification_scatter_data()` (lines 714-737)
-                    - `_export_power_efficiency_data()` (lines 964-985)
-                    - `_export_leaderboard_data()` (lines 1072-1106)
-                    - `_export_spatial_data()` (lines 1203-1243)
-                    - `_export_forming_status_data()` (lines 1314-1339)
-            - `_create_origin_readme()` generates import instructions (lines 1381+)
+                                                - All export methods implemented:
+                                                                                - `_export_device_summary_csv()` (lines 1356-1379)
+                                                                                - `_export_memristivity_heatmap_data()` (lines 371-401)
+                                                                                - `_export_conduction_mechanism_data()` (lines 450-464)
+                                                                                - `_export_memory_window_data()` (lines 537-566)
+                                                                                - `_export_classification_scatter_data()` (lines 714-737)
+                                                                                - `_export_power_efficiency_data()` (lines 964-985)
+                                                                                - `_export_leaderboard_data()` (lines 1072-1106)
+                                                                                - `_export_spatial_data()` (lines 1203-1243)
+                                                                                - `_export_forming_status_data()` (lines 1314-1339)
+                                                - `_create_origin_readme()` generates import instructions (lines 1381+)
 
 9. **GUI Integration** ✅
 
-            - Graphing tab added to GUI (`gui/measurement_gui/layout_builder.py`, lines 2321+)
-            - `run_full_sample_analysis()` method implemented (lines 2321-2420 in main.py)
-            - Supports folder browsing for retroactive analysis
-            - Status updates during analysis
+                                                - Graphing tab added to GUI (`gui/measurement_gui/layout_builder.py`, lines 2321+)
+                                                - `run_full_sample_analysis()` method implemented (lines 2321-2420 in main.py)
+                                                - Supports folder browsing for retroactive analysis
+                                                - Status updates during analysis
 
 ### ⚠️ POTENTIALLY MISSING / NEEDS VERIFICATION
 
 1. **Full System Testing** ⚠️
 
-            - Status: `pending` in todos
-            - Need to verify end-to-end: custom measurement → sample analysis → Origin export
-            - Should test with real data to ensure all plots generate correctly
+                                                - Status: `pending` in todos
+                                                - Need to verify end-to-end: custom measurement → sample analysis → Origin export
+                                                - Should test with real data to ensure all plots generate correctly
 
 2. **Plot Data Requirements** ⚠️
 
-            - Some plots require specific data:
-                    - Plot 4 (Hysteresis Radar): Requires research data with hysteresis_shape
-                    - Plot 6 (Forming Progress): Requires `all_measurements` in device data
-                    - Plot 8 (Research Diagnostics): Requires research data
-                    - Plot 9 (Power Efficiency): Requires research data
-            - Need to verify these data structures are populated correctly
+                                                - Some plots require specific data:
+                                                                                - Plot 4 (Hysteresis Radar): Requires research data with hysteresis_shape
+                                                                                - Plot 6 (Forming Progress): Requires `all_measurements` in device data
+                                                                                - Plot 8 (Research Diagnostics): Requires research data
+                                                                                - Plot 9 (Power Efficiency): Requires research data
+                                                - Need to verify these data structures are populated correctly
 
 3. **Error Handling** ⚠️
 
-            - Plots have try-except blocks, but need verification that errors are handled gracefully
-            - Should test with incomplete/missing data scenarios
+                                                - Plots have try-except blocks, but need verification that errors are handled gracefully
+                                                - Should test with incomplete/missing data scenarios
 
 4. **Performance Testing** ⚠️
 
-            - Need to verify performance with 100+ device samples
-            - Plot generation time for large datasets
+                                                - Need to verify performance with 100+ device samples
+                                                - Plot generation time for large datasets
 
 ### 📝 NOTES
 
@@ -1166,20 +1166,20 @@ test_A_2,5.0e+03,5.5e+03,1.1,12.5,ohmic,False
 
 1. **Run Full System Test**:
 
-            - Execute custom measurement on a test device
-            - Verify sequence summary generation
-            - Run sample analysis on a small sample (5-10 devices)
-            - Verify all 12 plots generate
-            - Test Origin CSV import
+                                                - Execute custom measurement on a test device
+                                                - Verify sequence summary generation
+                                                - Run sample analysis on a small sample (5-10 devices)
+                                                - Verify all 12 plots generate
+                                                - Test Origin CSV import
 
 2. **Data Validation**:
 
-            - Verify `all_measurements` array is populated in device tracking
-            - Verify research data structure matches plot expectations
-            - Check that device_summaries/ folder structure is correct
+                                                - Verify `all_measurements` array is populated in device tracking
+                                                - Verify research data structure matches plot expectations
+                                                - Check that device_summaries/ folder structure is correct
 
 3. **Documentation**:
 
-            - Update user documentation with new features
-            - Add examples of generated plots
-            - Document Origin import process
+                                                - Update user documentation with new features
+                                                - Add examples of generated plots
+                                                - Document Origin import process
