@@ -789,7 +789,7 @@ class MeasurementGUI:
         
         This method checks if analysis is enabled, runs quick_analyze() on the
         measurement data, updates the stats window/panel, and saves results to
-        a "sweep_analysis" subfolder.
+        the unified analysis folder at {sample}/analysis/sweeps/{device_id}/.
         
         For custom sequences:
         - Sweep 1: Always analyze to determine if memristive
@@ -884,7 +884,7 @@ class MeasurementGUI:
             # === PHASE 2: Build device tracking info ===
             device_id = None
             cycle_number = None
-            sample_save_dir = save_dir  # Default to device-level for sweep_analysis
+            sample_save_dir = save_dir  # Will be updated to sample-level for unified analysis folder
             
             if hasattr(self, 'sample_name_var') and hasattr(self, 'final_device_letter') and hasattr(self, 'final_device_number'):
                 # Create unique device ID: sample_letter_number (e.g., "MyChip_A_1")
@@ -1034,14 +1034,16 @@ class MeasurementGUI:
         analysis_level: str
     ) -> None:
         """
-        Save analysis results to a formatted text file in the sweep_analysis subfolder.
+        Save analysis results to a formatted text file in the unified analysis folder.
+        
+        Saves to: {sample}/analysis/sweeps/{device_id}/{file_name}_analysis.txt
         
         Parameters:
         -----------
         analysis_data : dict
             Analysis results from quick_analyze()
         save_dir : str
-            Base save directory for measurements
+            Base save directory for measurements (device-level)
         file_name : str
             Base filename (without extension)
         analysis_level : str
@@ -1051,12 +1053,54 @@ class MeasurementGUI:
             import os
             from datetime import datetime
             
-            # Create sweep_analysis subfolder
-            analysis_dir = os.path.join(save_dir, "sweep_analysis")
-            os.makedirs(analysis_dir, exist_ok=True)
+            # Get device_id - prefer from analysis data, fallback to construction
+            device_id = None
+            device_info = analysis_data.get('device_info', {})
+            
+            # Try to get from device_info first
+            if device_info.get('name'):
+                device_id = device_info['name']
+            else:
+                # Try metadata
+                metadata = device_info.get('metadata', {})
+                if metadata.get('device_name'):
+                    device_id = metadata['device_name']
+            
+            # If still no device_id, construct from GUI vars (same logic as tracking)
+            if not device_id:
+                if hasattr(self, 'sample_name_var') and hasattr(self, 'final_device_letter') and hasattr(self, 'final_device_number'):
+                    sample_name = self.sample_name_var.get()
+                    device_letter = getattr(self, 'final_device_letter', '')
+                    device_number = getattr(self, 'final_device_number', '')
+                    if sample_name and device_letter and device_number:
+                        device_id = f"{sample_name}_{device_letter}_{device_number}"
+            
+            # Last resort: extract from save_dir path
+            if not device_id:
+                path_parts = os.path.normpath(save_dir).split(os.sep)
+                if len(path_parts) >= 3:
+                    # save_dir is: {sample}/{section}/{device}
+                    device_id = f"{path_parts[-3]}_{path_parts[-2]}_{path_parts[-1]}"
+                else:
+                    device_id = "unknown_device"
+            
+            # Get sample-level directory (same logic as device tracking)
+            sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
+            if not sample_name:
+                # Extract from path if needed
+                path_parts = os.path.normpath(save_dir).split(os.sep)
+                if len(path_parts) >= 3:
+                    sample_name = path_parts[-3]
+            
+            sample_save_dir = self._get_sample_save_directory(sample_name) if sample_name else save_dir
+            
+            # Create unified analysis/sweeps folder structure
+            # {sample}/analysis/sweeps/{device_id}/
+            analysis_base_dir = os.path.join(sample_save_dir, "analysis", "sweeps", device_id)
+            os.makedirs(analysis_base_dir, exist_ok=True)
             
             # Create output filename
-            analysis_file = os.path.join(analysis_dir, f"{file_name}_analysis.txt")
+            analysis_file = os.path.join(analysis_base_dir, f"{file_name}_analysis.txt")
             
             # Format analysis results as readable text
             lines = []
@@ -1555,7 +1599,9 @@ class MeasurementGUI:
             lines.append("OVERALL ASSESSMENT")
             lines.append("-" * 80)
             lines.append(f"Overall Device Score: {overall_score:.1f}/100")
-            lines.append(f"Final Classification: {final_device_type.upper()}")
+            # Handle None case for final_device_type
+            final_type_str = (final_device_type or 'UNKNOWN').upper() if isinstance(final_device_type, str) else 'UNKNOWN'
+            lines.append(f"Final Classification: {final_type_str}")
             
             # Rating
             if overall_score >= 80:
@@ -1693,7 +1739,9 @@ class MeasurementGUI:
             print(f"[SUMMARY] Sequence summary saved:")
             print(f"[SUMMARY]   Text: {text_file}")
             print(f"[SUMMARY]   JSON: {json_file}")
-            print(f"[SUMMARY]   Overall Score: {overall_score:.1f}/100 ({final_device_type.upper()})")
+            # Handle None case for final_device_type
+            final_type_str = (final_device_type or 'UNKNOWN').upper() if isinstance(final_device_type, str) else 'UNKNOWN'
+            print(f"[SUMMARY]   Overall Score: {overall_score:.1f}/100 ({final_type_str})")
             
         except Exception as e:
             print(f"[SUMMARY ERROR] Failed to generate sequence summary: {e}")
@@ -1869,7 +1917,11 @@ class MeasurementGUI:
                     'unstable': '⚠ UNSTABLE',
                     'stable': '→ STABLE'
                 }
-                status_text = status_display.get(status, status.upper())
+                # Handle None case for status
+                if status and isinstance(status, str):
+                    status_text = status_display.get(status, status.upper())
+                else:
+                    status_text = 'UNKNOWN'
                 lines.append(f"Device Status: {status_text} ({confidence*100:.0f}% confidence)")
                 
                 if status == 'forming':
@@ -1926,7 +1978,10 @@ class MeasurementGUI:
                 classification = latest.get('classification', {})
                 lines.append("CLASSIFICATION")
                 lines.append("-" * 40)
-                lines.append(f"  Device Type: {classification.get('device_type', 'N/A').upper()}")
+                # Handle None case for device_type
+                device_type = classification.get('device_type') or 'N/A'
+                device_type_str = device_type.upper() if isinstance(device_type, str) else 'N/A'
+                lines.append(f"  Device Type: {device_type_str}")
                 lines.append(f"  Confidence: {classification.get('confidence', 0)*100:.1f}%")
                 
                 score = classification.get('memristivity_score', 0)
@@ -3500,9 +3555,11 @@ class MeasurementGUI:
             status_color = status_colors.get(status, '#000000')
             
             title_text = f'Device Evolution: {device_id}'
-            if status != 'insufficient_data':
-                confidence_pct = int(forming_status['confidence'] * 100)
-                title_text += f'  |  Status: {status.upper()} ({confidence_pct}%)'
+            if status != 'insufficient_data' and status:
+                confidence_pct = int(forming_status.get('confidence', 0) * 100)
+                # Handle None case for status
+                status_str = status.upper() if isinstance(status, str) else 'UNKNOWN'
+                title_text += f'  |  Status: {status_str} ({confidence_pct}%)'
             
             fig.suptitle(title_text, fontsize=11, fontweight='bold', color=status_color)
             

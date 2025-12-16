@@ -148,7 +148,15 @@ class PlotUpdaters:
 
                     abs_voltages = np.abs(np.array(voltages, dtype=float))
                     abs_voltages[abs_voltages == 0] = 1e-12
-                    self._update_line("rt_logilogv", abs_voltages.tolist(), abs_list)
+                    # Filter voltage: only show >= 0.1V (user requirement: don't go below 0.1V or -0.2V)
+                    voltage_mask = abs_voltages >= 0.1
+                    filtered_voltages = abs_voltages[voltage_mask]
+                    filtered_currents = np.array(abs_list)[voltage_mask]
+                    if len(filtered_voltages) > 0:
+                        self._update_line("rt_logilogv", filtered_voltages.tolist(), filtered_currents.tolist())
+                    else:
+                        # If no data meets threshold, show empty plot
+                        self._update_line("rt_logilogv", [], [])
             time.sleep(self.interval_s)
 
     def _update_current_time_plot(self) -> None:

@@ -275,3 +275,4 @@ class ComprehensiveAnalyzer:
             traceback.print_exc()
         
         print(f"[COMPREHENSIVE] Comprehensive analysis complete!")
+
