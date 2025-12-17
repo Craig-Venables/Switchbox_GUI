@@ -142,7 +142,7 @@ from gui.measurement_gui.analysis_stats_window import AnalysisStatsWindow
 from gui.pulse_testing_gui import TSPTestingGUI
 from gui.oscilloscope_pulse_gui.main import OscilloscopePulseGUI
 
-# Import cyclical IV sweep functions for 4200A (conditional import)
+# Import step-based IV sweep functions for 4200A (conditional import)
 # Using importlib to avoid issues with directory names starting with numbers
 try:
     import importlib
@@ -150,8 +150,14 @@ try:
     KXCIClient = _smu_iv_sweep_module.KXCIClient
     build_ex_command = _smu_iv_sweep_module.build_ex_command
     format_param = _smu_iv_sweep_module.format_param
-except (ImportError, AttributeError):
+    _SMU_IV_SWEEP_AVAILABLE = True
+except (ImportError, AttributeError) as e:
     # Gracefully handle if module is not available
+    _SMU_IV_SWEEP_AVAILABLE = False
+    KXCIClient = None
+    build_ex_command = None
+    format_param = None
+    print(f"WARNING: Step-based IV sweep module not available: {e}")
     KXCIClient = None
     build_ex_command = None
     format_param = None
@@ -4948,6 +4954,7 @@ class MeasurementGUI:
         self.cyclical_ilimit = tk.DoubleVar(value=0.1)    # Current limit (A), default 0.1A
         self.cyclical_integration_time = tk.DoubleVar(value=0.01)  # Integration time (PLC), default 0.01
         self.cyclical_debug = tk.BooleanVar(value=True)   # Debug output (default ON)
+        self.cyclical_num_steps = tk.IntVar(value=40)     # Number of steps across full sweep path (default: 40)
 
         # DC Triangle configuration variables used by dynamic UI below
         # Sweep Mode and Sweep Type
@@ -5011,15 +5018,17 @@ class MeasurementGUI:
                         except Exception: pass
                     
                     cr = 0
-                    tk.Label(self._cyclical_params_frame, text="Cyclical Sweep Parameters (4200A):", font=("Arial", 8, "bold"), bg='#f0f0f0', fg='blue').grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
-                    tk.Label(self._cyclical_params_frame, text="Pattern: (0V → +Vpos → Vneg → 0V) × NumCycles", fg="grey", bg='#f0f0f0', font=("Arial", 7)).grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
-                    tk.Label(self._cyclical_params_frame, text="Vpos (V):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Label(self._cyclical_params_frame, text="Step-Based IV Sweep Parameters (4200A):", font=("Arial", 8, "bold"), bg='#f0f0f0', fg='blue').grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Pattern: (0V → Vhigh → 0V → Vlow → 0V) × NumCycles", fg="grey", bg='#f0f0f0', font=("Arial", 7)).grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Vhigh (V):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
                     tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_vpos, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
-                    tk.Label(self._cyclical_params_frame, text="Vneg (V, 0=auto-symmetric):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Label(self._cyclical_params_frame, text="Vlow (V):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
                     tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_vneg, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
+                    tk.Label(self._cyclical_params_frame, text="Num Steps:", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_num_steps, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
                     tk.Label(self._cyclical_params_frame, text="Num Cycles:", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
                     tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_num_cycles, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
-                    tk.Label(self._cyclical_params_frame, text="Settle Time (s):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
+                    tk.Label(self._cyclical_params_frame, text="Step Delay (s):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
                     tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_settle_time, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
                     tk.Label(self._cyclical_params_frame, text="I Limit (A):", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
                     tk.Entry(self._cyclical_params_frame, textvariable=self.cyclical_ilimit, width=10).grid(row=cr, column=1, sticky="w"); cr+=1
@@ -5028,20 +5037,22 @@ class MeasurementGUI:
                     tk.Label(self._cyclical_params_frame, text="Debug Output:", bg='#f0f0f0').grid(row=cr, column=0, sticky="w")
                     tk.Checkbutton(self._cyclical_params_frame, variable=self.cyclical_debug, bg='#f0f0f0').grid(row=cr, column=1, sticky="w"); cr+=1
                     
-                    # Total points label (updates when cycles change)
+                    # Total points label (updates when steps/cycles change)
                     def update_total_points(*_):
                         try:
+                            steps = self.cyclical_num_steps.get()
                             cycles = self.cyclical_num_cycles.get()
-                            total = cycles * 4
+                            total = (steps + 1) * cycles
                             for widget in reversed(list(self._cyclical_params_frame.children.values())):
                                 if isinstance(widget, tk.Label) and "Total points:" in widget.cget("text"):
-                                    widget.config(text=f"Total points: {total} (4 × {cycles} cycles)")
+                                    widget.config(text=f"Total points: {total} (({steps}+1) × {cycles} cycles)")
                                     break
                         except Exception:
                             pass
                     
-                    total_points_label = tk.Label(self._cyclical_params_frame, text=f"Total points: {self.cyclical_num_cycles.get() * 4} (4 × {self.cyclical_num_cycles.get()} cycles)", fg="grey", bg='#f0f0f0', font=("Arial", 7))
+                    total_points_label = tk.Label(self._cyclical_params_frame, text=f"Total points: {((self.cyclical_num_steps.get() + 1) * self.cyclical_num_cycles.get())} (({self.cyclical_num_steps.get()}+1) × {self.cyclical_num_cycles.get()} cycles)", fg="grey", bg='#f0f0f0', font=("Arial", 7))
                     total_points_label.grid(row=cr, column=0, columnspan=2, sticky="w"); cr+=1
+                    self.cyclical_num_steps.trace_add("write", update_total_points)
                     self.cyclical_num_cycles.trace_add("write", update_total_points)
                 
                 sweep_type_menu.bind("<<ComboboxSelected>>", update_cyclical_params_visibility)
@@ -6153,36 +6164,43 @@ class MeasurementGUI:
                                                     f"Please change SMU type or select a different sweep type.")
                                 continue
                             
-                            # Get cyclical parameters from GUI variables or params
+                            # Get step-based sweep parameters from GUI variables or params
                             if hasattr(self, 'cyclical_vpos'):
-                                vpos = self.cyclical_vpos.get()
-                                vneg = self.cyclical_vneg.get()
+                                vhigh = self.cyclical_vpos.get()  # Use vpos as vhigh
+                                vlow = self.cyclical_vneg.get()   # Use vneg as vlow (0 = auto-symmetric)
+                                num_steps = self.cyclical_num_steps.get()
                                 num_cycles = self.cyclical_num_cycles.get()
-                                settle_time = self.cyclical_settle_time.get()
+                                step_delay = self.cyclical_settle_time.get()  # Use settle_time as step_delay
                                 ilimit = self.cyclical_ilimit.get()
                                 integration_time = self.cyclical_integration_time.get()
                                 debug = 1 if self.cyclical_debug.get() else 0
                             else:
                                 # Fallback to params if GUI vars don't exist
-                                vpos = float(params.get("vpos", stop_v if stop_v > 0 else 2.0))
-                                vneg = float(params.get("vneg", 0.0))
+                                vhigh = float(params.get("vhigh", params.get("vpos", stop_v if stop_v > 0 else 2.0)))
+                                vlow = float(params.get("vlow", params.get("vneg", 0.0)))
+                                num_steps = int(params.get("num_steps", 40))
                                 num_cycles = int(params.get("num_cycles", 1))
-                                settle_time = float(params.get("settle_time", step_delay if step_delay > 0 else 0.001))
+                                step_delay = float(params.get("step_delay", params.get("settle_time", step_delay if step_delay > 0 else 0.01)))
                                 ilimit = float(params.get("ilimit", icc_val if icc_val > 0 else 0.1))
                                 integration_time = float(params.get("integration_time", 0.01))
                                 debug = 1 if _is_truthy(params.get("debug", True)) else 0
+                            
+                            # Auto-symmetric: if vlow == 0, use -vhigh
+                            if vlow == 0.0:
+                                vlow = -vhigh
                             
                             def _on_point(v, i, t_s):
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
                                 self.t_arr_disp.append(t_s)
                             
-                            # Execute cyclical sweep via 4200A system wrapper (manager pattern)
-                            v_arr, c_arr, timestamps = self._run_cyclical_iv_sweep_via_manager(
-                                vpos=vpos,
-                                vneg=vneg,
+                            # Execute step-based sweep using new smu_ivsweep module
+                            v_arr, c_arr, timestamps = self._run_step_based_iv_sweep_kxci(
+                                vhigh=vhigh,
+                                vlow=vlow,
+                                num_steps=num_steps,
                                 num_cycles=num_cycles,
-                                settle_time=settle_time,
+                                step_delay=step_delay,
                                 ilimit=ilimit,
                                 integration_time=integration_time,
                                 debug=debug,
@@ -6915,6 +6933,167 @@ class MeasurementGUI:
             # Generate timestamps (estimate based on settle_time and number of points)
             # Each point takes approximately settle_time + integration_time
             time_per_point = settle_time + (integration_time * 0.01)  # Rough estimate: 1 PLC ≈ 0.01s
+            timestamps = [i * time_per_point for i in range(len(voltage))]
+            
+            # Call on_point callback if provided
+            if on_point is not None:
+                for v, i, t in zip(voltage, current, timestamps):
+                    if hasattr(self, 'stop_measurement_flag') and self.stop_measurement_flag:
+                        break
+                    try:
+                        on_point(v, i, t)
+                    except Exception as e:
+                        print(f"Warning: on_point callback failed: {e}")
+            
+            return (voltage, current, timestamps)
+            
+        finally:
+            # Cleanup: exit UL mode (if still active) and disconnect
+            try:
+                if controller._ul_mode_active:
+                    controller._exit_ul_mode()
+                controller.disconnect()
+            except Exception:
+                pass
+
+    def _run_step_based_iv_sweep_kxci(
+        self,
+        vhigh: float,
+        vlow: float,
+        num_steps: int,
+        num_cycles: int,
+        step_delay: float,
+        ilimit: float,
+        integration_time: float,
+        debug: int,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Execute step-based IV sweep using KXCI (Keithley 4200A only).
+        
+        Pattern: (0V → Vhigh → 0V → Vlow → 0V) × NumCycles
+        Total points = (NumSteps + 1) × NumCycles
+        
+        This uses the improved smu_ivsweep C module with constant step duration
+        to eliminate pauses in the waveform.
+        
+        Args:
+            vhigh: Positive voltage limit (V), must be >= 0
+            vlow: Negative voltage limit (V), must be <= 0
+            num_steps: Total steps across full sweep path (4-10000)
+            num_cycles: Number of cycles to repeat (1-1000)
+            step_delay: Delay per step (seconds)
+            ilimit: Current compliance limit (A)
+            integration_time: Measurement integration time (PLC)
+            debug: Debug output flag (0 or 1)
+            on_point: Optional callback for each measurement point (v, i, t)
+            
+        Returns:
+            Tuple of (voltage_array, current_array, timestamps)
+        """
+        if not _SMU_IV_SWEEP_AVAILABLE or KXCIClient is None or build_ex_command is None:
+            raise RuntimeError("Step-based IV sweep module not available. Ensure run_smu_vi_sweep.py is accessible.")
+        
+        # Get GPIB address from GUI
+        gpib_address = getattr(self, 'keithley_address_var', None)
+        if gpib_address is None or not hasattr(gpib_address, 'get'):
+            gpib_address_str = getattr(self, 'keithley_address', 'GPIB0::17::INSTR')
+        else:
+            gpib_address_str = gpib_address.get()
+        
+        # Validate parameters
+        if vhigh < 0:
+            raise ValueError(f"Vhigh ({vhigh}) must be >= 0")
+        if vlow > 0:
+            raise ValueError(f"Vlow ({vlow}) must be <= 0")
+        if not (4 <= num_steps <= 10000):
+            raise ValueError(f"NumSteps ({num_steps}) must be between 4 and 10000")
+        if not (1 <= num_cycles <= 1000):
+            raise ValueError(f"NumCycles ({num_cycles}) must be between 1 and 1000")
+        
+        # Calculate total points
+        num_points = (num_steps + 1) * num_cycles
+        
+        # Create KXCI client
+        controller = KXCIClient(gpib_address=gpib_address_str, timeout=30.0)
+        
+        try:
+            # Connect to instrument
+            if not controller.connect():
+                raise RuntimeError(f"Failed to connect to Keithley 4200A at {gpib_address_str}")
+            
+            # Enter UL mode
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            
+            # Build and execute EX command
+            command = build_ex_command(
+                vhigh=vhigh,
+                vlow=vlow,
+                num_steps=num_steps,
+                num_cycles=num_cycles,
+                num_points=num_points,
+                step_delay=step_delay,
+                ilimit=ilimit,
+                integration_time=integration_time,
+                clarius_debug=debug,
+            )
+            
+            print(f"\n[Step-Based IV Sweep] Executing KXCI command:")
+            print(f"  Pattern: (0V → {vhigh}V → 0V → {vlow}V → 0V) × {num_cycles} cycles")
+            print(f"  NumSteps: {num_steps} (distributed across 4 segments)")
+            print(f"  Total points: {num_points} (({num_steps}+1) × {num_cycles})")
+            print(f"  Step delay: {step_delay*1000:.1f} ms per step")
+            print(f"  Current limit: {ilimit:.2e} A")
+            print(f"  Integration time: {integration_time:.6f} PLC")
+            print(f"  Debug: {'ON' if debug else 'OFF'}")
+            
+            # Calculate wait time based on sweep parameters
+            # Time per point ≈ step_delay + (integration_time × 0.01s per PLC)
+            # Total time = num_points × time_per_point × safety_factor
+            time_per_point = step_delay + (integration_time * 0.01)  # Rough: 1 PLC ≈ 0.01s
+            estimated_time = num_points * time_per_point
+            wait_time = max(2.0, estimated_time * 1.5)  # Minimum 2s, add 50% safety margin
+            print(f"  Estimated sweep time: {estimated_time:.2f}s, waiting {wait_time:.2f}s...")
+            
+            return_value, error = controller._execute_ex_command(command, wait_seconds=wait_time)
+            
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+            if return_value is not None and return_value < 0:
+                error_messages = {
+                    -1: "Invalid Vhigh (must be >= 0) or Vlow (must be <= 0)",
+                    -2: "NumIPoints != NumVPoints (array size mismatch)",
+                    -3: "NumIPoints != (NumSteps + 1) × NumCycles (array size mismatch)",
+                    -4: "Invalid array sizes (NumIPoints or NumVPoints < NumSteps + 1)",
+                    -5: "Invalid NumSteps (must be >= 4 and <= 10000) or NumCycles (must be >= 1 and <= 1000)",
+                    -6: "limiti() failed (check current limit value)",
+                    -7: "measi() failed (check SMU connection)",
+                }
+                msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
+                raise RuntimeError(f"EX command returned error code: {return_value} - {msg}")
+            
+            # Retrieve data from GP parameters
+            # Based on function signature: 
+            # 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas (output), 6=NumIPoints, 
+            # 7=Vforce (output), 8=NumVPoints, 9=StepDelay, 10=Ilimit, 11=IntegrationTime, 12=ClariusDebug
+            print(f"\n[Step-Based IV Sweep] Retrieving {num_points} data points...")
+            voltage = controller._query_gp(7, num_points)  # GP parameter 7 = Vforce
+            current = controller._query_gp(5, num_points)  # GP parameter 5 = Imeas
+            
+            print(f"[Step-Based IV Sweep] Received: {len(voltage)} voltage, {len(current)} current samples")
+            
+            # Ensure arrays are same length
+            min_len = min(len(voltage), len(current))
+            voltage = voltage[:min_len]
+            current = current[:min_len]
+            
+            if min_len == 0:
+                raise RuntimeError("No data returned from sweep")
+            
+            # Generate timestamps (estimate based on step_delay and number of points)
+            # Each point takes approximately step_delay + integration_time
+            time_per_point = step_delay + (integration_time * 0.01)  # Rough estimate: 1 PLC ≈ 0.01s
             timestamps = [i * time_per_point for i in range(len(voltage))]
             
             # Call on_point callback if provided
