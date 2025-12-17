@@ -4,6 +4,7 @@ from typing import Optional, Sequence, Tuple
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import FuncFormatter
 
 # Disable LaTeX/math text globally for this module
 matplotlib.rcParams['text.usetex'] = False
@@ -13,6 +14,22 @@ matplotlib.rcParams['axes.formatter.min_exponent'] = 0
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 from .base import PlotManager
+
+
+def plain_log_formatter(x, pos):
+    """
+    Format log scale values as plain text without math symbols.
+    Avoids matplotlib math text parsing errors.
+    """
+    if x <= 0:
+        return '0'
+    # Use scientific notation for very small/large numbers
+    if x < 0.01 or x > 1000:
+        return f'{x:.2e}'
+    # For normal range, use decimal
+    if x < 1:
+        return f'{x:.3f}'
+    return f'{x:.1f}'
 
 
 class SCLCFitPlotter:
@@ -46,13 +63,11 @@ class SCLCFitPlotter:
         plt.rcParams['mathtext.default'] = 'regular'
         plt.rcParams['axes.formatter.use_mathtext'] = False
         
-        # Import formatter to force plain text
-        from matplotlib.ticker import LogFormatter
-        
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
 
-        mask = (v > 0) & np.isfinite(v) & np.isfinite(i) & (np.abs(i) > 0)
+        # Filter: voltage >= 0.1V (user requirement: don't show data below 0.1V or -0.2V)
+        mask = (v >= 0.1) & np.isfinite(v) & np.isfinite(i) & (np.abs(i) > 0)
         v_pos = v[mask]
         i_pos = np.abs(i[mask])
 
@@ -61,9 +76,9 @@ class SCLCFitPlotter:
             fig.suptitle(title)
 
         ax.loglog(v_pos, i_pos, "ko", markersize=4, label=device_label or "data")
-        # Force plain text formatters for log scales (rcParams already disable math text)
-        ax.xaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
-        ax.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+        # Force plain text formatters for log scales - use custom formatter to avoid math text parsing errors
+        ax.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+        ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
 
         # Global fit on all positive points
         if len(v_pos) >= 2:

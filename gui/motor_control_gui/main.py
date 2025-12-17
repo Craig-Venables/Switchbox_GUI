@@ -50,6 +50,7 @@ from tkinter import ttk, messagebox, simpledialog
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import threading
 import time
@@ -82,6 +83,14 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
     _FG_IMPORT_ERROR = exc
 else:
     _FG_IMPORT_ERROR = None
+
+try:
+    from Equipment.managers.laser import LaserManager
+except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+    LaserManager = None  # type: ignore[assignment]
+    _LASER_IMPORT_ERROR = exc
+else:
+    _LASER_IMPORT_ERROR = None
 
 import Equipment.Motor_Controll.config as config
 
@@ -141,6 +150,9 @@ class MotorControlWindow:
         # FG optional (legacy injection) and manager-based control
         self.fg: Optional[FunctionGenerator] = function_generator
         self.fg_mgr: Optional[FunctionGeneratorManager] = None
+        
+        # Laser controller
+        self.laser_mgr: Optional[LaserManager] = None
 
         # Canvas and world coordinate settings
         self.canvas_size = int(canvas_size_pixels)
@@ -196,6 +208,13 @@ class MotorControlWindow:
         self.var_fg_addr = tk.StringVar(value=config.LASER_USB)  # Pre-populate from config
         self.var_fg_enabled = tk.BooleanVar(value=False)
         self.var_fg_amplitude = tk.StringVar(value=f"{default_amplitude_volts:.3f}")
+        
+        # Laser state
+        self.var_laser_status = tk.StringVar(value="Laser: Disconnected")
+        self.var_laser_port = tk.StringVar(value="COM3")
+        self.var_laser_baud = tk.StringVar(value="38400")
+        self.var_laser_enabled = tk.BooleanVar(value=False)
+        self.var_laser_power = tk.StringVar(value="10.0")
         
         # Scanning state
         self.var_scan_x = tk.StringVar(value="5.0")
@@ -333,6 +352,7 @@ class MotorControlWindow:
         self._build_presets(scrollable_frame)
         self._build_scan_controls(scrollable_frame)
         self._build_fg_controls(scrollable_frame)
+        self._build_laser_controls(scrollable_frame)
 
     def _build_jog_controls(self, parent: tk.Frame) -> None:
         """Build jog controls section."""
@@ -769,6 +789,135 @@ class MotorControlWindow:
                 disconnect_btn,
                 output_check,
                 amplitude_entry,
+                apply_btn,
+            ):
+                widget.configure(state=tk.DISABLED)
+
+    def _build_laser_controls(self, parent: tk.Frame) -> None:
+        """Build laser controller controls."""
+        laser_frame = self._create_section_frame(parent, "🔴 Laser Control")
+        laser_frame.pack(fill=tk.X, pady=5)
+
+        # COM Port
+        tk.Label(
+            laser_frame, 
+            text="COM Port:", 
+            fg=self.COLORS['fg_primary'],
+            bg=self.COLORS['bg_medium']
+        ).grid(row=0, column=0, sticky="w", pady=2)
+        port_entry = tk.Entry(
+            laser_frame, 
+            textvariable=self.var_laser_port,
+            bg=self.COLORS['bg_light'],
+            fg=self.COLORS['fg_primary'],
+            insertbackground=self.COLORS['fg_primary']
+        )
+        port_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+        # Baud Rate
+        tk.Label(
+            laser_frame, 
+            text="Baud Rate:", 
+            fg=self.COLORS['fg_primary'],
+            bg=self.COLORS['bg_medium']
+        ).grid(row=1, column=0, sticky="w", pady=2)
+        baud_entry = tk.Entry(
+            laser_frame, 
+            textvariable=self.var_laser_baud,
+            bg=self.COLORS['bg_light'],
+            fg=self.COLORS['fg_primary'],
+            insertbackground=self.COLORS['fg_primary']
+        )
+        baud_entry.grid(row=1, column=1, sticky="ew", pady=2)
+
+        # Connection buttons
+        btn_frame = tk.Frame(laser_frame, bg=self.COLORS['bg_medium'])
+        btn_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 5))
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+        
+        connect_btn = tk.Button(
+            btn_frame, 
+            text="Connect", 
+            command=self._on_laser_connect,
+            bg=self.COLORS['accent_green'],
+            fg='black',
+            font=("Arial", 8)
+        )
+        connect_btn.grid(row=0, column=0, sticky="ew", padx=(0, 2))
+        
+        disconnect_btn = tk.Button(
+            btn_frame, 
+            text="Disconnect", 
+            command=self._on_laser_disconnect,
+            bg=self.COLORS['accent_red'],
+            fg='white',
+            font=("Arial", 8)
+        )
+        disconnect_btn.grid(row=0, column=1, sticky="ew", padx=(2, 0))
+
+        # Status
+        status_label = tk.Label(
+            laser_frame,
+            textvariable=self.var_laser_status,
+            fg=self.COLORS['accent_yellow'],
+            bg=self.COLORS['bg_medium'],
+            font=("Arial", 9)
+        )
+        status_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+
+        # Emission toggle
+        emission_check = tk.Checkbutton(
+            laser_frame, 
+            text="Emission Enabled", 
+            variable=self.var_laser_enabled, 
+            command=self._on_laser_toggle,
+            fg=self.COLORS['fg_primary'],
+            bg=self.COLORS['bg_medium'],
+            selectcolor=self.COLORS['bg_light'],
+            activebackground=self.COLORS['bg_medium'],
+            activeforeground=self.COLORS['fg_primary']
+        )
+        emission_check.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
+
+        # Power setting
+        tk.Label(
+            laser_frame, 
+            text="Power (mW):", 
+            fg=self.COLORS['fg_primary'],
+            bg=self.COLORS['bg_medium']
+        ).grid(row=5, column=0, sticky="w", pady=2)
+        power_entry = tk.Entry(
+            laser_frame, 
+            textvariable=self.var_laser_power,
+            bg=self.COLORS['bg_light'],
+            fg=self.COLORS['fg_primary'],
+            insertbackground=self.COLORS['fg_primary']
+        )
+        power_entry.grid(row=5, column=1, sticky="ew", pady=2)
+
+        # Apply button
+        apply_btn = tk.Button(
+            laser_frame, 
+            text="Apply Power", 
+            command=self._on_apply_laser_power,
+            bg=self.COLORS['accent_blue'],
+            fg='white',
+            font=("Arial", 9)
+        )
+        apply_btn.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+
+        laser_frame.columnconfigure(1, weight=1)
+
+        if LaserManager is None:
+            self.var_laser_status.set("Laser: Driver unavailable (install pyserial)")
+            for widget in (
+                port_entry,
+                baud_entry,
+                connect_btn,
+                disconnect_btn,
+                emission_check,
+                power_entry,
                 apply_btn,
             ):
                 widget.configure(state=tk.DISABLED)
@@ -1667,6 +1816,126 @@ class MotorControlWindow:
         except Exception as exc:
             messagebox.showerror("FG Error", f"Failed to apply voltage:\n{exc}")
 
+    # ---------- Laser Controller Controls ----------
+    def _on_laser_connect(self) -> None:
+        """Connect to laser controller."""
+        if LaserManager is None:
+            detail = "pyserial is not installed, so laser control is disabled."
+            if _LASER_IMPORT_ERROR:
+                detail += f"\nOriginal import error: {_LASER_IMPORT_ERROR}"
+            messagebox.showerror("Laser Controller", detail)
+            return
+        try:
+            port = self.var_laser_port.get().strip()
+            baud_str = self.var_laser_baud.get().strip()
+            
+            if not port:
+                messagebox.showwarning("No Port", "Please enter a COM port.")
+                return
+            
+            try:
+                baud = int(baud_str)
+            except ValueError:
+                messagebox.showwarning("Invalid Baud", "Please enter a valid baud rate.")
+                return
+            
+            self.var_laser_status.set("Laser: Connecting...")
+            self.root.update()
+            
+            # Create laser manager with config
+            cfg = {
+                "driver": "Oxxius",
+                "address": port,
+                "baud": baud
+            }
+            self.laser_mgr = LaserManager.from_config(cfg)
+            
+            # Test connection by querying ID
+            try:
+                laser = self.laser_mgr.instrument
+                idn = laser.idn()
+                self.var_laser_status.set(f"Laser: Connected ✓ ({idn[:30]})")
+                # Read current power if available
+                try:
+                    power_str = laser.get_power()
+                    # Try to extract numeric value from response
+                    import re
+                    power_match = re.search(r'[\d.]+', power_str)
+                    if power_match:
+                        self.var_laser_power.set(power_match.group())
+                except Exception:
+                    pass
+            except Exception as e:
+                self.var_laser_status.set("Laser: Connection Failed")
+                messagebox.showerror("Connection Failed", f"Could not communicate with laser:\n{e}")
+                self.laser_mgr = None
+                
+        except Exception as exc:
+            self.var_laser_status.set("Laser: Error")
+            messagebox.showerror("Connection Error", f"Failed to connect:\n{exc}")
+            self.laser_mgr = None
+
+    def _on_laser_disconnect(self) -> None:
+        """Disconnect from laser controller."""
+        try:
+            if self.laser_mgr is not None:
+                laser = self.laser_mgr.instrument
+                try:
+                    # Turn off emission before disconnecting
+                    laser.emission_off()
+                except Exception:
+                    pass
+                try:
+                    laser.close()
+                except Exception:
+                    pass
+                self.laser_mgr = None
+            self.var_laser_enabled.set(False)
+            self.var_laser_status.set("Laser: Disconnected")
+        except Exception as exc:
+            messagebox.showerror("Disconnect Error", f"Error during disconnect:\n{exc}")
+
+    def _on_laser_toggle(self) -> None:
+        """Toggle laser emission."""
+        try:
+            desired = bool(self.var_laser_enabled.get())
+            
+            if self.laser_mgr is not None:
+                laser = self.laser_mgr.instrument
+                if desired:
+                    laser.emission_on()
+                    status = "ON"
+                else:
+                    laser.emission_off()
+                    status = "OFF"
+                self.var_laser_status.set(f"Laser: Emission {status}")
+            else:
+                self.var_laser_enabled.set(not desired)
+                messagebox.showwarning("Not Connected", "Please connect to laser first.")
+                
+        except Exception as exc:
+            messagebox.showerror("Laser Error", f"Failed to toggle emission:\n{exc}")
+
+    def _on_apply_laser_power(self) -> None:
+        """Apply laser power setting."""
+        try:
+            power = float(self.var_laser_power.get())
+            
+            if power < 0:
+                raise ValueError("Power must be non-negative")
+            
+            if self.laser_mgr is not None:
+                laser = self.laser_mgr.instrument
+                laser.set_power(power)
+                self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW")
+            else:
+                messagebox.showwarning("Not Connected", "Please connect to laser first.")
+                
+        except ValueError:
+            messagebox.showerror("Invalid Value", "Please enter a valid power value (mW).")
+        except Exception as exc:
+            messagebox.showerror("Laser Error", f"Failed to set power:\n{exc}")
+
     def _show_help(self) -> None:
         """Display a help window with usage instructions."""
         help_win = tk.Toplevel(self.root)
@@ -2139,6 +2408,12 @@ class MotorControlWindow:
     def close(self) -> None:
         """Clean up resources."""
         self._stop_camera_feed()
+        # Disconnect laser if connected
+        try:
+            if self.laser_mgr is not None:
+                self._on_laser_disconnect()
+        except Exception:
+            pass
         if hasattr(self, 'root'):
             self.root.destroy()
 
