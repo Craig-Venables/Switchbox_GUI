@@ -83,10 +83,14 @@ class OpticalController:
         """
         try:
             if self.optical is not None:
-                # Use optical excitation system
+                # Use optical excitation system (works for both LED and Laser)
                 units = 'mW'  # Default units
                 if hasattr(self.optical, 'capabilities'):
-                    units = getattr(self.optical.capabilities, 'units', 'mW')
+                    caps = self.optical.capabilities
+                    if isinstance(caps, dict):
+                        units = caps.get('units', 'mW')
+                    else:
+                        units = getattr(caps, 'units', 'mW')
                 
                 self.optical.set_level(float(power), units)
                 self.optical.set_enabled(True)

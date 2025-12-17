@@ -10,14 +10,17 @@ The Motor Control GUI provides comprehensive control over XY stage motors for la
 
 - **Interactive Canvas**: Click-to-move functionality with visual position marker
 - **Real-Time Position Display**: Live updates of X/Y position
+- **Collapsible Control Sections**: Expandable/collapsible panels for better organization
+- **Expand/Collapse All**: Quick controls to show or hide all sections at once
 - **Jog Controls**: Arrow key and button-based movement with adjustable step size
 - **Velocity & Acceleration Settings**: Configurable motor parameters
 - **Position Presets**: Save and recall frequently used positions
 - **Go-To-Position**: Direct coordinate input for precise positioning
 - **Raster Scanning**: Automated scanning patterns for device mapping
 - **Function Generator Integration**: Laser power control via FG interface
+- **Laser Control**: Direct laser control with COM port configuration
 - **Keyboard Shortcuts**: Quick access to common operations
-- **Camera Feed Placeholder**: Prepared for future camera integration
+- **Camera Feed Support**: IP stream and USB camera integration
 
 ## Entry Points
 
@@ -96,6 +99,22 @@ Main window class for motor control interface.
    - Select a preset position
 5. **Laser Control**: User connects FG and controls laser power
 6. **Scanning**: User configures and runs raster scans
+
+## User Interface
+
+### Collapsible Sections
+All control sections can be collapsed or expanded individually by clicking the section header or arrow button. This helps keep the interface clean and focused on the controls you need.
+
+- **Expand All**: Button to expand all sections at once
+- **Collapse All**: Button to collapse all sections for maximum canvas view
+- **Individual Toggle**: Click any section header to toggle that section
+- **Smart Defaults**: Frequently used sections (Jog, Go-To, Presets) start expanded; advanced sections (FG, Laser) start collapsed
+
+### Layout
+- **Left Panel**: Scrollable control sections with collapsible frames
+- **Right Panel**: Interactive position canvas and camera feed
+- **Top Bar**: Connection controls and position display
+- **Bottom Bar**: Status information and keyboard shortcut hints
 
 ## Motor Control Features
 

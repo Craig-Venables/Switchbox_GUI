@@ -1924,7 +1924,8 @@ class IVControllerManager:
             # Get build_ex_command function from wrapper (already imported)
             build_ex_command = kxci_wrapper._build_ex_command
             
-            # Enable optical controller if needed (already initialized before try block)
+            # Enable optical controller if needed (works for both LED and Laser)
+            # The OpticalController automatically handles both LED (via PSU) and Laser (via optical)
             if context.led:
                 optical_ctrl.enable(context.power)
             
