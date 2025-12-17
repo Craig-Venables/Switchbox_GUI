@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import matplotlib.gridspec as gridspec
@@ -57,21 +57,23 @@ class OscilloscopePulseLayout:
         # Top Control Bar (New)
         self._build_top_bar(self.parent)
         
-        # Main Content Grid
+        # Main Content Grid (compact spacing)
         content_frame = ttk.Frame(self.parent)
-        content_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        content_frame.pack(fill="both", expand=True, padx=5, pady=3)
         
         content_frame.columnconfigure(1, weight=1)
         content_frame.rowconfigure(0, weight=1)
         
         # --- LEFT PANEL (Controls) ---
-        left_panel = ttk.Frame(content_frame, padding=5)
+        left_panel = ttk.Frame(content_frame, padding=3)
         left_panel.grid(row=0, column=0, sticky="nsew")
         
         self._build_connection_frame(left_panel)
         self._build_scope_frame(left_panel)
         self._build_pulse_frame(left_panel)
         self._build_measurement_frame(left_panel)
+        self._build_calculator_frame(left_panel)
+        self._build_save_options_frame(left_panel)
         self._build_action_buttons(left_panel)
         self._build_status_bar(left_panel)
 
@@ -273,8 +275,8 @@ class OscilloscopePulseLayout:
 
     def _build_connection_frame(self, parent):
         """Build connection settings frame"""
-        frame = ttk.Labelframe(parent, text="Connections", padding=10)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.Labelframe(parent, text="Connections", padding=5)
+        frame.pack(fill="x", pady=2)
         
         # SMU Address
         smu_frame = ttk.Frame(frame)
@@ -321,8 +323,8 @@ class OscilloscopePulseLayout:
 
     def _build_pulse_frame(self, parent):
         """Build pulse parameters frame"""
-        frame = ttk.Labelframe(parent, text="Pulse Parameters", padding=10)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.Labelframe(parent, text="Pulse Parameters", padding=5)
+        frame.pack(fill="x", pady=2)
         
         self._add_param(frame, "Pulse Voltage (V):", "pulse_voltage", "1.0", 
                        ToolTipText="Amplitude of the pulse")
@@ -337,8 +339,8 @@ class OscilloscopePulseLayout:
 
     def _build_scope_frame(self, parent):
         """Build oscilloscope settings frame - simplified for manual setup"""
-        frame = ttk.Labelframe(parent, text="1️⃣ Oscilloscope Setup (Manual)", padding=10)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.Labelframe(parent, text="1️⃣ Oscilloscope Setup (Manual)", padding=5)
+        frame.pack(fill="x", pady=2)
         
         # Instructions
         instructions = (
@@ -370,8 +372,8 @@ class OscilloscopePulseLayout:
     
     def _build_calculator_frame(self, parent):
         """Build shunt resistor calculator frame"""
-        frame = ttk.Labelframe(parent, text="📐 Shunt Resistor Calculator", padding=10)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.Labelframe(parent, text="📐 Shunt Resistor Calculator", padding=5)
+        frame.pack(fill="x", pady=2)
         
         # Input row
         input_row = ttk.Frame(frame)
@@ -499,7 +501,7 @@ class OscilloscopePulseLayout:
         ToolTip(quick_test_btn, "Pulse device with specified parameters and measure current")
     
     def _run_quick_test(self):
-        """Run quick test with specified parameters"""
+        """Run quick test: pulse device, measure current, recommend shunt resistor"""
         try:
             voltage = float(self.vars['quick_test_voltage'].get())
             duration = float(self.vars['quick_test_duration'].get())
@@ -509,63 +511,458 @@ class OscilloscopePulseLayout:
             self.vars['calc_voltage'].set(str(voltage))
             
             # Check if we have a callback for quick test
-            if 'quick_test' in self.callbacks:
-                self.vars['calc_result'].set(f"⚡ Testing device at {voltage}V for {duration}s...")
-                self.parent.update()  # Force GUI update
-                
-                # Call the quick test callback with custom parameters
-                # We need to modify the callback to accept duration and compliance
-                current = self.callbacks['quick_test'](voltage, duration, compliance)
-                
-                if current is not None and abs(current) > 1e-15:
-                    # Success! Update current field
-                    self.vars['calc_current'].set(f"{current:.9f}")
-                    # Auto-calculate
-                    self._calculate_shunt()
-                    # Show success message
-                    self.vars['calc_result'].set(f"✅ Quick test successful! Measured {abs(current)*1e6:.3f} µA\n" + 
-                                                 self.vars['calc_result'].get())
-                else:
-                    self.vars['calc_result'].set("⚠️ Quick test returned zero or None - check connections")
-            else:
+            if 'quick_test' not in self.callbacks:
                 self.vars['calc_result'].set("⚠️ Quick test not available - connect SMU first")
-                
+                return
+            
+            # Show status
+            self.vars['calc_result'].set(f"⚡ Pulsing device at {voltage}V for {duration}s...\nMeasuring current...")
+            self.parent.update()  # Force GUI update
+            
+            # Call the quick test callback to measure current
+            current = self.callbacks['quick_test'](voltage, duration, compliance)
+            
+            if current is None:
+                self.vars['calc_result'].set("⚠️ Measurement failed - check SMU connection and device")
+                return
+            
+            if abs(current) < 1e-15:
+                self.vars['calc_result'].set("⚠️ Measured current is zero - check:\n• Device connections\n• Compliance limit\n• Voltage level")
+                return
+            
+            # Success! Update current field and calculate recommended shunt
+            self.vars['calc_current'].set(f"{current:.9f}")
+            
+            # Calculate recommended shunt based on measured current
+            # Target: 10-100 mV signal for good scope measurement
+            target_v_signal = 0.05  # 50 mV target
+            recommended_r_shunt = target_v_signal / abs(current)
+            
+            # Find nearest standard E12 value
+            e12_base = [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2]
+            
+            # Determine decade
+            if recommended_r_shunt < 1:
+                decade = 1e-3  # mΩ
+                r_range = [r * 1e-3 for r in e12_base[:6]]
+            elif recommended_r_shunt < 1e3:
+                decade = 1  # Ω
+                r_range = [r for r in e12_base]
+            elif recommended_r_shunt < 1e6:
+                decade = 1e3  # kΩ
+                r_range = [r * 1e3 for r in e12_base]
+            else:
+                decade = 1e6  # MΩ
+                r_range = [r * 1e6 for r in e12_base[:6]]
+            
+            # Find closest standard value
+            r_range_sorted = sorted(r_range)
+            closest_r = min(r_range_sorted, key=lambda x: abs(x - recommended_r_shunt))
+            
+            # Calculate expected signal with recommended shunt
+            expected_v_signal = abs(current) * closest_r
+            
+            # Format results
+            def format_resistance(r):
+                if r >= 1e6:
+                    return f"{r/1e6:.2f} MΩ"
+                elif r >= 1e3:
+                    return f"{r/1e3:.2f} kΩ"
+                elif r >= 1:
+                    return f"{r:.2f} Ω"
+                else:
+                    return f"{r*1e3:.2f} mΩ"
+            
+            # Build result message
+            current_str = f"{abs(current)*1e6:.3f} µA" if abs(current) < 1e-3 else f"{abs(current)*1e3:.3f} mA"
+            result_msg = (
+                f"✅ Quick Test Complete!\n"
+                f"Measured Current: {current_str}\n"
+                f"Recommended R_shunt: {format_resistance(closest_r)}\n"
+                f"Expected Signal: {expected_v_signal*1e3:.2f} mV\n\n"
+            )
+            
+            # Check if signal is reasonable
+            if expected_v_signal < 0.001:  # < 1 mV
+                result_msg += "⚠️ Signal < 1mV - consider using TIA amplifier for low current\n"
+            elif expected_v_signal > 1.0:  # > 1 V
+                result_msg += "⚠️ Signal > 1V - may need larger R_shunt or lower voltage\n"
+            else:
+                result_msg += "✓ Signal level looks good for scope measurement\n"
+            
+            # Auto-fill R_shunt field
+            self.vars['r_shunt'].set(f"{closest_r:.2f}")
+            
+            # Also run the standard calculation for comparison
+            self._calculate_shunt()
+            
+            # Combine results
+            calc_result = self.vars['calc_result'].get()
+            self.vars['calc_result'].set(result_msg + "\n" + calc_result)
+            
         except ValueError:
             self.vars['calc_result'].set("⚠️ Error: Please enter valid numbers")
         except Exception as e:
-            self.vars['calc_result'].set(f"⚠️ Error: {str(e)}")
+            import traceback
+            self.vars['calc_result'].set(f"⚠️ Error: {str(e)}\n{traceback.format_exc()}")
 
 
+    def _build_alignment_frame(self, parent):
+        """Build simple alignment controls for pulse timing correction - placed under graph"""
+        frame = ttk.Labelframe(parent, text="🔧 Pulse Alignment (if V_SMU doesn't align)", padding=5)
+        frame.pack(fill="x", pady=(2, 0))
+        
+        # Instructions (compact)
+        instr = "Adjust if V_SMU (green) doesn't align with V_shunt (blue). Preview updates as you move sliders."
+        tk.Label(frame, text=instr, bg="#fff3cd", fg="#856404", 
+                font=("Segoe UI", 7), justify="left", wraplength=400, 
+                relief=tk.SOLID, bd=1, padx=3, pady=2).pack(fill="x", pady=(0, 4))
+        
+        # Initialize alignment variables
+        if 'pulse_alignment' not in self.vars:
+            self.vars['pulse_alignment'] = tk.DoubleVar(value=0.0)
+        if 'zero_offset' not in self.vars:
+            self.vars['zero_offset'] = tk.DoubleVar(value=0.0)
+        
+        self.alignment_offset = 0.0
+        self.zero_offset = 0.0
+        
+        # Time shift control
+        time_row = ttk.Frame(frame)
+        time_row.pack(fill="x", pady=1)
+        ttk.Label(time_row, text="Time Shift:", width=12, anchor="w").pack(side="left")
+        
+        time_slider = ttk.Scale(time_row, from_=-5.0, to=5.0, 
+                               variable=self.vars['pulse_alignment'],
+                               orient="horizontal", length=120)
+        time_slider.pack(side="left", padx=5, fill="x", expand=True)
+        
+        time_entry = ttk.Entry(time_row, textvariable=tk.StringVar(value="0.000"), width=8)
+        time_entry.pack(side="left", padx=2)
+        ttk.Label(time_row, text="s", font=("Segoe UI", 8)).pack(side="left")
+        
+        # Sync entry with slider and update preview
+        def update_time_entry(*args):
+            val = self.vars['pulse_alignment'].get()
+            time_entry_var.set(f"{val:.3f}")
+            # Update preview in real-time
+            self._update_alignment_preview()
+        
+        def update_time_slider(*args):
+            try:
+                val = float(time_entry_var.get())
+                val = max(-5.0, min(5.0, val))
+                self.vars['pulse_alignment'].set(val)
+                time_entry_var.set(f"{val:.3f}")
+                # Update preview in real-time
+                self._update_alignment_preview()
+            except ValueError:
+                time_entry_var.set(f"{self.vars['pulse_alignment'].get():.3f}")
+        
+        def on_time_slider_move(v):
+            val = float(v)
+            time_entry_var.set(f"{val:.3f}")
+            # Update preview in real-time (slider command fires on every move)
+            try:
+                self._update_alignment_preview()
+            except Exception as e:
+                pass  # Silently fail if data not ready
+        
+        time_entry_var = tk.StringVar(value="0.000")
+        time_entry.config(textvariable=time_entry_var)
+        time_entry_var.trace_add('write', lambda *a: update_time_slider())
+        self.vars['pulse_alignment'].trace_add('write', lambda *a: update_time_entry())
+        time_slider.configure(command=on_time_slider_move)
+        
+        # Voltage offset control
+        volt_row = ttk.Frame(frame)
+        volt_row.pack(fill="x", pady=1)
+        ttk.Label(volt_row, text="Voltage Offset:", width=12, anchor="w").pack(side="left")
+        
+        volt_slider = ttk.Scale(volt_row, from_=-2.0, to=2.0,
+                               variable=self.vars['zero_offset'],
+                               orient="horizontal", length=120)
+        volt_slider.pack(side="left", padx=5, fill="x", expand=True)
+        
+        volt_entry = ttk.Entry(volt_row, textvariable=tk.StringVar(value="0.000"), width=8)
+        volt_entry.pack(side="left", padx=2)
+        ttk.Label(volt_row, text="V", font=("Segoe UI", 8)).pack(side="left")
+        
+        # Sync voltage entry and update preview
+        def update_volt_entry(*args):
+            val = self.vars['zero_offset'].get()
+            volt_entry_var.set(f"{val:.3f}")
+            # Update preview in real-time
+            self._update_alignment_preview()
+        
+        def update_volt_slider(*args):
+            try:
+                val = float(volt_entry_var.get())
+                val = max(-2.0, min(2.0, val))
+                self.vars['zero_offset'].set(val)
+                volt_entry_var.set(f"{val:.3f}")
+                # Update preview in real-time
+                self._update_alignment_preview()
+            except ValueError:
+                volt_entry_var.set(f"{self.vars['zero_offset'].get():.3f}")
+        
+        def on_volt_slider_move(v):
+            val = float(v)
+            volt_entry_var.set(f"{val:.3f}")
+            # Update preview in real-time (slider command fires on every move)
+            try:
+                self._update_alignment_preview()
+            except Exception as e:
+                pass  # Silently fail if data not ready
+        
+        volt_entry_var = tk.StringVar(value="0.000")
+        volt_entry.config(textvariable=volt_entry_var)
+        volt_entry_var.trace_add('write', lambda *a: update_volt_slider())
+        self.vars['zero_offset'].trace_add('write', lambda *a: update_volt_entry())
+        volt_slider.configure(command=on_volt_slider_move)
+        
+        # Buttons
+        btn_row = ttk.Frame(frame)
+        btn_row.pack(fill="x", pady=(4, 0))
+        
+        auto_fit_btn = ttk.Button(btn_row, text="🎯 Auto-Fit", 
+                                  command=self._auto_fit_pulse_simple,
+                                  width=12)
+        auto_fit_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(auto_fit_btn, "Automatically detect and align pulse")
+        
+        apply_btn = ttk.Button(btn_row, text="✓ Apply", 
+                              command=self._apply_alignment_simple,
+                              width=12)
+        apply_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(apply_btn, "Apply alignment and recalculate (will overwrite on save)")
+        
+        reset_btn = ttk.Button(btn_row, text="↻ Reset", 
+                               command=self._reset_alignment_simple,
+                               width=12)
+        reset_btn.pack(side="left", padx=2, fill="x", expand=True)
+        ToolTip(reset_btn, "Reset to original alignment")
+    
+    def _update_alignment_preview(self):
+        """Update plot with preview overlay showing expected V_SMU position"""
+        if 'Main' not in self.plot_lines:
+            return
+        if not hasattr(self, 'plot_data') or 't' not in self.plot_data:
+            return
+        
+        import numpy as np
+        
+        # Get current slider values (preview, not applied yet)
+        preview_time_offset = self.vars['pulse_alignment'].get()
+        preview_volt_offset = self.vars['zero_offset'].get()
+        
+        # Get original data (fallback to current if original not stored yet)
+        t = self.plot_data.get('t_original', self.plot_data.get('t', []))
+        v_shunt_orig = self.plot_data.get('v_original', self.plot_data.get('v_shunt', self.plot_data.get('v', [])))
+        metadata = self.plot_data.get('metadata', {})
+        
+        if len(t) == 0 or len(v_shunt_orig) == 0:
+            return
+        
+        # Apply voltage offset for preview
+        v_shunt_preview = v_shunt_orig - preview_volt_offset
+        
+        # Get pulse parameters
+        try:
+            pulse_voltage = float(self.vars['pulse_voltage'].get())
+            pulse_duration = float(self.vars['pulse_duration'].get())
+            bias_voltage = float(self.vars['bias_voltage'].get())
+            pre_bias_time = float(self.vars['pre_bias_time'].get())
+            post_bias_time = float(self.vars.get('post_bias_time', tk.StringVar(value="0.0")).get())
+        except:
+            pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
+            pulse_duration = float(metadata.get('pulse_duration', 0.001))
+            bias_voltage = float(metadata.get('bias_voltage', 0.2))
+            pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
+            post_bias_time = float(metadata.get('post_bias_time', 0.0))
+        
+        # Calculate preview pulse start (original + offset)
+        original_pulse_start = metadata.get('pulse_start_time', pre_bias_time)
+        if original_pulse_start is None:
+            original_pulse_start = pre_bias_time
+        
+        preview_pulse_start = original_pulse_start + preview_time_offset
+        preview_pulse_end = preview_pulse_start + pulse_duration
+        
+        # Create preview V_SMU waveform
+        v_smu_preview = self._create_v_smu_waveform(
+            t, preview_pulse_start, preview_pulse_end, bias_voltage, pulse_voltage,
+            pre_bias_time, post_bias_time
+        )
+        
+        # Update plot with preview overlay
+        plot_info = self.plot_lines['Main']
+        ax = plot_info['ax']
+        
+        # Clear existing preview line if it exists
+        if 'preview_line' in plot_info and plot_info['preview_line']:
+            try:
+                plot_info['preview_line'].remove()
+            except:
+                pass
+        
+        # Draw preview V_SMU as dashed orange line (different from applied green)
+        if len(v_smu_preview) > 0:
+            preview_line = ax.plot(t, v_smu_preview, 'orange', linestyle=':', linewidth=2, 
+                                   alpha=0.6, label='Preview V_SMU (not applied)')[0]
+            plot_info['preview_line'] = preview_line
+            
+            # Update legend
+            ax.legend(loc='best', fontsize=9)
+            plot_info['canvas'].draw()  # Use draw() for immediate update
+    
+    def _auto_fit_pulse_simple(self):
+        """Simplified auto-fit for pulse alignment"""
+        if not hasattr(self, 'plot_data') or 't' not in self.plot_data:
+            messagebox.showinfo("No Data", "Read scope data first using 'Read & Analyze'")
+            return
+        
+        import numpy as np
+        t = self.plot_data['t']
+        v_shunt_raw = self.plot_data.get('v_shunt', self.plot_data.get('v', []))
+        metadata = self.plot_data.get('metadata', {})
+        
+        if len(t) == 0 or len(v_shunt_raw) == 0:
+            return
+        
+        try:
+            bias_voltage = float(self.vars['bias_voltage'].get())
+            pulse_voltage = float(self.vars['pulse_voltage'].get())
+        except:
+            bias_voltage = float(metadata.get('bias_voltage', 0.2))
+            pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
+        
+        # Auto-detect baseline offset
+        baseline_len = max(10, len(v_shunt_raw) // 10)
+        baseline = np.median(v_shunt_raw[:baseline_len])
+        v_offset = -baseline
+        self.vars['zero_offset'].set(v_offset)
+        v_shunt = v_shunt_raw - v_offset
+        
+        # Detect pulse start
+        detected_start = self._detect_pulse_start_improved(t, v_shunt, bias_voltage, pulse_voltage)
+        
+        if detected_start is None:
+            messagebox.showwarning("Auto-Fit Failed", "Could not detect pulse. Try manual adjustment.")
+            return
+        
+        # Calculate offset needed
+        pre_bias_time = float(self.vars.get('pre_bias_time', tk.StringVar(value="0.1")).get())
+        expected_start = pre_bias_time
+        offset = detected_start - expected_start
+        self.vars['pulse_alignment'].set(offset)
+        
+        # Apply immediately
+        self._apply_alignment_simple()
+        messagebox.showinfo("Auto-Fit Complete", f"Pulse aligned: offset = {offset:.3f}s, voltage offset = {v_offset:.3f}V")
+    
+    def _apply_alignment_simple(self):
+        """Apply alignment and recalculate plot"""
+        if not hasattr(self, 'plot_data') or 't' not in self.plot_data:
+            messagebox.showinfo("No Data", "Read scope data first using 'Read & Analyze'")
+            return
+        
+        self.alignment_offset = self.vars['pulse_alignment'].get()
+        self.zero_offset = self.vars['zero_offset'].get()
+        
+        # Remove preview line
+        if 'Main' in self.plot_lines:
+            plot_info = self.plot_lines['Main']
+            if 'preview_line' in plot_info and plot_info['preview_line']:
+                try:
+                    plot_info['preview_line'].remove()
+                    plot_info['preview_line'] = None
+                except:
+                    pass
+        
+        # Recalculate with alignment
+        self._recalculate_with_alignment()
+        
+        # Mark that alignment was applied (for overwrite on save)
+        self.alignment_applied = True
+        
+        # Notify main GUI that alignment was applied
+        if 'on_alignment_applied' in self.callbacks:
+            self.callbacks['on_alignment_applied']()
+        
+        self.set_status("Alignment applied. Next save will overwrite previous file.")
+    
+    def _reset_alignment_simple(self):
+        """Reset alignment to zero and reload original data"""
+        self.vars['pulse_alignment'].set(0.0)
+        self.vars['zero_offset'].set(0.0)
+        self.alignment_offset = 0.0
+        self.zero_offset = 0.0
+        
+        # Remove preview line
+        if 'Main' in self.plot_lines:
+            plot_info = self.plot_lines['Main']
+            if 'preview_line' in plot_info and plot_info['preview_line']:
+                try:
+                    plot_info['preview_line'].remove()
+                    plot_info['preview_line'] = None
+                except:
+                    pass
+        
+        # Reload original data
+        if hasattr(self, 'plot_data') and 't_original' in self.plot_data:
+            metadata = self.plot_data.get('metadata', {})
+            t_orig = self.plot_data['t_original']
+            v_orig = self.plot_data['v_original']
+            
+            if len(t_orig) > 0 and len(v_orig) > 0:
+                # Recalculate current
+                shunt_r = metadata.get('shunt_resistance', 100000.0)
+                i_orig = v_orig / shunt_r
+                
+                # Update plot with original data (this will reset plot_data)
+                self.update_plots(t_orig, v_orig, i_orig, metadata)
+        
+        self.alignment_applied = False
+        self.set_status("Alignment reset to original")
+    
     def _build_save_options_frame(self, parent):
         """Build save options frame"""
-        frame = ttk.Labelframe(parent, text="Save Options", padding=10)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.Labelframe(parent, text="💾 Save Options", padding=5)
+        frame.pack(fill="x", pady=2)
         
         # Auto-save checkbox
         self.vars['auto_save'] = tk.BooleanVar(value=self.config.get("auto_save", True))
         auto_save_check = ttk.Checkbutton(
             frame, 
-            text="Auto-save after measurement",
+            text="Auto-save after 'Read & Analyze'",
             variable=self.vars['auto_save']
         )
         auto_save_check.pack(side="left", padx=5)
-        ToolTip(auto_save_check, "Automatically save measurement data after completion")
+        ToolTip(auto_save_check, "Automatically save data to save directory after reading scope (filename: Pulse_Sample_Device_timestamp.txt)")
+        
+        # Save directory display
+        save_dir_frame = ttk.Frame(frame)
+        save_dir_frame.pack(fill="x", pady=(5, 0))
+        ttk.Label(save_dir_frame, text="Save to:", font=("Segoe UI", 8)).pack(side="left")
+        self.vars['save_dir_display'] = tk.StringVar(value=self.context.get('save_directory', "Not set"))
+        save_dir_label = tk.Label(save_dir_frame, textvariable=self.vars['save_dir_display'], 
+                                 bg="#f0f0f0", fg="#555", font=("Segoe UI", 8), 
+                                 relief=tk.SUNKEN, bd=1, padx=5, pady=2)
+        save_dir_label.pack(side="left", fill="x", expand=True, padx=(5, 0))
     
     def _build_action_buttons(self, parent):
         """Build action buttons frame - simplified workflow"""
-        frame = ttk.LabelFrame(parent, text="📋 Measurement Workflow", padding=10)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.LabelFrame(parent, text="📋 Measurement Workflow", padding=5)
+        frame.pack(fill="x", pady=2)
         
-        # Workflow instructions
+        # Workflow instructions (compact)
         instructions = (
-            "1️⃣ Manually set up your oscilloscope (timebase, V/div, trigger)\n"
-            "2️⃣ Click 'Send Pulse' to fire the SMU pulse\n"
-            "3️⃣ Verify pulse captured on scope screen\n"
-            "4️⃣ Click 'Read & Analyze' to get the data and calculate I/V/R"
+            "1️⃣ Set scope | 2️⃣ Send Pulse | 3️⃣ Verify | 4️⃣ Read & Analyze"
         )
         instr_label = tk.Label(frame, text=instructions, justify="left", bg="#f0f0f0", 
-                              font=("Segoe UI", 9), fg="#1565c0")
-        instr_label.pack(fill="x", pady=(0, 10))
+                              font=("Segoe UI", 8), fg="#1565c0")
+        instr_label.pack(fill="x", pady=(0, 4))
         
         # Main workflow buttons
         btn_frame = ttk.Frame(frame)
@@ -596,8 +993,8 @@ class OscilloscopePulseLayout:
 
     def _build_status_bar(self, parent):
         """Build status bar"""
-        frame = ttk.Frame(parent, padding=5)
-        frame.pack(fill="x", pady=5)
+        frame = ttk.Frame(parent, padding=3)
+        frame.pack(fill="x", pady=2)
         
         self.vars['status'] = tk.StringVar(value="Ready")
         status_label = ttk.Label(frame, textvariable=self.vars['status'], style="Status.TLabel")
@@ -613,8 +1010,8 @@ class OscilloscopePulseLayout:
         plot_frame = ttk.Frame(parent)
         plot_frame.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Create figure with single plot
-        fig = plt.Figure(figsize=(12, 6), dpi=100)
+        # Create figure with single plot (smaller for compact view)
+        fig = plt.Figure(figsize=(10, 4), dpi=100)
         ax = fig.add_subplot(111)
         ax.set_ylabel("Voltage (V)", fontweight='bold', fontsize=12)
         ax.set_title("Voltage Overlay: V_SMU (Programmed) vs V_shunt (Measured) vs V_DUT (Calculated)", 
@@ -638,11 +1035,15 @@ class OscilloscopePulseLayout:
             'ax': ax,
             'canvas': canvas,
             'toolbar': toolbar,
-            'lines': {}
+            'lines': {},
+            'preview_line': None  # For alignment preview overlay
         }
         
         # For compatibility with old code
         self.ax_voltage_breakdown = ax
+        
+        # Add alignment controls under the graph
+        self._build_alignment_frame(plot_frame)
     
     def _create_overview_tab(self):
         """Create overview tab with all plots in 2x2 grid"""
@@ -1134,79 +1535,6 @@ class OscilloscopePulseLayout:
         print(f"Auto-fit complete: pulse starts at {detected_start:.6f}s, duration {detected_duration:.6f}s, offset {offset:.6f}s")
         
         self._update_alignment_preview()
-    
-    def _update_alignment_preview(self):
-        """Update alignment plot preview dynamically as controls change"""
-        if 'Alignment' not in self.plot_lines:
-            return
-        if not hasattr(self, 'plot_data') or 't' not in self.plot_data:
-            return
-        
-        import numpy as np
-        t = self.plot_data['t']
-        v_shunt_raw = self.plot_data.get('v_shunt', self.plot_data.get('v', []))
-        metadata = self.plot_data.get('metadata', {})
-        
-        if len(t) == 0 or len(v_shunt_raw) == 0:
-            return
-        
-        preview_v_offset = self.vars['zero_offset'].get()
-        v_shunt_preview = v_shunt_raw - preview_v_offset
-        
-        try:
-            pulse_voltage = float(self.vars['pulse_voltage'].get())
-            pulse_duration = self.vars['align_pulse_duration'].get()
-            bias_voltage = float(self.vars['bias_voltage'].get())
-        except:
-            pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
-            pulse_duration = float(metadata.get('pulse_duration', 0.001))
-            bias_voltage = float(metadata.get('bias_voltage', 0.2))
-        
-        original_pulse_start = metadata.get('pulse_start_time', 0.0)
-        if original_pulse_start is None:
-            original_pulse_start = 0.0
-        
-        preview_h_offset = self.vars['pulse_alignment'].get()
-        pulse_start = original_pulse_start + preview_h_offset
-        pulse_end = pulse_start + pulse_duration
-        
-        # Build V_SMU preview as 0 V outside, bias_voltage (e.g. 0.2V) before/after, and pulse_voltage during pulse
-        v_smu_preview = self._create_v_smu_waveform(
-            t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
-            pre_bias_time, post_bias_time
-        )
-        
-        plot_info = self.plot_lines['Alignment']
-        ax = plot_info['ax']
-        ax.clear()
-        
-        if len(v_smu_preview) > 0 and len(v_shunt_preview) > 0:
-            v_min = min(np.min(v_smu_preview), np.min(v_shunt_preview))
-            v_max = max(np.max(v_smu_preview), np.max(v_shunt_preview))
-            v_margin = (v_max - v_min) * 0.1 if (v_max - v_min) > 0 else 0.1
-            ax.set_ylim(v_min - v_margin, v_max + v_margin)
-        
-        ax.plot(t, v_smu_preview, 'b-', linewidth=2.5, label='V_SMU (Applied)', alpha=0.85)
-        ax.plot(t, v_shunt_preview, 'r-', linewidth=2, label='V_shunt (Measured)', alpha=0.75)
-        
-        ax.axvspan(pulse_start, pulse_end, alpha=0.1, color='green', label='Pulse Window')
-        ax.axvline(x=pulse_start, color='green', linestyle='--', linewidth=1.5, alpha=0.6)
-        ax.axvline(x=pulse_end, color='orange', linestyle='--', linewidth=1.5, alpha=0.6)
-        ax.axhline(y=0, color='gray', linestyle=':', linewidth=1, alpha=0.5)
-        
-        ax.set_title("Pulse Alignment: V_SMU vs V_shunt (Preview)", fontsize=13, fontweight='bold', pad=15)
-        ax.set_xlabel("Time (s)", fontsize=11)
-        ax.set_ylabel("Voltage (V)", fontsize=11)
-        ax.grid(True, alpha=0.25, linestyle='--')
-        ax.legend(loc='best', fontsize=10, framealpha=0.9)
-        
-        if len(t) > 0:
-            t_margin = (t[-1] - t[0]) * 0.05 if (t[-1] - t[0]) > 0 else 0.1
-            ax.set_xlim(max(0, t[0] - t_margin), t[-1] + t_margin)
-        
-        plot_info['fig'].tight_layout()
-        plot_info['canvas'].draw()
-    
     def _create_v_smu_waveform(self, t, pulse_start, pulse_end, bias_voltage, pulse_voltage,
                                pre_bias_time, post_bias_time):
         """
@@ -1269,32 +1597,36 @@ class OscilloscopePulseLayout:
             return
         
         import numpy as np
-        t = self.plot_data['t']
-        v_shunt_raw = self.plot_data.get('v_shunt', self.plot_data.get('v', []))
+        
+        # Use original data (before any previous alignment)
+        t = self.plot_data.get('t_original', self.plot_data['t'])
+        v_shunt_raw = self.plot_data.get('v_original', self.plot_data.get('v_shunt', self.plot_data.get('v', [])))
         metadata = self.plot_data.get('metadata', {})
         
         if len(t) == 0 or len(v_shunt_raw) == 0:
             return
         
+        # Apply voltage offset
         v_shunt = v_shunt_raw - self.zero_offset
         
+        # Get pulse parameters
         try:
             pulse_voltage = float(self.vars['pulse_voltage'].get())
-            pulse_duration = self.vars['align_pulse_duration'].get()
+            pulse_duration = float(self.vars['pulse_duration'].get())
             bias_voltage = float(self.vars['bias_voltage'].get())
-            pre_bias_time = self.vars['align_pre_bias_time'].get()
-            # For 4200A we use the same hold on both sides; mirror pre-bias time
-            post_bias_time = pre_bias_time
+            pre_bias_time = float(self.vars['pre_bias_time'].get())
+            post_bias_time = float(self.vars.get('post_bias_time', tk.StringVar(value="0.0")).get())
         except:
             pulse_voltage = float(metadata.get('pulse_voltage', 1.0))
             pulse_duration = float(metadata.get('pulse_duration', 0.001))
             bias_voltage = float(metadata.get('bias_voltage', 0.2))
             pre_bias_time = float(metadata.get('pre_bias_time', 0.1))
-            post_bias_time = pre_bias_time
+            post_bias_time = float(metadata.get('post_bias_time', 0.0))
         
-        original_pulse_start = metadata.get('pulse_start_time', 0.0)
+        # Get original detected pulse start and apply time offset
+        original_pulse_start = metadata.get('pulse_start_time', pre_bias_time)
         if original_pulse_start is None:
-            original_pulse_start = 0.0
+            original_pulse_start = pre_bias_time
         
         pulse_start = original_pulse_start + self.alignment_offset
         pulse_end = pulse_start + pulse_duration
@@ -1318,16 +1650,23 @@ class OscilloscopePulseLayout:
         
         power = v_memristor * current
         
+        # Update plot_data with aligned values
         self.plot_data['v_smu'] = v_smu
         self.plot_data['v_memristor'] = v_memristor
         self.plot_data['v_shunt'] = v_shunt
         self.plot_data['current'] = current
         self.plot_data['resistance'] = resistance
         self.plot_data['power'] = power
+        self.plot_data['t'] = t  # Update time array
+        self.plot_data['metadata'] = metadata
         
+        # Update metadata with new pulse start
         metadata['pulse_start_time'] = pulse_start
+        metadata['alignment_offset'] = self.alignment_offset
+        metadata['zero_offset'] = self.zero_offset
         
-        self.update_plots(t, v_shunt, current, metadata)
+        # Update plot display
+        self._update_main_plot()
     
     def _detect_pulse_start_improved(self, t, v_shunt, bias_voltage, pulse_voltage):
         """
@@ -1709,12 +2048,32 @@ class OscilloscopePulseLayout:
         # Negative power would indicate measurement/calculation issue
         p_memristor = v_memristor * i
         
+        # Store original data for reset functionality
+        if 't_original' not in self.plot_data:
+            self.plot_data['t_original'] = t.copy() if hasattr(t, 'copy') else t
+            self.plot_data['v_original'] = v_shunt.copy() if hasattr(v_shunt, 'copy') else v_shunt
+        
         # Store data for line visibility toggles and calculations
         self.plot_data = {
             't': t, 'v_smu': v_smu, 'v_shunt': v_shunt, 'v_memristor': v_memristor,
             'i': i, 'r_memristor': r_memristor, 'p_memristor': p_memristor,
-            'metadata': metadata
+            'metadata': metadata,
+            't_original': self.plot_data.get('t_original', t),
+            'v_original': self.plot_data.get('v_original', v_shunt)
         }
+        
+        # Reset alignment flag
+        self.alignment_applied = False
+        
+        # Clear any existing preview line when new data is loaded
+        if 'Main' in self.plot_lines:
+            plot_info = self.plot_lines['Main']
+            if 'preview_line' in plot_info and plot_info['preview_line']:
+                try:
+                    plot_info['preview_line'].remove()
+                    plot_info['preview_line'] = None
+                except:
+                    pass
         
         # Update main voltage overlay plot
         self._update_main_plot()

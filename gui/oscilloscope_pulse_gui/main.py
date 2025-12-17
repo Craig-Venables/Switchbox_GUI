@@ -78,12 +78,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
              super().__init__(master)
              
         self.title("Oscilloscope Pulse Capture")
-        self.geometry("1400x900")
-        # Start maximized for full-screen view (Windows-friendly)
-        try:
-            self.state("zoomed")
-        except Exception:
-            pass
+        self.geometry("1200x700")  # Smaller default size
+        # Don't maximize - keep it compact
         
         # 1. State & Config
         self.config_manager = ConfigManager()
@@ -98,6 +94,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
         
         # 2. Prepare Context (Dropdowns, Info)
         self.context = context or {}
+        self.provider = context.get('provider') if context else None  # Store provider if available
         self._populate_context_defaults()
 
         # 3. Layout container with scrollbars
@@ -135,7 +132,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 'on_system_change': self._on_system_change,
                 'quick_test': self._quick_test_device,
                 'read_scope_settings': self._read_scope_settings,
-                'connect_smu': self._connect_smu
+                'connect_smu': self._connect_smu,
+                'on_alignment_applied': self._on_alignment_applied
             },
             config=self.config,
             context=self.context
@@ -144,6 +142,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
         # 4. Final Setup
         self.is_running = False
         self.last_data = None
+        self.last_save_path = None  # Track last save path for overwrite
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _load_systems_from_json(self):
@@ -180,7 +179,48 @@ class OscilloscopePulseGUI(tk.Toplevel):
         """Ensure context has necessary keys, auto-discovering if standalone."""
         if 'device_label' not in self.context: self.context['device_label'] = "Stand-alone"
         if 'sample_name' not in self.context: self.context['sample_name'] = "Test"
-        if 'save_directory' not in self.context: 
+        
+        # Calculate structured save directory (like IV sweep)
+        try:
+            sample_name = self.context.get('sample_name', 'Test')
+            device_label = self.context.get('device_label', 'Stand-alone')
+            
+            base_path = None
+            try:
+                if self.provider and hasattr(self.provider, '_get_base_save_path'):
+                    base_path = self.provider._get_base_save_path()
+            except:
+                pass
+            
+            try:
+                from Measurments.data_formats import FileNamer
+                namer = FileNamer(base_dir=base_path)
+                structured_dir = namer.get_device_folder(
+                    sample_name=sample_name,
+                    device=device_label,
+                    subfolder="osillascope_test"
+                )
+                self.context['save_directory'] = str(structured_dir)
+            except ImportError:
+                # Fallback to simple structure
+                # Extract letter and number from device label
+                if len(device_label) >= 2:
+                    letter = device_label[0]
+                    number = device_label[1:]
+                else:
+                    letter = "X"
+                    number = "0"
+                
+                if base_path:
+                    structured_dir = Path(base_path) / sample_name / letter / number / "osillascope_test"
+                else:
+                    structured_dir = Path.home() / "Documents" / "PulseData" / sample_name / letter / number / "osillascope_test"
+                self.context['save_directory'] = str(structured_dir)
+            
+            os.makedirs(self.context['save_directory'], exist_ok=True)
+            
+        except Exception as e:
+            # Ultimate fallback
             self.context['save_directory'] = str(Path.home() / "Documents" / "PulseData")
             os.makedirs(self.context['save_directory'], exist_ok=True)
             
@@ -384,34 +424,168 @@ class OscilloscopePulseGUI(tk.Toplevel):
         self.after(0, reset_ui)
         
     def _auto_save_if_needed(self):
-        # Implementation of auto-save to context['save_directory']
+        """Auto-save using structured folder layout like IV sweep"""
         if not self.last_data: return
+        
+        # Check if alignment was applied - if so, overwrite last file instead of creating new
+        if (hasattr(self.layout, 'alignment_applied') and 
+            self.layout.alignment_applied and 
+            self.last_save_path):
+            # Overwrite existing file with aligned data
+            t, v, i, meta = self.last_data
+            self._write_file(self.last_save_path, t, v, i, meta)
+            self.layout.set_status(f"Auto-saved (overwritten): {Path(self.last_save_path).name}")
+            return
+        
         t, v, i, meta = self.last_data
         
-        # Simple filename: Pulse_{sample}_{device}_{timestamp}.txt
-        import datetime
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        fname = f"Pulse_{self.context.get('sample_name','Sample')}_{self.context.get('device_label','Device')}_{ts}.txt"
-        
-        # Ensure directory exists
-        save_dir = Path(self.context.get('save_directory', '.'))
         try:
-            save_dir.mkdir(parents=True, exist_ok=True)
+            # Get sample name and device label from context
+            sample_name = self.context.get('sample_name', 'UnknownSample')
+            device_label = self.context.get('device_label', 'UnknownDevice')
+            
+            # Try to get base save path from context or use FileNamer
+            base_path = None
+            try:
+                # Check if context has a provider with _get_base_save_path
+                if hasattr(self, 'provider') and self.provider:
+                    base_path = self.provider._get_base_save_path()
+            except:
+                pass
+            
+            # Use FileNamer for structured saving (matches IV sweep structure)
+            try:
+                from Measurments.data_formats import FileNamer
+                namer = FileNamer(base_dir=base_path)
+                
+                # Get device folder with subfolder for oscilloscope pulse measurements
+                # Structure: {base}/{sample}/{letter}/{number}/osillascope_test/
+                # Note: using "osillascope_test" to match existing folder naming
+                save_dir = namer.get_device_folder(
+                    sample_name=sample_name,
+                    device=device_label,
+                    subfolder="osillascope_test"
+                )
+                save_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Get next index for sequential numbering
+                index = namer.get_next_index(save_dir)
+                
+            except ImportError:
+                # Fallback: use simple structure if FileNamer not available
+                # Extract letter and number from device label (e.g., "A1" -> "A", "1")
+                if len(device_label) >= 2:
+                    letter = device_label[0]
+                    number = device_label[1:]
+                else:
+                    letter = "X"
+                    number = "0"
+                
+                if base_path:
+                    save_dir = Path(base_path) / sample_name / letter / number / "osillascope_test"
+                else:
+                    save_dir = Path(self.context.get('save_directory', Path.home() / "Documents" / "PulseData"))
+                save_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Simple index: count existing files
+                existing_files = list(save_dir.glob("*.txt"))
+                index = len(existing_files) + 1
+            
+            # Create filename with timestamp and index
+            import datetime
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Ensure pulse_voltage and pulse_duration are floats
+            try:
+                pulse_voltage = float(meta.get('pulse_voltage', 0.0))
+            except (TypeError, ValueError):
+                pulse_voltage = 0.0
+            try:
+                pulse_duration = float(meta.get('pulse_duration', 0.0))
+            except (TypeError, ValueError):
+                pulse_duration = 0.0
+            
+            # Format: {index}-{voltage}v-{duration}s-{timestamp}.txt
+            fname = f"{index}-{abs(pulse_voltage):.2f}v-{pulse_duration:.3f}s-{ts}.txt"
             save_path = save_dir / fname
             
             self._write_file(str(save_path), t, v, i, meta)
-            self.layout.set_status(f"Auto-saved to {fname}")
+            self.layout.set_status(f"Auto-saved: {save_path.name}")
+            
+            # Store save path for potential overwrite after alignment
+            self.last_save_path = str(save_path)
+            
+            # Update save directory display
+            if 'save_dir_display' in self.layout.vars:
+                self.layout.vars['save_dir_display'].set(str(save_dir))
+            
         except Exception as e:
             print(f"Auto-save failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _save_data_dialog(self):
+        """Manual save - overwrites last file if alignment was applied"""
         if not hasattr(self, 'last_data') or self.last_data is None:
             messagebox.showinfo("Info", "No data to save.")
             return
+        
+        # Check if alignment was applied - if so, overwrite last file
+        if (hasattr(self.layout, 'alignment_applied') and 
+            self.layout.alignment_applied and 
+            self.last_save_path):
             
-        initial_dir = self.context.get('save_directory', "")
+            # Ask user to confirm overwrite
+            if messagebox.askyesno("Overwrite File?", 
+                                  f"Alignment was applied. Overwrite previous file?\n\n{self.last_save_path}"):
+                t, v, i, meta = self.last_data
+                self._write_file(self.last_save_path, t, v, i, meta)
+                self.layout.set_status(f"Saved (overwritten): {Path(self.last_save_path).name}")
+                messagebox.showinfo("Saved", f"File overwritten:\n{self.last_save_path}")
+                return
+        
+        # Normal save dialog
+        try:
+            # Get structured save directory (same as auto-save)
+            sample_name = self.context.get('sample_name', 'UnknownSample')
+            device_label = self.context.get('device_label', 'UnknownDevice')
+            
+            base_path = None
+            try:
+                if hasattr(self, 'provider') and self.provider:
+                    base_path = self.provider._get_base_save_path()
+            except:
+                pass
+            
+            try:
+                from Measurments.data_formats import FileNamer
+                namer = FileNamer(base_dir=base_path)
+                initial_dir = namer.get_device_folder(
+                    sample_name=sample_name,
+                    device=device_label,
+                    subfolder="osillascope_test"
+                )
+            except ImportError:
+                # Extract letter and number from device label
+                if len(device_label) >= 2:
+                    letter = device_label[0]
+                    number = device_label[1:]
+                else:
+                    letter = "X"
+                    number = "0"
+                
+                if base_path:
+                    initial_dir = Path(base_path) / sample_name / letter / number / "osillascope_test"
+                else:
+                    initial_dir = Path(self.context.get('save_directory', Path.home() / "Documents" / "PulseData"))
+            
+            initial_dir.mkdir(parents=True, exist_ok=True)
+            
+        except Exception:
+            # Fallback to simple path
+            initial_dir = self.context.get('save_directory', "")
+        
         filename = filedialog.asksaveasfilename(
-            initialdir=initial_dir,
+            initialdir=str(initial_dir),
             defaultextension=".txt",
             filetypes=[("Text File", "*.txt"), ("CSV Data", "*.csv"), ("JSON Data", "*.json")]
         )
@@ -419,6 +593,9 @@ class OscilloscopePulseGUI(tk.Toplevel):
         
         t, v, i, meta = self.last_data
         self._write_file(filename, t, v, i, meta)
+        
+        # Store save path for potential overwrite
+        self.last_save_path = filename
 
     def _write_file(self, filename, t, v, i, meta):
         try:
@@ -591,6 +768,21 @@ class OscilloscopePulseGUI(tk.Toplevel):
         if path:
             self.context['save_directory'] = path
             self.layout.vars['save_dir'].set(path)
+            # Update display if it exists
+            if 'save_dir_display' in self.layout.vars:
+                self.layout.vars['save_dir_display'].set(path)
+    
+    def _on_alignment_applied(self):
+        """Callback when alignment is applied - update last_data for saving"""
+        if hasattr(self.layout, 'plot_data') and 't' in self.layout.plot_data:
+            # Get current plot data (with alignment applied)
+            t = self.layout.plot_data['t']
+            v_shunt = self.layout.plot_data['v_shunt']
+            i = self.layout.plot_data['i']
+            metadata = self.layout.plot_data.get('metadata', {})
+            
+            # Update last_data so save uses aligned data
+            self.last_data = (t, v_shunt, i, metadata)
     
     def _connect_smu(self):
         """Connect to SMU using SystemWrapper"""
