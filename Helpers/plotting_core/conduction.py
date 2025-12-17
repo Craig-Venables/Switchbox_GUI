@@ -4,6 +4,7 @@ from typing import Optional, Sequence, Tuple
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import FuncFormatter
 
 # Disable LaTeX/math text globally for this module
 matplotlib.rcParams['text.usetex'] = False
@@ -13,6 +14,22 @@ matplotlib.rcParams['axes.formatter.min_exponent'] = 0
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 from .base import PlotManager
+
+
+def plain_log_formatter(x, pos):
+    """
+    Format log scale values as plain text without math symbols.
+    Avoids matplotlib math text parsing errors.
+    """
+    if x <= 0:
+        return '0'
+    # Use scientific notation for very small/large numbers
+    if x < 0.01 or x > 1000:
+        return f'{x:.2e}'
+    # For normal range, use decimal
+    if x < 1:
+        return f'{x:.3f}'
+    return f'{x:.1f}'
 
 
 class ConductionPlotter:
@@ -67,9 +84,6 @@ class ConductionPlotter:
         plt.rcParams['mathtext.default'] = 'regular'
         plt.rcParams['axes.formatter.use_mathtext'] = False
         
-        # Import formatter to force plain text
-        from matplotlib.ticker import ScalarFormatter, LogFormatter
-        
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
 
@@ -91,9 +105,9 @@ class ConductionPlotter:
         self._plot_loglog_with_windows(ax_loglog, v, i, device_label)
         ax_loglog.set_xlabel("|Voltage| (V)")
         ax_loglog.set_ylabel("|Current| (A)")
-        # Force plain text formatters for log scales (rcParams already disable math text)
-        ax_loglog.xaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
-        ax_loglog.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+        # Force plain text formatters for log scales - use custom formatter to avoid math text parsing errors
+        ax_loglog.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+        ax_loglog.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
         ax_loglog.grid(True, which="both", alpha=0.3)
 
         # Schottky: ln(I) vs sqrt(V)
@@ -103,8 +117,8 @@ class ConductionPlotter:
             sqrt_v = np.sqrt(v[pos_mask])
             i_pos = np.abs(i[pos_mask])
             ax_schottky.semilogy(sqrt_v, i_pos, "ko", markersize=3)
-            # Force plain text formatter for log scale (rcParams already disable math text)
-            ax_schottky.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+            # Force plain text formatter for log scale - use custom formatter to avoid math text parsing errors
+            ax_schottky.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
             if self.enable_schottky_overlays:
                 self._overlay_linear_windows(
                     ax_schottky,
@@ -128,8 +142,8 @@ class ConductionPlotter:
                 pf_y = np.abs(safe_i / safe_v)
             sqrt_v = np.sqrt(safe_v)
             ax_pf.semilogy(sqrt_v, pf_y, "ko", markersize=3)
-            # Force plain text formatter for log scale (rcParams already disable math text)
-            ax_pf.yaxis.set_major_formatter(LogFormatter(labelOnlyBase=False))
+            # Force plain text formatter for log scale - use custom formatter to avoid math text parsing errors
+            ax_pf.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
             if self.enable_pf_overlays:
                 self._overlay_linear_windows(
                     ax_pf,
@@ -154,7 +168,8 @@ class ConductionPlotter:
     def _plot_loglog_with_windows(self, ax, v: np.ndarray, i: np.ndarray, device_label: str):
         v_abs = np.abs(v)
         i_abs = np.abs(i)
-        mask = (v_abs > 0) & (i_abs > 0) & np.isfinite(v_abs) & np.isfinite(i_abs)
+        # Filter: voltage >= 0.1V (user requirement: don't show data below 0.1V or -0.2V)
+        mask = (v_abs >= 0.1) & (i_abs > 0) & np.isfinite(v_abs) & np.isfinite(i_abs)
         v_plot = v_abs[mask]
         i_plot = i_abs[mask]
         ax.loglog(v_plot, i_plot, "ko", markersize=3, label=device_label or "Log-Log IV")
