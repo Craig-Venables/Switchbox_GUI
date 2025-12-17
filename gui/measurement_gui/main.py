@@ -120,6 +120,7 @@ from tkinter import messagebox, simpledialog, ttk
 # Local application imports
 from gui.connection_check_gui import CheckConnection
 from Equipment.optical_excitation import OpticalExcitation, create_optical_from_system_config
+from Equipment.managers.laser import LaserManager
 from gui.motor_control_gui import MotorControlWindow
 from Measurments.background_workers import (
     start_manual_endurance as bw_start_manual_endurance,
@@ -371,6 +372,30 @@ class MeasurementGUI:
         # Set up window close protocol to notify sample_gui
         def on_closing():
             """Handle window close - notify sample_gui and cleanup"""
+            # Disconnect laser/optical system if connected
+            try:
+                if hasattr(self, 'optical') and self.optical is not None:
+                    # Disable optical source first
+                    try:
+                        self.optical.set_enabled(False)
+                    except Exception:
+                        pass
+                    # Close connection properly (restores laser to manual control mode)
+                    try:
+                        self.optical.close()
+                        print("[OPTICAL] Laser/optical system disconnected and restored to manual control")
+                    except Exception as e:
+                        print(f"[OPTICAL] Warning: Failed to close optical system: {e}")
+            except Exception:
+                pass
+            
+            # Also try disconnect_laser method if it exists (for backward compatibility)
+            if hasattr(self, 'disconnect_laser'):
+                try:
+                    self.disconnect_laser()
+                except Exception:
+                    pass
+            
             # Unregister from sample_gui
             if hasattr(self.sample_gui, 'unregister_child_gui'):
                 self.sample_gui.unregister_child_gui(self)
@@ -421,6 +446,8 @@ class MeasurementGUI:
         self.lakeshore = None
         self.psu_needed = False
         self.telegram = TelegramCoordinator(self)
+        # Laser controller
+        self.laser_mgr: Optional[LaserManager] = None
         self.single_runner = SingleMeasurementRunner(self)
         self.pulsed_runner = PulsedMeasurementRunner(self)
         self.special_runner = SpecialMeasurementRunner(self)
@@ -479,6 +506,12 @@ class MeasurementGUI:
                 "start_manual_endurance": self.start_manual_endurance,
                 "start_manual_retention": self.start_manual_retention,
                 "toggle_manual_led": self.toggle_manual_led,
+                "connect_laser": self.connect_laser,
+                "disconnect_laser": self.disconnect_laser,
+                "toggle_laser_emission": self.toggle_laser_emission,
+                "apply_laser_power": self.apply_laser_power,
+                "increase_laser_power": self.increase_laser_power,
+                "decrease_laser_power": self.decrease_laser_power,
                 "start_custom_measurement_thread": self._start_custom_measurement_thread,
                 "toggle_custom_pause": self._toggle_custom_pause,
                 "open_sweep_editor": self.open_sweep_editor_popup,
@@ -618,7 +651,31 @@ class MeasurementGUI:
                 self.psu.disable_channel(2)
                 self.psu.close()
         except Exception:
-            print("Warning: PSU cleanup failed")
+            pass
+        
+        # Disconnect laser/optical system if connected
+        try:
+            if hasattr(self, 'optical') and self.optical is not None:
+                # Disable optical source first
+                try:
+                    self.optical.set_enabled(False)
+                except Exception:
+                    pass
+                # Close connection properly (restores laser to manual control mode)
+                try:
+                    self.optical.close()
+                    print("[OPTICAL] Laser/optical system disconnected and restored to manual control")
+                except Exception as e:
+                    print(f"[OPTICAL] Warning: Failed to close optical system: {e}")
+        except Exception:
+            print("Warning: Optical system cleanup failed")
+        
+        # Also try disconnect_laser method if it exists (for backward compatibility)
+        try:
+            if hasattr(self, 'disconnect_laser'):
+                self.disconnect_laser()
+        except Exception:
+            pass
 
         print("safely turned everything off")
         # Reset runtime test flags
@@ -4109,22 +4166,43 @@ class MeasurementGUI:
         self.plot_panels.attach_to(self)
 
     def toggle_manual_led(self) -> None:
-        """Toggle the optical source (LED/Laser) using configured abstraction."""
+        """Toggle the optical source (LED/Laser) using configured abstraction.
+        
+        Works with both LED (via PSU) and Laser (via Oxxius) through the
+        OpticalExcitation abstraction. The same controls work for both!
+        """
         try:
             # Prefer new optical abstraction if available
             if hasattr(self, 'optical') and self.optical is not None:
+                print(f"[OPTICAL] Toggling optical source...")
                 if not self.manual_led_on:
+                    # Turn ON: set power first, then enable
                     lvl = float(self.manual_led_power.get())
                     unit = getattr(self.optical, 'capabilities', {}).get('units', 'mW')
+                    opt_type = getattr(self.optical, 'capabilities', {}).get('type', 'LED')
+                    print(f"[OPTICAL] Turning {opt_type} ON: {lvl} {unit}")
+                    # For lasers, set_level should be called before set_enabled
+                    # (set_enabled will handle the proper sequence)
                     self.optical.set_level(lvl, unit)
                     self.optical.set_enabled(True)
                     self.manual_led_on = True
-                    self.manual_led_btn.config(text="LIGHT ON")
+                    # Update button text based on type
+                    btn_text = "LASER ON" if opt_type == "Laser" else "LIGHT ON"
+                    self.manual_led_btn.config(text=btn_text)
+                    print(f"[OPTICAL] {opt_type} turned ON successfully")
                 else:
+                    # Turn OFF: disable emission
+                    opt_type = getattr(self.optical, 'capabilities', {}).get('type', 'LED')
+                    print(f"[OPTICAL] Turning {opt_type} OFF...")
                     self.optical.set_enabled(False)
                     self.manual_led_on = False
-                    self.manual_led_btn.config(text="LIGHT OFF")
+                    # Update button text based on type
+                    btn_text = "LASER OFF" if opt_type == "Laser" else "LIGHT OFF"
+                    self.manual_led_btn.config(text=btn_text)
+                    print(f"[OPTICAL] {opt_type} turned OFF successfully")
                 return
+            else:
+                print(f"[OPTICAL] WARNING: No optical system available. Make sure you've selected a system with laser/LED configured.")
             # Legacy PSU path fallback
             if not getattr(self, 'psu_connected', False):
                 self.connect_keithley_psu()
@@ -4138,6 +4216,290 @@ class MeasurementGUI:
                 self.manual_led_btn.config(text="LED OFF")
         except Exception:
             pass
+
+    # ========================================================================
+    # Laser Control Methods (from motor_control_gui)
+    # ========================================================================
+    
+    def connect_laser(self) -> None:
+        """Connect to laser controller."""
+        print("[LASER] Connect button clicked")
+        try:
+            if not hasattr(self, 'var_laser_port') or not hasattr(self, 'var_laser_baud'):
+                messagebox.showwarning("Not Configured", "Laser controls not initialized. Please restart the GUI.")
+                return
+            
+            port = self.var_laser_port.get().strip()
+            baud_str = self.var_laser_baud.get().strip()
+            print(f"[LASER] Attempting connection: port={port}, baud={baud_str}")
+            
+            if not port:
+                messagebox.showwarning("No Port", "Please enter a COM port.")
+                return
+            
+            try:
+                baud = int(baud_str)
+            except ValueError:
+                messagebox.showwarning("Invalid Baud", "Please enter a valid baud rate.")
+                return
+            
+            self.var_laser_status.set("Laser: Connecting...")
+            self.master.update()
+            
+            # Create laser manager with config
+            cfg = {
+                "driver": "Oxxius",
+                "address": port,
+                "baud": baud
+            }
+            print(f"[LASER] Creating LaserManager with config: {cfg}")
+            
+            try:
+                self.laser_mgr = LaserManager.from_config(cfg)
+                print(f"[LASER] LaserManager created successfully")
+            except Exception as e:
+                print(f"[LASER] ERROR creating LaserManager: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+            
+            # Test connection
+            try:
+                laser = self.laser_mgr.instrument
+                print(f"[LASER] Got instrument: {laser}")
+                
+                idn = laser.idn()
+                print(f"[LASER] Laser ID response: {idn}")
+                self.var_laser_status.set(f"Laser: Connected ✓ ({idn[:30]})")
+                print("[LASER] Connection successful")
+                
+                # Read current power if available
+                try:
+                    power_str = laser.get_power()
+                    import re
+                    power_match = re.search(r'[\d.]+', power_str)
+                    if power_match:
+                        power_val = float(power_match.group())
+                        if power_val > 0:
+                            self.var_laser_power.set(str(power_val))
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[LASER] ERROR: Connection test failed: {e}")
+                import traceback
+                traceback.print_exc()
+                self.var_laser_status.set("Laser: Connection Failed")
+                messagebox.showerror("Connection Failed", f"Could not communicate with laser:\n{e}")
+                self.laser_mgr = None
+                
+        except Exception as exc:
+            print(f"[LASER] ERROR: Exception during connect: {exc}")
+            import traceback
+            traceback.print_exc()
+            self.var_laser_status.set("Laser: Error")
+            messagebox.showerror("Connection Error", f"Failed to connect:\n{exc}")
+            self.laser_mgr = None
+
+    def disconnect_laser(self) -> None:
+        """Disconnect from laser and restore to manual control mode."""
+        print("[LASER] ===== DISCONNECT - Restoring to manual control mode =====")
+        try:
+            if hasattr(self, 'laser_mgr') and self.laser_mgr is not None:
+                laser = self.laser_mgr.instrument
+                try:
+                    laser.emission_on()
+                    time.sleep(0.1)
+                    # Restore to analog modulation mode
+                    laser.send_command("APC 1")
+                    time.sleep(0.1)
+                    laser.send_command("AM 1")
+                    time.sleep(0.1)
+                    laser.send_command("DM 0")
+                    time.sleep(0.1)
+                    laser.set_power(100.0)
+                    time.sleep(0.1)
+                except Exception:
+                    pass
+                try:
+                    laser.close(restore_to_manual_control=True)
+                except Exception:
+                    pass
+                self.laser_mgr = None
+            if hasattr(self, 'var_laser_enabled'):
+                self.var_laser_enabled.set(False)
+            if hasattr(self, 'var_laser_status'):
+                self.var_laser_status.set("Laser: Disconnected (restored to manual control)")
+            if hasattr(self, '_laser_emission_previous_state'):
+                self._laser_emission_previous_state = False
+            print("[LASER] Disconnect complete")
+        except Exception as exc:
+            print(f"[LASER] ERROR: Exception during disconnect: {exc}")
+            import traceback
+            traceback.print_exc()
+
+    def toggle_laser_emission(self) -> None:
+        """Toggle laser emission ON/OFF."""
+        print("[LASER] ========== Emission toggle clicked ==========")
+        try:
+            if not hasattr(self, '_laser_emission_previous_state'):
+                self._laser_emission_previous_state = False
+            
+            previous_state = self._laser_emission_previous_state
+            want_on = not previous_state
+            
+            print(f"[LASER] Previous state: {previous_state}, User wants: {'ON' if want_on else 'OFF'}")
+            
+            if hasattr(self, 'laser_mgr') and self.laser_mgr is not None:
+                laser = self.laser_mgr.instrument
+                
+                if want_on:
+                    # Turn ON sequence
+                    print("[LASER] ===== TURNING LASER ON =====")
+                    self.var_laser_status.set("Laser: Initializing...")
+                    self.master.update()
+                    
+                    laser.send_command("APC 1")
+                    time.sleep(0.1)
+                    laser.send_command("AM 0")
+                    time.sleep(0.1)
+                    laser.send_command("DM 0")
+                    time.sleep(0.1)
+                    
+                    # Set power
+                    try:
+                        power_str = self.var_laser_power.get().strip()
+                        if not power_str or power_str == "0" or power_str == "0.0":
+                            power = 10.0
+                            self.var_laser_power.set("10.0")
+                        else:
+                            power = float(power_str)
+                        laser.set_power(power)
+                        time.sleep(0.1)
+                    except ValueError:
+                        power = 10.0
+                        self.var_laser_power.set("10.0")
+                        laser.set_power(power)
+                        time.sleep(0.1)
+                    
+                    laser.emission_on()
+                    self.var_laser_status.set("Laser: Emission ON...")
+                    self.master.update()
+                    
+                    # Query actual power
+                    try:
+                        power_str = laser.get_power()
+                        import re
+                        power_match = re.search(r'[\d.]+', power_str)
+                        if power_match:
+                            actual_power = power_match.group()
+                            set_power = self.var_laser_power.get()
+                            self.var_laser_status.set(f"Laser: Emission ON (set: {set_power} mW, actual: {actual_power} mW)")
+                        else:
+                            set_power = self.var_laser_power.get()
+                            self.var_laser_status.set(f"Laser: Emission ON (set: {set_power} mW)")
+                    except Exception:
+                        set_power = self.var_laser_power.get()
+                        self.var_laser_status.set(f"Laser: Emission ON (set: {set_power} mW)")
+                    
+                    self._laser_emission_previous_state = True
+                    self.var_laser_enabled.set(True)
+                    
+                else:
+                    # Turn OFF sequence
+                    print("[LASER] ===== TURNING EMISSION OFF =====")
+                    laser.emission_off()
+                    time.sleep(0.1)
+                    laser.send_command("AM 1")
+                    time.sleep(0.1)
+                    laser.set_power(100.0)
+                    time.sleep(0.1)
+                    
+                    self.var_laser_status.set("Laser: Emission OFF (ready for manual control)")
+                    self._laser_emission_previous_state = False
+                    self.var_laser_enabled.set(False)
+                    
+            else:
+                messagebox.showwarning("Not Connected", "Please connect to laser first.")
+                if hasattr(self, 'var_laser_enabled'):
+                    self.var_laser_enabled.set(False)
+                if hasattr(self, '_laser_emission_previous_state'):
+                    self._laser_emission_previous_state = False
+                    
+        except Exception as exc:
+            print(f"[LASER] ERROR: Exception during toggle: {exc}")
+            import traceback
+            traceback.print_exc()
+            if hasattr(self, 'var_laser_enabled') and hasattr(self, '_laser_emission_previous_state'):
+                self.var_laser_enabled.set(self._laser_emission_previous_state)
+            messagebox.showerror("Laser Error", f"Failed to toggle emission:\n{exc}")
+
+    def apply_laser_power(self) -> None:
+        """Apply laser power setting."""
+        print("[LASER] Apply power button clicked")
+        try:
+            power_str = self.var_laser_power.get().strip()
+            if not power_str or power_str == "0" or power_str == "0.0":
+                power = 10.0
+                self.var_laser_power.set("10.0")
+            else:
+                power = float(power_str)
+            
+            if hasattr(self, 'laser_mgr') and self.laser_mgr is not None:
+                laser = self.laser_mgr.instrument
+                emission_on = self.var_laser_enabled.get() if hasattr(self, 'var_laser_enabled') else False
+                
+                if emission_on:
+                    try:
+                        laser.send_command("APC 1")
+                        time.sleep(0.05)
+                    except Exception:
+                        pass
+                    laser.set_power(power)
+                    time.sleep(0.1)
+                    
+                    # Query actual power
+                    try:
+                        power_str = laser.get_power()
+                        import re
+                        power_match = re.search(r'[\d.]+', power_str)
+                        if power_match:
+                            actual_power = power_match.group()
+                            self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW (actual: {actual_power} mW)")
+                        else:
+                            self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW")
+                    except Exception:
+                        self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW")
+                else:
+                    self.var_laser_status.set(f"Laser: Power will be set to {power:.2f} mW when turned on")
+            else:
+                messagebox.showwarning("Not Connected", "Please connect to laser first.")
+        except Exception as exc:
+            print(f"[LASER] ERROR: Exception during apply power: {exc}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Laser Error", f"Failed to apply power:\n{exc}")
+
+    def increase_laser_power(self) -> None:
+        """Increase laser power by 5 mW."""
+        try:
+            current_power = float(self.var_laser_power.get())
+            new_power = current_power + 5.0
+            self.var_laser_power.set(f"{new_power:.1f}")
+            if hasattr(self, 'laser_mgr') and self.laser_mgr is not None and hasattr(self, 'var_laser_enabled') and self.var_laser_enabled.get():
+                self.apply_laser_power()
+        except ValueError:
+            self.var_laser_power.set("5.0")
+
+    def decrease_laser_power(self) -> None:
+        """Decrease laser power by 5 mW."""
+        try:
+            current_power = float(self.var_laser_power.get())
+            new_power = max(0.0, current_power - 5.0)
+            self.var_laser_power.set(f"{new_power:.1f}")
+            if hasattr(self, 'laser_mgr') and self.laser_mgr is not None and hasattr(self, 'var_laser_enabled') and self.var_laser_enabled.get():
+                self.apply_laser_power()
+        except ValueError:
+            self.var_laser_power.set("0.0")
 
     def open_pulse_testing_gui(self) -> None:
         """Launch the pulse testing GUI with current sample/context info."""
@@ -4510,12 +4872,81 @@ class MeasurementGUI:
             self.optical_type_var.set("None")
         
         # Try to create optical object
+        # First, close any existing optical connection to avoid port conflicts
         try:
-            self.optical = create_optical_from_system_config(config)
+            if hasattr(self, 'optical') and self.optical is not None:
+                print(f"[OPTICAL] Closing existing optical connection before creating new one...")
+                try:
+                    self.optical.set_enabled(False)
+                except Exception:
+                    pass
+                try:
+                    self.optical.close()
+                except Exception:
+                    pass
+                self.optical = None
         except Exception:
+            pass
+        
+        try:
+            print(f"[OPTICAL] Creating optical system from config...")
+            self.optical = create_optical_from_system_config(config)
+            if self.optical is not None:
+                opt_type = getattr(self.optical, 'capabilities', {}).get('type', 'Unknown')
+                print(f"[OPTICAL] Optical system created: {opt_type}")
+                if opt_type == "Laser":
+                    print(f"[OPTICAL] Laser is ready - use the 'LIGHT ON/OFF' button to control it")
+                # Update power label based on optical type
+                if hasattr(self, '_update_optical_power_label'):
+                    self._update_optical_power_label()
+            else:
+                print(f"[OPTICAL] No optical system created (may not be configured)")
+                # Reset to default label
+                if hasattr(self, '_update_optical_power_label'):
+                    self._update_optical_power_label()
+        except Exception as e:
+            print(f"[OPTICAL] ERROR: Failed to create optical system: {e}")
+            import traceback
+            traceback.print_exc()
             self.optical = None
+            # Reset to default label
+            if hasattr(self, '_update_optical_power_label'):
+                self._update_optical_power_label()
         
         # Removed "System Loaded Successfully" popup - it's misleading since connection hasn't been tested
+    
+    def _update_optical_power_label(self) -> None:
+        """Update the optical power label based on the current optical system type."""
+        if not hasattr(self, 'led_power_label'):
+            return
+        
+        try:
+            if hasattr(self, 'optical') and self.optical is not None:
+                caps = getattr(self.optical, 'capabilities', {})
+                opt_type = caps.get('type', 'Unknown') if isinstance(caps, dict) else getattr(caps, 'type', 'Unknown')
+                units = caps.get('units', 'mW') if isinstance(caps, dict) else getattr(caps, 'units', 'mW')
+                limits = caps.get('limits', {}) if isinstance(caps, dict) else getattr(caps, 'limits', {})
+                
+                if opt_type == "Laser":
+                    # For laser, show power in mW with typical range (0-10 mW)
+                    max_power = limits.get('max', 10.0) if isinstance(limits, dict) else getattr(limits, 'max', 10.0)
+                    self.led_power_label.config(text=f"Laser Power (0-{max_power:.1f} {units}):")
+                elif opt_type == "LED":
+                    # For LED, show normalized or actual units
+                    max_power = limits.get('max', 1.0) if isinstance(limits, dict) else getattr(limits, 'max', 1.0)
+                    if units.lower() in ['ma', 'a']:
+                        self.led_power_label.config(text=f"LED Power (0-{max_power:.1f} {units}):")
+                    else:
+                        self.led_power_label.config(text=f"LED Power (0-{max_power:.1f} {units}):")
+                else:
+                    # Default/unknown
+                    self.led_power_label.config(text="Optical Power (0-1):")
+            else:
+                # No optical system, use default
+                self.led_power_label.config(text="Optical Power (0-1):")
+        except Exception as e:
+            # On error, use default label
+            self.led_power_label.config(text="Optical Power (0-1):")
     
     def save_system(self) -> None:
         """Save current configuration as a new system"""
@@ -4757,10 +5188,31 @@ class MeasurementGUI:
             print(self.SMU_type)
 
             # Optical excitation (LED/Laser) selection based on config
+            # First, close any existing optical connection to avoid port conflicts
+            try:
+                if hasattr(self, 'optical') and self.optical is not None:
+                    try:
+                        self.optical.set_enabled(False)
+                    except Exception:
+                        pass
+                    try:
+                        self.optical.close()
+                    except Exception:
+                        pass
+                    self.optical = None
+            except Exception:
+                pass
+            
             try:
                 self.optical = create_optical_from_system_config(config)
+                # Update power label based on optical type
+                if hasattr(self, '_update_optical_power_label'):
+                    self._update_optical_power_label()
             except Exception:
                 self.optical = None
+                # Reset to default label
+                if hasattr(self, 'led_power_label'):
+                    self.led_power_label.config(text="Optical Power (0-1):")
 
     def _handle_system_selection(self, selected_system: str) -> None:
         """Callback for legacy system dropdown - only connects if a valid system is selected."""
@@ -5464,12 +5916,12 @@ class MeasurementGUI:
 
         # Sweep Type variable already declared above; controls will be shown in DC Triangle UI
 
-        # LED Controls mini title
-        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=22, column=0, columnspan=2, sticky="w",
+        # LED/Laser Controls mini title
+        tk.Label(frame, text="Optical Controls", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=22, column=0, columnspan=2, sticky="w",
                                                                              pady=(10, 2))
 
-        # LED Toggle Button
-        tk.Label(frame, text="LED Status:", bg='#f0f0f0').grid(row=23, column=0, sticky="w")
+        # LED/Laser Toggle Button
+        tk.Label(frame, text="Optical Status:", bg='#f0f0f0').grid(row=23, column=0, sticky="w")
         self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
 
         def toggle_led():
@@ -5487,9 +5939,12 @@ class MeasurementGUI:
                                     width=8, command=toggle_led)
         self.led_button.grid(row=23, column=1, sticky="w")
 
-        tk.Label(frame, text="Led_Power (0-1):", bg='#f0f0f0').grid(row=24, column=0, sticky="w")
+        # Power control label (will be updated dynamically based on optical type)
+        self.led_power_label = tk.Label(frame, text="Optical Power (0-1):", bg='#f0f0f0')
+        self.led_power_label.grid(row=24, column=0, sticky="w")
         self.led_power = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.led_power).grid(row=24, column=1)
+        self.led_power_entry = tk.Entry(frame, textvariable=self.led_power)
+        self.led_power_entry.grid(row=24, column=1)
 
         tk.Label(frame, text="Sequence: (01010)", bg='#f0f0f0').grid(row=25, column=0, sticky="w")
         self.sequence = tk.StringVar()

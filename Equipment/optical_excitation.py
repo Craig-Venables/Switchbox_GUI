@@ -171,22 +171,61 @@ class LaserExcitation(OpticalExcitation):
             pass
 
     def set_enabled(self, on: bool) -> None:
+        """Enable/disable laser emission following proper sequence.
+        
+        When turning ON:
+        1. Set to power control mode (APC 1)
+        2. Set to digital control (AM 0, DM 0)
+        3. Turn emission ON
+        (Power should be set before enabling via set_level)
+        
+        When turning OFF:
+        1. Turn emission OFF
+        2. Enable analog modulation (AM 1) for manual control
+        3. Set power to 100 mW for manual control
+        """
         try:
             if on:
+                # Turn ON sequence
+                self._laser.send_command("APC 1")
+                time.sleep(0.1)
+                self._laser.send_command("AM 0")
+                time.sleep(0.1)
+                self._laser.send_command("DM 0")
+                time.sleep(0.1)
                 self._laser.emission_on()
             else:
+                # Turn OFF sequence - restore to manual control
                 self._laser.emission_off()
+                time.sleep(0.1)
+                self._laser.send_command("AM 1")
+                time.sleep(0.1)
+                self._laser.set_power(100.0)
+                time.sleep(0.1)
         except Exception:
             pass
 
     def set_level(self, value: float, unit: str) -> None:
-        # Clamp
+        """Set laser power level.
+        
+        Should be called before set_enabled(True) for best results.
+        If laser is already on, power will be updated immediately.
+        """
+        # Clamp to limits
         try:
             min_v = float(self._limits.get("min", -1e9))
             max_v = float(self._limits.get("max", 1e9))
             value = max(min_v, min(max_v, float(value)))
         except Exception:
             pass
+        
+        # Ensure we're in power control mode before setting power
+        try:
+            self._laser.send_command("APC 1")
+            time.sleep(0.05)
+        except Exception:
+            pass
+        
         unit = (unit or self._units).lower()
         try:
             if unit == "mw":
@@ -206,10 +245,25 @@ class LaserExcitation(OpticalExcitation):
             pass
 
     def close(self) -> None:
+        """Close laser connection and restore to manual control mode."""
         try:
-            self.emergency_stop()
+            # Restore to manual control mode before closing
+            try:
+                self._laser.emission_on()  # Ensure emission is ON
+                time.sleep(0.1)
+                self._laser.send_command("APC 1")
+                time.sleep(0.1)
+                self._laser.send_command("AM 1")  # Enable analog modulation
+                time.sleep(0.1)
+                self._laser.send_command("DM 0")
+                time.sleep(0.1)
+                self._laser.set_power(100.0)  # Set to 100 mW for manual control
+                time.sleep(0.1)
+            except Exception:
+                pass
+            # Use laser's close method which also restores to manual control
             if hasattr(self._laser, "close"):
-                self._laser.close()
+                self._laser.close(restore_to_manual_control=True)
         except Exception:
             pass
 
@@ -312,18 +366,61 @@ def create_optical_from_system_config(system_cfg: Dict[str, Any]) -> Optional[Op
         if driver.lower() == "oxxius":
             try:
                 from Equipment.Laser_Controller.oxxius import OxxiusLaser  # type: ignore
-            except Exception:
+            except Exception as e:
+                print(f"[OPTICAL] ERROR: Could not import OxxiusLaser: {e}")
                 return None
-            port = opt.get("address", "COM3")
-            baud = int(opt.get("baud", 38400))
-            laser = OxxiusLaser(port=port, baud=baud)
+            port = opt.get("address", "COM4")  # Default to COM4 (common for this system)
+            baud = int(opt.get("baud", 19200))  # Default to 19200 (common for this system)
+            print(f"[OPTICAL] Creating laser connection: port={port}, baud={baud}")
+            
+            # Try to create connection, with retry logic for port conflicts
+            laser = None
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    laser = OxxiusLaser(port=port, baud=baud)
+                    print(f"[OPTICAL] Laser connection created successfully")
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    error_msg = str(e)
+                    if ("Access is denied" in error_msg or "PermissionError" in error_msg) and attempt < max_retries - 1:
+                        # Port is in use, wait a bit and retry
+                        print(f"[OPTICAL] WARNING: Port {port} appears to be in use (attempt {attempt + 1}/{max_retries}). Waiting...")
+                        import time
+                        time.sleep(1.0)  # Wait 1 second for port to be released
+                        continue
+                    else:
+                        # Final attempt failed or different error
+                        if "Access is denied" in error_msg or "PermissionError" in error_msg:
+                            print(f"[OPTICAL] ERROR: Port {port} is already in use by another process.")
+                            print(f"[OPTICAL] This may happen if:")
+                            print(f"[OPTICAL]   - The laser is already connected in another window (e.g., Motor Control GUI)")
+                            print(f"[OPTICAL]   - A previous connection wasn't properly closed")
+                            print(f"[OPTICAL] Solution: Close other laser connections or wait a moment and reload the system.")
+                        else:
+                            print(f"[OPTICAL] ERROR: Failed to connect to laser at {port}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return None
+            
+            if laser is None:
+                return None
+            
+            # Test connection by querying ID
+            try:
+                idn = laser.idn()
+                print(f"[OPTICAL] Laser ID: {idn}")
+            except Exception as e:
+                print(f"[OPTICAL] WARNING: Could not query laser ID: {e}")
             lx = LaserExcitation(laser=laser, units=units, wavelength_nm=opt.get("wavelength_nm"), limits=limits)
             try:
                 lx.initialize()
-            except Exception:
-                pass
+                print(f"[OPTICAL] Laser initialized successfully")
+            except Exception as e:
+                print(f"[OPTICAL] WARNING: Laser initialization had issues: {e}")
             return lx
         # Unknown laser driver for now
+        print(f"[OPTICAL] WARNING: Unknown laser driver: {driver}")
         return None
 
     if otype == "simulation":

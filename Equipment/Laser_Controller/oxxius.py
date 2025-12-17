@@ -103,8 +103,81 @@ class OxxiusLaser:
     # Housekeeping
     # =======================
 
-    def close(self):
-        """Close the serial connection."""
+    def set_to_analog_modulation_mode(self, power_mw=100):
+        """
+        Set laser to analog modulation mode for manual control.
+        
+        This is the standard state the laser should be left in:
+        - Analog modulation ON (AM 1) - allows front panel wheel control
+        - Digital modulation OFF (DM 0)
+        - Power control mode ON (APC 1)
+        - Power set to specified value (default 100 mW)
+        - Emission should remain ON
+        
+        The analog modulation controls a percentage of the set power value.
+        Setting power to 100 mW means the front panel wheel can control
+        0-100% of 100 mW (0-100 mW range).
+        
+        Args:
+            power_mw: Power level in mW (default: 100 mW)
+        
+        Returns:
+            dict: Results of each command
+        """
+        results = {}
+        try:
+            # Set to power control mode
+            results['APC'] = self.send_command("APC 1")
+            time.sleep(0.1)
+            
+            # Enable analog modulation (allows front panel wheel control)
+            results['AM'] = self.send_command("AM 1")
+            time.sleep(0.1)
+            
+            # Disable digital modulation
+            results['DM'] = self.send_command("DM 0")
+            time.sleep(0.1)
+            
+            # Set power level
+            results['power'] = self.set_power(power_mw)
+            time.sleep(0.1)
+            
+        except Exception as e:
+            results['error'] = str(e)
+        return results
+
+    def close(self, restore_to_manual_control=True):
+        """
+        Close the serial connection.
+        
+        IMPORTANT: By default, this will restore the laser to analog modulation
+        mode before closing. This ensures the laser is left in a state where
+        it can be controlled manually via the front panel wheel.
+        
+        Standard final state:
+        - Emission: ON
+        - Analog modulation: ON (AM 1)
+        - Digital modulation: OFF (DM 0)
+        - Power control: ON (APC 1)
+        - Power: 100 mW (front panel wheel controls 0-100% of this)
+        
+        Args:
+            restore_to_manual_control: If True, restore to analog modulation
+                mode before closing (default: True)
+        """
+        if restore_to_manual_control:
+            try:
+                # Ensure emission is ON
+                self.emission_on()
+                time.sleep(0.1)
+                
+                # Set to analog modulation mode with 100 mW power
+                self.set_to_analog_modulation_mode(power_mw=100)
+                
+            except Exception:
+                # If restoration fails, still close the connection
+                pass
+        
         self.ser.close()
 
 
@@ -112,84 +185,202 @@ class OxxiusLaser:
 # Example usage
 # =======================
 if __name__ == "__main__":
+    print("=" * 50)
+    print("Oxxius Laser Controller Test")
+    print("=" * 50)
+    
+    # Connect to laser
+    print("\n1. Connecting to laser...")
     laser = OxxiusLaser(port="COM4", baud=19200)
+    print("   ✓ Connected")
 
     try:
-        print("ID:", laser.idn())
-
-        print("Status:", laser.get_status())
-        print("Errors:", laser.get_error())
-        print("set laser to power control")
-        print(laser.send_command("APC 1"))
-
-        print("Turning emission ON...")
-        print(laser.emission_on())
-        time.sleep(6)  # safety delay
-
+        # Get laser identity
+        print("\n2. Querying laser identity...")
+        idn = laser.idn()
+        print(f"   ID: {idn}")
         
-
-        print("changing powers")
-        print(laser.send_command("AM 0"))
-        print(laser.send_command("DM 0"))
-
-        # print("########################")
-
-        # print("Setting power to 10 mW...")
-        # print(laser.set_power(10))
-        # print("Power:", laser.get_power())
-
-        # time.sleep(2)
+        # Check status and errors
+        print("\n3. Checking status and errors...")
+        status = laser.get_status()
+        errors = laser.get_error()
+        print(f"   Status: {status}")
+        print(f"   Errors: {errors}")
         
-        # print("Setting power to 100 mW...")
-        # print(laser.set_power(100))
-        # print("Power:", laser.get_power())
-        # time.sleep(2)
+        # Set to power control mode
+        print("\n4. Setting to power control mode...")
+        result = laser.send_command("APC 1")
+        print(f"   Result: {result}")
+        
+        # Set to digital control (analog modulation OFF)
+        print("\n5. Setting to digital control (AM 0)...")
+        result = laser.send_command("AM 0")
+        print(f"   Result: {result}")
+        
+        # Disable digital modulation
+        print("   Disabling digital modulation (DM 0)...")
+        result = laser.send_command("DM 0")
+        print(f"   Result: {result}")
+        
+        # Set power to 5 mW
+        print("\n6. Setting power to 5 mW...")
+        result = laser.set_power(5)
+        print(f"   Result: {result}")
+        
+        # Verify power setting
+        power = laser.get_power()
+        print(f"   Current power: {power}")
+        
+        # Turn laser on
+        print("\n7. Turning laser emission ON...")
+        result = laser.emission_on()
+        print(f"   Result: {result}")
+        
+        # Wait 2 seconds
+        print("\n8. Waiting 2 seconds...")
+        time.sleep(2)
+        print("   ✓ Wait complete")
+        
+        # Enable analog modulation (AM 1)
+        # Note: Analog modulation is a % of the power setting
+        print("\n9. Enabling analog modulation (AM 1)...")
+        result = laser.send_command("AM 1")
+        print(f"   Result: {result}")
+        print("   ✓ Analog modulation enabled (front panel wheel controls % of set power)")
+        
+        # Set power to 100 mW (this becomes the maximum when analog modulation is enabled)
+        print("\n10. Setting power to 100 mW (max for analog modulation)...")
+        result = laser.set_power(100)
+        print(f"   Result: {result}")
+        
+        # Verify power setting
+        power = laser.get_power()
+        print(f"   Current power: {power}")
+        print("   ✓ Power set to 100 mW - analog wheel now controls % of this value")
+        
+        # Keep emission ON (don't disable as it causes issues)
+        print("\n11. Keeping emission ON (not disabling to avoid issues)...")
+        print("   ✓ Laser remains ON with analog modulation enabled")
+        
+        print("\n" + "=" * 50)
+        print("Test completed successfully!")
+        print("=" * 50)
+        print("Laser is now in analog modulation mode:")
+        print("  - Power set to 100 mW (maximum)")
+        print("  - Front panel wheel controls percentage of 100 mW")
+        print("  - Emission remains ON")
+        print("=" * 50)
 
-        # print("Power:", laser.get_power())
-        # print("Temperature:", laser.get_temperature())
-
-        # print(laser.set_power(1))
-
-        # print("Turning emission OFF...")
-        # print(laser.emission_off())
-
-
-        print(laser.send_command("APC 0"))
-
-        laser.send_command("RST")
-
+    except Exception as e:
+        print(f"\n❌ Error during test: {e}")
+        import traceback
+        traceback.print_exc()
+        
     finally:
-        laser.close()
+        print("\n11. Closing connection and restoring to manual control mode...")
+        # close() automatically restores to analog modulation mode with 100 mW
+        # Emission will be kept ON, analog modulation ON, power at 100 mW
+        laser.close(restore_to_manual_control=True)
+        print("   ✓ Connection closed")
+        print("   ✓ Laser restored to manual control mode (emission ON, AM ON, 100 mW)")
 
 
 """
-What you need to change for different controllers
+================================================================================
+LASER OPERATION PROTOCOL AND DOCUMENTATION
+================================================================================
 
-SERIAL_PORT
+STANDARD OPERATION SEQUENCE
+----------------------------
+When operating the laser, ALWAYS follow this sequence to ensure proper operation
+and leave the system in a good state for the next user:
 
-Windows: "COMx"
+1. CONNECT to laser (COM4, 19200 baud)
+2. QUERY identity, status, and errors
+3. SET to power control mode: APC 1
+4. SET to digital control: AM 0, DM 0
+5. SET power level (e.g., 5 mW for testing)
+6. TURN laser ON: DL 1
+7. WAIT 2 seconds (safety delay)
+8. ENABLE analog modulation: AM 1
+9. SET power to desired level (typically 100 mW for manual control)
+10. KEEP emission ON (do NOT disable - causes issues)
+11. CLOSE connection (automatically restores to manual control mode)
 
-Linux/Mac: "/dev/ttyUSBx"
+IMPORTANT: Never disable emission (DL 0) after enabling analog modulation,
+as this causes the laser to not work properly later.
 
-Check in Device Manager (Windows) or dmesg (Linux) to find which COM port the laser appears on.
+POWER LEVEL SETTINGS
+--------------------
+- When analog modulation is OFF (AM 0): Power setting is absolute (e.g., 5 mW = 5 mW)
+- When analog modulation is ON (AM 1): Power setting is the MAXIMUM
+  - Front panel wheel controls 0-100% of the set power
+  - Example: Power set to 100 mW with AM 1 means wheel controls 0-100 mW
 
-BAUD_RATE
+STANDARD FINAL STATE (for manual control)
+------------------------------------------
+The laser should ALWAYS be left in this state when closing/disconnecting:
 
-LCX / LBX LaserBoxx: 19200 or 38400 (check manual / try both).
+- Emission: ON (DL 1)
+- Analog modulation: ON (AM 1)
+- Digital modulation: OFF (DM 0)
+- Power control: ON (APC 1)
+- Power: 100 mW
 
-L1C compact lasers: 115200.
+This allows the next user to control the laser manually via the front panel
+wheel, which will adjust the power from 0-100% of 100 mW (0-100 mW range).
 
-Commands
+The close() method automatically restores the laser to this state by default.
 
-DL 1 / DL 0 are common for LCX and LaserBoxx.
+SETTING POWER LEVELS
+--------------------
+When setting power levels:
 
-Some older LBX units use EM 1 / EM 0.
+1. If using digital control (AM 0):
+   - Set power directly: set_power(desired_mw)
+   - Power will be exactly what you set
 
-Power query is usually ?P, but can vary.
+2. If using analog modulation (AM 1):
+   - Set power to maximum desired: set_power(max_mw)
+   - Front panel wheel controls 0-100% of this maximum
+   - Example: set_power(100) with AM 1 allows 0-100 mW via wheel
 
-Always check the “RS-232 command list” in your model’s manual.
+3. Always set power BEFORE enabling analog modulation if you want a specific
+   maximum value.
 
-Safety delay
+COMMAND REFERENCE
+-----------------
+- DL 1: Turn emission ON
+- DL 0: Turn emission OFF (avoid after enabling analog modulation)
+- APC 1: Enable automatic power control
+- APC 0: Disable automatic power control
+- AM 1: Enable analog modulation (front panel wheel control)
+- AM 0: Disable analog modulation (digital/software control)
+- DM 1: Enable digital modulation
+- DM 0: Disable digital modulation
+- PM <value>: Set power in mW
+- ?P: Query current power setting
 
-The first ON after enabling emission typically takes 5 s before light appears. Don’t shorten that wait.
+CONNECTION SETTINGS
+-------------------
+SERIAL_PORT:
+  Windows: "COMx" (e.g., "COM4")
+  Linux/Mac: "/dev/ttyUSBx"
+  Check Device Manager (Windows) or dmesg (Linux) to find COM port
+
+BAUD_RATE:
+  LCX / LBX LaserBoxx: 19200 or 38400 (check manual / try both)
+  L1C compact lasers: 115200
+
+Default for this system: COM4, 19200 baud
+
+SAFETY NOTES
+------------
+- First ON after enabling emission typically takes 5 s before light appears
+- Don't shorten the safety delay
+- Always verify laser status and errors before operations
+- Never disable emission after enabling analog modulation
+- Always restore to analog modulation mode before closing
+
+================================================================================
 """
