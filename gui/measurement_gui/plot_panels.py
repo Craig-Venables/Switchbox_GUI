@@ -66,6 +66,10 @@ class MeasurementPlotPanels:
     
     # Reference to GUI for context menu callbacks
     gui: Optional[object] = None
+    
+    # Graph activity terminal/log
+    graph_terminal: Optional[tk.Text] = None
+    graph_terminal_scrollbar: Optional[tk.Scrollbar] = None
 
     # ------------------------------------------------------------------
     # Public construction API
@@ -128,6 +132,9 @@ class MeasurementPlotPanels:
         
         # Create floating overlay
         self._create_floating_overlay(plot_container)
+        
+        # Note: Graph activity terminal is created in the Graphing tab, not here
+        # (Terminal was moved to Graphing tab per user request)
         
         # Initial layout
         self._update_plot_layout()
@@ -434,6 +441,115 @@ class MeasurementPlotPanels:
         if self.overlay_label:
             text = f"Sample: {sample_name} | Device: {device} | Voltage: {voltage} | Loop: {loop}"
             self.overlay_label.config(text=text)
+    
+    def _create_graph_terminal(self, parent: tk.Misc) -> None:
+        """Create a terminal widget at the bottom to show graph activity
+        
+        Note: This method detects whether the parent uses grid or pack layout
+        and uses the appropriate geometry manager.
+        """
+        terminal_frame = tk.LabelFrame(
+            parent,
+            text="Graph Activity Log",
+            font=("Segoe UI", 9, "bold"),
+            bg='white',
+            padx=5,
+            pady=5
+        )
+        
+        # Check if parent uses grid by checking for grid slaves
+        uses_grid = False
+        try:
+            slaves = parent.grid_slaves()
+            if slaves:
+                uses_grid = True
+        except:
+            pass
+        
+        # Use appropriate geometry manager based on parent
+        if uses_grid:
+            # Parent uses grid - need to find the right row
+            # For Graphing tab: tab has row 0 (title), row 1 (content_frame)
+            # So terminal should go at row 2 of the tab
+            try:
+                # Check what rows are already used
+                max_row = -1
+                for child in parent.winfo_children():
+                    try:
+                        grid_info = child.grid_info()
+                        row = grid_info.get('row', -1)
+                        if isinstance(row, (int, str)) and str(row).isdigit():
+                            max_row = max(max_row, int(row))
+                    except:
+                        pass
+                
+                # Add terminal at the next row after the highest used row
+                terminal_row = max_row + 1
+                terminal_frame.grid(row=terminal_row, column=0, sticky="ew", padx=10, pady=(10, 10))
+                parent.rowconfigure(terminal_row, weight=0)  # Terminal row doesn't expand
+            except Exception as e:
+                # Fallback: try row 2 (for Graphing tab structure)
+                try:
+                    terminal_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(10, 10))
+                    parent.rowconfigure(2, weight=0)
+                except:
+                    # Last resort: use pack (might fail but worth trying)
+                    terminal_frame.pack(side='bottom', fill='x', padx=10, pady=(0, 10))
+        else:
+            # Parent uses pack - use pack
+            terminal_frame.pack(side='bottom', fill='x', padx=10, pady=(0, 10))
+        
+        # Create text widget with scrollbar (always use pack inside terminal_frame)
+        text_frame = tk.Frame(terminal_frame, bg='white')
+        text_frame.pack(fill='both', expand=True)
+        
+        scrollbar = tk.Scrollbar(text_frame)
+        scrollbar.pack(side='right', fill='y')
+        
+        self.graph_terminal = tk.Text(
+            text_frame,
+            font=("Consolas", 8),
+            bg='#1e1e1e',  # Dark background
+            fg='#d4d4d4',  # Light text
+            wrap='word',
+            relief='solid',
+            borderwidth=1,
+            padx=8,
+            pady=8,
+            height=4,  # Small height
+            yscrollcommand=scrollbar.set,
+            state='disabled'  # Read-only
+        )
+        self.graph_terminal.pack(side='left', fill='both', expand=True)
+        scrollbar.config(command=self.graph_terminal.yview)
+        self.graph_terminal_scrollbar = scrollbar
+        
+        # Add initial message
+        self.log_graph_activity("Graph Activity Log - Ready for sample analysis operations")
+    
+    def log_graph_activity(self, message: str) -> None:
+        """Log a message to the graph activity terminal"""
+        if not self.graph_terminal:
+            return
+        
+        try:
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted_message = f"[{timestamp}] {message}\n"
+            
+            self.graph_terminal.config(state='normal')
+            self.graph_terminal.insert('end', formatted_message)
+            self.graph_terminal.see('end')  # Auto-scroll to bottom
+            self.graph_terminal.config(state='disabled')
+            
+            # Limit to last 100 lines to prevent memory issues
+            lines = self.graph_terminal.get('1.0', 'end').split('\n')
+            if len(lines) > 100:
+                self.graph_terminal.config(state='normal')
+                self.graph_terminal.delete('1.0', f'{len(lines) - 100}.0')
+                self.graph_terminal.config(state='disabled')
+        except Exception:
+            pass  # Don't crash if terminal logging fails
     
     def update_stats_panel(self, analysis_data: Dict[str, Any], analysis_level: str = "full") -> None:
         """
@@ -910,6 +1026,8 @@ class MeasurementPlotPanels:
             ax_all_logiv.legend(loc="best", fontsize="5")
             self.canvases["all_iv"].draw()
             self.canvases["all_logiv"].draw()
+            # Log activity
+            self.log_graph_activity(f"Added sweep to 'All Sweeps': {label} ({len(v_arr)} points)")
 
     def reset_for_new_sweep(self, gui: Optional[object] = None) -> None:
         """Clear only individual real-time graphs between sweeps (keeps combined graphs)."""
