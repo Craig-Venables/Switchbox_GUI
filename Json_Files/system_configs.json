@@ -14,32 +14,7 @@
             "channels": { "380nm": 1, "420nm": 2 },
             "defaults": { "channel": "380nm", "level": 10.0 }
         }
-    },
-    "Simulation-2400": {
-        "SMU_address": "SIM::GPIB0::24::INSTR",
-        "SMU Type": "simulation_2400"
-    },
-    "Simulation-2450": {
-        "SMU_address": "SIM::KEITHLEY2450",
-        "SMU Type": "simulation_2450"
-    },
-    "Simulation-4200": {
-        "SMU_address": "SIM::GPIB0::17::INSTR",
-        "SMU Type": "simulation_4200"
-    },
-    "Lab_Laser-4200A": {
-        "SMU_address": "192.168.0.10:8888",
-        "SMU Type": "Keithley 4200A",
-        "optical": {
-            "type": "Laser",
-            "driver": "Oxxius",
-            "address": "COM4",
-            "baud": 19200,
-            "units": "mW",
-            "limits": { "min": 0.0, "max": 10.0 },
-            "wavelength_nm": 405,
-            "defaults": { "level": 0.6 }
-        }
+    
     },
     "Lab_Laser-4200A_C": {
         "SMU_address": "GPIB0::17::INSTR",
@@ -78,5 +53,17 @@
     "Hp4140b": {
         "SMU_address": "GPIB0::24::INSTR",
         "SMU Type": "Hp4140b"
+    },
+    "Simulation-2400": {
+        "SMU_address": "SIM::GPIB0::24::INSTR",
+        "SMU Type": "simulation_2400"
+    },
+    "Simulation-2450": {
+        "SMU_address": "SIM::KEITHLEY2450",
+        "SMU Type": "simulation_2450"
+    },
+    "Simulation-4200": {
+        "SMU_address": "SIM::GPIB0::17::INSTR",
+        "SMU Type": "simulation_4200"
     }
 }

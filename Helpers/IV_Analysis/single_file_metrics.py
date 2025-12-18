@@ -11,6 +11,50 @@ from typing import List
 import textwrap
 from matplotlib.backends.backend_pdf import PdfPages
 
+# Suppress expected numerical warnings that are handled by try-except blocks
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in log')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in divide')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in scalar divide')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='Mean of empty slice')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='Degrees of freedom <= 0')
+warnings.filterwarnings('ignore', category=RuntimeWarning, message='overflow encountered in power')
+warnings.filterwarnings('ignore', category=optimize.OptimizeWarning, message='Covariance of the parameters could not be estimated')
+# Suppress LAPACK warnings (DLASCLS errors)
+warnings.filterwarnings('ignore', message='.*On entry to DLASCLS.*')
+
+
+def safe_mean(arr, default=0.0):
+    """Safely compute mean, handling empty arrays and invalid values."""
+    if arr is None or len(arr) == 0:
+        return default
+    arr = np.array(arr)
+    arr = arr[np.isfinite(arr)]
+    if len(arr) == 0:
+        return default
+    return float(np.mean(arr))
+
+
+def safe_std(arr, default=0.0):
+    """Safely compute standard deviation, handling empty arrays and invalid values."""
+    if arr is None or len(arr) == 0:
+        return default
+    arr = np.array(arr)
+    arr = arr[np.isfinite(arr)]
+    if len(arr) < 2:
+        return default
+    return float(np.std(arr))
+
+
+def safe_var(arr, default=0.0):
+    """Safely compute variance, handling empty arrays and invalid values."""
+    if arr is None or len(arr) == 0:
+        return default
+    arr = np.array(arr)
+    arr = arr[np.isfinite(arr)]
+    if len(arr) < 2:
+        return default
+    return float(np.var(arr))
+
 
 class analyze_single_file:
     """
@@ -325,10 +369,23 @@ class analyze_single_file:
 
         # Fit retention model (logarithmic decay)
         try:
+            # Validate data before fitting
+            if len(self.time) < 3 or len(resistance) < 3:
+                raise ValueError("Insufficient data points for retention fitting")
+            if np.any(~np.isfinite(self.time)) or np.any(~np.isfinite(resistance)):
+                raise ValueError("Non-finite values in time or resistance")
+            if np.any(resistance <= 0):
+                raise ValueError("Non-positive resistance values")
+            if len(self.time) != len(resistance):
+                raise ValueError("Time and resistance arrays must have same length")
+            
             def retention_model(t, r0, alpha):
                 return r0 * (1 + alpha * np.log(1 + t))
 
-            popt, _ = curve_fit(retention_model, self.time, resistance)
+            # Suppress OptimizeWarning for this specific operation
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=optimize.OptimizeWarning)
+                popt, _ = curve_fit(retention_model, self.time, resistance)
 
             self.retention_times = self.time
             self.state_degradation = {
@@ -431,13 +488,27 @@ class analyze_single_file:
 
             # 4. Poole-Frenkel emission: I ∝ V*exp(β*√V)
         try:
+            # Validate data before processing
+            if len(i_fit) < 3 or len(v_fit) < 3:
+                raise ValueError("Insufficient data points")
+            if np.any(v_fit <= 0) or np.any(i_fit <= 0):
+                raise ValueError("Invalid voltage/current values")
+            
             def poole_frenkel(v, a, beta):
                 return a * v * np.exp(beta * np.sqrt(v))
 
             # Use log transformation for better fitting
-            log_i = np.log(i_fit + 1e-12)
-            log_v = np.log(v_fit)
-            sqrt_v = np.sqrt(v_fit)
+            # Ensure positive values before log
+            i_safe = np.maximum(i_fit, 1e-12)
+            v_safe = np.maximum(v_fit, 1e-12)
+            log_i = np.log(i_safe)
+            log_v = np.log(v_safe)
+            sqrt_v = np.sqrt(v_safe)
+            
+            # Check for valid values after transformation
+            if np.any(~np.isfinite(log_i)) or np.any(~np.isfinite(log_v)) or np.any(~np.isfinite(sqrt_v)):
+                raise ValueError("Non-finite values after transformation")
+            
             # Linear fit in log space
             coeffs = np.polyfit(sqrt_v, log_i - log_v, 1)
             beta = coeffs[0]
@@ -450,12 +521,26 @@ class analyze_single_file:
 
             # 5. Schottky emission: I ∝ T²*exp(-qΦ/kT)*exp(β*√V)
         try:
+            # Validate data before processing
+            if len(i_fit) < 3 or len(v_fit) < 3:
+                raise ValueError("Insufficient data points")
+            if np.any(v_fit <= 0) or np.any(i_fit <= 0):
+                raise ValueError("Invalid voltage/current values")
+            
             # Simplified Schottky at constant T: I ∝ exp(β*√V)
             def schottky(v, a, beta):
                 return a * np.exp(beta * np.sqrt(v))
 
-            log_i = np.log(i_fit + 1e-12)
-            sqrt_v = np.sqrt(v_fit)
+            # Ensure positive values before log
+            i_safe = np.maximum(i_fit, 1e-12)
+            v_safe = np.maximum(v_fit, 1e-12)
+            log_i = np.log(i_safe)
+            sqrt_v = np.sqrt(v_safe)
+            
+            # Check for valid values after transformation
+            if np.any(~np.isfinite(log_i)) or np.any(~np.isfinite(sqrt_v)):
+                raise ValueError("Non-finite values after transformation")
+            
             coeffs = np.polyfit(sqrt_v, log_i, 1)
             beta = coeffs[0]
             a = np.exp(coeffs[1])
@@ -467,9 +552,23 @@ class analyze_single_file:
 
             # 6. Fowler-Nordheim tunneling: I ∝ V²*exp(-b/V)
         try:
+            # Validate data before processing
+            if len(i_fit) < 3 or len(v_fit) < 3:
+                raise ValueError("Insufficient data points")
+            if np.any(v_fit == 0) or np.any(i_fit <= 0):
+                raise ValueError("Invalid voltage/current values (zero voltage or negative current)")
+            
             # F-N plot: ln(I/V²) vs 1/V should be linear
-            inv_v = 1 / v_fit
-            ln_i_v2 = np.log(i_fit / v_fit ** 2 + 1e-12)
+            v_safe = np.maximum(np.abs(v_fit), 1e-12)  # Avoid division by zero
+            inv_v = 1 / v_safe
+            i_safe = np.maximum(i_fit, 1e-12)
+            i_v2_ratio = i_safe / (v_safe ** 2)
+            ln_i_v2 = np.log(i_v2_ratio + 1e-12)
+            
+            # Check for valid values after transformation
+            if np.any(~np.isfinite(inv_v)) or np.any(~np.isfinite(ln_i_v2)):
+                raise ValueError("Non-finite values after transformation")
+            
             coeffs = np.polyfit(inv_v, ln_i_v2, 1)
             b = -coeffs[0]
             a = np.exp(coeffs[1])
@@ -494,7 +593,9 @@ class analyze_single_file:
               SS_tot = Σ(y_true - y_mean)²
         """
         ss_res = np.sum((y_true - y_pred) ** 2)
-        ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+        # Safely compute mean for R² calculation
+        y_mean = safe_mean(y_true, default=0.0)
+        ss_tot = np.sum((y_true - y_mean) ** 2)
         return 1 - (ss_res / (ss_tot + 1e-12))
 
     def _classify_device(self):
@@ -525,6 +626,12 @@ class analyze_single_file:
         if self.classification_features['polarity_dependent']:
             scores['memristive'] += 10
 
+        # PENALTIES: Prevent linear/ohmic devices from being classified as memristors
+        if self.classification_features['linear_iv']:
+            scores['memristive'] -= 20
+        if self.classification_features['ohmic_behavior']:
+            scores['memristive'] -= 30
+
         # Score capacitive characteristics
         if self.classification_features['has_hysteresis'] and not self.classification_features['pinched_hysteresis']:
             scores['capacitive'] += 40
@@ -543,7 +650,7 @@ class analyze_single_file:
 
         # Score ohmic characteristics (guarded to avoid false-ohmic due to compliance or small-signal linearity)
         median_norm_area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0.0
-        mean_on_off = float(np.mean(self.on_off)) if self.on_off else 1.0
+        mean_on_off = safe_mean(self.on_off, default=1.0)
         has_compliance = self.compliance_current is not None and self.compliance_current > 0
 
         # Only consider ohmic if: linear_iv AND no clear hysteresis AND small memory window AND no compliance plateau
@@ -769,8 +876,12 @@ class analyze_single_file:
         """
         if len(self.ron) > 1 and len(self.roff) > 1:
             # Calculate coefficient of variation for Ron and Roff
-            cv_ron = np.std(self.ron) / (np.mean(self.ron) + 1e-10)
-            cv_roff = np.std(self.roff) / (np.mean(self.roff) + 1e-10)
+            mean_ron = safe_mean(self.ron, default=1e10)
+            mean_roff = safe_mean(self.roff, default=1e10)
+            std_ron = safe_std(self.ron, default=0.0)
+            std_roff = safe_std(self.roff, default=0.0)
+            cv_ron = std_ron / (mean_ron + 1e-10)
+            cv_roff = std_roff / (mean_roff + 1e-10)
 
             # Retention score (lower CV is better)
             self.retention_score = 1.0 / (1.0 + cv_ron + cv_roff)
@@ -802,13 +913,15 @@ class analyze_single_file:
 
             consistency_scores = []
             for metric_name, values in metrics.items():
-                if len(values) > 1 and np.mean(values) > 0:
-                    cv = np.std(values) / np.mean(values)
+                mean_val = safe_mean(values, default=0.0)
+                if len(values) > 1 and mean_val > 0:
+                    std_val = safe_std(values, default=0.0)
+                    cv = std_val / mean_val
                     consistency = 1.0 / (1.0 + cv)
                     consistency_scores.append(consistency)
 
             if consistency_scores:
-                self.endurance_score = np.mean(consistency_scores)
+                self.endurance_score = safe_mean(consistency_scores, default=0.0)
             else:
                 self.endurance_score = 0.0
         else:
@@ -1004,10 +1117,10 @@ DEVICE CLASSIFICATION:
 - Model R²: {self.model_parameters.get('R2', 0):.3f}
 
 SWITCHING CHARACTERISTICS:
-- Mean Ron: {np.mean(self.ron):.2e} Ω (σ = {np.std(self.ron):.2e})
-- Mean Roff: {np.mean(self.roff):.2e} Ω (σ = {np.std(self.roff):.2e})
-- Mean Switching Ratio: {np.mean(self.switching_ratio):.1f}
-- Mean Window Margin: {np.mean(self.window_margin):.1f}
+- Mean Ron: {safe_mean(self.ron, default=0.0):.2e} Ω (σ = {safe_std(self.ron, default=0.0):.2e})
+- Mean Roff: {safe_mean(self.roff, default=0.0):.2e} Ω (σ = {safe_std(self.roff, default=0.0):.2e})
+- Mean Switching Ratio: {safe_mean(self.switching_ratio, default=1.0):.1f}
+- Mean Window Margin: {safe_mean(self.window_margin, default=0.0):.1f}
 
 PERFORMANCE METRICS:
 - Retention Score: {self.retention_score:.3f}
@@ -1752,17 +1865,37 @@ POWER CHARACTERISTICS:
         return median_area > base_threshold
 
     def _check_pinched_hysteresis(self):
-        """Check if the I-V curve shows pinched hysteresis at origin."""
-        # Find currents near zero voltage
-        threshold = 0.05 * max(abs(self.voltage.max()), abs(self.voltage.min()))
-        near_zero_mask = np.abs(self.voltage) < threshold
+        """
+        Check if the I-V curve shows pinched hysteresis at origin.
+        Requires the loop to be 'closed' at V=0 (current -> 0).
+        """
+        # Find currents strictly near zero voltage
+        v_abs_max = max(abs(self.voltage.max()), abs(self.voltage.min()))
+        threshold_v = 0.02 * v_abs_max  # Tightened to 2% of voltage range
+        
+        near_zero_mask = np.abs(self.voltage) < threshold_v
 
         if np.any(near_zero_mask):
             currents_near_zero = self.current[near_zero_mask]
-            max_current = np.max(np.abs(self.current))
-            if max_current > 0:
-                # Check if current is also near zero at zero voltage
-                return np.mean(np.abs(currents_near_zero)) < 0.1 * max_current
+            
+            # Robust max current (95th percentile to ignore spikes)
+            if len(self.current) > 0:
+                max_current = np.percentile(np.abs(self.current), 99)
+            else:
+                max_current = 0
+            
+            if max_current > 1e-12: # Avoid division by zero
+                # Calculate the "gap" at zero (mean absolute current at V~0)
+                mean_zero_current = np.mean(np.abs(currents_near_zero))
+                
+                # Ratio of (Current at Zero) / (Max Current)
+                # For a Memristor, this should be ~0.
+                # For a Capacitor, this is I_cap / I_total, which is significant.
+                zero_ratio = mean_zero_current / max_current
+                
+                # Strict threshold: Must be less than 5% of max current to be considered "pinched"
+                return zero_ratio < 0.05
+                
         return False
 
     def _check_linearity(self):
@@ -3266,8 +3399,9 @@ POWER CHARACTERISTICS:
             import os
             from datetime import datetime
             
-            # Create tracking directory
-            tracking_dir = os.path.join(self.save_directory, "device_tracking")
+            # Create tracking directory in sample_analysis structure
+            # self.save_directory is the sample-level directory
+            tracking_dir = os.path.join(self.save_directory, "sample_analysis", "device_tracking")
             os.makedirs(tracking_dir, exist_ok=True)
             
             # Device history file

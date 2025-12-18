@@ -127,13 +127,79 @@ class IVGridPlotter:
 
     @staticmethod
     def _plot_avg_with_arrows(ax, v: np.ndarray, i: np.ndarray, num_points: int, label: str):
+        """
+        Plot averaged IV with direction arrows, using only the first sweep.
+        
+        Detects multiple sweeps by looking for voltage direction changes and
+        extracts only the first sweep to avoid messy overlapping arrows.
+        """
+        # Extract first sweep only
+        if len(v) < 2:
+            # Not enough data
+            ax.set_xlabel("Voltage (V)")
+            ax.set_ylabel("Current (A)")
+            ax.grid(True, alpha=0.3)
+            return
+        
+        # Detect sweep boundaries by looking for voltage direction changes
+        # A sweep typically goes: start -> max/min -> back to start
+        # Look for the point where voltage starts going back (direction reversal)
+        dv = np.diff(v)
+        
+        # Find the first significant direction reversal
+        # This happens when the sign of dv changes significantly
+        first_sweep_end = len(v)
+        
+        if len(dv) > 2:
+            # Find where voltage direction changes (sweep reversal)
+            # Look for point where voltage starts returning to starting point
+            initial_direction = np.sign(dv[0]) if abs(dv[0]) > 1e-10 else 0
+            
+            if initial_direction != 0:
+                # Find first point where direction changes significantly
+                for idx in range(1, len(dv)):
+                    current_direction = np.sign(dv[idx]) if abs(dv[idx]) > 1e-10 else 0
+                    # If direction reversed and we're moving back toward the start
+                    if current_direction != 0 and current_direction != initial_direction:
+                        # Check if we're actually returning (voltage moving back toward start)
+                        start_voltage = v[0]
+                        current_voltage = v[idx]
+                        # If we've passed the start point or are clearly reversing
+                        if (initial_direction > 0 and current_voltage < start_voltage) or \
+                           (initial_direction < 0 and current_voltage > start_voltage):
+                            first_sweep_end = idx + 1
+                            break
+                    # Also check if we've reached a local extremum and started returning
+                    elif idx > 5:  # Need some points to establish trend
+                        # Check if we've hit a peak/valley and are returning
+                        if initial_direction > 0:
+                            # Positive sweep: look for maximum then decrease
+                            if v[idx] < v[idx-1] and v[idx-1] > np.max(v[:idx-1]):
+                                first_sweep_end = idx + 1
+                                break
+                        else:
+                            # Negative sweep: look for minimum then increase
+                            if v[idx] > v[idx-1] and v[idx-1] < np.min(v[:idx-1]):
+                                first_sweep_end = idx + 1
+                                break
+        
+        # Use only the first sweep
+        v_first = v[:first_sweep_end]
+        i_first = i[:first_sweep_end]
+        
+        if len(v_first) < 2:
+            # Fallback: use all data if first sweep detection failed
+            v_first = v
+            i_first = i
+        
+        # Now average the first sweep data
         if num_points < 2:
             num_points = 2
-        step = max(len(v) // num_points, 1)
-        avg_v = [np.mean(v[j : j + step]) for j in range(0, len(v), step)]
-        avg_i = [np.mean(i[j : j + step]) for j in range(0, len(i), step)]
+        step = max(len(v_first) // num_points, 1)
+        avg_v = [np.mean(v_first[j : j + step]) for j in range(0, len(v_first), step)]
+        avg_i = [np.mean(i_first[j : j + step]) for j in range(0, len(i_first), step)]
 
-        ax.scatter(avg_v, avg_i, c="b", marker="o", s=10, label=label or "Averaged")
+        ax.scatter(avg_v, avg_i, c="b", marker="o", s=10, label=label or "Averaged (1st sweep)")
         for k in range(1, len(avg_v)):
             ax.annotate(
                 "",

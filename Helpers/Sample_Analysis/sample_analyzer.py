@@ -19,7 +19,7 @@ except ImportError:
     SEABORN_AVAILABLE = False
     print("[SAMPLE] Warning: seaborn not available. Plot 8 (Research Diagnostics) will be skipped.")
 
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Callable
 from datetime import datetime
 import warnings
 
@@ -42,33 +42,47 @@ class SampleAnalysisOrchestrator:
         self.sample_name = os.path.basename(sample_directory)
         self.code_name_filter = code_name  # Filter by code_name like old module
         
-        # Data directories
-        self.tracking_dir = os.path.join(sample_directory, "device_tracking")
-        self.research_dir = os.path.join(sample_directory, "device_research")
+        # Data directories - all under sample_analysis/
+        self.tracking_dir = os.path.join(sample_directory, "sample_analysis", "device_tracking")
+        self.research_dir = os.path.join(sample_directory, "sample_analysis", "device_research")
         
         # Unified output directory structure - everything in sample_analysis/ with subfolders
         self.output_dir = os.path.join(sample_directory, "sample_analysis")
         if code_name:
             # Use subfolder for code_name-specific analysis
             self.plots_dir = os.path.join(self.output_dir, "plots", code_name)
-            self.origin_dir = os.path.join(self.output_dir, "origin_data", code_name)
+            self.data_origin_formatted_dir = os.path.join(self.output_dir, "plots", "data_origin_formatted", code_name)
         else:
             # Overall analysis (no code_name filter)
             self.plots_dir = os.path.join(self.output_dir, "plots", "overall")
-            self.origin_dir = os.path.join(self.output_dir, "origin_data", "overall")
+            self.data_origin_formatted_dir = os.path.join(self.output_dir, "plots", "data_origin_formatted", "overall")
         
         # Device summaries also go in unified folder
         self.summaries_dir = os.path.join(self.output_dir, "device_summaries")
         
         # Create output directories
         os.makedirs(self.plots_dir, exist_ok=True)
-        os.makedirs(self.origin_dir, exist_ok=True)
+        os.makedirs(self.data_origin_formatted_dir, exist_ok=True)
         os.makedirs(self.summaries_dir, exist_ok=True)
         
         # Data containers
         self.devices_data = []
         self.memristive_devices = []
         self.research_data = {}  # device_id -> list of research JSONs
+        
+        # Logging callback for progress updates
+        self.log_callback: Optional[Callable] = None
+    
+    def set_log_callback(self, callback: Callable) -> None:
+        """Set callback function for logging progress updates."""
+        self.log_callback = callback
+    
+    def _log(self, message: str) -> None:
+        """Log message using callback if available, otherwise print."""
+        if self.log_callback:
+            self.log_callback(message)
+        else:
+            print(message)
         
     def _extract_code_name_from_filename(self, filename: str) -> Optional[str]:
         """
@@ -117,10 +131,14 @@ class SampleAnalysisOrchestrator:
         """Load all device tracking data, optionally filtered by code_name."""
         count = 0
         if not os.path.exists(self.tracking_dir):
-            print(f"[SAMPLE] No tracking directory found: {self.tracking_dir}")
+            self._log(f"No tracking directory found: {self.tracking_dir}")
             return 0
         
-        for file in os.listdir(self.tracking_dir):
+        self._log("Loading device tracking data...")
+        tracking_files = [f for f in os.listdir(self.tracking_dir) if f.endswith('_history.json')]
+        total_files = len(tracking_files)
+        
+        for idx, file in enumerate(tracking_files, 1):
             if file.endswith('_history.json'):
                 try:
                     file_path = os.path.join(self.tracking_dir, file)
@@ -183,14 +201,21 @@ class SampleAnalysisOrchestrator:
                                 self.memristive_devices.append(device_info)
                             
                             count += 1
+                            
+                            # Log progress every 10 devices or at the end
+                            if count % 10 == 0 or idx == total_files:
+                                remaining = total_files - idx
+                                self._log(f"Loaded {count} device(s) - {idx}/{total_files} files processed, {remaining} remaining")
                 except Exception as e:
-                    print(f"[SAMPLE] Error loading {file}: {e}")
+                    self._log(f"Error loading {file}: {e}")
         
         # Load research data for memristive devices
+        if self.memristive_devices:
+            self._log(f"Loading research data for {len(self.memristive_devices)} memristive device(s)...")
         self._load_research_data()
         
-        filter_msg = f" (filtered by code_name: {self.code_name_filter})" if self.code_name_filter else ""
-        print(f"[SAMPLE] Loaded {count} devices ({len(self.memristive_devices)} memristive){filter_msg}")
+        filter_msg = f" (filtered by: {self.code_name_filter})" if self.code_name_filter else ""
+        self._log(f"✓ Loaded {count} device(s) ({len(self.memristive_devices)} memristive){filter_msg}")
         return count
     
     def _load_research_data(self) -> None:
@@ -218,48 +243,89 @@ class SampleAnalysisOrchestrator:
     
     def generate_all_plots(self) -> None:
         """Generate all 12 plot types."""
-        print(f"[SAMPLE] Generating plots for {self.sample_name}...")
+        self._log(f"Generating 12 plot types for {self.sample_name}...")
+        
+        plot_names = [
+            "Memristivity Score Heatmap",
+            "Conduction Mechanism Distribution",
+            "Memory Window Quality Distribution",
+            "Hysteresis Shape Radar",
+            "Enhanced Classification Scatter",
+            "Forming Progress Tracking",
+            "Warning Flag Summary",
+            "Research Diagnostics Scatter Matrix",
+            "Power & Energy Efficiency",
+            "Device Leaderboard",
+            "Spatial Distribution Maps",
+            "Forming Status Distribution"
+        ]
+        
+        plot_num = 0
         
         # Plot 1: Memristivity Score Heatmap
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[0]}")
         self.plot_memristivity_heatmap()
         
         # Plot 2: Conduction Mechanism Distribution
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[1]}")
         self.plot_conduction_mechanisms()
         
         # Plot 3: Memory Window Quality Distribution
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[2]}")
         self.plot_memory_window_quality()
         
         # Plot 4: Hysteresis Shape Radar (memristive only)
         if self.memristive_devices:
+            plot_num += 1
+            self._log(f"Plot {plot_num}/12: {plot_names[3]}")
             self.plot_hysteresis_radar()
         
         # Plot 5: Enhanced Classification Scatter
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[4]}")
         self.plot_classification_scatter()
         
         # Plot 6: Forming Progress Tracking
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[5]}")
         self.plot_forming_progress()
         
         # Plot 7: Warning Flag Summary
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[6]}")
         self.plot_warning_summary()
         
         # Plot 8: Research Diagnostics Scatter Matrix
         if self.memristive_devices and len(self.research_data) > 0:
+            plot_num += 1
+            self._log(f"Plot {plot_num}/12: {plot_names[7]}")
             self.plot_research_diagnostics()
         
         # Plot 9: Power & Energy Efficiency
         if len(self.research_data) > 0:
+            plot_num += 1
+            self._log(f"Plot {plot_num}/12: {plot_names[8]}")
             self.plot_power_efficiency()
         
         # Plot 10: Device Leaderboard
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[9]}")
         self.plot_device_leaderboard()
         
         # Plot 11: Spatial Distribution Maps
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[10]}")
         self.plot_spatial_distributions()
         
         # Plot 12: Forming Status Distribution
+        plot_num += 1
+        self._log(f"Plot {plot_num}/12: {plot_names[11]}")
         self.plot_forming_status()
         
-        print(f"[SAMPLE] All plots saved to: {self.plots_dir}")
+        self._log(f"✓ All {plot_num} plots saved to: {self.plots_dir}")
     
     def export_origin_data(self) -> None:
         """Export all data in Origin-ready format (CSV/TXT)."""
@@ -282,7 +348,7 @@ class SampleAnalysisOrchestrator:
         # Create README for Origin import
         self._create_origin_readme()
         
-        print(f"[SAMPLE] Origin data exported to: {self.origin_dir}")
+        print(f"[SAMPLE] Origin data exported to: {self.data_origin_formatted_dir}")
     
     # === PLOT 1: Memristivity Score Heatmap ===
     def plot_memristivity_heatmap(self) -> None:
@@ -395,7 +461,7 @@ class SampleAnalysisOrchestrator:
             })
         
         df = pd.DataFrame(rows)
-        output_file = os.path.join(self.origin_dir, 'memristivity_heatmap.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'memristivity_heatmap.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: memristivity_heatmap.csv")
     
@@ -406,6 +472,8 @@ class SampleAnalysisOrchestrator:
             mechanisms = {}
             for dev in self.devices_data:
                 mechanism = dev['classification'].get('conduction_mechanism', 'unknown')
+                if mechanism is None:
+                    mechanism = 'unknown'
                 mechanisms[mechanism] = mechanisms.get(mechanism, 0) + 1
             
             if not mechanisms:
@@ -414,7 +482,7 @@ class SampleAnalysisOrchestrator:
             
             # Sort by count
             sorted_mechs = sorted(mechanisms.items(), key=lambda x: x[1], reverse=True)
-            labels = [m[0].replace('_', ' ').title() for m, _ in sorted_mechs]
+            labels = [str(m[0]).replace('_', ' ').title() for m, _ in sorted_mechs]
             counts = [c for _, c in sorted_mechs]
             
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -455,10 +523,10 @@ class SampleAnalysisOrchestrator:
                 mechanism = dev['classification'].get('conduction_mechanism', 'unknown')
                 mechanisms[mechanism] = mechanisms.get(mechanism, 0) + 1
         
-        rows = [{'Mechanism': k.replace('_', ' ').title(), 'Count': v} 
+        rows = [{'Mechanism': str(k).replace('_', ' ').title(), 'Count': v} 
                 for k, v in sorted(mechanisms.items(), key=lambda x: x[1], reverse=True)]
         df = pd.DataFrame(rows)
-        output_file = os.path.join(self.origin_dir, 'conduction_mechanisms.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'conduction_mechanisms.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: conduction_mechanisms.csv")
     
@@ -560,7 +628,7 @@ class SampleAnalysisOrchestrator:
             'Separation_Ratio': separation + [np.nan] * (max_len - len(separation))
         }
         df = pd.DataFrame(data)
-        output_file = os.path.join(self.origin_dir, 'memory_window_quality.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'memory_window_quality.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: memory_window_quality.csv")
     
@@ -656,7 +724,12 @@ class SampleAnalysisOrchestrator:
                     scores.append(score)
                     device_types.append(dtype)
                     pinched.append(is_pinched)
-                    switching_ratios.append(ratio if not np.isnan(ratio) else 1)
+                    
+                    # Safe ratio handling
+                    safe_ratio = 1
+                    if ratio is not None and isinstance(ratio, (int, float)) and not np.isnan(ratio):
+                        safe_ratio = ratio
+                    switching_ratios.append(safe_ratio)
             
             if not ron_values:
                 print("[PLOT] No resistance data for scatter")
@@ -731,7 +804,7 @@ class SampleAnalysisOrchestrator:
             'Device_Type': types,
             'Pinched': pinched
         })
-        output_file = os.path.join(self.origin_dir, 'classification_scatter.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'classification_scatter.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: classification_scatter.csv")
     
@@ -979,7 +1052,7 @@ class SampleAnalysisOrchestrator:
             'Power_Consumption_W': power,
             'Energy_per_Switch_J': energy
         })
-        output_file = os.path.join(self.origin_dir, 'power_efficiency.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'power_efficiency.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: power_efficiency.csv")
     
@@ -1009,7 +1082,11 @@ class SampleAnalysisOrchestrator:
                 
                 # Composite score: memristivity (40%), quality (30%), switching ratio (20%), stability (10%)
                 # Normalize switching ratio (log scale)
-                ratio_score = min(100, np.log10(switching_ratio) * 10) if switching_ratio > 1 else 0
+                ratio_val = 1
+                if switching_ratio is not None and isinstance(switching_ratio, (int, float)):
+                    ratio_val = switching_ratio
+                    
+                ratio_score = min(100, np.log10(ratio_val) * 10) if ratio_val > 1 else 0
                 
                 composite = (memristivity * 0.4 + quality * 0.3 + ratio_score * 0.2 + stability * 0.1)
                 
@@ -1088,7 +1165,12 @@ class SampleAnalysisOrchestrator:
                     quality = 0
                     stability = 0
                 switching_ratio = dev['resistance'].get('switching_ratio', 1)
-                ratio_score = min(100, np.log10(switching_ratio) * 10) if switching_ratio > 1 else 0
+                
+                ratio_val = 1
+                if switching_ratio is not None and isinstance(switching_ratio, (int, float)):
+                    ratio_val = switching_ratio
+                    
+                ratio_score = min(100, np.log10(ratio_val) * 10) if ratio_val > 1 else 0
                 composite = (memristivity * 0.4 + quality * 0.3 + ratio_score * 0.2 + stability * 0.1)
                 device_scores.append({
                     'device_id': dev['device_id'],
@@ -1100,7 +1182,7 @@ class SampleAnalysisOrchestrator:
             device_scores.sort(key=lambda x: x['composite_score'], reverse=True)
         
         df = pd.DataFrame(device_scores)
-        output_file = os.path.join(self.origin_dir, 'device_leaderboard.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'device_leaderboard.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: device_leaderboard.csv")
     
@@ -1237,7 +1319,7 @@ class SampleAnalysisOrchestrator:
                 'Switching_Ratio': switch_map.get((row, col), 1)
             })
         df = pd.DataFrame(rows)
-        output_file = os.path.join(self.origin_dir, 'spatial_data.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'spatial_data.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: spatial_data.csv")
     
@@ -1257,6 +1339,9 @@ class SampleAnalysisOrchestrator:
                 
                 scores = [m.get('classification', {}).get('memristivity_score', 0) 
                          for m in measurements]
+                # Filter None values
+                scores = [s for s in scores if s is not None]
+                
                 if len(scores) > 1:
                     improvement = scores[-1] - scores[0]
                     variation = np.std(scores) if len(scores) > 1 else 0
@@ -1334,7 +1419,7 @@ class SampleAnalysisOrchestrator:
             'Status': ['Forming', 'Formed', 'Degrading', 'Unstable'],
             'Count': [forming, formed, degrading, unstable]
         })
-        output_file = os.path.join(self.origin_dir, 'forming_status.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'forming_status.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: forming_status.csv")
     
@@ -1374,7 +1459,7 @@ class SampleAnalysisOrchestrator:
             })
         
         df = pd.DataFrame(rows)
-        output_file = os.path.join(self.origin_dir, 'device_summary.csv')
+        output_file = os.path.join(self.data_origin_formatted_dir, 'device_summary.csv')
         df.to_csv(output_file, index=False)
         print(f"[ORIGIN] Exported: device_summary.csv")
     
@@ -1445,7 +1530,7 @@ Sample: {self.sample_name}
 - Power values in Watts, Energy in Joules
 """
         
-        readme_file = os.path.join(self.origin_dir, 'README_ORIGIN_IMPORT.txt')
+        readme_file = os.path.join(self.data_origin_formatted_dir, 'README_ORIGIN_IMPORT.txt')
         with open(readme_file, 'w', encoding='utf-8') as f:
             f.write(readme.strip())
         print(f"[ORIGIN] Created: README_ORIGIN_IMPORT.txt")

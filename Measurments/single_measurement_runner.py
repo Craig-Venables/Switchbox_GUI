@@ -414,7 +414,8 @@ class SingleMeasurementRunner:
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
-            self.graphs_show(v_arr, c_arr, "1", stop_v)
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # self.graphs_show(v_arr, c_arr, "1", stop_v)
             
             # Run IV analysis if enabled
             try:

@@ -24,3 +24,6 @@
 - Use "Collapse All" button to maximize canvas view
 - Frequently used controls (Jog, Go-To, Presets) start expanded
 
+
+
+

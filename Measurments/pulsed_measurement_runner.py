@@ -120,10 +120,11 @@ class PulsedMeasurementRunner:
                 except Exception:
                     pass
 
-            try:
-                self.graphs_show(v_out, i_out, "PULSED_IV", stop_v)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_out, i_out, "PULSED_IV", stop_v)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)
@@ -206,10 +207,11 @@ class PulsedMeasurementRunner:
                 except Exception:
                     pass
 
-            try:
-                self.graphs_show(v_out, i_out, "PULSED_IV_GT1p5", stop_v)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_out, i_out, "PULSED_IV_GT1p5", stop_v)
+            # except Exception:
+            #     pass
 
             if not self.single_device_flag:
                 self.sample_gui.next_device()
@@ -271,10 +273,11 @@ class PulsedMeasurementRunner:
             except Exception:
                 pass
 
-            try:
-                self.graphs_show(v_out, i_out, "PULSED_IV_FIXED", stop_v)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_out, i_out, "PULSED_IV_FIXED", stop_v)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)

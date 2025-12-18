@@ -118,6 +118,9 @@ class PlotUpdaters:
             ax.relim()
             ax.autoscale_view()
             canvas.draw()
+            
+            # Note: Graph activity terminal is only for "Run Full Sample Analysis" progress
+            # Real-time plot updates are not logged to avoid spam
         except Exception:
             # Drawing errors (e.g., empty data) should not kill the thread.
             pass
