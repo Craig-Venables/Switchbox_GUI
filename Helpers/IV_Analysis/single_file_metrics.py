@@ -19,7 +19,7 @@ class analyze_single_file:
     Includes theoretical model fitting and advanced device classification.
     """
 
-    def __init__(self, voltage, current, time=None, measurement_type='iv_sweep', analysis_level='full', custom_weights=None):
+    def __init__(self, voltage, current, time=None, measurement_type='iv_sweep', analysis_level='full'):
         """
         Initialize device analysis.
 
@@ -39,9 +39,6 @@ class analyze_single_file:
             - 'classification'→ basic + features + device classification
             - 'full'          → classification + conduction models + advanced metrics
             - 'research'      → full + extra diagnostics/statistics (NDR, kink voltage, loop similarity)
-        custom_weights : dict, optional
-            Custom scoring weights for memristivity score calculation.
-            If provided, overrides default weights. Keys should match breakdown features.
         """
         # Support original two-parameter call
         if isinstance(time, str):
@@ -55,10 +52,6 @@ class analyze_single_file:
         if self.time is None and self.measurement_type in {'pulse', 'retention'}:
             self.measurement_type = 'iv_sweep'
         self.analysis_level = analysis_level if analysis_level in {'basic','classification','full','research'} else 'full'
-        
-        # Store custom weights for memristivity score calculation
-        self.custom_weights = custom_weights
-        
         self.process_loops()
 
         # Validate data
@@ -2722,29 +2715,13 @@ POWER CHARACTERISTICS:
         - Memory window quality: 15 points (state separation)
         - Nonlinearity: 10 points (deviation from ohmic)
         - Polarity dependence: 5 points (bipolar switching)
-        
-        Uses custom_weights if provided in __init__, otherwise uses defaults.
         """
-        # Default weights
-        default_weights = {
-            'pinched_hysteresis': 30.0,
-            'hysteresis_quality': 20.0,
-            'switching_behavior': 20.0,
-            'memory_window': 15.0,
-            'nonlinearity': 10.0,
-            'polarity_dependence': 5.0
-        }
-        
-        # Use custom weights if provided, otherwise defaults
-        weights = self.custom_weights if self.custom_weights else default_weights
-        
         score = 0.0
         breakdown = {}
         
-        # 1. Pinched hysteresis
-        weight_pinched = weights.get('pinched_hysteresis', 30.0)
+        # 1. Pinched hysteresis (30 points max)
         if self.classification_features.get('pinched_hysteresis', False):
-            pinched_score = weight_pinched
+            pinched_score = 30.0
             # Bonus for quality of pinching (low current at V≈0)
             if hasattr(self, 'pinch_offset') and self.pinch_offset is not None:
                 max_current = np.max(np.abs(self.current))
@@ -2752,14 +2729,13 @@ POWER CHARACTERISTICS:
                     pinch_quality = 1.0 - min(self.pinch_offset / max_current, 1.0)
                     pinched_score *= (0.7 + 0.3 * pinch_quality)  # 70-100% of score
         elif self.classification_features.get('has_hysteresis', False):
-            pinched_score = weight_pinched * 0.33  # Some credit for hysteresis even if not pinched
+            pinched_score = 10.0  # Some credit for hysteresis even if not pinched
         else:
             pinched_score = 0.0
         breakdown['pinched_hysteresis'] = pinched_score
         score += pinched_score
         
-        # 2. Hysteresis quality
-        weight_hyst_qual = weights.get('hysteresis_quality', 20.0)
+        # 2. Hysteresis quality (20 points max)
         hysteresis_quality = 0.0
         if self.normalized_areas:
             areas = np.abs(np.asarray(self.normalized_areas))
@@ -2767,8 +2743,8 @@ POWER CHARACTERISTICS:
             
             # Score based on normalized area (log scale)
             if median_area > 1e-3:
-                # Scale: 1e-3 → 0 points, 1e-1 → max points, >1 → max points
-                area_score = min(weight_hyst_qual, weight_hyst_qual * np.log10(median_area / 1e-3) / 2.0)
+                # Scale: 1e-3 → 0 points, 1e-1 → 20 points, >1 → 20 points
+                area_score = min(20.0, 20.0 * np.log10(median_area / 1e-3) / 2.0)
                 hysteresis_quality += max(0, area_score)
                 
             # Consistency bonus (low variance across cycles)
@@ -2778,49 +2754,44 @@ POWER CHARACTERISTICS:
         breakdown['hysteresis_quality'] = hysteresis_quality
         score += hysteresis_quality
         
-        # 3. Switching behavior
-        weight_switching = weights.get('switching_behavior', 20.0)
+        # 3. Switching behavior (20 points max)
         switching_score = 0.0
         if self.on_off and len(self.on_off) > 0:
             mean_ratio = np.mean([r for r in self.on_off if r > 0])
             # Score based on ON/OFF ratio (log scale)
-            # 1.5 → 0 pts, 10 → 75% of max, 100 → max pts, >1000 → max pts
+            # 1.5 → 0 pts, 10 → 15 pts, 100 → 20 pts, >1000 → 20 pts
             if mean_ratio > 1.5:
-                # Scale to weight_switching
-                switching_score = min(weight_switching, weight_switching * 0.75 * np.log10(mean_ratio / 1.5) / np.log10(10))
+                switching_score = min(20.0, 15.0 * np.log10(mean_ratio / 1.5) / np.log10(10))
         breakdown['switching_behavior'] = switching_score
         score += switching_score
         
-        # 4. Memory window quality - will be refined in _assess_memory_window_quality
-        weight_window = weights.get('memory_window', 15.0)
+        # 4. Memory window quality (15 points max) - will be refined in _assess_memory_window_quality
         window_score = 0.0
         if self.ron and self.roff:
             ron_mean = np.mean([r for r in self.ron if r > 0])
             roff_mean = np.mean([r for r in self.roff if r > 0])
             if ron_mean > 0:
                 window_margin = (roff_mean - ron_mean) / ron_mean
-                # 0.5 → 33% of max, 1 → 67% of max, 10 → max
+                # 0.5 → 5 pts, 1 → 10 pts, 10 → 15 pts
                 if window_margin > 0.5:
-                    window_score = min(weight_window, weight_window * (0.33 + 0.34 * np.log10(window_margin / 0.5) / np.log10(20)))
+                    window_score = min(15.0, 10.0 + 5.0 * np.log10(window_margin / 0.5) / np.log10(20))
         breakdown['memory_window'] = window_score
         score += window_score
         
-        # 5. Nonlinearity
-        weight_nonlinearity = weights.get('nonlinearity', 10.0)
+        # 5. Nonlinearity (10 points max)
         nonlinearity_score = 0.0
         if self.classification_features.get('nonlinear_iv', False):
-            nonlinearity_score = weight_nonlinearity
+            nonlinearity_score = 10.0
             # Reduce if it's just capacitive nonlinearity
             if self.classification_features.get('elliptical_hysteresis', False):
                 nonlinearity_score *= 0.5
         breakdown['nonlinearity'] = nonlinearity_score
         score += nonlinearity_score
         
-        # 6. Polarity dependence
-        weight_polarity = weights.get('polarity_dependence', 5.0)
+        # 6. Polarity dependence (5 points max)
         polarity_score = 0.0
         if self.classification_features.get('polarity_dependent', False):
-            polarity_score = weight_polarity
+            polarity_score = 5.0
         breakdown['polarity_dependence'] = polarity_score
         score += polarity_score
         
