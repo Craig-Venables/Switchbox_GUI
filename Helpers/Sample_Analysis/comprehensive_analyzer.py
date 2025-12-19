@@ -12,9 +12,15 @@ This module provides:
 import os
 import json
 import numpy as np
+import numpy as np
+import matplotlib
+# Force Agg backend
+matplotlib.use('Agg')
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Callable
 from collections import defaultdict
 
 # Get project root
@@ -39,6 +45,20 @@ class ComprehensiveAnalyzer:
         
         # Discovered code_names
         self.discovered_code_names: Set[str] = set()
+        
+        # Logging callback for progress updates
+        self.log_callback: Optional[callable] = None
+    
+    def set_log_callback(self, callback: callable) -> None:
+        """Set callback function for logging progress updates."""
+        self.log_callback = callback
+    
+    def _log(self, message: str) -> None:
+        """Log message using callback if available, otherwise print."""
+        if self.log_callback:
+            self.log_callback(message)
+        else:
+            print(message)
         
     def _load_test_configurations(self) -> Dict:
         """Load test configurations from JSON."""
@@ -123,7 +143,10 @@ class ComprehensiveAnalyzer:
                 continue
             
             # Create figure with linear and log subplots
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+            fig = Figure(figsize=(16, 6))
+            FigureCanvasAgg(fig)
+            ax1 = fig.add_subplot(121)
+            ax2 = fig.add_subplot(122)
             
             # Plot each sweep in the combination
             for sweep_num in sweeps:
@@ -166,13 +189,15 @@ class ComprehensiveAnalyzer:
             ax2.grid(True, alpha=0.3)
             ax2.legend()
             
-            plt.tight_layout()
+            fig.tight_layout()
             
             # Save
             safe_title = title.replace(" ", "_").replace("/", "-")
             output_file = images_dir / f'{code_name}_{sweeps}_{safe_title}.png'
-            plt.savefig(output_file, dpi=300, bbox_inches='tight')
-            plt.close()
+            try:
+                fig.savefig(output_file, dpi=300, bbox_inches='tight')
+            except Exception:
+                pass
             
             print(f"[COMPREHENSIVE] Saved: {output_file}")
     
@@ -213,67 +238,108 @@ class ComprehensiveAnalyzer:
         3. Runs sample-level analysis for each code_name
         4. Runs overall sample analysis (no filter)
         """
-        print(f"[COMPREHENSIVE] Starting comprehensive analysis for {self.sample_name}...")
+        self._log(f"Starting comprehensive analysis for {self.sample_name}...")
         
         # Discover all code_names
+        self._log("Discovering code names from measurement files...")
         valid_code_names = self.get_valid_code_names()
+        self._log(f"Found {len(valid_code_names)} code name(s): {', '.join(sorted(valid_code_names))}")
         
-        # Run device-level combined plots for each code_name
-        print(f"[COMPREHENSIVE] Generating device-level combined plots...")
+        # Count total devices for progress tracking
+        total_devices = 0
+        device_list = []
         for section_dir in self.sample_dir.iterdir():
             if not section_dir.is_dir() or section_dir.name in ['device_tracking', 'device_research', 'sample_analysis']:
                 continue
-            
             if len(section_dir.name) == 1 and section_dir.name.isalpha():
                 section = section_dir.name
                 for device_dir in section_dir.iterdir():
                     if device_dir.is_dir() and device_dir.name.isdigit():
                         device_num = device_dir.name
-                        
-                        # Find code_name for this device
-                        device_code_name = None
-                        for file in device_dir.glob('*.txt'):
-                            if file.name != 'log.txt':
-                                code_name = self._extract_code_name_from_filename(file.name)
-                                if code_name and code_name in valid_code_names:
-                                    device_code_name = code_name
-                                    break
-                        
-                        if device_code_name:
-                            self.plot_device_combined_sweeps(section, device_num, device_code_name)
+                        device_path = self.sample_dir / section / device_num
+                        txt_files = [f for f in device_path.glob('*.txt') if f.name != 'log.txt']
+                        if txt_files:
+                            total_devices += 1
+                            device_list.append((section, device_num))
+        
+        self._log(f"Found {total_devices} device(s) with measurement files")
+        
+        # Run device-level combined plots for each code_name
+        self._log("Generating device-level combined sweep plots...")
+        plotted_count = 0
+        for section, device_num in device_list:
+            device_dir = self.sample_dir / section / device_num
+            
+            # Find code_name for this device
+            device_code_name = None
+            for file in device_dir.glob('*.txt'):
+                if file.name != 'log.txt':
+                    code_name = self._extract_code_name_from_filename(file.name)
+                    if code_name and code_name in valid_code_names:
+                        device_code_name = code_name
+                        break
+            
+            if device_code_name:
+                self.plot_device_combined_sweeps(section, device_num, device_code_name)
+                plotted_count += 1
+                remaining = total_devices - plotted_count
+                self._log(f"Plotted device {section}{device_num} ({device_code_name}) - {plotted_count}/{total_devices} done, {remaining} remaining")
+
+        # Run section-level analysis (restored feature)
+        self._log("Running section-level analysis (stacked sweeps & stats)...")
+        from .section_analyzer import SectionAnalyzer
+        
+        unique_sections = sorted(list(set(s for s, _ in device_list)))
+        for section in unique_sections:
+            try:
+                self._log(f"Analyzing Section {section}...")
+                sec_analyzer = SectionAnalyzer(str(self.sample_dir), section, self.sample_name)
+                sec_analyzer.analyze_section_sweeps()
+            except Exception as e:
+                self._log(f"Error analyzing Section {section}: {e}")
         
         # Run sample-level analysis for each code_name
-        print(f"[COMPREHENSIVE] Running sample-level analysis for each code_name...")
+        self._log(f"Running sample-level analysis for {len(valid_code_names)} code name(s)...")
         from .sample_analyzer import SampleAnalysisOrchestrator
         
-        for code_name in valid_code_names:
-            print(f"[COMPREHENSIVE] Analyzing code_name: {code_name}")
+        for idx, code_name in enumerate(valid_code_names, 1):
+            self._log(f"[{idx}/{len(valid_code_names)}] Analyzing code_name: {code_name}")
             try:
                 analyzer = SampleAnalysisOrchestrator(str(self.sample_dir), code_name=code_name)
+                analyzer.set_log_callback(self.log_callback)  # Pass logging callback
                 device_count = analyzer.load_all_devices()
                 if device_count > 0:
+                    self._log(f"Generating 12 plot types for {code_name} ({device_count} devices)...")
                     analyzer.generate_all_plots()
+                    self._log(f"Exporting Origin data for {code_name}...")
                     analyzer.export_origin_data()
-                    print(f"[COMPREHENSIVE] Completed analysis for {code_name}: {device_count} devices")
+                    self._log(f"✓ Completed {code_name}: {device_count} devices, 12 plots generated")
+                else:
+                    self._log(f"⚠ No devices found for {code_name}")
             except Exception as e:
-                print(f"[COMPREHENSIVE] Error analyzing {code_name}: {e}")
+                self._log(f"✗ Error analyzing {code_name}: {str(e)}")
                 import traceback
                 traceback.print_exc()
         
         # Run overall sample analysis (no code_name filter)
-        print(f"[COMPREHENSIVE] Running overall sample analysis (all measurements)...")
+        self._log("Running overall sample analysis (all measurements combined)...")
         try:
             analyzer = SampleAnalysisOrchestrator(str(self.sample_dir), code_name=None)
+            analyzer.set_log_callback(self.log_callback)  # Pass logging callback
             device_count = analyzer.load_all_devices()
             if device_count > 0:
+                self._log(f"Generating 12 plot types for overall analysis ({device_count} devices)...")
                 analyzer.generate_all_plots()
+                self._log("Exporting Origin data for overall analysis...")
                 analyzer.export_origin_data()
-                print(f"[COMPREHENSIVE] Completed overall analysis: {device_count} devices")
+                self._log(f"✓ Completed overall analysis: {device_count} devices, 12 plots generated")
+            else:
+                self._log("⚠ No devices found for overall analysis")
         except Exception as e:
-            print(f"[COMPREHENSIVE] Error in overall analysis: {e}")
+            self._log(f"✗ Error in overall analysis: {str(e)}")
             import traceback
             traceback.print_exc()
         
-        print(f"[COMPREHENSIVE] Comprehensive analysis complete!")
+        self._log("✓ Comprehensive analysis complete!")
 
 

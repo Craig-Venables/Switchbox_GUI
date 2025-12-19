@@ -76,6 +76,7 @@ class _Keithley4200A_KXCI_Wrapper:
         Args:
             kxci_controller: Keithley4200A_KXCI instance (must already be connected)
         """
+        import threading
         self._kxci = kxci_controller
         self._output_enabled = False
         self._last_source_mode = "voltage"  # or "current"
@@ -83,6 +84,7 @@ class _Keithley4200A_KXCI_Wrapper:
         self._voltage_limit = 10.0  # Default voltage compliance
         self._last_voltage = 0.0  # Track last set voltage
         self._last_current = 0.0  # Track last set current
+        self._ex_command_lock = threading.Lock()  # Lock to prevent concurrent EX commands
         
         # Note: Don't force connection in __init__ - connection will be established
         # when needed. This allows the wrapper to be created without immediate connection.
@@ -252,11 +254,12 @@ class _Keithley4200A_KXCI_Wrapper:
         num_points = 4  # 0, +V, -V, 0
         
         command = self._build_ex_command(
-            vpos=vpos,
-            vneg=vneg,  # Explicitly set negative voltage
+            vhigh=vpos,
+            vlow=vneg,  # Explicitly set negative voltage
+            num_steps=1,  # Minimal steps for single point
             num_cycles=num_cycles,
             num_points=num_points,
-            settle_time=0.01,  # 10ms settle time
+            step_delay=0.01,  # 10ms step delay (was settle_time)
             ilimit=ilimit,
             integration_time=0.01,  # 0.01 PLC
             clarius_debug=0,
@@ -1815,12 +1818,13 @@ class IVControllerManager:
         
         needs_fine_control = (
             (context.sequence is not None and len(context.sequence) > 0) or  # LED sequence
-            config.pause_s > 0 or  # Pausing needed
-            config.sweeps > 1  # Multiple sweeps with different LED states
+            config.pause_s > 0  # Pausing needed
+            # Note: Multiple sweeps (config.sweeps > 1) is supported by C module via NumCycles
+            # Only need fine control if LED sequence or pausing is required
         )
         
         # Debug: Check which mode we're using
-        print(f"[4200A Sweep] Checking sweep mode...")
+        # Check if we should use EX command batch mode
         print(f"  - Num sweep points: {num_sweep_points}")
         print(f"  - Has LED sequence: {context.sequence is not None and len(context.sequence) > 0}")
         print(f"  - Pause duration: {config.pause_s}s")
@@ -1830,210 +1834,260 @@ class IVControllerManager:
         # Fall back to point-by-point for fine-grained control
         # TODO: Implement sub-sweep breaking for LED/pausing with C modules
         if needs_fine_control:
-            print(f"[4200A Sweep] ⚠️ FALLING BACK to point-by-point mode (2400 method)")
+            # Fall back to point-by-point mode
             return self._do_iv_sweep_2400(config, context, psu, optical)
         
-        print(f"[4200A Sweep] ✓ Using EX command batch mode (4200A C module)")
-        
-        # Check instrument limits
-        caps = self.get_capabilities()
-        if config.step_delay * 1000 < caps.min_step_delay_ms:
-            raise ValueError(
-                f"Step delay {config.step_delay*1000} ms is below minimum "
-                f"for {self.smu_type} ({caps.min_step_delay_ms} ms)"
+        # Acquire lock to prevent concurrent EX commands (only one EX command at a time)
+        # Do this AFTER checking if we need fine control, so we don't hold the lock unnecessarily
+        if not kxci_wrapper._ex_command_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "4200A EX command already in progress. Please wait for the current measurement to complete."
             )
         
-        # Determine sweep parameters for C module
-        # The C module does (0 → Vhigh → 0 → Vlow → 0) pattern per cycle
-        # Steps are distributed across the full sweep path
-        
-        if config.sweep_type in ["FS", "FULL"]:
-            # Full sweep: 0 → stop_v → 0 → neg_stop_v → 0
-            vhigh = abs(config.stop_v)
-            vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
-            num_cycles = config.sweeps
-        elif config.sweep_type == "PS":
-            # Positive sweep: 0 → stop_v → 0 (vlow=0 means only positive)
-            vhigh = abs(config.stop_v)
-            vlow = 0.0  # Only sweep positive
-            num_cycles = config.sweeps
-        elif config.sweep_type == "NS":
-            # Negative sweep: 0 → -stop_v → 0
-            vhigh = 0.0  # Start at 0
-            vlow = -abs(config.stop_v)
-            num_cycles = config.sweeps
-        elif config.sweep_type == "Triangle":
-            # Triangle: 0 → stop_v → 0 → neg_stop_v → 0
-            vhigh = abs(config.stop_v)
-            vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
-            num_cycles = config.sweeps
-        else:
-            # Default to full sweep
-            vhigh = abs(config.stop_v)
-            vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
-            num_cycles = config.sweeps
-        
-        # Calculate number of steps from step_v
-        # The C module distributes steps across the full path (0→Vhigh→0→Vlow→0)
-        # We need to calculate how many steps fit in the voltage range
-        if config.step_v > 0:
-            # Calculate steps based on step size
-            # Full path length = |Vhigh| + |Vhigh| + |Vlow| + |Vlow| = 2*(|Vhigh| + |Vlow|)
-            total_path_length = 2 * (abs(vhigh) + abs(vlow))
-            if total_path_length > 0:
-                num_steps = max(4, int(total_path_length / config.step_v))
-            else:
-                num_steps = 4  # Minimum steps
-        else:
-            # If no step_v specified, use a reasonable default
-            num_steps = 20
-        
-        # Ensure num_steps is within valid range
-        num_steps = max(4, min(num_steps, 10000))
-        
-        # Calculate total points: (NumSteps + 1) × NumCycles
-        points_per_cycle = num_steps + 1
-        num_points = points_per_cycle * num_cycles
-        
-        # Ensure we don't exceed max points
-        if num_points > caps.max_points_per_sweep:
-            max_points_per_cycle = caps.max_points_per_sweep // num_cycles
-            max_steps = max_points_per_cycle - 1
-            raise ValueError(
-                f"Requested {num_steps} steps × {num_cycles} cycles ({num_points} points) exceeds maximum "
-                f"for {self.smu_type} ({caps.max_points_per_sweep} points). "
-                f"Maximum steps per cycle: {max_steps}"
-            )
-        
-        # Get build_ex_command function from wrapper (already imported)
-        build_ex_command = kxci_wrapper._build_ex_command
-        
-        # Initialize optical controller
+        # Initialize optical controller early so it's always available in finally block
         optical_ctrl = OpticalController(optical=optical, psu=psu)
-        if context.led:
-            optical_ctrl.enable(context.power)
-        
-        start_time = time.perf_counter()
         
         try:
-            # Ensure connected
-            kxci_wrapper._ensure_connection()
             
-            # Enter UL mode
-            was_in_ul = kxci._ul_mode_active
-            if not was_in_ul:
-                if not kxci._enter_ul_mode():
-                    raise RuntimeError("Failed to enter UL mode for 4200A sweep")
+            # Using EX command batch mode (4200A C module)
+            
+            # Check instrument limits
+            caps = self.get_capabilities()
+            if config.step_delay * 1000 < caps.min_step_delay_ms:
+                raise ValueError(
+                    f"Step delay {config.step_delay*1000} ms is below minimum "
+                    f"for {self.smu_type} ({caps.min_step_delay_ms} ms)"
+                )
+            
+            # Determine sweep parameters for C module
+            # The C module does (0 → Vhigh → 0 → Vlow → 0) pattern per cycle
+            # Steps are distributed across the full sweep path
+            
+            if config.sweep_type in ["FS", "FULL"]:
+                # Full sweep: 0 → stop_v → 0 → neg_stop_v → 0
+                vhigh = abs(config.stop_v)
+                vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
+                num_cycles = config.sweeps
+            elif config.sweep_type == "PS":
+                # Positive sweep: 0 → stop_v → 0 (vlow=0 means only positive)
+                vhigh = abs(config.stop_v)
+                vlow = 0.0  # Only sweep positive
+                num_cycles = config.sweeps
+            elif config.sweep_type == "NS":
+                # Negative sweep: 0 → -stop_v → 0
+                vhigh = 0.0  # Start at 0
+                vlow = -abs(config.stop_v)
+                num_cycles = config.sweeps
+            elif config.sweep_type == "Triangle":
+                # Triangle: 0 → stop_v → 0 → neg_stop_v → 0
+                vhigh = abs(config.stop_v)
+                vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
+                num_cycles = config.sweeps
+            else:
+                # Default to full sweep
+                vhigh = abs(config.stop_v)
+                vlow = -abs(config.neg_stop_v if config.neg_stop_v is not None else config.stop_v)
+                num_cycles = config.sweeps
+            
+            # Calculate number of steps from step_v
+            # The C module distributes steps across the full path (0→Vhigh→0→Vlow→0)
+            # We need to calculate how many steps fit in the voltage range
+            if config.step_v > 0:
+                # Calculate steps based on step size
+                # Full path length = |Vhigh| + |Vhigh| + |Vlow| + |Vlow| = 2*(|Vhigh| + |Vlow|)
+                total_path_length = 2 * (abs(vhigh) + abs(vlow))
+                if total_path_length > 0:
+                    num_steps = max(4, int(total_path_length / config.step_v))
+                else:
+                    num_steps = 4  # Minimum steps
+            else:
+                # If no step_v specified, use a reasonable default
+                num_steps = 20
+            
+            # Ensure num_steps is within valid range
+            num_steps = max(4, min(num_steps, 10000))
+            
+            # Calculate total points: (NumSteps + 1) × NumCycles
+            points_per_cycle = num_steps + 1
+            num_points = points_per_cycle * num_cycles
+            
+            # Ensure we don't exceed max points
+            if num_points > caps.max_points_per_sweep:
+                max_points_per_cycle = caps.max_points_per_sweep // num_cycles
+                max_steps = max_points_per_cycle - 1
+                raise ValueError(
+                    f"Requested {num_steps} steps × {num_cycles} cycles ({num_points} points) exceeds maximum "
+                    f"for {self.smu_type} ({caps.max_points_per_sweep} points). "
+                    f"Maximum steps per cycle: {max_steps}"
+                )
+            
+            # Get build_ex_command function from wrapper (already imported)
+            build_ex_command = kxci_wrapper._build_ex_command
+            
+            # Enable optical controller if needed (works for both LED and Laser)
+            # The OpticalController automatically handles both LED (via PSU) and Laser (via optical)
+            if context.led:
+                optical_ctrl.enable(context.power)
+            
+            start_time = time.perf_counter()
             
             try:
-                # Build EX command
-                step_delay = config.step_delay  # Use step_delay
-                integration_time = 0.01  # 0.01 PLC (default)
+                # Ensure connected
+                kxci_wrapper._ensure_connection()
                 
-                print(f"[4200A Sweep] Building EX command...")
-                print(f"  - vhigh: {vhigh}V")
-                print(f"  - vlow: {vlow}V")
-                print(f"  - num_steps: {num_steps}")
-                print(f"  - num_cycles: {num_cycles}")
-                print(f"  - points_per_cycle: {points_per_cycle}")
-                print(f"  - num_points: {num_points}")
-                print(f"  - step_delay: {step_delay}s")
-                print(f"  - ilimit: {config.icc}A")
-                print(f"  - integration_time: {integration_time} PLC")
+                # Enter UL mode
+                was_in_ul = kxci._ul_mode_active
+                if not was_in_ul:
+                    if not kxci._enter_ul_mode():
+                        raise RuntimeError("Failed to enter UL mode for 4200A sweep")
                 
-                command = build_ex_command(
-                    vhigh=vhigh,
-                    vlow=vlow,
-                    num_steps=num_steps,
-                    num_cycles=num_cycles,
-                    num_points=num_points,
-                    step_delay=step_delay,
-                    ilimit=config.icc,
-                    integration_time=integration_time,
-                    clarius_debug=0
-                )
-                
-                print(f"[4200A Sweep] EX Command: {command}")
-                print(f"[4200A Sweep] Executing EX command...")
-                
-                # Execute EX command
-                return_value, error_msg = kxci._execute_ex_command(command, wait_seconds=2.0)
-                
-                print(f"[4200A Sweep] EX command returned: {return_value}, error: {error_msg}")
-                if error_msg:
-                    raise RuntimeError(f"4200A EX command failed: {error_msg}")
-                
-                # Check return value (0 = success for smu_ivsweep)
-                if return_value is not None and return_value != 0:
-                    if return_value < 0:
-                        error_messages = {
-                            -1: "Invalid Vhigh (must be >= 0) or Vlow (must be <= 0)",
-                            -2: "NumIPoints != NumVPoints (array size mismatch)",
-                            -3: "NumIPoints != (NumSteps + 1) × NumCycles (array size mismatch)",
-                            -4: "Invalid array sizes (NumIPoints or NumVPoints < NumSteps + 1)",
-                            -5: "Invalid NumSteps (must be >= 4 and <= 10000) or NumCycles (must be >= 1 and <= 1000)",
-                            -6: "limiti() failed (check current limit value)",
-                            -7: "measi() failed (check SMU connection)",
-                        }
-                        msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
-                        raise RuntimeError(f"4200A EX command returned error code: {return_value} - {msg}")
-                    else:
-                        raise RuntimeError(f"4200A EX command returned unexpected value: {return_value} (expected 0)")
-                
-                # Wait for measurement to complete
-                time.sleep(0.3)
-                
-                # Exit UL mode before GP commands
-                print(f"[4200A Sweep] Exiting UL mode...")
-                kxci._exit_ul_mode()
-                time.sleep(0.5)  # Wait for mode transition
-                
-                # Retrieve data via GP commands
-                # GP parameter positions: 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas, 6=NumIPoints, 7=Vforce, ...
-                print(f"[4200A Sweep] Querying GP parameters for {num_points} points...")
-                print(f"[4200A Sweep] Querying GP 7 (Vforce)...")
-                vforce = kxci._query_gp(7, num_points)  # GP 7 = Vforce
-                print(f"[4200A Sweep] Got {len(vforce)} voltage points")
-                
-                print(f"[4200A Sweep] Querying GP 5 (Imeas)...")
-                imeas = kxci._query_gp(5, num_points)   # GP 5 = Imeas
-                print(f"[4200A Sweep] Got {len(imeas)} current points")
-                
-                if len(vforce) != len(imeas):
-                    raise RuntimeError(
-                        f"Data length mismatch: vforce={len(vforce)}, imeas={len(imeas)}"
+                try:
+                    # Build EX command
+                    step_delay = config.step_delay  # Use step_delay
+                    integration_time = 0.01  # 0.01 PLC (default)
+                    
+                    command = build_ex_command(
+                        vhigh=vhigh,
+                        vlow=vlow,
+                        num_steps=num_steps,
+                        num_cycles=num_cycles,
+                        num_points=num_points,
+                        step_delay=step_delay,
+                        ilimit=config.icc,
+                        integration_time=integration_time,
+                        clarius_debug=0
                     )
-                
-                print(f"[4200A Sweep] ✓ Successfully retrieved all {len(vforce)} data points at once")
-                
-                # Process data and call on_point callbacks for live plotting
-                measurement_duration = time.perf_counter() - start_time
-                
-                for i, (v, i_meas) in enumerate(zip(vforce, imeas)):
-                    if context.check_stop():
-                        break
                     
-                    # Normalize current measurement
-                    try:
-                        i_val = normalize_measurement(i_meas)
-                    except Exception:
-                        i_val = float('nan')
+                    # Calculate wait time based on sweep parameters
+                    time_per_point = step_delay + (integration_time * 0.01)  # Rough: 1 PLC ≈ 0.01s
+                    estimated_time = num_points * time_per_point
+                    wait_time = max(2.0, estimated_time * 1.5)  # Minimum 2s, add 50% safety margin
                     
-                    # Estimate timestamp (uniform distribution over measurement duration)
-                    t_est = measurement_duration * i / max(1, len(vforce) - 1)
+                    # Execute EX command with calculated wait time
+                    # IMPORTANT: Ensure we're in UL mode before executing
+                    if not kxci._ul_mode_active:
+                        kxci._enter_ul_mode()
+                        time.sleep(0.1)
                     
-                    v_arr.append(float(v))
-                    c_arr.append(float(i_val))
-                    t_arr.append(t_est)
+                    return_value, error_msg = kxci._execute_ex_command(command, wait_seconds=wait_time)
+                    if error_msg:
+                        raise RuntimeError(f"4200A EX command failed: {error_msg}")
                     
-                    # Call on_point callback for live plotting
-                    context.call_on_point(float(v), float(i_val), t_est)
-                
-            finally:
-                # Ensure we're out of UL mode
-                if not was_in_ul and kxci._ul_mode_active:
-                    kxci._exit_ul_mode()
-        
+                    # Check return value (0 = success for smu_ivsweep)
+                    if return_value is not None and return_value != 0:
+                        if return_value < 0:
+                            error_messages = {
+                                -1: "Invalid Vhigh (must be >= 0) or Vlow (must be <= 0)",
+                                -2: "NumIPoints != NumVPoints (array size mismatch)",
+                                -3: "NumIPoints != (NumSteps + 1) × NumCycles (array size mismatch)",
+                                -4: "Invalid array sizes (NumIPoints or NumVPoints < NumSteps + 1)",
+                                -5: "Invalid NumSteps (must be >= 4 and <= 10000) or NumCycles (must be >= 1 and <= 1000)",
+                                -6: "limiti() failed (check current limit value)",
+                                -7: "measi() failed (check SMU connection)",
+                            }
+                            msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
+                            raise RuntimeError(f"4200A EX command returned error code: {return_value} - {msg}")
+                        else:
+                            raise RuntimeError(f"4200A EX command returned unexpected value: {return_value} (expected 0)")
+                    
+                    # Additional wait to ensure EX command is fully complete and data arrays are written
+                    time.sleep(0.5)  # Give C module time to write data to output arrays
+                    
+                    # Ensure we're still in UL mode for GP commands (smu_ivsweep requires UL mode for GP)
+                    if not kxci._ul_mode_active:
+                        kxci._enter_ul_mode()
+                        time.sleep(0.1)
+                    
+                    # Retrieve data via GP commands
+                    # GP parameter positions: 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas, 6=NumIPoints, 7=Vforce, ...
+                    def try_query_gp(param: int, name: str, try_ul_mode: bool = True) -> List[float]:
+                        """Try querying GP parameter, first in current mode, then try switching modes if needed."""
+                        # First try in current mode
+                        try:
+                            data = kxci._query_gp(param, num_points)
+                            if len(data) > 0:
+                                return data
+                        except Exception as e:
+                            pass  # Silently try alternative mode
+                        
+                        # If that failed, try switching modes
+                        if try_ul_mode and not kxci._ul_mode_active:
+                            try:
+                                kxci._enter_ul_mode()
+                                time.sleep(0.1)
+                                data = kxci._query_gp(param, num_points)
+                                if len(data) > 0:
+                                    return data
+                            except Exception:
+                                pass
+                        elif not try_ul_mode and kxci._ul_mode_active:
+                            try:
+                                kxci._exit_ul_mode()
+                                time.sleep(0.2)
+                                data = kxci._query_gp(param, num_points)
+                                if len(data) > 0:
+                                    return data
+                            except Exception:
+                                pass
+                        
+                        return []
+                    
+                    # Query voltage and current
+                    vforce = try_query_gp(7, "Vforce", try_ul_mode=True)
+                    if len(vforce) == 0:
+                        vforce = try_query_gp(7, "Vforce", try_ul_mode=False)
+                    
+                    imeas = try_query_gp(5, "Imeas", try_ul_mode=True)
+                    if len(imeas) == 0:
+                        imeas = try_query_gp(5, "Imeas", try_ul_mode=False)
+                    
+                    if len(vforce) == 0 or len(imeas) == 0:
+                        raise RuntimeError(
+                            f"Failed to retrieve data: vforce={len(vforce)} points, imeas={len(imeas)} points"
+                        )
+                    
+                    if len(vforce) != len(imeas):
+                        # Trim to minimum length
+                        min_len = min(len(vforce), len(imeas))
+                        vforce = vforce[:min_len]
+                        imeas = imeas[:min_len]
+                    
+                    # Data retrieved successfully (no verbose output)
+                    
+                    # Process data and call on_point callbacks for live plotting
+                    measurement_duration = time.perf_counter() - start_time
+                    
+                    for i, (v, i_meas) in enumerate(zip(vforce, imeas)):
+                        if context.check_stop():
+                            break
+                        
+                        # Normalize current measurement
+                        try:
+                            i_val = normalize_measurement(i_meas)
+                        except Exception:
+                            i_val = float('nan')
+                        
+                        # Estimate timestamp (uniform distribution over measurement duration)
+                        t_est = measurement_duration * i / max(1, len(vforce) - 1)
+                        
+                        v_arr.append(float(v))
+                        c_arr.append(float(i_val))
+                        t_arr.append(t_est)
+                        
+                        # Call on_point callback for live plotting
+                        context.call_on_point(float(v), float(i_val), t_est)
+                    
+                except Exception as e:
+                    # Re-raise exceptions from EX command execution
+                    raise
+                finally:
+                    # Ensure we're out of UL mode
+                    if not was_in_ul and kxci._ul_mode_active:
+                        kxci._exit_ul_mode()
+            
+            except Exception as e:
+                # Re-raise exceptions from inner try
+                raise
         finally:
             # Cleanup optical
             optical_ctrl.disable()
@@ -2044,6 +2098,9 @@ class IVControllerManager:
                 self.enable_output(False)
             except Exception:
                 pass
+            
+            # Release lock to allow next EX command
+            kxci_wrapper._ex_command_lock.release()
         
         return v_arr, c_arr, t_arr
     
@@ -2080,131 +2137,144 @@ class IVControllerManager:
         kxci_wrapper = self.instrument
         kxci = kxci_wrapper.kxci
         
-        # Validate timing
-        if validate_timing:
-            caps = self.get_capabilities()
-            min_pulse_width = caps.min_step_delay_ms
-            if pulse_width_ms < min_pulse_width:
-                raise ValueError(
-                    f"Pulse width {pulse_width_ms} ms is below minimum "
-                    f"for {self.smu_type} ({min_pulse_width} ms)"
-                )
-        
-        v_arr: List[float] = []
-        c_arr: List[float] = []
-        t_arr: List[float] = []
-        
-        start_time = time.perf_counter()
-        
-        # Initialize optical controller
-        optical_ctrl = OpticalController(optical=optical, psu=psu)
-        
-        # Helper function to format parameters for EX command
-        def format_param(value: float) -> str:
-            """Format parameter for EX command (scientific notation)."""
-            if abs(value) < 1e-3 or abs(value) > 1e3:
-                return f"{value:.6E}"
-            return f"{value:.6f}"
+        # Acquire lock to prevent concurrent EX commands (only one EX command at a time)
+        if not kxci_wrapper._ex_command_lock.acquire(blocking=False):
+            raise RuntimeError(
+                "4200A EX command already in progress. Please wait for the current measurement to complete."
+            )
         
         try:
-            # Ensure connected
-            kxci_wrapper._ensure_connection()
+            # Validate timing
+            if validate_timing:
+                caps = self.get_capabilities()
+                min_pulse_width = caps.min_step_delay_ms
+                if pulse_width_ms < min_pulse_width:
+                    raise ValueError(
+                        f"Pulse width {pulse_width_ms} ms is below minimum "
+                        f"for {self.smu_type} ({min_pulse_width} ms)"
+                    )
             
-            # Initialize pulse measurement module (once at start)
-            was_in_ul = kxci._ul_mode_active
-            if not was_in_ul:
-                if not kxci._enter_ul_mode():
-                    raise RuntimeError("Failed to enter UL mode for 4200A pulse measurement")
+            v_arr: List[float] = []
+            c_arr: List[float] = []
+            t_arr: List[float] = []
+            
+            start_time = time.perf_counter()
+            
+            # Initialize optical controller
+            optical_ctrl = OpticalController(optical=optical, psu=psu)
+            
+            # Helper function to format parameters for EX command
+            def format_param(value: float) -> str:
+                """Format parameter for EX command (scientific notation)."""
+                if abs(value) < 1e-3 or abs(value) > 1e3:
+                    return f"{value:.6E}"
+                return f"{value:.6f}"
             
             try:
-                # Initialize SMU_pulse_measure module
-                init_command = (
-                    f"EX Labview_Controlled_Programs_Kemp "
-                    f"SMU_pulse_measure(1,0,{format_param(1e-4)},{format_param(0.0)},"
-                    f"{format_param(icc)},{format_param(icc)},)"
-                )
-                return_value, error = kxci._execute_ex_command(init_command, wait_seconds=0.5)
-                if error:
-                    raise RuntimeError(f"4200A pulse initialization failed: {error}")
+                # Ensure connected
+                kxci_wrapper._ensure_connection()
                 
-                # Execute pulses
-                pulse_width_s = pulse_width_ms / 1000.0
+                # Initialize pulse measurement module (once at start)
+                was_in_ul = kxci._ul_mode_active
+                if not was_in_ul:
+                    if not kxci._enter_ul_mode():
+                        raise RuntimeError("Failed to enter UL mode for 4200A pulse measurement")
                 
-                for pulse_idx in range(int(num_pulses)):
-                    if context.check_stop():
-                        break
-                    
-                    # Apply LED state from sequence if provided
-                    led_state = context.get_led_state_for_sweep(pulse_idx) if context.sequence else None
-                    if led_state is not None:
-                        try:
-                            optical_ctrl.set_state(led_state == '1', power=context.power)
-                        except Exception:
-                            pass
-                    
-                    # Execute pulse measurement
-                    # SMU_pulse_measure(initialize=0, logMessages, widthTime, Amplitude, Irange, Icomp, measResistance)
-                    pulse_command = (
+                try:
+                    # Initialize SMU_pulse_measure module
+                    init_command = (
                         f"EX Labview_Controlled_Programs_Kemp "
-                        f"SMU_pulse_measure(0,0,{format_param(pulse_width_s)},"
-                        f"{format_param(pulse_voltage)},{format_param(icc)},{format_param(icc)},)"
+                        f"SMU_pulse_measure(1,0,{format_param(1e-4)},{format_param(0.0)},"
+                        f"{format_param(icc)},{format_param(icc)},)"
                     )
-                    
-                    return_value, error = kxci._execute_ex_command(pulse_command, wait_seconds=pulse_width_s + 0.1)
+                    return_value, error = kxci._execute_ex_command(init_command, wait_seconds=0.5)
                     if error:
-                        raise RuntimeError(f"4200A pulse execution failed: {error}")
-                    if return_value is not None and return_value != 0:
-                        raise RuntimeError(f"4200A pulse returned error code: {return_value} (expected 0)")
+                        raise RuntimeError(f"4200A pulse initialization failed: {error}")
                     
-                    # For now, use read_voltage for measurement after pulse
-                    # TODO: Retrieve actual measured data from C module if available
-                    # For now, fall back to setting read voltage and measuring
-                    kxci._exit_ul_mode()
-                    time.sleep(0.03)
+                    # Execute pulses
+                    pulse_width_s = pulse_width_ms / 1000.0
                     
-                    try:
-                        # Set to read voltage and measure
-                        self.set_voltage(read_voltage, icc)
-                        time.sleep(0.01)  # Brief settle
-                        current = safe_measure_current(self)
-                        current = normalize_measurement(current)
-                    except Exception:
-                        current = float('nan')
-                    
-                    t_now = time.perf_counter() - start_time
-                    v_arr.append(read_voltage)
-                    c_arr.append(current)
-                    t_arr.append(t_now)
-                    context.call_on_point(read_voltage, current, t_now)
-                    
-                    # Re-enter UL mode for next pulse
-                    if pulse_idx < num_pulses - 1:  # Don't re-enter after last pulse
-                        if not kxci._enter_ul_mode():
-                            raise RuntimeError("Failed to re-enter UL mode for next pulse")
-                    
-                    # Inter-pulse delay (sample at read voltage)
-                    if inter_pulse_delay_s > 0 and pulse_idx < num_pulses - 1:
-                        post_start = time.perf_counter()
-                        while (time.perf_counter() - post_start) < float(inter_pulse_delay_s):
-                            if context.check_stop():
-                                break
+                    for pulse_idx in range(int(num_pulses)):
+                        if context.check_stop():
+                            break
+                        
+                        # Apply LED state from sequence if provided
+                        led_state = context.get_led_state_for_sweep(pulse_idx) if context.sequence else None
+                        if led_state is not None:
                             try:
-                                current_tuple = self.measure_current()
-                                current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
-                                current = normalize_measurement(current)
+                                optical_ctrl.set_state(led_state == '1', power=context.power)
                             except Exception:
-                                current = float('nan')
-                            t_now = time.perf_counter() - start_time
-                            v_arr.append(read_voltage)
-                            c_arr.append(current)
-                            t_arr.append(t_now)
-                            context.call_on_point(read_voltage, current, t_now)
+                                pass
+                        
+                        # Execute pulse measurement
+                        # SMU_pulse_measure(initialize=0, logMessages, widthTime, Amplitude, Irange, Icomp, measResistance)
+                        pulse_command = (
+                            f"EX Labview_Controlled_Programs_Kemp "
+                            f"SMU_pulse_measure(0,0,{format_param(pulse_width_s)},"
+                            f"{format_param(pulse_voltage)},{format_param(icc)},{format_param(icc)},)"
+                        )
+                        
+                        return_value, error = kxci._execute_ex_command(pulse_command, wait_seconds=pulse_width_s + 0.1)
+                        if error:
+                            raise RuntimeError(f"4200A pulse execution failed: {error}")
+                        if return_value is not None and return_value != 0:
+                            raise RuntimeError(f"4200A pulse returned error code: {return_value} (expected 0)")
+                        
+                        # For now, use read_voltage for measurement after pulse
+                        # TODO: Retrieve actual measured data from C module if available
+                        # For now, fall back to setting read voltage and measuring
+                        kxci._exit_ul_mode()
+                        time.sleep(0.03)
+                        
+                        try:
+                            # Set to read voltage and measure
+                            self.set_voltage(read_voltage, icc)
+                            time.sleep(0.01)  # Brief settle
+                            current = safe_measure_current(self)
+                            current = normalize_measurement(current)
+                        except Exception:
+                            current = float('nan')
+                        
+                        t_now = time.perf_counter() - start_time
+                        v_arr.append(read_voltage)
+                        c_arr.append(current)
+                        t_arr.append(t_now)
+                        context.call_on_point(read_voltage, current, t_now)
+                        
+                        # Re-enter UL mode for next pulse
+                        if pulse_idx < num_pulses - 1:  # Don't re-enter after last pulse
+                            if not kxci._enter_ul_mode():
+                                raise RuntimeError("Failed to re-enter UL mode for next pulse")
+                        
+                        # Inter-pulse delay (sample at read voltage)
+                        if inter_pulse_delay_s > 0 and pulse_idx < num_pulses - 1:
+                            post_start = time.perf_counter()
+                            while (time.perf_counter() - post_start) < float(inter_pulse_delay_s):
+                                if context.check_stop():
+                                    break
+                                try:
+                                    current_tuple = self.measure_current()
+                                    current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(current_tuple) > 1 else float(current_tuple)
+                                    current = normalize_measurement(current)
+                                except Exception:
+                                    current = float('nan')
+                                t_now = time.perf_counter() - start_time
+                                v_arr.append(read_voltage)
+                                c_arr.append(current)
+                                t_arr.append(t_now)
+                                context.call_on_point(read_voltage, current, t_now)
                 
-            finally:
-                # Exit UL mode
-                if not was_in_ul and kxci._ul_mode_active:
-                    kxci._exit_ul_mode()
-        
+                except Exception as e:
+                    # Re-raise exceptions from pulse measurement
+                    raise
+                finally:
+                    # Exit UL mode
+                    if not was_in_ul and kxci._ul_mode_active:
+                        kxci._exit_ul_mode()
+            
+            except Exception as e:
+                # Re-raise exceptions from outer try
+                raise
         finally:
             optical_ctrl.disable()
             if return_to_zero_at_end:
@@ -2213,6 +2283,9 @@ class IVControllerManager:
                     self.enable_output(False)
                 except Exception:
                     pass
+            
+            # Release lock to allow next EX command
+            kxci_wrapper._ex_command_lock.release()
         
         return v_arr, c_arr, t_arr
     

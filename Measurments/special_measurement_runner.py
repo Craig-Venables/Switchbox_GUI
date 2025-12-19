@@ -117,10 +117,11 @@ class SpecialMeasurementRunner:
                 validate_timing=True,
             )
 
-            try:
-                self.graphs_show(v_arr, c_arr, "ISPP", stop_v)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_arr, c_arr, "ISPP", stop_v)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)
@@ -201,10 +202,11 @@ class SpecialMeasurementRunner:
                 on_point=_on_point,
             )
 
-            try:
-                self.graphs_show(v_arr, c_arr, "ENDURANCE", set_v)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_arr, c_arr, "ENDURANCE", set_v)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)
@@ -287,10 +289,11 @@ class SpecialMeasurementRunner:
                 on_point=_on_point,
             )
 
-            try:
-                self.graphs_show(v_arr, c_arr, "RETENTION", read_v)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_arr, c_arr, "RETENTION", read_v)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)
@@ -367,10 +370,11 @@ class SpecialMeasurementRunner:
                 validate_timing=True,
             )
 
-            try:
-                self.graphs_show(w_arr, i_arr, "PWidth", amp)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(w_arr, i_arr, "PWidth", amp)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)
@@ -446,10 +450,11 @@ class SpecialMeasurementRunner:
                 validate_timing=True,
             )
 
-            try:
-                self.graphs_show(v_arr, c_arr, "THRESH", v_hi)
-            except Exception:
-                pass
+            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
+            # try:
+            #     self.graphs_show(v_arr, c_arr, "THRESH", v_hi)
+            # except Exception:
+            #     pass
 
             save_dir = self._ensure_save_dir()
             key = find_largest_number_in_folder(save_dir)

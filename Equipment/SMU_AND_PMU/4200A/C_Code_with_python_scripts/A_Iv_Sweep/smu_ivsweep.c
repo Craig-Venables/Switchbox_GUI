@@ -166,6 +166,7 @@ END USRLIB MODULE HELP DESCRIPTION */
 #include "keithley.h"
 #include <math.h>  /* For fabs() function */
 #include <stdio.h>  /* For printf() function */
+#include <Windows.h>  /* For Sleep() and timing functions */
 
 /* USRLIB MODULE MAIN FUNCTION */
 int smu_ivsweep( double Vhigh, double Vlow, int NumSteps, int NumCycles, double *Imeas, int NumIPoints, 
@@ -203,6 +204,10 @@ int steps_per_segment; /* Steps per segment (NumSteps / 4) */
 int remainder_steps;    /* Remainder steps to distribute */
 int segment_start_idx; /* Starting index for current segment */
 int points_per_cycle;  /* Points per cycle (NumSteps + 1) */
+int delay_ms;          /* Pre-calculated delay in milliseconds (consistent for all steps) */
+DWORD step_start_time; /* Start time for current step (for constant step duration) */
+DWORD step_elapsed_ms;  /* Elapsed time for current step */
+DWORD target_step_ms;   /* Target step duration in milliseconds */
 
 /* ============================================================
    INITIALIZE VARIABLES
@@ -210,6 +215,12 @@ int points_per_cycle;  /* Points per cycle (NumSteps + 1) */
 
 debug = (ClariusDebug == 1) ? 1 : 0;  /* Enable debug output if requested */
 compliance_threshold = Ilimit * 0.99;  /* 99% of limit = compliance */
+
+/* Pre-calculate delay once to ensure consistency across all steps */
+delay_ms = (int)(StepDelay * 1000.0 + 0.5); /* Round to nearest ms */
+if (delay_ms < 1) delay_ms = 1; /* Minimum 1 ms for Windows Sleep() */
+target_step_ms = delay_ms; /* Target total time per step (will be adjusted for constant duration) */
+if(debug) printf("smu_ivsweep: Target step duration set to %d ms (from %.6f s)\n", target_step_ms, StepDelay);
 
 /* ============================================================
    INPUT VALIDATION
@@ -270,11 +281,13 @@ if ( (NumIPoints < points_per_cycle) || (NumVPoints < points_per_cycle) )
     return( -4 ); /* Invalid array size */
 }
 
-/* Validate step delay (must be positive) */
-if ( StepDelay < 0.0001 )
+/* Validate step delay (must be positive and at least 1 ms)
+   Windows Sleep() requires at least 1 millisecond to actually sleep.
+   Values less than 0.001s (1 ms) will be rounded up to 1 ms. */
+if ( StepDelay < 0.001 )
 {
-    if(debug) printf("smu_ivsweep WARNING: StepDelay (%.6f) too small, using minimum 0.0001s\n", StepDelay);
-    StepDelay = 0.0001; /* Minimum step delay: 0.1 ms */
+    if(debug) printf("smu_ivsweep WARNING: StepDelay (%.6f) too small, using minimum 0.001s (1 ms)\n", StepDelay);
+    StepDelay = 0.001; /* Minimum step delay: 1 ms (Windows Sleep() minimum) */
 }
 
 /* Validate current limit (must be positive) */
@@ -365,6 +378,7 @@ for(cycle = 0; cycle < NumCycles; cycle++)
         v = 0.0;
         
         /* Force voltage on SMU1 */
+        step_start_time = GetTickCount(); /* Record start time for constant step duration */
         status = forcev(SMU1, v);
         if ( status != 0 )
         {
@@ -374,10 +388,10 @@ for(cycle = 0; cycle < NumCycles; cycle++)
             return( -100 - i );
         }
         
-        /* Wait for settling */
-        Sleep( (int)(StepDelay * 1000.0) );
+        /* Wait for minimum settling time */
+        Sleep(delay_ms);
         
-        /* Measure current */
+        /* Measure current (variable time depending on integration time and auto-ranging) */
         status = measi(SMU1, &Imeas[i]);
         if ( status != 0 )
         {
@@ -397,6 +411,15 @@ for(cycle = 0; cycle < NumCycles; cycle++)
         }
         
         Vforce[i] = v;
+        
+        /* Ensure constant step duration: calculate elapsed time and sleep for remainder */
+        step_elapsed_ms = GetTickCount() - step_start_time;
+        if (step_elapsed_ms < target_step_ms)
+        {
+            Sleep(target_step_ms - step_elapsed_ms); /* Pad to reach target duration */
+        }
+        /* If elapsed time exceeds target, move immediately (no negative sleep) */
+        
         if(debug && (i == segment_start_idx || i == segment_start_idx + seg_steps))
         {
             double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
@@ -405,46 +428,70 @@ for(cycle = 0; cycle < NumCycles; cycle++)
         }
         i++;
         
-        /* Sweep from 0V to Vhigh */
-        for(step = 1; step <= seg_steps; step++)
+        /* Sweep from 0V to Vhigh using incremental approach (exactly like SMU_VIsweep) for even steps */
         {
-            v = (Vhigh * step) / seg_steps;
+            /* Use exact same formula as SMU_VIsweep: vstep = (Vstop-Vstart) / (NumPoints - 1)
+               For this segment: Vstart=0V, Vstop=Vhigh, NumPoints=seg_steps+1 (seg_steps steps + 1 start point) */
+            double vstep = (Vhigh - 0.0) / ((double)(seg_steps + 1) - 1.0);  /* Same as SMU_VIsweep formula */
+            v = 0.0;  /* Start from 0V (already measured above) */
             
-            status = forcev(SMU1, v);
-            if ( status != 0 )
+            for(step = 1; step <= seg_steps; step++)
             {
-                if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 1, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
-                                 cycle + 1, step, i, v, status);
-                forcev(SMU1, 0.0);
-                return( -100 - i );
+                v = v + vstep;  /* Incremental approach (same as SMU_VIsweep: v = v + vstep) */
+                
+                /* Ensure voltage doesn't exceed Vhigh due to rounding */
+                if (v > Vhigh) v = Vhigh;
+                
+                step_start_time = GetTickCount(); /* Record start time for constant step duration */
+                status = forcev(SMU1, v);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 1, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
+                                     cycle + 1, step, i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -100 - i );
+                }
+                
+                /* Wait for minimum settling time */
+                Sleep(delay_ms);
+                
+                /* Measure current (variable time depending on integration time and auto-ranging) */
+                status = measi(SMU1, &Imeas[i]);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -7 );
+                }
+                
+                status = intgv(SMU1, &v_measured);
+                if ( status != 0 ) v_measured = v;
+                
+                if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
+                {
+                    if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
+                }
+                
+                Vforce[i] = v;
+                
+                /* Ensure constant step duration: calculate elapsed time and sleep for remainder */
+                step_elapsed_ms = GetTickCount() - step_start_time;
+                if (step_elapsed_ms < target_step_ms)
+                {
+                    Sleep(target_step_ms - step_elapsed_ms); /* Pad to reach target duration */
+                }
+                /* If elapsed time exceeds target, move immediately (no negative sleep) */
+                
+                if(debug && (step == seg_steps || step == 1))
+                {
+                    double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
+                    printf("  Cycle %2d, Seg 1, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
+                           cycle + 1, step + 1, seg_steps + 1, i + 1, NumIPoints, v, Imeas[i], resistance);
+                }
+                i++;
             }
-            
-            Sleep( (int)(StepDelay * 1000.0) );
-            
-            status = measi(SMU1, &Imeas[i]);
-            if ( status != 0 )
-            {
-                if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
-                forcev(SMU1, 0.0);
-                return( -7 );
-            }
-            
-            status = intgv(SMU1, &v_measured);
-            if ( status != 0 ) v_measured = v;
-            
-            if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
-            {
-                if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
-            }
-            
-            Vforce[i] = v;
-            if(debug && (step == seg_steps || step == 1))
-            {
-                double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
-                printf("  Cycle %2d, Seg 1, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
-                       cycle + 1, step + 1, seg_steps + 1, i + 1, NumIPoints, v, Imeas[i], resistance);
-            }
-            i++;
+            /* Ensure we end exactly at Vhigh (fix any floating point rounding) */
+            if (v != Vhigh) v = Vhigh;
         }
     }
     
@@ -453,46 +500,70 @@ for(cycle = 0; cycle < NumCycles; cycle++)
         int seg_steps = steps_per_segment + (remainder_steps > 0 ? 1 : 0);
         if (remainder_steps > 0) remainder_steps--;
         
-        /* Sweep from Vhigh to 0V */
-        for(step = 1; step <= seg_steps; step++)
+        /* Sweep from Vhigh to 0V using incremental approach (exactly like SMU_VIsweep) for even steps */
         {
-            v = Vhigh * (1.0 - (double)step / seg_steps);
+            /* Use exact same formula as SMU_VIsweep: vstep = (Vstop-Vstart) / (NumPoints - 1)
+               For this segment: Vstart=Vhigh, Vstop=0V, NumPoints=seg_steps+1, so vstep is negative */
+            double vstep = (0.0 - Vhigh) / ((double)(seg_steps + 1) - 1.0);  /* Same as SMU_VIsweep formula */
+            v = Vhigh;  /* Start from Vhigh (Segment 1 ended here) */
             
-            status = forcev(SMU1, v);
-            if ( status != 0 )
+            for(step = 1; step <= seg_steps; step++)
             {
-                if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 2, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
-                                 cycle + 1, step, i, v, status);
-                forcev(SMU1, 0.0);
-                return( -100 - i );
+                v = v + vstep;  /* Incremental approach (vstep is negative, so this decreases v) */
+                
+                /* Ensure voltage doesn't go below 0V due to rounding */
+                if (v < 0.0) v = 0.0;
+                
+                step_start_time = GetTickCount(); /* Record start time for constant step duration */
+                status = forcev(SMU1, v);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 2, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
+                                     cycle + 1, step, i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -100 - i );
+                }
+                
+                /* Wait for minimum settling time */
+                Sleep(delay_ms);
+                
+                /* Measure current (variable time depending on integration time and auto-ranging) */
+                status = measi(SMU1, &Imeas[i]);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -7 );
+                }
+                
+                status = intgv(SMU1, &v_measured);
+                if ( status != 0 ) v_measured = v;
+                
+                if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
+                {
+                    if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
+                }
+                
+                Vforce[i] = v;
+                
+                /* Ensure constant step duration: calculate elapsed time and sleep for remainder */
+                step_elapsed_ms = GetTickCount() - step_start_time;
+                if (step_elapsed_ms < target_step_ms)
+                {
+                    Sleep(target_step_ms - step_elapsed_ms); /* Pad to reach target duration */
+                }
+                /* If elapsed time exceeds target, move immediately (no negative sleep) */
+                
+                if(debug && (step == seg_steps || step == 1))
+                {
+                    double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
+                    printf("  Cycle %2d, Seg 2, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
+                           cycle + 1, step, seg_steps, i + 1, NumIPoints, v, Imeas[i], resistance);
+                }
+                i++;
             }
-            
-            Sleep( (int)(StepDelay * 1000.0) );
-            
-            status = measi(SMU1, &Imeas[i]);
-            if ( status != 0 )
-            {
-                if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
-                forcev(SMU1, 0.0);
-                return( -7 );
-            }
-            
-            status = intgv(SMU1, &v_measured);
-            if ( status != 0 ) v_measured = v;
-            
-            if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
-            {
-                if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
-            }
-            
-            Vforce[i] = v;
-            if(debug && (step == seg_steps || step == 1))
-            {
-                double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
-                printf("  Cycle %2d, Seg 2, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
-                       cycle + 1, step, seg_steps, i + 1, NumIPoints, v, Imeas[i], resistance);
-            }
-            i++;
+            /* Ensure we end exactly at 0V (fix any floating point rounding) */
+            if (v != 0.0) v = 0.0;
         }
     }
     
@@ -501,85 +572,73 @@ for(cycle = 0; cycle < NumCycles; cycle++)
         int seg_steps = steps_per_segment + (remainder_steps > 0 ? 1 : 0);
         if (remainder_steps > 0) remainder_steps--;
         
-        /* Start at 0V (first point of segment) */
-        v = 0.0;
+        /* Note: Segment 2 already ended at 0V, so we skip the duplicate 0V measurement
+           and go directly to sweeping from 0V to Vlow for continuous waveform */
         
-        status = forcev(SMU1, v);
-        if ( status != 0 )
+        /* Sweep from 0V to Vlow using incremental approach (exactly like SMU_VIsweep) for even steps */
         {
-            if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 3 start, global index %d (voltage=%.6f V) with status: %d\n", 
-                             cycle + 1, i, v, status);
-            forcev(SMU1, 0.0);
-            return( -100 - i );
-        }
-        
-        Sleep( (int)(StepDelay * 1000.0) );
-        
-        status = measi(SMU1, &Imeas[i]);
-        if ( status != 0 )
-        {
-            if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
-            forcev(SMU1, 0.0);
-            return( -7 );
-        }
-        
-        status = intgv(SMU1, &v_measured);
-        if ( status != 0 ) v_measured = v;
-        
-        if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
-        {
-            if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
-        }
-        
-        Vforce[i] = v;
-        if(debug && (i == segment_start_idx + points_per_cycle - 1 || i == segment_start_idx + (points_per_cycle * 2 / 3)))
-        {
-            double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
-            printf("  Cycle %2d, Seg 3, Point 1/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
-                   cycle + 1, seg_steps + 1, i + 1, NumIPoints, v, Imeas[i], resistance);
-        }
-        i++;
-        
-        /* Sweep from 0V to Vlow */
-        for(step = 1; step <= seg_steps; step++)
-        {
-            v = (Vlow * step) / seg_steps;
+            /* Use exact same formula as SMU_VIsweep: vstep = (Vstop-Vstart) / (NumPoints - 1)
+               For this segment: Vstart=0V, Vstop=Vlow (negative), NumPoints=seg_steps+1, so vstep is negative */
+            double vstep = (Vlow - 0.0) / ((double)(seg_steps + 1) - 1.0);  /* Same as SMU_VIsweep formula */
+            v = 0.0;  /* Start from 0V */
             
-            status = forcev(SMU1, v);
-            if ( status != 0 )
+            for(step = 1; step <= seg_steps; step++)
             {
-                if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 3, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
-                                 cycle + 1, step, i, v, status);
-                forcev(SMU1, 0.0);
-                return( -100 - i );
+                v = v + vstep;  /* Incremental approach (vstep is negative, so this goes negative) */
+                
+                /* Ensure voltage doesn't go below Vlow due to rounding */
+                if (v < Vlow) v = Vlow;
+                
+                step_start_time = GetTickCount(); /* Record start time for constant step duration */
+                status = forcev(SMU1, v);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 3, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
+                                     cycle + 1, step, i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -100 - i );
+                }
+                
+                /* Wait for minimum settling time */
+                Sleep(delay_ms);
+                
+                /* Measure current (variable time depending on integration time and auto-ranging) */
+                status = measi(SMU1, &Imeas[i]);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -7 );
+                }
+                
+                status = intgv(SMU1, &v_measured);
+                if ( status != 0 ) v_measured = v;
+                
+                if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
+                {
+                    if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
+                }
+                
+                Vforce[i] = v;
+                
+                /* Ensure constant step duration: calculate elapsed time and sleep for remainder */
+                step_elapsed_ms = GetTickCount() - step_start_time;
+                if (step_elapsed_ms < target_step_ms)
+                {
+                    Sleep(target_step_ms - step_elapsed_ms); /* Pad to reach target duration */
+                }
+                /* If elapsed time exceeds target, move immediately (no negative sleep) */
+                
+                if(debug && (step == seg_steps || step == 1))
+                {
+                    double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
+                    printf("  Cycle %2d, Seg 3, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
+                           cycle + 1, step + 1, seg_steps + 1, i + 1, NumIPoints, v, Imeas[i], resistance);
+                }
+                i++;
             }
-            
-            Sleep( (int)(StepDelay * 1000.0) );
-            
-            status = measi(SMU1, &Imeas[i]);
-            if ( status != 0 )
-            {
-                if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
-                forcev(SMU1, 0.0);
-                return( -7 );
-            }
-            
-            status = intgv(SMU1, &v_measured);
-            if ( status != 0 ) v_measured = v;
-            
-            if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
-            {
-                if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
-            }
-            
-            Vforce[i] = v;
-            if(debug && (step == seg_steps || step == 1))
-            {
-                double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
-                printf("  Cycle %2d, Seg 3, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
-                       cycle + 1, step + 1, seg_steps + 1, i + 1, NumIPoints, v, Imeas[i], resistance);
-            }
-            i++;
+            /* Ensure we end exactly at Vlow (fix any floating point rounding) */
+            if (v != Vlow) v = Vlow;
         }
     }
     
@@ -588,46 +647,70 @@ for(cycle = 0; cycle < NumCycles; cycle++)
         int seg_steps = steps_per_segment + (remainder_steps > 0 ? 1 : 0);
         if (remainder_steps > 0) remainder_steps--;
         
-        /* Sweep from Vlow to 0V */
-        for(step = 1; step <= seg_steps; step++)
+        /* Sweep from Vlow to 0V using incremental approach (exactly like SMU_VIsweep) for even steps */
         {
-            v = Vlow * (1.0 - (double)step / seg_steps);
+            /* Use exact same formula as SMU_VIsweep: vstep = (Vstop-Vstart) / (NumPoints - 1)
+               For this segment: Vstart=Vlow (negative), Vstop=0V, NumPoints=seg_steps+1, so vstep is positive */
+            double vstep = (0.0 - Vlow) / ((double)(seg_steps + 1) - 1.0);  /* Same as SMU_VIsweep formula */
+            v = Vlow;  /* Start from Vlow */
             
-            status = forcev(SMU1, v);
-            if ( status != 0 )
+            for(step = 1; step <= seg_steps; step++)
             {
-                if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 4, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
-                                 cycle + 1, step, i, v, status);
-                forcev(SMU1, 0.0);
-                return( -100 - i );
+                v = v + vstep;  /* Incremental approach (vstep is positive, moving toward 0V) */
+                
+                /* Ensure voltage doesn't exceed 0V due to rounding */
+                if (v > 0.0) v = 0.0;
+                
+                step_start_time = GetTickCount(); /* Record start time for constant step duration */
+                status = forcev(SMU1, v);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: forcev() failed at cycle %d, segment 4, step %d, global index %d (voltage=%.6f V) with status: %d\n", 
+                                     cycle + 1, step, i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -100 - i );
+                }
+                
+                /* Wait for minimum settling time */
+                Sleep(delay_ms);
+                
+                /* Measure current (variable time depending on integration time and auto-ranging) */
+                status = measi(SMU1, &Imeas[i]);
+                if ( status != 0 )
+                {
+                    if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
+                    forcev(SMU1, 0.0);
+                    return( -7 );
+                }
+                
+                status = intgv(SMU1, &v_measured);
+                if ( status != 0 ) v_measured = v;
+                
+                if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
+                {
+                    if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
+                }
+                
+                Vforce[i] = v;
+                
+                /* Ensure constant step duration: calculate elapsed time and sleep for remainder */
+                step_elapsed_ms = GetTickCount() - step_start_time;
+                if (step_elapsed_ms < target_step_ms)
+                {
+                    Sleep(target_step_ms - step_elapsed_ms); /* Pad to reach target duration */
+                }
+                /* If elapsed time exceeds target, move immediately (no negative sleep) */
+                
+                if(debug && (step == seg_steps || step == 1))
+                {
+                    double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
+                    printf("  Cycle %2d, Seg 4, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
+                           cycle + 1, step, seg_steps, i + 1, NumIPoints, v, Imeas[i], resistance);
+                }
+                i++;
             }
-            
-            Sleep( (int)(StepDelay * 1000.0) );
-            
-            status = measi(SMU1, &Imeas[i]);
-            if ( status != 0 )
-            {
-                if(debug) printf("smu_ivsweep ERROR: measi() failed at point %d (voltage=%.6f V) with status: %d\n", i, v, status);
-                forcev(SMU1, 0.0);
-                return( -7 );
-            }
-            
-            status = intgv(SMU1, &v_measured);
-            if ( status != 0 ) v_measured = v;
-            
-            if ( (Imeas[i] >= compliance_threshold) || (Imeas[i] <= -compliance_threshold) )
-            {
-                if(debug) printf("smu_ivsweep WARNING: Compliance detected at point %d\n", i);
-            }
-            
-            Vforce[i] = v;
-            if(debug && (step == seg_steps || step == 1))
-            {
-                double resistance = (fabs(Imeas[i]) > 1e-12) ? (v_measured / Imeas[i]) : 1e12;
-                printf("  Cycle %2d, Seg 4, Point %d/%d, Global %3d/%d: V=%.6f V, I=%.6e A, R=%.3e Ohm\n",
-                       cycle + 1, step, seg_steps, i + 1, NumIPoints, v, Imeas[i], resistance);
-            }
-            i++;
+            /* Ensure we end exactly at 0V (fix any floating point rounding) */
+            if (v != 0.0) v = 0.0;
         }
     }
 }  /* End of cycle loop */

@@ -273,6 +273,24 @@ class Keithley4200A_KXCI:
             print(f"\n[KXCI] Parsing GP response...")
             print(f"[KXCI] Original response: {repr(response)}")
         
+        # Check for error responses (negative numbers like -980, -992, etc.)
+        response_stripped = response.strip()
+        # Check if response is a single negative integer (error code)
+        if response_stripped.startswith('-'):
+            try:
+                error_code = int(response_stripped)
+                # Only treat as error if it's a known error code range
+                if error_code <= -100:  # Error codes are typically <= -100
+                    error_messages = {
+                        -980: "Parameter not accessible or invalid parameter number",
+                        -992: "Command timeout or communication error",
+                        -993: "Invalid command format",
+                    }
+                    error_msg = error_messages.get(error_code, f"Unknown error code: {error_code}")
+                    raise RuntimeError(f"GP command returned error {error_code}: {error_msg}")
+            except ValueError:
+                pass  # Not a simple integer, continue parsing
+        
         # Remove "PARAM VALUE = " prefix if present
         original_response = response
         response = response.strip()

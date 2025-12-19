@@ -21,7 +21,7 @@ from gui.sample_gui import SampleGUI
 #temp gui
 
 # make the current value when plotting red so you can see it when tracing
-# cannot change sample mid way though testing 
+
 
 """ Classes for the Gui"""
 

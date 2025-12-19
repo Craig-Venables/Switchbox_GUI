@@ -2472,6 +2472,22 @@ class MeasurementGUILayoutBuilder:
         )
         plot_device_btn.pack(pady=10)
         
+        # Sample plotting button
+        plot_sample_btn = tk.Button(
+            btn_frame,
+            text="Plot All Graphs for Current SAMPLE",
+            command=gui.plot_all_sample_graphs,
+            font=("Segoe UI", 10, "bold"),
+            bg="#9C27B0",
+            fg="white",
+            padx=20,
+            pady=10,
+            cursor="hand2",
+            relief=tk.RAISED,
+            bd=2
+        )
+        plot_sample_btn.pack(pady=10)
+        
         tk.Label(
             btn_frame,
             text="(Plots dashboard, conduction, and SCLC graphs for all measurement files in current device)",
@@ -2523,8 +2539,9 @@ Output location: {sample_dir}/sample_analysis/
         )
         info_label.grid(row=4, column=0, sticky="ew", pady=10)
         
-        # Store reference
+        # Store reference to tab for later terminal creation (after plot_panels is initialized)
         self.widgets["graphing_tab"] = tab
+        gui.graphing_tab = tab  # Also store on GUI for easy access
     
     def _create_custom_sweeps_graphing_tab(self, notebook: ttk.Notebook) -> None:
         """
