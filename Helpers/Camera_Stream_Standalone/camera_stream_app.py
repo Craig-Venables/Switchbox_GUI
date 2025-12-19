@@ -35,7 +35,7 @@ import time
 import socket
 from typing import Optional
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import sys
 import os
 import numpy as np
@@ -511,6 +511,21 @@ class CameraStreamApp:
         )
         self.clear_markers_button.pack(side=tk.LEFT, padx=10)
         
+        # Save Image Button
+        self.save_image_button = tk.Button(
+            button_frame,
+            text="💾 Save Image",
+            command=self._save_image,
+            bg="#2196F3",
+            fg="white",
+            font=("Arial", 9, "bold"),
+            padx=15,
+            pady=10,
+            relief=tk.FLAT,
+            state=tk.DISABLED
+        )
+        self.save_image_button.pack(side=tk.LEFT, padx=10)
+        
         # Info text
         info_text = tk.Text(
             self.root,
@@ -643,6 +658,7 @@ class CameraStreamApp:
             self.pause_button.config(state=tk.NORMAL)
             self.stop_button.config(state=tk.NORMAL)
             self.clear_markers_button.config(state=tk.NORMAL)
+            self.save_image_button.config(state=tk.NORMAL)
             
             local_ip = self._get_local_ip()
             if self.stream_ip == "0.0.0.0" or self.stream_ip == "":
@@ -767,6 +783,7 @@ class CameraStreamApp:
         self.pause_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.DISABLED)
         self.clear_markers_button.config(state=tk.DISABLED)
+        self.save_image_button.config(state=tk.DISABLED)
         self.status_var.set("Stopped")
         self.paused = False
         
@@ -1066,6 +1083,54 @@ class CameraStreamApp:
         with self.marker_lock:
             self.marker = None
         print("Marker cleared")
+    
+    def _save_image(self):
+        """Save the current camera frame to a file."""
+        if not self.streaming or self.current_frame_raw is None:
+            messagebox.showwarning("Save Image", "No image available. Please start the camera first.")
+            return
+        
+        # Get current frame (with markers if any)
+        with self.frame_lock:
+            if self.current_frame_raw is None:
+                messagebox.showwarning("Save Image", "No image available. Please wait for the camera to capture a frame.")
+                return
+            frame_to_save = self.current_frame_raw.copy()
+        
+        # Generate default filename with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"camera_image_{timestamp}.png"
+        
+        # Open file dialog to choose save location
+        filepath = filedialog.asksaveasfilename(
+            title="Save Camera Image",
+            defaultextension=".png",
+            filetypes=[
+                ("PNG files", "*.png"),
+                ("JPEG files", "*.jpg;*.jpeg"),
+                ("All files", "*.*")
+            ],
+            initialfile=default_filename
+        )
+        
+        if not filepath:  # User cancelled
+            return
+        
+        try:
+            # Determine format from extension
+            if filepath.lower().endswith(('.jpg', '.jpeg')):
+                # Save as JPEG
+                cv2.imwrite(filepath, frame_to_save, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            else:
+                # Save as PNG (default, lossless)
+                cv2.imwrite(filepath, frame_to_save)
+            
+            messagebox.showinfo("Save Image", f"Image saved successfully!\n{filepath}")
+            print(f"Image saved to: {filepath}")
+        except Exception as e:
+            messagebox.showerror("Save Image Error", f"Failed to save image:\n{e}")
+            print(f"Error saving image: {e}")
     
     def _update_camera_settings(self):
         """Update camera settings from GUI values (only when user explicitly changes them)."""

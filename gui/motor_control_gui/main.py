@@ -68,6 +68,85 @@ except ImportError:
     Image = None
     ImageTk = None
 
+# ---------- Collapsible Frame Widget ----------
+
+class CollapsibleFrame(tk.Frame):
+    """A frame that can be collapsed and expanded with a toggle button."""
+    
+    def __init__(self, parent, title: str, bg_color: str = '#e8e8e8', 
+                 fg_color: str = '#000000', **kwargs):
+        super().__init__(parent, bg=bg_color, **kwargs)
+        
+        self.bg_color = bg_color
+        self.fg_color = fg_color
+        self.is_expanded = True
+        
+        # Header frame with toggle button
+        self.header = tk.Frame(self, bg=bg_color)
+        self.header.pack(fill=tk.X, padx=2, pady=2)
+        
+        # Toggle button (arrow icon)
+        self.toggle_btn = tk.Button(
+            self.header,
+            text="▼",
+            command=self.toggle,
+            bg=bg_color,
+            fg=fg_color,
+            font=("Arial", 10, "bold"),
+            relief=tk.FLAT,
+            width=2,
+            cursor="hand2"
+        )
+        self.toggle_btn.pack(side=tk.LEFT, padx=(2, 5))
+        
+        # Title label
+        self.title_label = tk.Label(
+            self.header,
+            text=title,
+            bg=bg_color,
+            fg=fg_color,
+            font=("Arial", 10, "bold"),
+            anchor="w"
+        )
+        self.title_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Make header clickable too
+        self.header.bind("<Button-1>", lambda e: self.toggle())
+        self.title_label.bind("<Button-1>", lambda e: self.toggle())
+        
+        # Content frame - use light border color
+        self.content_frame = tk.Frame(self, bg='#d0d0d0', relief=tk.FLAT, borderwidth=1)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
+        
+        # Inner padding frame for content - light background matching GUI theme
+        self.inner_frame = tk.Frame(self.content_frame, bg='#f0f0f0')
+        self.inner_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+    def toggle(self):
+        """Toggle the collapsed/expanded state."""
+        if self.is_expanded:
+            self.content_frame.pack_forget()
+            self.toggle_btn.config(text="▶")
+            self.is_expanded = False
+        else:
+            self.content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
+            self.toggle_btn.config(text="▼")
+            self.is_expanded = True
+    
+    def collapse(self):
+        """Collapse the frame."""
+        if self.is_expanded:
+            self.toggle()
+    
+    def expand(self):
+        """Expand the frame."""
+        if not self.is_expanded:
+            self.toggle()
+    
+    def get_content_frame(self) -> tk.Frame:
+        """Return the frame where content should be added."""
+        return self.inner_frame
+
 # ---------- Optional FG Protocol (for type hints) ----------
 
 class FunctionGenerator(Protocol):
@@ -189,7 +268,7 @@ class MotorControlWindow:
         # Create root window
         self.root = tk.Tk()
         self.root.title("Advanced Motor Control & Laser Positioning")
-        self.root.geometry("1200x750")
+        self.root.geometry("1400x900")
         self.root.configure(bg=self.COLORS['bg_dark'])
 
         # State variables
@@ -208,13 +287,31 @@ class MotorControlWindow:
         self.var_fg_addr = tk.StringVar(value=config.LASER_USB)  # Pre-populate from config
         self.var_fg_enabled = tk.BooleanVar(value=False)
         self.var_fg_amplitude = tk.StringVar(value=f"{default_amplitude_volts:.3f}")
+        # Predefined FG addresses from test scripts
+        self.fg_addresses = [
+            "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR",  # From test script
+            config.LASER_USB,  # From config
+            "USB0::0xF4EC::0x1103::INSTR",  # Generic Siglent USB
+            "TCPIP0::192.168.1.100::INSTR",  # Generic TCP/IP
+        ]
         
         # Laser state
         self.var_laser_status = tk.StringVar(value="Laser: Disconnected")
-        self.var_laser_port = tk.StringVar(value="COM3")
-        self.var_laser_baud = tk.StringVar(value="38400")
+        self.var_laser_port = tk.StringVar(value="COM4")  # From oxxius.py line 115
+        self.var_laser_baud = tk.StringVar(value="19200")  # From oxxius.py line 115
         self.var_laser_enabled = tk.BooleanVar(value=False)
         self.var_laser_power = tk.StringVar(value="10.0")
+        # Track previous emission state to detect toggle direction
+        self._laser_emission_previous_state = False
+        # Predefined laser ports and baud rates from test scripts
+        self.laser_configs = [
+            {"port": "COM4", "baud": "19200"},  # From oxxius.py line 115 (primary)
+            {"port": "COM4", "baud": "38400"},  # From test.py
+            {"port": "COM3", "baud": "38400"},  # Default from oxxius.py
+            {"port": "COM3", "baud": "19200"},
+            {"port": "COM5", "baud": "38400"},
+            {"port": "COM5", "baud": "19200"},
+        ]
         
         # Scanning state
         self.var_scan_x = tk.StringVar(value="5.0")
@@ -237,8 +334,8 @@ class MotorControlWindow:
     def _build_ui(self) -> None:
         """Build the complete user interface."""
         # Configure root grid
-        self.root.columnconfigure(0, weight=0)  # Controls
-        self.root.columnconfigure(1, weight=1)  # Canvas + Camera
+        self.root.columnconfigure(0, weight=0)  # Controls (fixed width)
+        self.root.columnconfigure(1, weight=1)  # Canvas + Camera (takes remaining space)
         self.root.rowconfigure(0, weight=0)  # Header
         self.root.rowconfigure(1, weight=1)  # Main content
         self.root.rowconfigure(2, weight=0)  # Status bar
@@ -321,9 +418,39 @@ class MotorControlWindow:
 
     def _build_controls(self) -> None:
         """Build left control panel."""
-        controls_container = tk.Frame(self.root, bg=self.COLORS['bg_dark'], width=320)
+        controls_container = tk.Frame(self.root, bg=self.COLORS['bg_dark'], width=380)
         controls_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         controls_container.grid_propagate(False)
+        controls_container.rowconfigure(1, weight=1)
+        controls_container.columnconfigure(0, weight=1)
+
+        # Expand/Collapse all buttons
+        expand_collapse_frame = tk.Frame(controls_container, bg=self.COLORS['bg_dark'])
+        expand_collapse_frame.grid(row=0, column=0, sticky="ew", padx=5, pady=(0, 5))
+        
+        tk.Button(
+            expand_collapse_frame,
+            text="▼ Expand All",
+            command=self._expand_all_sections,
+            bg=self.COLORS['accent_blue'],
+            fg='white',
+            font=("Arial", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=3
+        ).pack(side=tk.LEFT, padx=2)
+        
+        tk.Button(
+            expand_collapse_frame,
+            text="▶ Collapse All",
+            command=self._collapse_all_sections,
+            bg=self.COLORS['accent_blue'],
+            fg='white',
+            font=("Arial", 9),
+            relief=tk.FLAT,
+            padx=10,
+            pady=3
+        ).pack(side=tk.LEFT, padx=2)
 
         # Create canvas for scrolling
         canvas = tk.Canvas(
@@ -342,8 +469,11 @@ class MotorControlWindow:
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        canvas.grid(row=1, column=0, sticky="nsew")
+        scrollbar.grid(row=1, column=1, sticky="ns")
+        
+        # Store collapsible sections for expand/collapse all
+        self.collapsible_sections = []
 
         # Add control sections
         self._build_jog_controls(scrollable_frame)
@@ -354,10 +484,24 @@ class MotorControlWindow:
         self._build_fg_controls(scrollable_frame)
         self._build_laser_controls(scrollable_frame)
 
+    def _expand_all_sections(self) -> None:
+        """Expand all collapsible sections."""
+        for section in self.collapsible_sections:
+            section.expand()
+    
+    def _collapse_all_sections(self) -> None:
+        """Collapse all collapsible sections."""
+        for section in self.collapsible_sections:
+            section.collapse()
+
     def _build_jog_controls(self, parent: tk.Frame) -> None:
         """Build jog controls section."""
-        jog_frame = self._create_section_frame(parent, "🎮 Jog Controls")
-        jog_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "🎮 Jog Controls", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        self.collapsible_sections.append(collapsible)
+        
+        jog_frame = collapsible.get_content_frame()
+        jog_frame.configure(bg=self.COLORS['bg_medium'])
 
         # Step size
         tk.Label(
@@ -406,7 +550,7 @@ class MotorControlWindow:
         )
         btn_x_neg.grid(row=3, column=0, padx=2, pady=2)
 
-        btn_home = tk.Button(
+        self.btn_home = tk.Button(
             jog_frame, 
             text="🏠\nHOME", 
             command=self._on_home,
@@ -416,7 +560,7 @@ class MotorControlWindow:
             width=6,
             height=2
         )
-        btn_home.grid(row=3, column=1, padx=2, pady=2)
+        self.btn_home.grid(row=3, column=1, padx=2, pady=2)
 
         btn_x_pos = tk.Button(
             jog_frame, 
@@ -448,8 +592,12 @@ class MotorControlWindow:
 
     def _build_goto_controls(self, parent: tk.Frame) -> None:
         """Build go-to-position controls."""
-        goto_frame = self._create_section_frame(parent, "📍 Go To Position")
-        goto_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "📍 Go To Position", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        self.collapsible_sections.append(collapsible)
+        
+        goto_frame = collapsible.get_content_frame()
+        goto_frame.configure(bg=self.COLORS['bg_medium'])
 
         # X coordinate
         tk.Label(
@@ -495,8 +643,12 @@ class MotorControlWindow:
 
     def _build_motor_settings(self, parent: tk.Frame) -> None:
         """Build motor velocity/acceleration settings."""
-        settings_frame = self._create_section_frame(parent, "⚙️ Motor Settings")
-        settings_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "⚙️ Motor Settings", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        self.collapsible_sections.append(collapsible)
+        
+        settings_frame = collapsible.get_content_frame()
+        settings_frame.configure(bg=self.COLORS['bg_medium'])
 
         # Velocity
         tk.Label(
@@ -542,8 +694,12 @@ class MotorControlWindow:
 
     def _build_presets(self, parent: tk.Frame) -> None:
         """Build position presets section."""
-        presets_frame = self._create_section_frame(parent, "⭐ Position Presets")
-        presets_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "⭐ Position Presets", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        self.collapsible_sections.append(collapsible)
+        
+        presets_frame = collapsible.get_content_frame()
+        presets_frame.configure(bg=self.COLORS['bg_medium'])
 
         # Presets listbox
         self.presets_listbox = tk.Listbox(
@@ -590,8 +746,12 @@ class MotorControlWindow:
 
     def _build_scan_controls(self, parent: tk.Frame) -> None:
         """Build scanning/raster controls."""
-        scan_frame = self._create_section_frame(parent, "🔍 Raster Scan")
-        scan_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "🔍 Raster Scan", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        self.collapsible_sections.append(collapsible)
+        
+        scan_frame = collapsible.get_content_frame()
+        scan_frame.configure(bg=self.COLORS['bg_medium'])
 
         # X distance
         tk.Label(
@@ -667,10 +827,16 @@ class MotorControlWindow:
 
     def _build_fg_controls(self, parent: tk.Frame) -> None:
         """Build function generator controls."""
-        fg_frame = self._create_section_frame(parent, "⚡ Laser / Function Generator")
-        fg_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "⚡ Function Generator", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        # Start collapsed by default to save space
+        collapsible.collapse()
+        self.collapsible_sections.append(collapsible)
+        
+        fg_frame = collapsible.get_content_frame()
+        fg_frame.configure(bg=self.COLORS['bg_medium'])
 
-        # VISA address with auto-detect button
+        # VISA address with dropdown and auto-detect button
         tk.Label(
             fg_frame, 
             text="VISA Address:", 
@@ -678,8 +844,39 @@ class MotorControlWindow:
             bg=self.COLORS['bg_medium']
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=2)
         
+        # Dropdown for predefined addresses
+        addr_dropdown_frame = tk.Frame(fg_frame, bg=self.COLORS['bg_medium'])
+        addr_dropdown_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        addr_dropdown_frame.columnconfigure(0, weight=1)
+        
+        self.fg_addr_combo = ttk.Combobox(
+            addr_dropdown_frame,
+            values=["Custom..."] + self.fg_addresses,
+            state="readonly",
+            width=50
+        )
+        self.fg_addr_combo.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        # Set initial value if current address matches a predefined one
+        current_addr = self.var_fg_addr.get()
+        if current_addr in self.fg_addresses:
+            self.fg_addr_combo.set(current_addr)
+        else:
+            self.fg_addr_combo.set("Custom...")
+        self.fg_addr_combo.bind("<<ComboboxSelected>>", self._on_fg_addr_selected)
+        
+        auto_btn = tk.Button(
+            addr_dropdown_frame,
+            text="🔍",
+            command=self._auto_detect_fg,
+            bg=self.COLORS['accent_blue'],
+            fg='white',
+            width=3
+        )
+        auto_btn.grid(row=0, column=1, padx=(0, 5))
+        
+        # Entry field for custom/manual address
         addr_frame = tk.Frame(fg_frame, bg=self.COLORS['bg_medium'])
-        addr_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        addr_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 5))
         addr_frame.columnconfigure(0, weight=1)
         
         addr_entry = tk.Entry(
@@ -689,21 +886,11 @@ class MotorControlWindow:
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
         )
-        addr_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        
-        auto_btn = tk.Button(
-            addr_frame,
-            text="🔍",
-            command=self._auto_detect_fg,
-            bg=self.COLORS['accent_blue'],
-            fg='white',
-            width=3
-        )
-        auto_btn.grid(row=0, column=1)
+        addr_entry.grid(row=0, column=0, sticky="ew")
 
         # Connection buttons
         btn_frame = tk.Frame(fg_frame, bg=self.COLORS['bg_medium'])
-        btn_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        btn_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 5))
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         
@@ -735,7 +922,7 @@ class MotorControlWindow:
             bg=self.COLORS['bg_medium'],
             font=("Arial", 9)
         )
-        status_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+        status_label.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
 
         # Output toggle
         output_check = tk.Checkbutton(
@@ -749,7 +936,7 @@ class MotorControlWindow:
             activebackground=self.COLORS['bg_medium'],
             activeforeground=self.COLORS['fg_primary']
         )
-        output_check.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
+        output_check.grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
 
         # DC Voltage
         tk.Label(
@@ -757,7 +944,7 @@ class MotorControlWindow:
             text="DC Voltage (V):", 
             fg=self.COLORS['fg_primary'],
             bg=self.COLORS['bg_medium']
-        ).grid(row=5, column=0, sticky="w", pady=2)
+        ).grid(row=6, column=0, sticky="w", pady=2)
         amplitude_entry = tk.Entry(
             fg_frame, 
             textvariable=self.var_fg_amplitude,
@@ -765,7 +952,7 @@ class MotorControlWindow:
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
         )
-        amplitude_entry.grid(row=5, column=1, sticky="ew", pady=2)
+        amplitude_entry.grid(row=6, column=1, sticky="ew", pady=2)
 
         # Apply button
         apply_btn = tk.Button(
@@ -776,13 +963,14 @@ class MotorControlWindow:
             fg='white',
             font=("Arial", 9)
         )
-        apply_btn.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        apply_btn.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(5, 0))
 
         fg_frame.columnconfigure(1, weight=1)
 
         if FunctionGeneratorManager is None:
             self.var_fg_status.set("FG: Driver unavailable (install pyvisa)")
             for widget in (
+                self.fg_addr_combo,
                 addr_entry,
                 auto_btn,
                 connect_btn,
@@ -795,8 +983,44 @@ class MotorControlWindow:
 
     def _build_laser_controls(self, parent: tk.Frame) -> None:
         """Build laser controller controls."""
-        laser_frame = self._create_section_frame(parent, "🔴 Laser Control")
-        laser_frame.pack(fill=tk.X, pady=5)
+        collapsible = CollapsibleFrame(parent, "🔴 Laser Control", bg_color=self.COLORS['bg_dark'], fg_color=self.COLORS['fg_primary'])
+        collapsible.pack(fill=tk.X, pady=3)
+        # Start collapsed by default to save space
+        collapsible.collapse()
+        self.collapsible_sections.append(collapsible)
+        
+        laser_frame = collapsible.get_content_frame()
+        laser_frame.configure(bg=self.COLORS['bg_medium'])
+
+        # COM Port with dropdown
+        tk.Label(
+            laser_frame, 
+            text="Configuration:", 
+            fg=self.COLORS['fg_primary'],
+            bg=self.COLORS['bg_medium']
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=2)
+        
+        # Create dropdown options from configs
+        laser_config_options = ["Custom..."] + [
+            f"{cfg['port']} @ {cfg['baud']} baud" for cfg in self.laser_configs
+        ]
+        
+        self.laser_config_combo = ttk.Combobox(
+            laser_frame,
+            values=laser_config_options,
+            state="readonly",
+            width=30
+        )
+        self.laser_config_combo.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        # Set initial value if current config matches a predefined one
+        current_port = self.var_laser_port.get()
+        current_baud = self.var_laser_baud.get()
+        matching_config = f"{current_port} @ {current_baud} baud"
+        if matching_config in laser_config_options:
+            self.laser_config_combo.set(matching_config)
+        else:
+            self.laser_config_combo.set("Custom...")
+        self.laser_config_combo.bind("<<ComboboxSelected>>", self._on_laser_config_selected)
 
         # COM Port
         tk.Label(
@@ -804,7 +1028,7 @@ class MotorControlWindow:
             text="COM Port:", 
             fg=self.COLORS['fg_primary'],
             bg=self.COLORS['bg_medium']
-        ).grid(row=0, column=0, sticky="w", pady=2)
+        ).grid(row=2, column=0, sticky="w", pady=2)
         port_entry = tk.Entry(
             laser_frame, 
             textvariable=self.var_laser_port,
@@ -812,7 +1036,7 @@ class MotorControlWindow:
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
         )
-        port_entry.grid(row=0, column=1, sticky="ew", pady=2)
+        port_entry.grid(row=2, column=1, sticky="ew", pady=2)
 
         # Baud Rate
         tk.Label(
@@ -820,7 +1044,7 @@ class MotorControlWindow:
             text="Baud Rate:", 
             fg=self.COLORS['fg_primary'],
             bg=self.COLORS['bg_medium']
-        ).grid(row=1, column=0, sticky="w", pady=2)
+        ).grid(row=3, column=0, sticky="w", pady=2)
         baud_entry = tk.Entry(
             laser_frame, 
             textvariable=self.var_laser_baud,
@@ -828,11 +1052,11 @@ class MotorControlWindow:
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
         )
-        baud_entry.grid(row=1, column=1, sticky="ew", pady=2)
+        baud_entry.grid(row=3, column=1, sticky="ew", pady=2)
 
         # Connection buttons
         btn_frame = tk.Frame(laser_frame, bg=self.COLORS['bg_medium'])
-        btn_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5, 5))
+        btn_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(5, 5))
         btn_frame.columnconfigure(0, weight=1)
         btn_frame.columnconfigure(1, weight=1)
         
@@ -864,7 +1088,7 @@ class MotorControlWindow:
             bg=self.COLORS['bg_medium'],
             font=("Arial", 9)
         )
-        status_label.grid(row=3, column=0, columnspan=2, sticky="w", pady=2)
+        status_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=2)
 
         # Emission toggle
         emission_check = tk.Checkbutton(
@@ -878,7 +1102,7 @@ class MotorControlWindow:
             activebackground=self.COLORS['bg_medium'],
             activeforeground=self.COLORS['fg_primary']
         )
-        emission_check.grid(row=4, column=0, columnspan=2, sticky="w", pady=2)
+        emission_check.grid(row=6, column=0, columnspan=2, sticky="w", pady=2)
 
         # Power setting
         tk.Label(
@@ -886,15 +1110,46 @@ class MotorControlWindow:
             text="Power (mW):", 
             fg=self.COLORS['fg_primary'],
             bg=self.COLORS['bg_medium']
-        ).grid(row=5, column=0, sticky="w", pady=2)
+        ).grid(row=7, column=0, sticky="w", pady=2)
+        
+        # Power control frame with entry and adjustment buttons
+        power_frame = tk.Frame(laser_frame, bg=self.COLORS['bg_medium'])
+        power_frame.grid(row=7, column=1, sticky="ew", pady=2)
+        power_frame.columnconfigure(1, weight=1)
+        
+        # Decrease button
+        decrease_btn = tk.Button(
+            power_frame,
+            text="−",
+            command=self._decrease_laser_power,
+            bg=self.COLORS['accent_blue'],
+            fg='white',
+            font=("Arial", 10, "bold"),
+            width=3
+        )
+        decrease_btn.grid(row=0, column=0, padx=(0, 2))
+        
+        # Power entry
         power_entry = tk.Entry(
-            laser_frame, 
+            power_frame, 
             textvariable=self.var_laser_power,
             bg=self.COLORS['bg_light'],
             fg=self.COLORS['fg_primary'],
             insertbackground=self.COLORS['fg_primary']
         )
-        power_entry.grid(row=5, column=1, sticky="ew", pady=2)
+        power_entry.grid(row=0, column=1, sticky="ew", padx=2)
+        
+        # Increase button
+        increase_btn = tk.Button(
+            power_frame,
+            text="+",
+            command=self._increase_laser_power,
+            bg=self.COLORS['accent_blue'],
+            fg='white',
+            font=("Arial", 10, "bold"),
+            width=3
+        )
+        increase_btn.grid(row=0, column=2, padx=(2, 0))
 
         # Apply button
         apply_btn = tk.Button(
@@ -905,19 +1160,22 @@ class MotorControlWindow:
             fg='white',
             font=("Arial", 9)
         )
-        apply_btn.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(5, 0))
+        apply_btn.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(5, 0))
 
         laser_frame.columnconfigure(1, weight=1)
 
         if LaserManager is None:
             self.var_laser_status.set("Laser: Driver unavailable (install pyserial)")
             for widget in (
+                self.laser_config_combo,
                 port_entry,
                 baud_entry,
                 connect_btn,
                 disconnect_btn,
                 emission_check,
                 power_entry,
+                decrease_btn,
+                increase_btn,
                 apply_btn,
             ):
                 widget.configure(state=tk.DISABLED)
@@ -1400,19 +1658,70 @@ class MotorControlWindow:
             messagebox.showerror("Disconnect Error", f"Error during disconnect:\n{exc}")
 
     def _on_home(self) -> None:
-        """Home both motors to (0,0)."""
+        """Home both motors to (0,0) in parallel threads."""
         if not self._is_connected():
             messagebox.showwarning("Not Connected", "Please connect to motors first.")
             return
-        try:
-            self.var_status.set("Motors: Homing...")
-            self.root.update()
-            self.motor.home_motors(self.var_status_x, self.var_status_y)  # type: ignore
-            self._refresh_position()
-            self.var_status.set("Motors: Homed ✓")
-        except Exception as exc:
-            self.var_status.set("Motors: Homing Failed")
-            messagebox.showerror("Homing Error", f"Failed to home motors:\n{exc}")
+        
+        # Disable home button during homing
+        if hasattr(self, 'btn_home'):
+            self.btn_home.config(state=tk.DISABLED)
+        
+        self.var_status.set("Motors: Homing...")
+        self.var_status_x.set("Homing X...")
+        self.var_status_y.set("Homing Y...")
+        self.root.update()
+        
+        # Run homing in a background thread to prevent GUI freezing
+        def home_thread():
+            """Thread function to home motors in parallel."""
+            try:
+                # Create threads for X and Y homing to run simultaneously
+                def home_x():
+                    """Home X axis."""
+                    if self.motor and self.motor.motor_x:  # type: ignore
+                        try:
+                            self.motor.motor_x.home()  # type: ignore
+                            self.motor.motor_x.wait_move()  # type: ignore
+                            self.root.after(0, lambda: self.var_status_x.set("Homed X ✓"))
+                        except Exception as e:
+                            self.root.after(0, lambda: self.var_status_x.set(f"Error: {str(e)}"))
+                
+                def home_y():
+                    """Home Y axis."""
+                    if self.motor and self.motor.motor_y:  # type: ignore
+                        try:
+                            self.motor.motor_y.home()  # type: ignore
+                            self.motor.motor_y.wait_move()  # type: ignore
+                            self.root.after(0, lambda: self.var_status_y.set("Homed Y ✓"))
+                        except Exception as e:
+                            self.root.after(0, lambda: self.var_status_y.set(f"Error: {str(e)}"))
+                
+                # Start both homing operations in parallel
+                thread_x = threading.Thread(target=home_x, daemon=True)
+                thread_y = threading.Thread(target=home_y, daemon=True)
+                
+                thread_x.start()
+                thread_y.start()
+                
+                # Wait for both threads to complete
+                thread_x.join()
+                thread_y.join()
+                
+                # Update UI on main thread
+                self.root.after(0, lambda: self._refresh_position())
+                self.root.after(0, lambda: self.var_status.set("Motors: Homed ✓"))
+                
+            except Exception as exc:
+                self.root.after(0, lambda: self.var_status.set("Motors: Homing Failed"))
+                self.root.after(0, lambda: messagebox.showerror("Homing Error", f"Failed to home motors:\n{exc}"))
+            finally:
+                # Re-enable home button
+                if hasattr(self, 'btn_home'):
+                    self.root.after(0, lambda: self.btn_home.config(state=tk.NORMAL))
+        
+        # Start the homing thread
+        threading.Thread(target=home_thread, daemon=True).start()
 
     def _validate_step(self, event=None) -> None:
         """Validate and correct step size entry."""
@@ -1682,6 +1991,26 @@ class MotorControlWindow:
             messagebox.showerror("Scan Error", f"Failed to complete scan:\n{exc}")
 
     # ---------- Function Generator Controls ----------
+    def _on_fg_addr_selected(self, event=None) -> None:
+        """Handle function generator address selection from dropdown."""
+        selected = self.fg_addr_combo.get()
+        if selected and selected != "Custom...":
+            self.var_fg_addr.set(selected)
+    
+    def _on_laser_config_selected(self, event=None) -> None:
+        """Handle laser configuration selection from dropdown."""
+        selected = self.laser_config_combo.get()
+        if selected and selected != "Custom...":
+            # Parse the selection (format: "COM4 @ 38400 baud")
+            try:
+                parts = selected.split(" @ ")
+                port = parts[0]
+                baud = parts[1].replace(" baud", "")
+                self.var_laser_port.set(port)
+                self.var_laser_baud.set(baud)
+            except Exception:
+                pass  # If parsing fails, leave as custom
+    
     def _auto_detect_fg(self) -> None:
         """Auto-detect function generator VISA address."""
         if FunctionGeneratorManager is None:
@@ -1817,25 +2146,126 @@ class MotorControlWindow:
             messagebox.showerror("FG Error", f"Failed to apply voltage:\n{exc}")
 
     # ---------- Laser Controller Controls ----------
+    def _set_laser_analog_modulation_mode(self, power_mw: float = 100.0) -> None:
+        """Set laser to analog modulation mode for manual control via front panel.
+        
+        This is the standard state the laser should be left in:
+        - AM 1: Analog modulation ON (allows front panel wheel control)
+        - DM 0: Digital modulation OFF
+        - APC 1: Automatic power control ON (constant power mode)
+        - Power: Set to specified value (default 100 mW)
+        - Emission: Should remain ON
+        
+        The analog modulation controls a percentage of the set power value.
+        Setting power to 100 mW means the front panel wheel can control
+        0-100% of 100 mW (0-100 mW range).
+        
+        This is the default state that allows manual control via the control box.
+        
+        Args:
+            power_mw: Power level in mW (default: 100 mW)
+        """
+        print(f"[LASER] _set_laser_analog_modulation_mode called with power_mw={power_mw}")
+        if not self.laser_mgr:
+            print("[LASER] ERROR: laser_mgr is None")
+            return
+        
+        try:
+            if not self.laser_mgr:
+                print("[LASER] ERROR: laser_mgr is None in _set_laser_analog_modulation_mode")
+                return
+            
+            laser = self.laser_mgr.instrument
+            print(f"[LASER] Got instrument: {laser}")
+            print(f"[LASER] Instrument type: {type(laser)}")
+            
+            # Check if serial connection is open
+            if hasattr(laser, 'ser'):
+                print(f"[LASER] Serial port object: {laser.ser}")
+                if laser.ser:
+                    print(f"[LASER] Serial port name: {laser.ser.port}")
+                    print(f"[LASER] Serial is_open: {laser.ser.is_open}")
+                    if not laser.ser.is_open:
+                        print("[LASER] WARNING: Serial port is not open!")
+                else:
+                    print("[LASER] WARNING: Serial port object is None!")
+            
+            # Use the new method if available, otherwise fall back to manual commands
+            if hasattr(laser, 'set_to_analog_modulation_mode'):
+                print("[LASER] Using set_to_analog_modulation_mode method")
+                try:
+                    result = laser.set_to_analog_modulation_mode(power_mw=power_mw)
+                    print(f"[LASER] set_to_analog_modulation_mode result: {result}")
+                except Exception as e:
+                    print(f"[LASER] ERROR calling set_to_analog_modulation_mode: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    raise
+            else:
+                print("[LASER] Using manual commands (fallback)")
+                # Fallback: manual commands
+                print("[LASER] Sending APC 1...")
+                try:
+                    result = laser.send_command("APC 1")
+                    print(f"[LASER] APC 1 response: {result}")
+                except Exception as e:
+                    print(f"[LASER] ERROR sending APC 1: {e}")
+                    raise
+                time.sleep(0.1)
+                print("[LASER] Sending AM 1...")
+                try:
+                    result = laser.send_command("AM 1")
+                    print(f"[LASER] AM 1 response: {result}")
+                except Exception as e:
+                    print(f"[LASER] ERROR sending AM 1: {e}")
+                    raise
+                time.sleep(0.1)
+                print("[LASER] Sending DM 0...")
+                try:
+                    result = laser.send_command("DM 0")
+                    print(f"[LASER] DM 0 response: {result}")
+                except Exception as e:
+                    print(f"[LASER] ERROR sending DM 0: {e}")
+                    raise
+                time.sleep(0.1)
+                print(f"[LASER] Setting power to {power_mw} mW...")
+                try:
+                    result = laser.set_power(power_mw)
+                    print(f"[LASER] set_power response: {result}")
+                except Exception as e:
+                    print(f"[LASER] ERROR setting power: {e}")
+                    raise
+                time.sleep(0.1)
+            print("[LASER] Analog modulation mode set successfully")
+        except Exception as e:
+            print(f"[LASER] ERROR: Could not set laser to analog modulation mode: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def _on_laser_connect(self) -> None:
         """Connect to laser controller."""
+        print("[LASER] Connect button clicked")
         if LaserManager is None:
             detail = "pyserial is not installed, so laser control is disabled."
             if _LASER_IMPORT_ERROR:
                 detail += f"\nOriginal import error: {_LASER_IMPORT_ERROR}"
+            print(f"[LASER] ERROR: {detail}")
             messagebox.showerror("Laser Controller", detail)
             return
         try:
             port = self.var_laser_port.get().strip()
             baud_str = self.var_laser_baud.get().strip()
+            print(f"[LASER] Attempting connection: port={port}, baud={baud_str}")
             
             if not port:
+                print("[LASER] ERROR: No port specified")
                 messagebox.showwarning("No Port", "Please enter a COM port.")
                 return
             
             try:
                 baud = int(baud_str)
             except ValueError:
+                print(f"[LASER] ERROR: Invalid baud rate: {baud_str}")
                 messagebox.showwarning("Invalid Baud", "Please enter a valid baud rate.")
                 return
             
@@ -1848,92 +2278,423 @@ class MotorControlWindow:
                 "address": port,
                 "baud": baud
             }
-            self.laser_mgr = LaserManager.from_config(cfg)
+            print(f"[LASER] Creating LaserManager with config: {cfg}")
+            print(f"[LASER] LaserManager class: {LaserManager}")
+            print(f"[LASER] LaserManager.from_config method: {LaserManager.from_config}")
+            
+            try:
+                self.laser_mgr = LaserManager.from_config(cfg)
+                print(f"[LASER] LaserManager created successfully: {self.laser_mgr}")
+                print(f"[LASER] LaserManager type: {type(self.laser_mgr)}")
+                print(f"[LASER] LaserManager has instrument attribute: {hasattr(self.laser_mgr, 'instrument')}")
+            except Exception as e:
+                print(f"[LASER] ERROR creating LaserManager: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
             
             # Test connection by querying ID
             try:
                 laser = self.laser_mgr.instrument
+                print(f"[LASER] Got instrument: {laser}")
+                print(f"[LASER] Instrument type: {type(laser)}")
+                print(f"[LASER] Instrument has idn method: {hasattr(laser, 'idn')}")
+                print(f"[LASER] Instrument has send_command method: {hasattr(laser, 'send_command')}")
+                print(f"[LASER] Instrument has ser attribute: {hasattr(laser, 'ser')}")
+                if hasattr(laser, 'ser'):
+                    print(f"[LASER] Serial port: {laser.ser.port if laser.ser else 'None'}")
+                    print(f"[LASER] Serial is_open: {laser.ser.is_open if laser.ser else 'N/A'}")
+                
+                print("[LASER] Querying laser ID...")
                 idn = laser.idn()
+                print(f"[LASER] Laser ID response: {idn}")
+                print(f"[LASER] Laser ID type: {type(idn)}")
                 self.var_laser_status.set(f"Laser: Connected ✓ ({idn[:30]})")
+                print("[LASER] Connection successful - laser ready (not setting analog modulation until emission is on)")
+                
                 # Read current power if available
                 try:
+                    print("[LASER] Reading current power...")
                     power_str = laser.get_power()
+                    print(f"[LASER] Power response: {power_str}")
                     # Try to extract numeric value from response
                     import re
                     power_match = re.search(r'[\d.]+', power_str)
                     if power_match:
-                        self.var_laser_power.set(power_match.group())
-                except Exception:
+                        power_val = float(power_match.group())
+                        print(f"[LASER] Extracted power: {power_val}")
+                        # Only update entry field if laser has a valid non-zero power
+                        # Don't overwrite user's desired power with 0.0
+                        if power_val > 0:
+                            self.var_laser_power.set(str(power_val))
+                        else:
+                            print("[LASER] Laser power is 0.0 - keeping entry field value")
+                except Exception as e:
+                    print(f"[LASER] Warning: Could not read power: {e}")
                     pass
+                print("[LASER] Connection successful!")
             except Exception as e:
+                print(f"[LASER] ERROR: Connection test failed: {e}")
+                import traceback
+                traceback.print_exc()
                 self.var_laser_status.set("Laser: Connection Failed")
                 messagebox.showerror("Connection Failed", f"Could not communicate with laser:\n{e}")
                 self.laser_mgr = None
                 
         except Exception as exc:
+            print(f"[LASER] ERROR: Exception during connect: {exc}")
+            import traceback
+            traceback.print_exc()
             self.var_laser_status.set("Laser: Error")
             messagebox.showerror("Connection Error", f"Failed to connect:\n{exc}")
             self.laser_mgr = None
 
     def _on_laser_disconnect(self) -> None:
-        """Disconnect from laser controller."""
+        """Disconnect from laser controller and restore to analog modulation mode.
+        
+        This is called when user clicks Disconnect or when GUI closes.
+        Standard final state:
+        - Emission: ON
+        - Analog modulation: ON (AM 1)
+        - Power: 100 mW
+        - This allows manual control via front panel wheel
+        """
+        print("[LASER] ===== DISCONNECT - Restoring to manual control mode =====")
         try:
             if self.laser_mgr is not None:
                 laser = self.laser_mgr.instrument
+                print(f"[LASER] Got instrument: {laser}")
                 try:
-                    # Turn off emission before disconnecting
-                    laser.emission_off()
-                except Exception:
+                    # Ensure emission is ON (required for proper operation)
+                    print("[LASER] Ensuring emission is ON...")
+                    result = laser.emission_on()
+                    print(f"[LASER] emission_on response: {result}")
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"[LASER] Warning: Could not set emission ON: {e}")
                     pass
                 try:
-                    laser.close()
-                except Exception:
+                    # Restore to analog modulation mode with 100 mW for manual control
+                    # This ensures the laser can be controlled via front panel after disconnect
+                    print("[LASER] Restoring to analog modulation mode with 100 mW...")
+                    self._set_laser_analog_modulation_mode(power_mw=100.0)
+                    print("[LASER] Analog modulation mode restored")
+                except Exception as e:
+                    print(f"[LASER] Warning: Could not restore analog modulation mode: {e}")
+                    pass
+                try:
+                    # Use the close method which automatically restores to manual control
+                    # restore_to_manual_control=True ensures proper final state
+                    print("[LASER] Closing connection...")
+                    laser.close(restore_to_manual_control=True)
+                    print("[LASER] Connection closed")
+                except Exception as e:
+                    print(f"[LASER] Warning: Error during close: {e}")
                     pass
                 self.laser_mgr = None
+                print("[LASER] laser_mgr set to None")
+            else:
+                print("[LASER] laser_mgr is None - nothing to disconnect")
             self.var_laser_enabled.set(False)
-            self.var_laser_status.set("Laser: Disconnected")
+            self.var_laser_status.set("Laser: Disconnected (restored to manual control)")
+            print("[LASER] Disconnect complete - laser ready for manual control")
         except Exception as exc:
+            print(f"[LASER] ERROR: Exception during disconnect: {exc}")
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("Disconnect Error", f"Error during disconnect:\n{exc}")
 
     def _on_laser_toggle(self) -> None:
-        """Toggle laser emission."""
+        """Toggle laser emission following proper sequence.
+        
+        When turning ON:
+        1. Set to power control mode (APC 1)
+        2. Set to digital control (AM 0, DM 0)
+        3. Set power to current value
+        4. Turn emission ON
+        5. Wait 2 seconds
+        6. Enable analog modulation (AM 1)
+        
+        When turning OFF (proper shutdown):
+        1. Set to analog modulation mode (AM 1)
+        2. Set power to 100 mW
+        3. Keep emission ON (do NOT disable - causes issues)
+        """
+        print("[LASER] ========== Emission toggle clicked ==========")
         try:
-            desired = bool(self.var_laser_enabled.get())
+            # Simple approach: toggle based on previous state
+            # If it was OFF, turn it ON. If it was ON, turn it OFF.
+            previous_state = self._laser_emission_previous_state
+            want_on = not previous_state  # Toggle: if was OFF, want ON; if was ON, want OFF
+            
+            print(f"[LASER] Previous state: {previous_state}")
+            print(f"[LASER] User wants: {'ON' if want_on else 'OFF'}")
             
             if self.laser_mgr is not None:
                 laser = self.laser_mgr.instrument
-                if desired:
-                    laser.emission_on()
-                    status = "ON"
+                print(f"[LASER] Got instrument: {laser}")
+                
+                if want_on:
+                    # Checkbox is CHECKED - user wants to turn laser ON
+                    print("[LASER] ===== TURNING LASER ON =====")
+                    # Turning ON - follow proper sequence
+                    print("[LASER] Turning ON - starting sequence...")
+                    self.var_laser_status.set("Laser: Initializing...")
+                    self.root.update()
+                    
+                    # Step 1: Set to power control mode
+                    print("[LASER] Step 1: Setting to power control mode (APC 1)...")
+                    result = laser.send_command("APC 1")
+                    print(f"[LASER] APC 1 response: {result}")
+                    time.sleep(0.1)
+                    
+                    # Step 2: Set to digital control (AM 0, DM 0)
+                    print("[LASER] Step 2: Setting to digital control (AM 0, DM 0)...")
+                    result = laser.send_command("AM 0")
+                    print(f"[LASER] AM 0 response: {result}")
+                    time.sleep(0.1)
+                    result = laser.send_command("DM 0")
+                    print(f"[LASER] DM 0 response: {result}")
+                    time.sleep(0.1)
+                    
+                    # Step 3: Set power to current value (or default to 10.0 if 0.0 or invalid)
+                    try:
+                        power_str = self.var_laser_power.get().strip()
+                        if not power_str or power_str == "0" or power_str == "0.0":
+                            print("[LASER] Power entry is 0.0 or empty - using default 10.0 mW")
+                            power = 10.0
+                            self.var_laser_power.set("10.0")
+                        else:
+                            power = float(power_str)
+                        print(f"[LASER] Step 3: Setting power to {power} mW...")
+                        result = laser.set_power(power)
+                        print(f"[LASER] set_power response: {result}")
+                        time.sleep(0.1)
+                    except ValueError as e:
+                        print(f"[LASER] ERROR: Invalid power value: {e}, using default 10.0 mW")
+                        power = 10.0
+                        self.var_laser_power.set("10.0")
+                        result = laser.set_power(power)
+                        print(f"[LASER] set_power response: {result}")
+                        time.sleep(0.1)
+                    
+                    # Step 4: Turn emission ON
+                    print("[LASER] Step 4: Turning emission ON...")
+                    result = laser.emission_on()
+                    print(f"[LASER] emission_on response: {result}")
+                    self.var_laser_status.set("Laser: Emission ON...")
+                    self.root.update()
+                    
+                    # NOTE: Do NOT enable analog modulation while emission is ON
+                    # Analog modulation will be enabled when emission is turned OFF
+                    
+                    # Query actual power reading
+                    try:
+                        print("[LASER] Querying actual power reading...")
+                        power_str = laser.get_power()
+                        print(f"[LASER] Power query response: {power_str}")
+                        import re
+                        power_match = re.search(r'[\d.]+', power_str)
+                        if power_match:
+                            actual_power = power_match.group()
+                            print(f"[LASER] Actual power reading: {actual_power} mW")
+                            set_power = self.var_laser_power.get()
+                            self.var_laser_status.set(f"Laser: Emission ON (set: {set_power} mW, actual: {actual_power} mW)")
+                        else:
+                            set_power = self.var_laser_power.get()
+                            self.var_laser_status.set(f"Laser: Emission ON (set: {set_power} mW)")
+                    except Exception as e:
+                        print(f"[LASER] Warning: Could not query actual power: {e}")
+                        set_power = self.var_laser_power.get()
+                        self.var_laser_status.set(f"Laser: Emission ON (set: {set_power} mW)")
+                    
+                    print("[LASER] Turn ON sequence complete!")
+                    # Update state tracking
+                    self._laser_emission_previous_state = True
+                    # Ensure checkbox reflects the state
+                    self.var_laser_enabled.set(True)
+                    
                 else:
-                    laser.emission_off()
-                    status = "OFF"
-                self.var_laser_status.set(f"Laser: Emission {status}")
+                    # User wants emission OFF (previous was True, new is False)
+                    print("[LASER] ===== TURNING EMISSION OFF =====")
+                    
+                    try:
+                        # Turn emission OFF first
+                        print("[LASER] Step 1: Turning emission OFF...")
+                        result = laser.emission_off()
+                        print(f"[LASER] emission_off response: {result}")
+                        time.sleep(0.1)
+                        
+                        # Now enable analog modulation (only when emission is OFF)
+                        print("[LASER] Step 2: Enabling analog modulation (AM 1)...")
+                        result = laser.send_command("AM 1")
+                        print(f"[LASER] AM 1 response: {result}")
+                        time.sleep(0.1)
+                        
+                        # Set power to 100 mW for manual control
+                        print("[LASER] Step 3: Setting power to 100 mW for manual control...")
+                        result = laser.set_power(100.0)
+                        print(f"[LASER] set_power response: {result}")
+                        time.sleep(0.1)
+                        
+                        self.var_laser_status.set("Laser: Emission OFF (ready for manual control)")
+                        # Update state tracking
+                        self._laser_emission_previous_state = False
+                        # Ensure checkbox reflects the state
+                        self.var_laser_enabled.set(False)
+                        print("[LASER] Emission turned OFF and analog modulation enabled successfully")
+                    except Exception as e:
+                        print(f"[LASER] ERROR: Could not turn emission off: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Revert checkbox if error
+                        self.var_laser_enabled.set(True)
+                        self._laser_emission_previous_state = True
+                        messagebox.showerror("Laser Error", f"Failed to turn emission off:\n{e}")
+                    
             else:
-                self.var_laser_enabled.set(not desired)
+                print("[LASER] ERROR: laser_mgr is None - not connected")
+                # Revert checkbox state since we can't connect
+                self.var_laser_enabled.set(False)
+                self._laser_emission_previous_state = False
                 messagebox.showwarning("Not Connected", "Please connect to laser first.")
                 
         except Exception as exc:
+            print(f"[LASER] ERROR: Exception during toggle: {exc}")
+            import traceback
+            traceback.print_exc()
+            # Revert checkbox state on error - go back to previous state
+            self.var_laser_enabled.set(self._laser_emission_previous_state)
             messagebox.showerror("Laser Error", f"Failed to toggle emission:\n{exc}")
 
-    def _on_apply_laser_power(self) -> None:
-        """Apply laser power setting."""
+    def _increase_laser_power(self) -> None:
+        """Increase laser power by 5 mW and apply immediately if laser is on."""
+        print("[LASER] Increase power button clicked")
         try:
-            power = float(self.var_laser_power.get())
+            current_power = float(self.var_laser_power.get())
+            new_power = current_power + 5.0
+            print(f"[LASER] Increasing power: {current_power} -> {new_power} mW")
+            self.var_laser_power.set(f"{new_power:.1f}")
+            # Auto-apply if laser is on
+            if self.laser_mgr is not None and self.var_laser_enabled.get():
+                print("[LASER] Laser is on - auto-applying power change")
+                self._on_apply_laser_power()
+            else:
+                print("[LASER] Laser is off - power value updated but not applied")
+        except ValueError as e:
+            print(f"[LASER] ERROR: Invalid power value: {e}")
+            self.var_laser_power.set("5.0")
+    
+    def _decrease_laser_power(self) -> None:
+        """Decrease laser power by 5 mW and apply immediately if laser is on."""
+        print("[LASER] Decrease power button clicked")
+        try:
+            current_power = float(self.var_laser_power.get())
+            new_power = max(0.0, current_power - 5.0)  # Don't go below 0
+            print(f"[LASER] Decreasing power: {current_power} -> {new_power} mW")
+            self.var_laser_power.set(f"{new_power:.1f}")
+            # Auto-apply if laser is on
+            if self.laser_mgr is not None and self.var_laser_enabled.get():
+                print("[LASER] Laser is on - auto-applying power change")
+                self._on_apply_laser_power()
+            else:
+                print("[LASER] Laser is off - power value updated but not applied")
+        except ValueError as e:
+            print(f"[LASER] ERROR: Invalid power value: {e}")
+            self.var_laser_power.set("0.0")
+    
+    def _on_apply_laser_power(self) -> None:
+        """Apply laser power setting.
+        
+        This method allows adjusting power while the laser is on.
+        The power can be increased or decreased as needed.
+        
+        When analog modulation is enabled (AM 1):
+        - The set power becomes the MAXIMUM
+        - Front panel wheel controls 0-100% of this maximum
+        - Example: 100 mW with AM 1 = wheel controls 0-100 mW
+        
+        When analog modulation is disabled (AM 0):
+        - The set power is absolute
+        - Example: 50 mW with AM 0 = exactly 50 mW
+        """
+        print("[LASER] Apply power button clicked")
+        try:
+            power_str = self.var_laser_power.get().strip()
+            if not power_str or power_str == "0" or power_str == "0.0":
+                print("[LASER] WARNING: Power is 0.0 or empty - using default 10.0 mW")
+                power = 10.0
+                self.var_laser_power.set("10.0")
+            else:
+                power = float(power_str)
+            print(f"[LASER] Requested power: {power} mW")
             
             if power < 0:
+                print("[LASER] ERROR: Power must be non-negative")
                 raise ValueError("Power must be non-negative")
             
             if self.laser_mgr is not None:
                 laser = self.laser_mgr.instrument
-                laser.set_power(power)
-                self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW")
+                print(f"[LASER] Got instrument: {laser}")
+                
+                # Check if emission is currently on
+                emission_on = self.var_laser_enabled.get()
+                print(f"[LASER] Emission currently: {'ON' if emission_on else 'OFF'}")
+                
+                if emission_on:
+                    # Laser is on - can adjust power directly
+                    print("[LASER] Laser is ON - applying power directly...")
+                    # Ensure we're in power control mode
+                    try:
+                        print("[LASER] Ensuring power control mode (APC 1)...")
+                        result = laser.send_command("APC 1")
+                        print(f"[LASER] APC 1 response: {result}")
+                        time.sleep(0.05)
+                    except Exception as e:
+                        print(f"[LASER] Warning: Could not set APC 1: {e}")
+                        pass
+                    
+                    # Set power (works with both AM 0 and AM 1)
+                    print(f"[LASER] Setting power to {power} mW...")
+                    result = laser.set_power(power)
+                    print(f"[LASER] set_power response: {result}")
+                    time.sleep(0.1)  # Small delay before querying
+                    
+                    # Query actual power reading
+                    try:
+                        print("[LASER] Querying actual power reading...")
+                        power_str = laser.get_power()
+                        print(f"[LASER] Power query response: {power_str}")
+                        import re
+                        power_match = re.search(r'[\d.]+', power_str)
+                        if power_match:
+                            actual_power = power_match.group()
+                            print(f"[LASER] Actual power reading: {actual_power} mW")
+                            self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW (actual: {actual_power} mW)")
+                        else:
+                            print("[LASER] Could not extract power from response")
+                            self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW")
+                    except Exception as e:
+                        print(f"[LASER] Warning: Could not query actual power: {e}")
+                        self.var_laser_status.set(f"Laser: Power set to {power:.2f} mW")
+                    print("[LASER] Power applied successfully!")
+                else:
+                    # Laser is off - just set the power value for when it's turned on
+                    print("[LASER] Laser is OFF - storing power value for next turn-on")
+                    # Don't actually send command to laser yet
+                    self.var_laser_status.set(f"Laser: Power will be set to {power:.2f} mW when turned on")
+                    
             else:
+                print("[LASER] ERROR: laser_mgr is None - not connected")
                 messagebox.showwarning("Not Connected", "Please connect to laser first.")
                 
-        except ValueError:
+        except ValueError as e:
+            print(f"[LASER] ERROR: Invalid power value: {e}")
             messagebox.showerror("Invalid Value", "Please enter a valid power value (mW).")
         except Exception as exc:
+            print(f"[LASER] ERROR: Exception during apply power: {exc}")
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("Laser Error", f"Failed to set power:\n{exc}")
 
     def _show_help(self) -> None:
@@ -2406,11 +3167,28 @@ class MotorControlWindow:
         self.root.mainloop()
     
     def close(self) -> None:
-        """Clean up resources."""
+        """Clean up resources and restore laser to analog modulation mode.
+        
+        Ensures laser is left in standard final state:
+        - Emission: ON
+        - Analog modulation: ON (AM 1)
+        - Power: 100 mW
+        - Allows manual control via front panel wheel
+        """
         self._stop_camera_feed()
-        # Disconnect laser if connected
+        # Disconnect laser if connected (this will restore analog modulation mode)
         try:
             if self.laser_mgr is not None:
+                # Ensure emission is ON and restore to analog modulation mode with 100 mW
+                # This ensures the laser can be controlled manually after closing
+                laser = self.laser_mgr.instrument
+                try:
+                    laser.emission_on()
+                    time.sleep(0.1)
+                except Exception:
+                    pass
+                # Restore to analog modulation mode with 100 mW before disconnecting
+                self._set_laser_analog_modulation_mode(power_mw=100.0)
                 self._on_laser_disconnect()
         except Exception:
             pass
