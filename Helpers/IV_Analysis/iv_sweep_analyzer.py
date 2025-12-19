@@ -108,8 +108,7 @@ class IVSweepAnalyzer:
                      metadata: Optional[Dict[str, Any]] = None,
                      device_id: Optional[str] = None,
                      cycle_number: Optional[int] = None,
-                     save_directory: Optional[str] = None,
-                     **kwargs) -> Dict[str, Any]:
+                     save_directory: Optional[str] = None) -> Dict[str, Any]:
         """
         Analyze an IV sweep and extract all relevant information.
         
@@ -215,17 +214,11 @@ class IVSweepAnalyzer:
                 else:
                     measurement_type = 'iv_sweep'
         
-        # Extract custom_weights and analysis_level from kwargs if provided
-        custom_weights = kwargs.pop('custom_weights', None)
-        analysis_level_override = kwargs.pop('analysis_level', None)
-        analysis_level = analysis_level_override if analysis_level_override else self.analysis_level
-        
         # Run the technical analysis
         self.analyzer = analyze_single_file(
             voltage, current, time, 
             measurement_type=measurement_type,
-            analysis_level=analysis_level,
-            custom_weights=custom_weights
+            analysis_level=self.analysis_level
         )
         
         # === PHASE 2: Re-run enhanced classification with tracking info ===
@@ -467,9 +460,7 @@ def analyze_sweep(file_path: Optional[str] = None,
                   save_path: Optional[str] = None,
                   device_id: Optional[str] = None,
                   cycle_number: Optional[int] = None,
-                  save_directory: Optional[str] = None,
-                  custom_weights: Optional[Dict[str, float]] = None,
-                  **kwargs) -> Dict[str, Any]:
+                  save_directory: Optional[str] = None) -> Dict[str, Any]:
     """
     Convenience function for quick single-sweep analysis.
     
@@ -519,9 +510,7 @@ def analyze_sweep(file_path: Optional[str] = None,
         metadata=metadata,
         device_id=device_id,
         cycle_number=cycle_number,
-        save_directory=save_directory,
-        custom_weights=custom_weights,
-        **kwargs
+        save_directory=save_directory
     )
     
     if save_path:
@@ -580,15 +569,11 @@ def quick_analyze(voltage, current, time=None, metadata=None, **kwargs) -> Dict[
         >>> print(f"Switching Ratio: {results['resistance_metrics']['switching_ratio_mean']:.1f}")
         >>> print(f"Ron: {results['resistance_metrics']['ron_mean']:.2e} Ω")
     """
-    # Extract custom_weights from kwargs if present
-    custom_weights = kwargs.pop('custom_weights', None)
-    
     return analyze_sweep(
         voltage=voltage,
         current=current,
         time=time,
         metadata=metadata,
-        custom_weights=custom_weights,
         **kwargs
     )
 
