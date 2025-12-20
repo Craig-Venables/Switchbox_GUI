@@ -1,0 +1,37 @@
+{
+  "weights": {
+    "memristive_has_hysteresis": 25.0,
+    "memristive_pinched_hysteresis": 30.0,
+    "memristive_switching_behavior": 25.0,
+    "memristive_nonlinear_iv": 10.0,
+    "memristive_polarity_dependent": 10.0,
+    "memristive_penalty_linear_iv": -20.0,
+    "memristive_penalty_ohmic": -30.0,
+    "capacitive_hysteresis_unpinched": 40.0,
+    "capacitive_phase_shift": 40.0,
+    "capacitive_elliptical": 20.0,
+    "memcapacitive_hysteresis_unpinched": 40.0,
+    "memcapacitive_switching_behavior": 30.0,
+    "memcapacitive_nonlinear_iv": 20.0,
+    "memcapacitive_phase_shift": 20.0,
+    "memcapacitive_penalty_pinched": -20.0,
+    "conductive_no_hysteresis": 30.0,
+    "conductive_nonlinear_no_switching": 40.0,
+    "conductive_advanced_mechanism": 30.0,
+    "ohmic_linear_clean": 60.0,
+    "ohmic_model_fit": 20.0,
+    "adjustment_learning_rate": 5.0,
+    "pinched_hysteresis": 29.545454545454547,
+    "hysteresis_quality": 30.0,
+    "switching_behavior": 42.65734265734265,
+    "memory_window": 30.0,
+    "nonlinearity": 30.0,
+    "polarity_dependence": 30.0
+  },
+  "thresholds": {
+    "memristive_min_score": 60.0,
+    "high_confidence_min": 70.0,
+    "device_type_memristive_min": 60.0,
+    "uncertain_threshold": 30.0
+  }
+}

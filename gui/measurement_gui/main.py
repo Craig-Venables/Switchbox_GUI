@@ -934,6 +934,9 @@ class MeasurementGUI:
             # Run analysis in background thread to prevent crashes
             print(f"[ANALYSIS] Queuing analysis (level: {analysis_level}) on {len(v_arr)} points...")
 
+            # Ensure threading module is accessible (fix for UnboundLocalError)
+            import threading as _threading
+
             # Create a thread-safe way to update GUI after analysis
             def run_analysis_thread():
                 try:
@@ -981,7 +984,7 @@ class MeasurementGUI:
                         device_type = analysis_data.get('classification', {}).get('device_type', '')
                         memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
 
-                        if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
+                        if device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60):
                             # Spawn background thread for research-level analysis
                             def run_research_analysis():
                                 try:
@@ -1013,7 +1016,7 @@ class MeasurementGUI:
                                     traceback.print_exc()
 
                             # Start background thread (daemon so it doesn't block exit)
-                            research_thread = threading.Thread(target=run_research_analysis, daemon=True)
+                            research_thread = _threading.Thread(target=run_research_analysis, daemon=True)
                             research_thread.start()
 
                             print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
@@ -1021,7 +1024,7 @@ class MeasurementGUI:
                         # === RETURN FOR CUSTOM SEQUENCES ===
                         # For first sweep in custom sequence, store memristive flag
                         if is_custom_sequence and sweep_number == 1:
-                            is_memristive = device_type == 'memristive' or (memristivity_score and memristivity_score > 60)
+                            is_memristive = device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60)
                             print(f"[ANALYSIS] First sweep: score={memristivity_score:.1f}, memristive={is_memristive}")
                             # Store result for custom measurement to use
                             if not hasattr(self, '_pending_analysis_results'):
@@ -1073,7 +1076,7 @@ class MeasurementGUI:
                         self.master.after(0, show_error)
 
             # Start analysis in background thread
-            analysis_thread = threading.Thread(target=run_analysis_thread, daemon=True, name="AnalysisThread")
+            analysis_thread = _threading.Thread(target=run_analysis_thread, daemon=True, name="AnalysisThread")
             analysis_thread.start()
 
             # Log that analysis is starting
@@ -1117,7 +1120,7 @@ class MeasurementGUI:
             device_type = analysis_data.get('classification', {}).get('device_type', '')
             memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
 
-            if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
+            if device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60):
                 # Spawn background thread for research-level analysis
                 import threading
 
@@ -1148,7 +1151,7 @@ class MeasurementGUI:
                         print(f"[RESEARCH ERROR] Background analysis failed: {e}")
 
                 # Start background thread (daemon so it doesn't block exit)
-                research_thread = threading.Thread(target=run_research_analysis, daemon=True)
+                research_thread = _threading.Thread(target=run_research_analysis, daemon=True)
                 research_thread.start()
 
                 print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
@@ -2634,9 +2637,9 @@ class MeasurementGUI:
                                     time=list(timestamps) if timestamps is not None else None,
                                     analysis_level='full'
                                 )
-                                classification = analysis_data.get('classification', {})
+                                device_type = classification.get('device_type', '')
                                 memristivity_score = classification.get('memristivity_score', 0)
-                                is_memristive = memristivity_score > 60
+                                is_memristive = device_type in ['memristive', 'memcapacitive'] or memristivity_score > 60
                             except Exception as e:
                                 print(f"[DEVICE PLOT] Analysis error for {txt_file}: {e}")
                                 is_memristive = False  # Default to non-memristive if analysis fails
@@ -3741,7 +3744,7 @@ class MeasurementGUI:
                             device_type = analysis_data.get('classification', {}).get('device_type', '')
                             memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
 
-                            if device_type == 'memristive' or (memristivity_score and memristivity_score > 60):
+                            if device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60):
                                 if log_callback:
                                     log_callback(f"Running research analysis for {txt_file.name}...")
                                 try:
