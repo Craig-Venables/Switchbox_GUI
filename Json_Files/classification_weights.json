@@ -1,0 +1,34 @@
+{
+    "description": "Default classification weights for device type scoring in single_file_metrics.py",
+    "version": "1.0",
+    "weights": {
+        "memristive_has_hysteresis": 25.0,
+        "memristive_pinched_hysteresis": 30.0,
+        "memristive_switching_behavior": 25.0,
+        "memristive_nonlinear_iv": 10.0,
+        "memristive_polarity_dependent": 10.0,
+        "memristive_penalty_linear_iv": -20.0,
+        "memristive_penalty_ohmic": -30.0,
+        "capacitive_hysteresis_unpinched": 40.0,
+        "capacitive_phase_shift": 40.0,
+        "capacitive_elliptical": 20.0,
+        "memcapacitive_hysteresis_unpinched": 40.0,
+        "memcapacitive_switching_behavior": 30.0,
+        "memcapacitive_nonlinear_iv": 20.0,
+        "memcapacitive_phase_shift": 20.0,
+        "memcapacitive_penalty_pinched": -20.0,
+        "conductive_no_hysteresis": 30.0,
+        "conductive_nonlinear_no_switching": 40.0,
+        "conductive_advanced_mechanism": 30.0,
+        "ohmic_linear_clean": 60.0,
+        "ohmic_model_fit": 20.0
+    },
+    "notes": {
+        "memristive": "Scores for devices showing hysteresis, pinched loops, and switching behavior",
+        "capacitive": "Scores for devices with unpinched hysteresis, phase shift, and elliptical patterns",
+        "memcapacitive": "Scores for devices combining capacitive and memristive characteristics",
+        "conductive": "Scores for non-linear devices without hysteresis (non-ohmic, non-memristive)",
+        "ohmic": "Scores for linear resistive behavior",
+        "penalties": "Negative scores to prevent misclassification (e.g., linear devices as memristive)"
+    }
+}

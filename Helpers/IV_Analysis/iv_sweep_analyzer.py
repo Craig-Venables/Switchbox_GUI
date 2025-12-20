@@ -108,7 +108,8 @@ class IVSweepAnalyzer:
                      metadata: Optional[Dict[str, Any]] = None,
                      device_id: Optional[str] = None,
                      cycle_number: Optional[int] = None,
-                     save_directory: Optional[str] = None) -> Dict[str, Any]:
+                     save_directory: Optional[str] = None,
+                     custom_weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         """
         Analyze an IV sweep and extract all relevant information.
         
@@ -197,28 +198,38 @@ class IVSweepAnalyzer:
         
         # Auto-detect measurement type if not provided
         if measurement_type is None:
-            if time is not None:
-                # Check if it looks like retention (long constant periods)
-                if len(np.unique(voltage)) < len(voltage) / 10:
-                    measurement_type = 'retention'
-                # Check if it looks like pulse (step changes)
-                elif np.max(np.abs(np.diff(voltage))) > 10 * np.median(np.abs(np.diff(voltage))):
-                    measurement_type = 'pulse'
-                else:
+            # First check device_name for hints (FS/ps/ns indicate IV sweep)
+            if device_name:
+                name_lower = device_name.lower()
+                if any(indicator in name_lower for indicator in ['fs', 'ps', 'ns', '-sweep', '_sweep']):
                     measurement_type = 'iv_sweep'
-            else:
-                # Check for multiple cycles (endurance)
-                zero_crossings = np.where(np.diff(np.signbit(voltage)))[0]
-                if len(zero_crossings) > 8:  # Multiple cycles
-                    measurement_type = 'endurance'
+            
+            # If not determined by filename, use data characteristics
+            if measurement_type is None:
+                if time is not None:
+                    # Check if it looks like retention (long constant periods)
+                    if len(np.unique(voltage)) < len(voltage) / 10:
+                        measurement_type = 'retention'
+                    # Check if it looks like pulse (step changes)
+                    elif np.max(np.abs(np.diff(voltage))) > 10 * np.median(np.abs(np.diff(voltage))):
+                        measurement_type = 'pulse'
+                    else:
+                        measurement_type = 'iv_sweep'
                 else:
-                    measurement_type = 'iv_sweep'
+                    # Check for multiple cycles (endurance)
+                    zero_crossings = np.where(np.diff(np.signbit(voltage)))[0]
+                    if len(zero_crossings) > 8:  # Multiple cycles
+                        measurement_type = 'endurance'
+                    else:
+                        measurement_type = 'iv_sweep'
         
         # Run the technical analysis
         self.analyzer = analyze_single_file(
             voltage, current, time, 
             measurement_type=measurement_type,
-            analysis_level=self.analysis_level
+            analysis_level=self.analysis_level,
+            classification_weights=custom_weights,
+            device_name=device_name  # Pass device name for diagnostic output
         )
         
         # === PHASE 2: Re-run enhanced classification with tracking info ===
@@ -269,6 +280,7 @@ class IVSweepAnalyzer:
             'classification': {
                 'device_type': self.analyzer.device_type,
                 'confidence': float(self.analyzer.classification_confidence),
+                'breakdown': self.analyzer.classification_breakdown if hasattr(self.analyzer, 'classification_breakdown') else {},
                 'conduction_mechanism': self.analyzer.conduction_mechanism,
                 'model_r2': float(self.analyzer.model_parameters.get('R2', 0)) if isinstance(self.analyzer.model_parameters, dict) else 0.0,
                 'features': self.analyzer.classification_features if hasattr(self.analyzer, 'classification_features') else {},
@@ -451,6 +463,7 @@ class IVSweepAnalyzer:
         return self.analyzer.analyze_feedback_accuracy()
 
 
+
 def analyze_sweep(file_path: Optional[str] = None,
                   voltage: Optional[np.ndarray] = None,
                   current: Optional[np.ndarray] = None,
@@ -459,8 +472,10 @@ def analyze_sweep(file_path: Optional[str] = None,
                   analysis_level: str = 'full',
                   save_path: Optional[str] = None,
                   device_id: Optional[str] = None,
+                  device_name: Optional[str] = None,
                   cycle_number: Optional[int] = None,
-                  save_directory: Optional[str] = None) -> Dict[str, Any]:
+                  save_directory: Optional[str] = None,
+                  custom_weights: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """
     Convenience function for quick single-sweep analysis.
     
@@ -483,6 +498,8 @@ def analyze_sweep(file_path: Optional[str] = None,
         Analysis depth: 'basic', 'classification', 'full', 'research'
     save_path : str, optional
         Path to save JSON results
+    device_name : str, optional
+        Name/ID of device for diagnostic output
     
     Returns:
     --------
@@ -509,8 +526,10 @@ def analyze_sweep(file_path: Optional[str] = None,
         time=time,
         metadata=metadata,
         device_id=device_id,
+        device_name=device_name,
         cycle_number=cycle_number,
-        save_directory=save_directory
+        save_directory=save_directory,
+        custom_weights=custom_weights
     )
     
     if save_path:

@@ -63,7 +63,7 @@ class analyze_single_file:
     Includes theoretical model fitting and advanced device classification.
     """
 
-    def __init__(self, voltage, current, time=None, measurement_type='iv_sweep', analysis_level='full'):
+    def __init__(self, voltage, current, time=None, measurement_type='iv_sweep', analysis_level='full', classification_weights=None, device_name=None):
         """
         Initialize device analysis.
 
@@ -83,11 +83,16 @@ class analyze_single_file:
             - 'classification'→ basic + features + device classification
             - 'full'          → classification + conduction models + advanced metrics
             - 'research'      → full + extra diagnostics/statistics (NDR, kink voltage, loop similarity)
+        classification_weights : dict, optional
+            Custom classification weights. If None, uses default weights.
+        device_name : str, optional
+            Name/ID of the device being analyzed (for diagnostic output)
         """
         # Support original two-parameter call
         if isinstance(time, str):
             measurement_type = time
             time = None
+        self.device_name = device_name  # Store device name for diagnostics
         self.voltage = self._ensure_1d_array(voltage)
         self.current = self._ensure_1d_array(current)
         self.time = self._ensure_1d_array(time) if time is not None else None
@@ -96,6 +101,7 @@ class analyze_single_file:
         if self.time is None and self.measurement_type in {'pulse', 'retention'}:
             self.measurement_type = 'iv_sweep'
         self.analysis_level = analysis_level if analysis_level in {'basic','classification','full','research'} else 'full'
+        self.classification_weights = classification_weights  # Store custom weights if provided
         self.process_loops()
 
         # Validate data
@@ -187,6 +193,10 @@ class analyze_single_file:
         self.last_report = None  # cache for the most recent generated report
 
         # Process based on measurement type
+        device_info = f" [{self.device_name}]" if self.device_name else ""
+        num_cycles = self._detect_cycles()
+        print(f"[DIAGNOSTIC]{device_info} Detected measurement type: {self.measurement_type} (cycles: {num_cycles})")
+        
         if self.measurement_type == 'iv_sweep':
             self._process_iv_sweep()
         elif self.measurement_type == 'pulse':
@@ -241,20 +251,84 @@ class analyze_single_file:
         if suggested_type != 'iv_sweep':
             return suggested_type
 
+        # Check filename for hints
+        # FS = Fast Sweep, ps/ns = picosecond/nanosecond sweep rates
+        if self.device_name:
+            name_lower = self.device_name.lower()
+            has_fs_indicator = any(indicator in name_lower for indicator in ['fs', 'ps', 'ns', '-sweep', '_sweep'])
+            print(f"[DIAGNOSTIC] Filename check: '{self.device_name}' -> has IV sweep indicator: {has_fs_indicator}")
+            if has_fs_indicator:
+                # Filename indicates IV sweep, trust it
+                print(f"[DIAGNOSTIC] Forcing measurement type to 'iv_sweep' based on filename")
+                return 'iv_sweep'
+        else:
+            print(f"[DIAGNOSTIC] No device_name available for filename check")
+
         # Check if this might be a pulse measurement
         if self.time is not None:
             # Check for step-like voltage changes
             v_diff = np.diff(self.voltage)
-            if np.max(np.abs(v_diff)) > 10 * np.median(np.abs(v_diff)):
-                return 'pulse'
+            if len(v_diff) > 0:
+                max_diff = np.max(np.abs(v_diff))
+                median_diff = np.median(np.abs(v_diff))
+                
+                # Large step changes indicate pulse measurement
+                if max_diff > 10 * median_diff and median_diff > 0:
+                    return 'pulse'
 
-            # Check for long constant voltage periods (retention)
-            if len(np.unique(self.voltage)) < len(self.voltage) / 10:
-                return 'retention'
+            # Check for retention (constant voltage over time)
+            # Retention has very few unique voltage values AND low voltage variation
+            unique_voltages = len(np.unique(self.voltage))
+            total_points = len(self.voltage)
+            
+            if unique_voltages < total_points / 10:
+                # Few unique values - could be retention OR coarsely sampled IV sweep
+                # Check voltage range to distinguish:
+                # - Retention: typically holds 1-2 voltage levels (read voltages)
+                # - IV Sweep: even with coarse sampling, should have varying voltage
+                v_range = np.max(self.voltage) - np.min(self.voltage)
+                v_std = np.std(self.voltage)
+                
+                # If voltage barely varies (std < 10% of range), it's retention
+                # Otherwise, it's likely a coarsely sampled IV sweep
+                if v_range > 0 and v_std < 0.1 * v_range:
+                    return 'retention'
+                # If we see very few unique values (<5) and they're discrete levels, it's retention
+                elif unique_voltages < 5:
+                    return 'retention'
 
-        # Check for multiple cycles (endurance)
-        if self._detect_cycles() > 10:
-            return 'endurance'
+        # Check for endurance vs IV sweep
+        # Endurance: pulse-write-read pattern (discrete voltage levels with holds)
+        # IV Sweep: continuous triangular/sinusoidal sweeping
+        num_cycles = self._detect_cycles()
+        
+        if num_cycles > 10:
+            # Check if this is continuous sweeping (IV) or discrete pulse pattern (endurance)
+            # IV sweeps have smoothly varying voltage, endurance has step changes
+            v_diff = np.abs(np.diff(self.voltage))
+            
+            # Calculate the variation in voltage differences
+            # IV sweeps have consistent voltage steps (low variation)
+            # Endurance/pulse has large jumps and plateaus (high variation)
+            if len(v_diff) > 0:
+                median_diff = np.median(v_diff)
+                max_diff = np.max(v_diff)
+                
+                # If we see large voltage jumps (>5x median), likely endurance/pulse
+                if max_diff > 5 * median_diff and median_diff > 0:
+                    return 'endurance'
+                
+                # Check for plateaus (constant voltage regions)
+                # Count points where voltage barely changes
+                plateau_points = np.sum(v_diff < median_diff * 0.1) if median_diff > 0 else 0
+                plateau_fraction = plateau_points / len(v_diff) if len(v_diff) > 0 else 0
+                
+                # If >30% of points are plateaus, likely endurance (pulse-hold pattern)
+                if plateau_fraction > 0.3:
+                    return 'endurance'
+            
+            # Otherwise, it's an IV sweep with many cycles (which is fine!)
+            return 'iv_sweep'
 
         return 'iv_sweep'
 
@@ -387,8 +461,9 @@ class analyze_single_file:
                 'retention_time_90_percent': self._calculate_retention_time(0.9),
                 'retention_time_50_percent': self._calculate_retention_time(0.5)
             }
-        except:
-            print("Warning: Could not fit retention model")
+        except Exception as e:
+            device_info = f" [{self.device_name}]" if self.device_name else ""
+            print(f"[DIAGNOSTIC]{device_info} Warning: Could not fit retention model - {type(e).__name__}: {str(e)}")
 
     def _calculate_cycles_to_failure(self, failure_threshold):
         """
@@ -591,111 +666,263 @@ class analyze_single_file:
         ss_tot = np.sum((y_true - y_mean) ** 2)
         return 1 - (ss_res / (ss_tot + 1e-12))
 
+    def _check_noise(self):
+        """Check if signal is dominated by noise."""
+        if len(self.current) == 0: return True, "No Data"
+        
+        # Check 1: Absolute magnitude (Open Circuit / Noise floor)
+        # Using 95th percentile to be robust against spikes
+        max_current = np.percentile(np.abs(self.current), 95)
+        if max_current < 1e-9: # 1 nA threshold
+            return True, "Low Current (<1nA)"
+            
+        return False, ""
+
     def _classify_device(self):
         """
         Classify the device as memristive, capacitive, conductive, or ohmic.
         Based on I-V characteristics, hysteresis patterns, and conduction mechanisms.
+        Uses configurable weights if provided, otherwise defaults.
         """
-        # Extract classification features
-        self.classification_features = self._extract_classification_features()
+        try:
+            device_info = f" [{self.device_name}]" if self.device_name else ""
+            print(f"\n[DIAGNOSTIC]{device_info} Starting classification...")
+            
+            # Extract classification features
+            self.classification_features = self._extract_classification_features()
+            
+            # Check for noise
+            is_noisy, noise_reason = self._check_noise()
+            self.classification_features['is_noisy'] = is_noisy
+            self.classification_features['noise_reason'] = noise_reason
 
-        # Initialize scores for each device type
-        scores = {
-            'memristive': 0,
-            'capacitive': 0,
-            'conductive': 0,
-            'ohmic': 0
-        }
+            # === NOISE OVERRIDE ===
+            if is_noisy:
+                # Force critical features to False to suppress false classifications
+                self.classification_features['has_hysteresis'] = False
+                self.classification_features['switching_behavior'] = False
+                self.classification_features['nonlinear_iv'] = False
+                self.classification_features['pinched_hysteresis'] = False
+                
+            # === CONSISTENCY CHECK ===
+            # If pinched loop is detected, hysteresis MUST be present (overriding area check)
+            if self.classification_features.get('pinched_hysteresis'):
+                self.classification_features['has_hysteresis'] = True
 
-        # Score memristive characteristics
-        if self.classification_features['has_hysteresis']:
-            scores['memristive'] += 25
-        if self.classification_features['pinched_hysteresis']:
-            scores['memristive'] += 30
-        if self.classification_features['switching_behavior']:
-            scores['memristive'] += 25
-        if self.classification_features['nonlinear_iv']:
-            scores['memristive'] += 10
-        if self.classification_features['polarity_dependent']:
-            scores['memristive'] += 10
+            # Get weights (use custom weights if provided, otherwise defaults)
+            if self.classification_weights is None:
+                weights = self._get_default_classification_weights()
+            else:
+                weights = self.classification_weights
 
-        # PENALTIES: Prevent linear/ohmic devices from being classified as memristors
-        if self.classification_features['linear_iv']:
-            scores['memristive'] -= 20
-        if self.classification_features['ohmic_behavior']:
-            scores['memristive'] -= 30
+            # Initialize scores for each device type
+            scores = {
+                'memristive': 0,
+                'memcapacitive': 0,
+                'capacitive': 0,
+                'conductive': 0,
+                'ohmic': 0
+            }
 
-        # Score capacitive characteristics
-        if self.classification_features['has_hysteresis'] and not self.classification_features['pinched_hysteresis']:
-            scores['capacitive'] += 40
-        if self.classification_features['phase_shift'] > 45:
-            scores['capacitive'] += 40
-        if self.classification_features['elliptical_hysteresis']:
-            scores['capacitive'] += 20
+            # Score memristive characteristics (NOW CONFIGURABLE)
+            if self.classification_features['has_hysteresis']:
+                scores['memristive'] += weights.get('memristive_has_hysteresis', 25.0)
+            if self.classification_features['pinched_hysteresis']:
+                scores['memristive'] += weights.get('memristive_pinched_hysteresis', 30.0)
+            if self.classification_features['switching_behavior']:
+                scores['memristive'] += weights.get('memristive_switching_behavior', 25.0)
+            if self.classification_features['nonlinear_iv']:
+                scores['memristive'] += weights.get('memristive_nonlinear_iv', 10.0)
+            if self.classification_features['polarity_dependent']:
+                scores['memristive'] += weights.get('memristive_polarity_dependent', 10.0)
 
-        # Score conductive characteristics (non-ohmic)
-        if not self.classification_features['has_hysteresis']:
-            scores['conductive'] += 30
-        if self.classification_features['nonlinear_iv'] and not self.classification_features['switching_behavior']:
-            scores['conductive'] += 40
-        if self.conduction_mechanism in ['sclc', 'trap_sclc', 'poole_frenkel', 'schottky', 'fowler_nordheim']:
-            scores['conductive'] += 30
+            # PENALTIES: Prevent linear/ohmic devices from being classified as memristors
+            if self.classification_features['linear_iv']:
+                scores['memristive'] += weights.get('memristive_penalty_linear_iv', -20.0)  # Note: weight is already negative
+            if self.classification_features['ohmic_behavior']:
+                scores['memristive'] += weights.get('memristive_penalty_ohmic', -30.0)  # Note: weight is already negative
 
-        # Score ohmic characteristics (guarded to avoid false-ohmic due to compliance or small-signal linearity)
-        median_norm_area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0.0
-        mean_on_off = safe_mean(self.on_off, default=1.0)
-        has_compliance = self.compliance_current is not None and self.compliance_current > 0
+            # Score capacitive characteristics (NOW CONFIGURABLE)
+            if self.classification_features['has_hysteresis'] and not self.classification_features['pinched_hysteresis']:
+                scores['capacitive'] += weights.get('capacitive_hysteresis_unpinched', 40.0)
+            if self.classification_features['phase_shift'] > 45:
+                scores['capacitive'] += weights.get('capacitive_phase_shift', 40.0)
+            if self.classification_features['elliptical_hysteresis']:
+                scores['capacitive'] += weights.get('capacitive_elliptical', 20.0)
 
-        # Only consider ohmic if: linear_iv AND no clear hysteresis AND small memory window AND no compliance plateau
-        if (self.classification_features['linear_iv']
-            and not self.classification_features['has_hysteresis']
-            and not self.classification_features['switching_behavior']
-            and median_norm_area < 1e-3
-            and mean_on_off < 1.5
-            and not has_compliance):
-            scores['ohmic'] += 60
-        # Additional support for ohmic if model fit indicates ohmic strongly and still passes guards
-        if (self.conduction_mechanism == 'ohmic'
-            and self.model_parameters.get('R2', 0) > 0.98
-            and median_norm_area < 1e-3
-            and mean_on_off < 1.5
-            and not has_compliance):
-            scores['ohmic'] += 20
+            # Score memcapacitive characteristics (NOW CONFIGURABLE)
+            # Logic: Unpinched hysteresis (capacitive) + Switching/Nonlinear (memristive)
+            if self.classification_features['has_hysteresis'] and not self.classification_features['pinched_hysteresis']:
+                 scores['memcapacitive'] += weights.get('memcapacitive_hysteresis_unpinched', 40.0)
+            
+            if self.classification_features['switching_behavior']:
+                 scores['memcapacitive'] += weights.get('memcapacitive_switching_behavior', 30.0)
+                 
+            if self.classification_features['nonlinear_iv']:
+                 scores['memcapacitive'] += weights.get('memcapacitive_nonlinear_iv', 20.0)
+                 
+            if self.classification_features['phase_shift'] > 30: 
+                 scores['memcapacitive'] += weights.get('memcapacitive_phase_shift', 20.0)
+                 
+            if self.classification_features['pinched_hysteresis']:
+                 scores['memcapacitive'] += weights.get('memcapacitive_penalty_pinched', -20.0)
 
-        # Keep breakdown and normalize to get confidence-style weights
-        self.classification_breakdown = scores.copy()
-        max_score = max(scores.values())
-        total_score = sum(scores.values())
 
-        if total_score == 0 or max_score < 30:
+            # Score conductive characteristics (updated per user requirements)
+            # Conductive: Non-linear, non-ohmic, non-memristive, non-memcapacitive, non-capacitive
+            # i.e., nonlinear but without hysteresis/switching (cannot be explained by capacitive or memristive)
+            if not self.classification_features['has_hysteresis']:
+                scores['conductive'] += weights.get('conductive_no_hysteresis', 30.0)
+            if self.classification_features['nonlinear_iv'] and not self.classification_features['switching_behavior']:
+                scores['conductive'] += weights.get('conductive_nonlinear_no_switching', 40.0)
+            if self.conduction_mechanism in ['sclc', 'trap_sclc', 'poole_frenkel', 'schottky', 'fowler_nordheim']:
+                scores['conductive'] += weights.get('conductive_advanced_mechanism', 30.0)
+            
+            # PENALTY: Reduce score if capacitive features are present
+            if self.classification_features['phase_shift'] > 30:
+                scores['conductive'] -= 20.0  # Has capacitive characteristics
+            if self.classification_features['elliptical_hysteresis']:
+                scores['conductive'] -= 15.0  # Elliptical pattern suggests capacitive
+
+            # Score ohmic characteristics (guarded to avoid false-ohmic due to compliance or small-signal linearity)
+            median_norm_area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0.0
+            mean_on_off = safe_mean(self.on_off, default=1.0)
+            has_compliance = self.compliance_current is not None and self.compliance_current > 0
+
+            # Only consider ohmic if: linear_iv AND no clear hysteresis AND small memory window AND no compliance plateau (NOW CONFIGURABLE)
+            if (self.classification_features['linear_iv']
+                and not self.classification_features['has_hysteresis']
+                and not self.classification_features['switching_behavior']
+                and median_norm_area < 1e-3
+                and mean_on_off < 1.5
+                and not has_compliance):
+                scores['ohmic'] += weights.get('ohmic_linear_clean', 60.0)
+            # Additional support for ohmic if model fit indicates ohmic strongly and still passes guards
+            if (self.conduction_mechanism == 'ohmic'
+                and self.model_parameters.get('R2', 0) > 0.98
+                and median_norm_area < 1e-3
+                and mean_on_off < 1.5
+                and not has_compliance):
+                scores['ohmic'] += weights.get('ohmic_model_fit', 20.0)
+
+            # Keep breakdown and normalize to get confidence-style weights
+            self.classification_breakdown = scores.copy()
+            max_score = max(scores.values())
+            total_score = sum(scores.values())
+            
+            # DIAGNOSTIC: Print scoring breakdown
+            device_info = f" [{self.device_name}]" if self.device_name else ""
+            print(f"\n[DIAGNOSTIC]{device_info} Classification scores:")
+            for device_type, score in scores.items():
+                print(f"  - {device_type}: {score:.1f}")
+            print(f"  - Total score: {total_score:.1f}, Max score: {max_score:.1f}")
+            print(f"  - Conduction mechanism: {self.conduction_mechanism}")
+
+            if total_score == 0 or max_score < 30:
+                self.device_type = 'uncertain'
+                self.classification_confidence = 0.0
+                print(f"[DIAGNOSTIC]{device_info} !!! UNCERTAIN CLASSIFICATION !!!")
+                if total_score == 0:
+                    print(f"[DIAGNOSTIC]{device_info}   Reason: All scores are 0 (no features detected)")
+                else:
+                    print(f"[DIAGNOSTIC]{device_info}   Reason: Max score ({max_score:.1f}) is below threshold (30)")
+            else:
+                self.device_type = max(scores, key=scores.get)
+                self.classification_confidence = max_score / 100.0
+                print(f"[DIAGNOSTIC]{device_info} Classification: {self.device_type} (confidence: {self.classification_confidence:.1%})")
+
+
+            # Provide a human-friendly explanation map
+            self.classification_explanation = {
+                'has_hysteresis': self.classification_features.get('has_hysteresis'),
+                'pinched_hysteresis': self.classification_features.get('pinched_hysteresis'),
+                'switching_behavior': self.classification_features.get('switching_behavior'),
+                'nonlinear_iv': self.classification_features.get('nonlinear_iv'),
+                'polarity_dependent': self.classification_features.get('polarity_dependent'),
+                'phase_shift': self.classification_features.get('phase_shift'),
+                'elliptical_hysteresis': self.classification_features.get('elliptical_hysteresis'),
+                'linear_iv': self.classification_features.get('linear_iv'),
+                'ohmic_behavior': self.classification_features.get('ohmic_behavior'),
+                'best_conduction_model': self.conduction_mechanism,
+            }
+            
+            # === ENHANCED CLASSIFICATION (Phase 1) ===
+            # Calculate additional metrics without affecting core classification
+            if self.enhanced_classification_enabled:
+                try:
+                    self.calculate_enhanced_classification()
+                except Exception as e:
+                    # Silently fail - don't disrupt core classification
+                    self.classification_warnings.append(f"Enhanced classification error: {str(e)}")
+                    
+        except Exception as e:
+            device_info = f" [{self.device_name}]" if self.device_name else ""
+            print(f"\n[DIAGNOSTIC]{device_info} !!! ERROR IN CLASSIFICATION !!!")
+            print(f"[DIAGNOSTIC]{device_info} Exception: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            # Set safe defaults
             self.device_type = 'uncertain'
             self.classification_confidence = 0.0
-        else:
-            self.device_type = max(scores, key=scores.get)
-            self.classification_confidence = max_score / 100.0
+            self.classification_breakdown = {'memristive': 0, 'memcapacitive': 0, 'capacitive': 0, 'conductive': 0, 'ohmic': 0}
+            self.classification_features = {}
+            self.classification_explanation = {}
 
-        # Provide a human-friendly explanation map
-        self.classification_explanation = {
-            'has_hysteresis': self.classification_features.get('has_hysteresis'),
-            'pinched_hysteresis': self.classification_features.get('pinched_hysteresis'),
-            'switching_behavior': self.classification_features.get('switching_behavior'),
-            'nonlinear_iv': self.classification_features.get('nonlinear_iv'),
-            'polarity_dependent': self.classification_features.get('polarity_dependent'),
-            'phase_shift': self.classification_features.get('phase_shift'),
-            'elliptical_hysteresis': self.classification_features.get('elliptical_hysteresis'),
-            'linear_iv': self.classification_features.get('linear_iv'),
-            'ohmic_behavior': self.classification_features.get('ohmic_behavior'),
-            'best_conduction_model': self.conduction_mechanism,
-        }
+    def _get_default_classification_weights(self):
+        """
+        Return default classification weights.
+        Loads from JSON config file if available, otherwise uses hardcoded defaults.
+        """
+        # Try to load from JSON file first
+        try:
+            import os
+            import json
+            
+            # Look for the weights file in Json_Files directory
+            # Get the path relative to this file
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            json_path = os.path.join(current_dir, '..', '..', 'Json_Files', 'classification_weights.json')
+            json_path = os.path.normpath(json_path)
+            
+            if os.path.exists(json_path):
+                with open(json_path, 'r') as f:
+                    config = json.load(f)
+                    weights = config.get('weights', {})
+                    if weights:
+                        return weights
+        except Exception as e:
+            # If loading fails, fall back to hardcoded defaults
+            print(f"[WARNING] Could not load classification weights from JSON: {e}")
+            print(f"[WARNING] Using hardcoded default weights")
         
-        # === ENHANCED CLASSIFICATION (Phase 1) ===
-        # Calculate additional metrics without affecting core classification
-        if self.enhanced_classification_enabled:
-            try:
-                self.calculate_enhanced_classification()
-            except Exception as e:
-                # Silently fail - don't disrupt core classification
-                self.classification_warnings.append(f"Enhanced classification error: {str(e)}")
+        # Fallback: hardcoded default weights
+        return {
+            # Memristive
+            'memristive_has_hysteresis': 25.0,
+            'memristive_pinched_hysteresis': 30.0,
+            'memristive_switching_behavior': 25.0,
+            'memristive_nonlinear_iv': 10.0,
+            'memristive_polarity_dependent': 10.0,
+            'memristive_penalty_linear_iv': -20.0,
+            'memristive_penalty_ohmic': -30.0,
+            # Capacitive
+            'capacitive_hysteresis_unpinched': 40.0,
+            'capacitive_phase_shift': 40.0,
+            'capacitive_elliptical': 20.0,
+            # Memcapacitive
+            'memcapacitive_hysteresis_unpinched': 40.0,
+            'memcapacitive_switching_behavior': 30.0,
+            'memcapacitive_nonlinear_iv': 20.0,
+            'memcapacitive_phase_shift': 20.0,
+            'memcapacitive_penalty_pinched': -20.0,
+            # Conductive
+            'conductive_no_hysteresis': 30.0,
+            'conductive_nonlinear_no_switching': 40.0,
+            'conductive_advanced_mechanism': 30.0,
+            # Ohmic
+            'ohmic_linear_clean': 60.0,
+            'ohmic_model_fit': 20.0,
+        }
 
     def _calculate_advanced_metrics(self):
         """
@@ -1810,37 +2037,101 @@ POWER CHARACTERISTICS:
     def _extract_classification_features(self):
         """Extract features for device classification."""
         features = {}
+        
+        # DIAGNOSTIC: Data validation
+        debug_info = {
+            'voltage_len': len(self.voltage),
+            'current_len': len(self.current),
+            'normalized_areas': len(self.normalized_areas) if self.normalized_areas else 0,
+            'on_off': len(self.on_off) if self.on_off else 0,
+            'num_loops': self.num_loops,
+        }
+        
+        # Check for empty critical data
+        if len(self.normalized_areas) == 0:
+            print(f"[DIAGNOSTIC] WARNING: normalized_areas is empty - hysteresis detection will fail")
+        if len(self.on_off) == 0:
+            print(f"[DIAGNOSTIC] WARNING: on_off is empty - switching detection will fail")
 
         # Detect compliance early for downstream logic
-        if self.compliance_current is None:
-            self.compliance_current = self._detect_compliance_current()
+        try:
+            if self.compliance_current is None:
+                self.compliance_current = self._detect_compliance_current()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in compliance detection: {e}")
+            self.compliance_current = None
 
         # Check for hysteresis with robust estimator
-        features['has_hysteresis'] = self._estimate_hysteresis_present()
+        try:
+            features['has_hysteresis'] = self._estimate_hysteresis_present()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in hysteresis estimation: {e}")
+            features['has_hysteresis'] = False
 
         # Check for pinched hysteresis (memristive fingerprint)
-        features['pinched_hysteresis'] = self._check_pinched_hysteresis()
+        try:
+            features['pinched_hysteresis'] = self._check_pinched_hysteresis()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in pinched hysteresis check: {e}")
+            features['pinched_hysteresis'] = False
 
         # Check for switching behavior
-        if self.on_off:
-            features['switching_behavior'] = any(ratio > 2 for ratio in self.on_off if ratio > 0)
-        else:
+        try:
+            if self.on_off:
+                features['switching_behavior'] = any(ratio > 2 for ratio in self.on_off if ratio > 0)
+            else:
+                features['switching_behavior'] = False
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in switching behavior check: {e}")
             features['switching_behavior'] = False
 
         # Check I-V linearity (robust to compliance region)
-        features['linear_iv'], features['nonlinear_iv'] = self._check_linearity()
+        try:
+            features['linear_iv'], features['nonlinear_iv'] = self._check_linearity()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in linearity check: {e}")
+            features['linear_iv'], features['nonlinear_iv'] = False, False
 
         # Check for ohmic behavior at low voltages
-        features['ohmic_behavior'] = self._check_ohmic_behavior()
+        try:
+            features['ohmic_behavior'] = self._check_ohmic_behavior()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in ohmic behavior check: {e}")
+            features['ohmic_behavior'] = False
 
         # Check polarity dependence
-        features['polarity_dependent'] = self._check_polarity_dependence()
+        try:
+            features['polarity_dependent'] = self._check_polarity_dependence()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in polarity dependence check: {e}")
+            features['polarity_dependent'] = False
 
         # Calculate phase shift (for capacitive detection)
-        features['phase_shift'] = self._calculate_phase_shift()
+        try:
+            features['phase_shift'] = self._calculate_phase_shift()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in phase shift calculation: {e}")
+            features['phase_shift'] = 0
 
         # Check for elliptical hysteresis pattern
-        features['elliptical_hysteresis'] = self._check_elliptical_pattern()
+        try:
+            features['elliptical_hysteresis'] = self._check_elliptical_pattern()
+        except Exception as e:
+            print(f"[DIAGNOSTIC] Error in elliptical pattern check: {e}")
+            features['elliptical_hysteresis'] = False
+        
+        # DIAGNOSTIC: Print feature extraction results
+        device_info = f" [{self.device_name}]" if self.device_name else ""
+        print(f"\n[DIAGNOSTIC]{device_info} Feature extraction results:")
+        print(f"  - Data: V={debug_info['voltage_len']}, I={debug_info['current_len']}, loops={debug_info['num_loops']}")
+        print(f"  - Arrays: norm_areas={debug_info['normalized_areas']}, on_off={debug_info['on_off']}")
+        print(f"  - has_hysteresis: {features.get('has_hysteresis')}")
+        print(f"  - pinched_hysteresis: {features.get('pinched_hysteresis')}")
+        print(f"  - switching_behavior: {features.get('switching_behavior')}")
+        print(f"  - nonlinear_iv: {features.get('nonlinear_iv')}")
+        print(f"  - linear_iv: {features.get('linear_iv')}")
+        print(f"  - ohmic_behavior: {features.get('ohmic_behavior')}")
+        print(f"  - phase_shift: {features.get('phase_shift')}")
 
         return features
 
