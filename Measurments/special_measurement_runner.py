@@ -166,6 +166,20 @@ class SpecialMeasurementRunner:
         self._finalize()
 
     def _run_endurance(self, device_count: int, start_index: int) -> None:
+        # Initialize endurance data tracking
+        if hasattr(self, 'plot_panels'):
+            self.plot_panels.endurance_ratios = []
+            self.plot_panels.endurance_on_times = []
+            self.plot_panels.endurance_on_currents = []
+            self.plot_panels.endurance_off_times = []
+            self.plot_panels.endurance_off_currents = []
+        cycle_reads = []  # Track current measurements for ON/OFF ratio calculation
+        endurance_start_time = None  # Track start time for relative timestamps
+        
+        # Start endurance plot updater thread
+        if hasattr(self, 'plot_updaters'):
+            self.plot_updaters.start_endurance_thread(True)
+        
         for i in range(device_count):
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
@@ -181,9 +195,43 @@ class SpecialMeasurementRunner:
             icc_val = float(self.icc.get())
 
             def _on_point(v: float, i_val: float, t_s: float) -> None:
+                nonlocal endurance_start_time
                 self.v_arr_disp.append(v)
                 self.c_arr_disp.append(i_val)
                 self.t_arr_disp.append(t_s)
+                
+                # Initialize start time for relative timestamps
+                if endurance_start_time is None:
+                    endurance_start_time = t_s
+                
+                # Process endurance data: track reads and calculate ON/OFF ratios
+                # Endurance pattern: SET_pulse -> SET_read -> RESET_pulse -> RESET_read
+                # We track read measurements (at read_voltage) to calculate ratios
+                if abs(v - read_v) < 0.01:  # This is a read measurement
+                    current_abs = abs(i_val) if i_val != 0 else 1e-12
+                    cycle_reads.append(current_abs)
+                    relative_time = t_s - endurance_start_time
+                    
+                    # Track ON and OFF currents separately with timestamps
+                    if hasattr(self, 'plot_panels'):
+                        # Even indices (0, 2, 4, ...) are SET reads (ON current)
+                        # Odd indices (1, 3, 5, ...) are RESET reads (OFF current)
+                        if len(cycle_reads) % 2 == 1:  # Odd number means this is a SET read (ON)
+                            self.plot_panels.endurance_on_times.append(relative_time)
+                            self.plot_panels.endurance_on_currents.append(current_abs)
+                        else:  # Even number means this is a RESET read (OFF)
+                            self.plot_panels.endurance_off_times.append(relative_time)
+                            self.plot_panels.endurance_off_currents.append(current_abs)
+                    
+                    # When we have a pair (SET_read and RESET_read), calculate ratio
+                    # Pattern: every two consecutive reads form a cycle
+                    if len(cycle_reads) >= 2 and len(cycle_reads) % 2 == 0:
+                        i_on = cycle_reads[-2]  # SET_read (second to last)
+                        i_off = cycle_reads[-1]  # RESET_read (last)
+                        if i_off > 0:
+                            ratio = i_on / i_off
+                            if hasattr(self, 'plot_panels'):
+                                self.plot_panels.endurance_ratios.append(ratio)
 
             v_arr, c_arr, t_arr = self.measurement_service.run_endurance(
                 keithley=self.keithley,
@@ -201,6 +249,44 @@ class SpecialMeasurementRunner:
                 should_stop=lambda: getattr(self, "stop_measurement_flag", False),
                 on_point=_on_point,
             )
+            
+            # Post-process endurance data to extract ON/OFF ratios and currents if not done in on_point
+            # Endurance data typically has pattern: SET_pulse, SET_read, RESET_pulse, RESET_read (repeat)
+            # Extract read measurements (at read_voltage) and pair them
+            if hasattr(self, 'plot_panels'):
+                # If ratios weren't calculated in on_point, calculate them now
+                if len(self.plot_panels.endurance_ratios) == 0:
+                    read_indices = [i for i, v in enumerate(v_arr) if abs(v - read_v) < 0.01]
+                    if len(read_indices) >= 2:
+                        start_time = t_arr[0] if t_arr else 0
+                        # Pair consecutive reads: even indices are SET reads, odd are RESET reads
+                        for idx in range(0, len(read_indices) - 1, 2):
+                            if idx + 1 < len(read_indices):
+                                i_on = abs(c_arr[read_indices[idx]])  # SET read
+                                i_off = abs(c_arr[read_indices[idx + 1]])  # RESET read
+                                if i_off > 0:
+                                    ratio = i_on / i_off
+                                    self.plot_panels.endurance_ratios.append(ratio)
+                                    
+                                    # Also track ON and OFF currents with timestamps
+                                    if len(self.plot_panels.endurance_on_times) == 0:
+                                        on_time = t_arr[read_indices[idx]] - start_time
+                                        off_time = t_arr[read_indices[idx + 1]] - start_time
+                                        self.plot_panels.endurance_on_times.append(on_time)
+                                        self.plot_panels.endurance_on_currents.append(i_on)
+                                        self.plot_panels.endurance_off_times.append(off_time)
+                                        self.plot_panels.endurance_off_currents.append(i_off)
+                
+                # Final update of endurance plots
+                if hasattr(self.plot_panels, 'update_endurance_plot'):
+                    self.plot_panels.update_endurance_plot(self.plot_panels.endurance_ratios)
+                if hasattr(self.plot_panels, 'update_endurance_current_plot'):
+                    self.plot_panels.update_endurance_current_plot(
+                        self.plot_panels.endurance_on_times,
+                        self.plot_panels.endurance_on_currents,
+                        self.plot_panels.endurance_off_times,
+                        self.plot_panels.endurance_off_currents
+                    )
 
             # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
             # try:
@@ -251,6 +337,15 @@ class SpecialMeasurementRunner:
         self._finalize()
 
     def _run_retention(self, device_count: int, start_index: int) -> None:
+        # Initialize retention data tracking
+        if hasattr(self, 'plot_panels'):
+            self.plot_panels.retention_times = []
+            self.plot_panels.retention_currents = []
+        
+        # Start retention plot updater thread
+        if hasattr(self, 'plot_updaters'):
+            self.plot_updaters.start_retention_thread(True)
+        
         for i in range(device_count):
             device = self.device_list[(start_index + i) % device_count]
             if self.stop_measurement_flag:
@@ -272,7 +367,22 @@ class SpecialMeasurementRunner:
                 self.v_arr_disp.append(v)
                 self.c_arr_disp.append(i_val)
                 self.t_arr_disp.append(t_s)
+                
+                # Process retention data: track time vs current for retention plot
+                # Retention measurements track current over time after SET pulse
+                if hasattr(self, 'plot_panels'):
+                    # Use relative time from start of retention measurement
+                    if not hasattr(self, 'retention_start_time') or self.retention_start_time is None:
+                        self.retention_start_time = t_s
+                    relative_time = t_s - self.retention_start_time
+                    if relative_time > 0:  # Only add positive times for log scale
+                        self.plot_panels.retention_times.append(relative_time)
+                        self.plot_panels.retention_currents.append(abs(i_val) if i_val != 0 else 1e-12)
 
+            # Track start time for retention measurement
+            if hasattr(self, 'plot_panels'):
+                self.retention_start_time = None
+            
             v_arr, c_arr, t_arr = self.measurement_service.run_retention(
                 keithley=self.keithley,
                 set_voltage=set_v,
@@ -288,6 +398,27 @@ class SpecialMeasurementRunner:
                 should_stop=lambda: getattr(self, "stop_measurement_flag", False),
                 on_point=_on_point,
             )
+            
+            # Post-process retention data if not fully processed in on_point
+            # Retention data: time vs current (log-log plot)
+            if hasattr(self, 'plot_panels'):
+                if len(self.plot_panels.retention_times) == 0 and len(t_arr) > 0:
+                    # Use all time vs current data for retention plot
+                    start_time = t_arr[0] if t_arr else 0
+                    for idx in range(len(t_arr)):
+                        if idx < len(c_arr):
+                            relative_time = t_arr[idx] - start_time
+                            if relative_time > 0:  # Only positive times for log scale
+                                self.plot_panels.retention_times.append(relative_time)
+                                current = abs(c_arr[idx]) if c_arr[idx] != 0 else 1e-12
+                                self.plot_panels.retention_currents.append(current)
+                
+                # Final update of retention plot
+                if hasattr(self.plot_panels, 'update_retention_plot'):
+                    self.plot_panels.update_retention_plot(
+                        self.plot_panels.retention_times,
+                        self.plot_panels.retention_currents
+                    )
 
             # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
             # try:

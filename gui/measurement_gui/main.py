@@ -5250,20 +5250,28 @@ class MeasurementGUI:
                 self.plot_panels.plot_visibility["current_time"].set(False)
                 self.plot_panels.plot_visibility["temp_time"].set(False)
                 self.plot_panels.plot_visibility["endurance"].set(False)
+                self.plot_panels.plot_visibility["endurance_current"].set(False)
                 self.plot_panels.plot_visibility["retention"].set(False)
                 
                 # Show appropriate plots based on measurement type
                 if meas_type == "Endurance":
-                    # For endurance, show endurance plot prominently, keep IV plots for reference
+                    # For endurance, show endurance plots prominently, keep IV plots for reference
                     self.plot_panels.plot_visibility["endurance"].set(True)
+                    self.plot_panels.plot_visibility["endurance_current"].set(True)
                     self.plot_panels.plot_visibility["rt_iv"].set(True)
                     self.plot_panels.plot_visibility["rt_logiv"].set(False)  # Hide log IV for cleaner view
+                    # Start endurance plot updater thread
+                    if hasattr(self, 'plot_updaters'):
+                        self.plot_updaters.start_endurance_thread(True)
                     print("[MeasurementGUI] Switched to Endurance plot view")
                 elif meas_type == "Retention":
                     # For retention, show retention plot prominently, keep IV plots for reference
                     self.plot_panels.plot_visibility["retention"].set(True)
                     self.plot_panels.plot_visibility["rt_iv"].set(True)
                     self.plot_panels.plot_visibility["rt_logiv"].set(False)  # Hide log IV for cleaner view
+                    # Start retention plot updater thread
+                    if hasattr(self, 'plot_updaters'):
+                        self.plot_updaters.start_retention_thread(True)
                     print("[MeasurementGUI] Switched to Retention plot view")
                 else:
                     # For other measurements (IV sweeps, etc.), show IV plots
