@@ -343,3 +343,7 @@ class ComprehensiveAnalyzer:
         self._log("✓ Comprehensive analysis complete!")
 
 
+
+
+
+
