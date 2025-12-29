@@ -46,6 +46,22 @@ class PlotUpdaters:
             ("ct", self._update_current_time_plot),
         ):
             self._ensure_thread(name, target)
+    
+    def start_endurance_thread(self, enabled: bool) -> None:
+        """Start (or stop) the optional endurance plot thread."""
+        if not enabled or "endurance" not in self.plot_panels.axes:
+            self._stop_thread("endurance")
+            self._stop_thread("endurance_current")
+            return
+        self._ensure_thread("endurance", self._update_endurance_plot)
+        self._ensure_thread("endurance_current", self._update_endurance_current_plot)
+    
+    def start_retention_thread(self, enabled: bool) -> None:
+        """Start (or stop) the optional retention plot thread."""
+        if not enabled or "retention" not in self.plot_panels.axes:
+            self._stop_thread("retention")
+            return
+        self._ensure_thread("retention", self._update_retention_plot)
 
     def start_temperature_thread(self, enabled: bool) -> None:
         """Start (or stop) the optional temperature plot thread."""
@@ -182,6 +198,59 @@ class PlotUpdaters:
                 n = min(len(t), len(temps))
                 if n > 0:
                     self._update_line("tt_rt", t[:n], temps[:n])
+            time.sleep(self.interval_s)
+    
+    def _update_endurance_plot(self) -> None:
+        """Update endurance plot with ON/OFF ratios."""
+        name = "endurance"
+        while self._thread_running(name):
+            if getattr(self.gui, "measuring", False):
+                # Get endurance ratios from plot_panels
+                ratios = list(getattr(self.plot_panels, "endurance_ratios", []))
+                if ratios:
+                    cycles = list(range(1, len(ratios) + 1))
+                    # Use the plot_panels update method which handles the full plot setup
+                    try:
+                        self.plot_panels.update_endurance_plot(ratios)
+                    except Exception:
+                        pass
+            time.sleep(self.interval_s)
+    
+    def _update_endurance_current_plot(self) -> None:
+        """Update endurance current plot with ON and OFF currents over time."""
+        name = "endurance_current"
+        while self._thread_running(name):
+            if getattr(self.gui, "measuring", False):
+                # Get endurance current data from plot_panels
+                on_times = list(getattr(self.plot_panels, "endurance_on_times", []))
+                on_currents = list(getattr(self.plot_panels, "endurance_on_currents", []))
+                off_times = list(getattr(self.plot_panels, "endurance_off_times", []))
+                off_currents = list(getattr(self.plot_panels, "endurance_off_currents", []))
+                
+                if (on_times and on_currents) or (off_times and off_currents):
+                    # Use the plot_panels update method which handles the full plot setup
+                    try:
+                        self.plot_panels.update_endurance_current_plot(
+                            on_times, on_currents, off_times, off_currents
+                        )
+                    except Exception:
+                        pass
+            time.sleep(self.interval_s)
+    
+    def _update_retention_plot(self) -> None:
+        """Update retention plot with time vs current."""
+        name = "retention"
+        while self._thread_running(name):
+            if getattr(self.gui, "measuring", False):
+                # Get retention data from plot_panels
+                times = list(getattr(self.plot_panels, "retention_times", []))
+                currents = list(getattr(self.plot_panels, "retention_currents", []))
+                if times and currents and len(times) == len(currents):
+                    # Use the plot_panels update method which handles the full plot setup
+                    try:
+                        self.plot_panels.update_retention_plot(times, currents)
+                    except Exception:
+                        pass
             time.sleep(self.interval_s)
 
 
