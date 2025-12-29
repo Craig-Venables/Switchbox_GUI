@@ -365,3 +365,161 @@ The system provides comprehensive error handling:
 - Inter-sweep delays should be minimized for fast testing
 - Current source mode works best with Keithley 4200A
 - Hardware sweeps are automatically selected for optimal performance
+
+---
+
+## Conditional Memristive Testing
+
+### Overview
+
+Conditional testing is an intelligent workflow that automatically screens devices and runs additional tests only on devices that show memristive behavior. This saves time by avoiding expensive tests on non-functional devices.
+
+### Configuration File
+
+Conditional testing is configured in `Json_Files/conditional_test_config.json`:
+
+```json
+{
+  "quick_test": {
+    "custom_sweep_name": "Quick_Screen_2.8V",
+    "timeout_s": 300
+  },
+  "thresholds": {
+    "basic_memristive": 60.0,
+    "high_quality": 80.0
+  },
+  "re_evaluate_during_test": {
+    "enabled": true
+  },
+  "include_memcapacitive": true,
+  "tests": {
+    "basic_memristive": {
+      "custom_sweep_name": "Basic_Memristive_Test"
+    },
+    "high_quality": {
+      "custom_sweep_name": "High_Quality_Memristive_Test"
+    }
+  },
+  "final_test": {
+    "enabled": false,
+    "selection_mode": "top_x",
+    "top_x_count": 3,
+    "min_score_threshold": 80.0,
+    "custom_sweep_name": ""
+  }
+}
+```
+
+### Configuration Parameters
+
+#### Quick Test
+- **custom_sweep_name**: Name of custom sweep from `Custom_Sweeps.json` to use for quick screening (typically 0-2.8V IV sweep)
+- **timeout_s**: Maximum time allowed for quick test (safety timeout)
+
+#### Thresholds
+- **basic_memristive**: Minimum memristivity score (0-100) to qualify for basic memristive test (default: 60)
+- **high_quality**: Minimum memristivity score to qualify for high-quality test (default: 80)
+
+#### Re-evaluation
+- **enabled**: If `true`, re-analyzes devices after basic test. If score improves to ≥80, automatically runs high-quality test
+
+#### Classification Options
+- **include_memcapacitive**: If `true`, devices classified as "memcapacitive" also qualify. If `false`, only "memristive" devices qualify
+
+#### Test Definitions
+- **basic_memristive**: Custom sweep name for basic memristive characterization
+- **high_quality**: Custom sweep name for advanced/high-quality device testing
+
+#### Final Test
+- **enabled**: Enable final test that runs after all devices complete
+- **selection_mode**: 
+  - `"top_x"`: Select top X devices above minimum score
+  - `"all_above_score"`: Select all devices above minimum score
+- **top_x_count**: Number of top devices to select (for "top_x" mode)
+- **min_score_threshold**: Minimum score required for selection
+- **custom_sweep_name**: Custom sweep to run as final test (e.g., laser test)
+
+### Workflow
+
+1. **Quick Test**: Runs on all devices (e.g., 0-2.8V IV sweep)
+2. **Analysis**: Each device is analyzed for memristivity score
+3. **Conditional Tests**:
+   - Score ≥ 60: Run basic memristive test
+   - Score ≥ 80: Run high-quality test (immediately or after basic test if re-evaluation enabled)
+4. **Re-evaluation** (if enabled): After basic test, re-analyze. If score improved to ≥80, run high-quality test
+5. **Final Test** (if enabled): After all devices complete, select best devices and run final test
+
+### Example Configuration
+
+```json
+{
+  "quick_test": {
+    "custom_sweep_name": "Quick_Screen_2.8V",
+    "timeout_s": 300
+  },
+  "thresholds": {
+    "basic_memristive": 60.0,
+    "high_quality": 80.0
+  },
+  "re_evaluate_during_test": {
+    "enabled": true
+  },
+  "include_memcapacitive": true,
+  "tests": {
+    "basic_memristive": {
+      "custom_sweep_name": "Basic_Memristive_Characterization"
+    },
+    "high_quality": {
+      "custom_sweep_name": "Advanced_Memristive_Test"
+    }
+  },
+  "final_test": {
+    "enabled": true,
+    "selection_mode": "top_x",
+    "top_x_count": 5,
+    "min_score_threshold": 80.0,
+    "custom_sweep_name": "Laser_Damage_Test"
+  }
+}
+```
+
+### Usage
+
+#### From Advanced Tests Tab
+1. Go to **Advanced Tests** tab
+2. Configure thresholds, tests, and final test options
+3. Click **Save Config** to save configuration
+4. Click **Run Conditional Testing** to execute
+
+#### From Main Measurements Tab
+1. Go to **Measurements** tab
+2. Expand **Conditional Testing** section
+3. Click **Load Config** to load saved configuration
+4. Click **Run Conditional** to execute
+
+### Selection Modes Explained
+
+#### Top X Mode
+- Selects the top X devices by memristivity score
+- Only includes devices above minimum score threshold
+- Example: Top 3 devices with score ≥ 80
+
+#### All Above Score Mode
+- Selects all devices above the minimum score threshold
+- No limit on number of devices
+- Example: All devices with score ≥ 80
+
+### Safety Features
+
+- **Confirmation Dialog**: Final test requires user confirmation before running (important for potentially damaging tests like laser)
+- **Device List Display**: Shows which devices will be tested before confirmation
+- **Score Tracking**: All device scores are tracked and displayed
+
+### Tips
+
+1. **Quick Test**: Use a fast, simple IV sweep (e.g., 0-2.8V, 1 sweep, standard step size)
+2. **Thresholds**: Adjust based on your device population. Lower thresholds = more devices tested
+3. **Re-evaluation**: Enable if devices may improve during basic test (e.g., forming effects)
+4. **Final Test**: Use for expensive or potentially damaging tests (laser, high voltage, etc.)
+5. **Memcapacitive**: Include if you want to test both memristive and memcapacitive devices
+6. **Save Configs**: Save different configurations for different test scenarios

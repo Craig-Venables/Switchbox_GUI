@@ -351,6 +351,87 @@ from Measurments.data_formats import (
 
 ---
 
+---
+
+## Conditional Memristive Testing
+
+### Overview
+
+Conditional testing is an intelligent workflow that automatically screens all devices with a quick test, analyzes them for memristive behavior, and then conditionally runs additional tests only on promising devices. This saves significant time by avoiding expensive tests on non-functional devices.
+
+### How It Works
+
+1. **Quick Screening**: Runs a fast test (e.g., 0-2.8V IV sweep) on all devices
+2. **Analysis**: Each device is analyzed to determine memristivity score (0-100)
+3. **Conditional Execution**: 
+   - Devices with score ≥ 60: Run basic memristive test
+   - Devices with score ≥ 80: Run high-quality test
+   - If re-evaluation enabled: Re-check score after basic test, run high-quality if improved
+4. **Final Test** (optional): After all devices complete, select best devices and run final test (e.g., laser test)
+
+### Configuration
+
+Configure conditional testing in the **Advanced Tests** tab:
+
+1. **Thresholds**: Set score thresholds (default: 60 for basic, 80 for high-quality)
+2. **Quick Test**: Select custom sweep for quick screening
+3. **Basic Test**: Select custom sweep for basic memristive characterization
+4. **High Quality Test**: Select custom sweep for advanced testing
+5. **Re-evaluation**: Enable to re-check score after basic test
+6. **Include Memcapacitive**: Toggle whether memcapacitive devices qualify
+7. **Final Test**: Configure final test that runs on best devices
+   - Selection mode: "top_x" or "all_above_score"
+   - Parameters: Top X count, minimum score threshold
+   - Final test: Custom sweep to run (e.g., laser test)
+
+### Running Conditional Testing
+
+**From Advanced Tests Tab:**
+1. Configure all settings
+2. Click **Save Config** to save configuration
+3. Click **Run Conditional Testing**
+
+**From Measurements Tab:**
+1. Expand **Conditional Testing** section
+2. Click **Load Config** to load saved configuration
+3. Click **Run Conditional**
+
+### Final Test Options
+
+The final test runs after all devices complete their conditional tests:
+
+- **Top X Mode**: Selects top X devices above minimum score (e.g., top 5 devices with score ≥ 80)
+- **All Above Score Mode**: Selects all devices above minimum score (e.g., all devices with score ≥ 80)
+
+**Safety**: A confirmation dialog appears before running final test, showing which devices will be tested. This is important for potentially damaging tests (e.g., laser).
+
+### Example Workflow
+
+1. Configure quick test: "Quick_Screen_2.8V" (0-2.8V, 1 sweep)
+2. Set thresholds: Basic = 60, High Quality = 80
+3. Configure basic test: "Basic_Memristive_Characterization"
+4. Configure high-quality test: "Advanced_Memristive_Test"
+5. Enable final test: Top 3 devices with score ≥ 80, run "Laser_Damage_Test"
+6. Run conditional testing
+7. System automatically:
+   - Screens all devices
+   - Runs basic test on devices with score ≥ 60
+   - Runs high-quality test on devices with score ≥ 80
+   - Re-evaluates and upgrades if score improves
+   - At end, runs laser test on top 3 devices
+
+### Tips
+
+- Use a fast, simple sweep for quick test (minimize time per device)
+- Adjust thresholds based on your device population
+- Enable re-evaluation if devices may improve during basic test
+- Use final test for expensive or potentially damaging tests
+- Save different configurations for different scenarios
+
+For detailed configuration options, see **[JSON_CONFIG_GUIDE.md](JSON_CONFIG_GUIDE.md)**.
+
+---
+
 ## Additional Resources
 
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - One-page cheat sheet

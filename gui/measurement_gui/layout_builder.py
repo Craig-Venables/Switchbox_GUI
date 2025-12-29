@@ -22,6 +22,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import webbrowser
+import subprocess
+import sys
+import os
+import json
 
 # Third-party imports
 import tkinter as tk
@@ -456,6 +461,7 @@ class MeasurementGUILayoutBuilder:
                 text="• IV Sweeps: Standard voltage sweeps with current measurement\n"
                       "• Custom Measurements: Load pre-configured sweeps from JSON\n"
                       "• Sequential Measurements: Test multiple devices automatically\n"
+                      "• Conditional Testing: Smart workflow that screens devices and runs tests only on memristive devices\n"
                       "• Pulse Testing: Fast pulse characterization (opens separate GUI)\n"
                       "• Real-time Plotting: Live voltage, current, and resistance plots\n"
                       "• Data Saving: Automatic file naming and organization",
@@ -469,11 +475,140 @@ class MeasurementGUILayoutBuilder:
                       "• Pulse Testing: Open advanced pulse testing interface",
                 justify="left", bg="#f0f0f0").pack(**pad)
         
-        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        tk.Label(scrollable_frame, text="5. Conditional Memristive Testing", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#e65100").pack(**pad)
         tk.Label(scrollable_frame,
-                text="Video tutorials and additional resources will be added here.",
-                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
+                text="Smart workflow that automatically screens devices and runs tests only on memristive devices.\n\n"
+                      "Workflow:\n"
+                      "1. Quick Test: Runs fast screening test (e.g., 0-2.8V sweep) on all devices\n"
+                      "2. Analysis: Each device analyzed for memristivity score (0-100)\n"
+                      "3. Conditional Tests:\n"
+                      "   • Score ≥ 60: Run basic memristive test\n"
+                      "   • Score ≥ 80: Run high-quality test\n"
+                      "   • Re-evaluation: Re-check after basic test, upgrade if score improves\n"
+                      "4. Final Test (optional): After all devices complete, select best devices and run final test\n\n"
+                      "Configuration:\n"
+                      "• Access from Advanced Tests tab or Measurements tab\n"
+                      "• Set thresholds (default: 60 for basic, 80 for high-quality)\n"
+                      "• Select custom sweeps for quick test, basic test, and high-quality test\n"
+                      "• Configure final test with selection mode:\n"
+                      "  - 'top_x': Select top X devices above minimum score\n"
+                      "  - 'all_above_score': Select all devices above minimum score\n"
+                      "• Toggle re-evaluation and memcapacitive inclusion\n"
+                      "• Save configuration for reuse\n\n"
+                      "Safety: Final test shows confirmation dialog before running (important for potentially\n"
+                      "damaging tests like laser).",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="6. Additional Resources", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0").pack(**pad)
+        tk.Label(scrollable_frame,
+                text="• USER_GUIDE.md: Complete usage guide\n"
+                      "• JSON_CONFIG_GUIDE.md: Detailed configuration reference\n"
+                      "• QUICK_REFERENCE.md: One-page cheat sheet\n\n"
+                      "All documentation files are in the Documents/ folder.",
+                justify="left", bg="#f0f0f0").pack(**pad)
+        
+        tk.Label(scrollable_frame, text="7. Video Tutorials", font=("Segoe UI", 12, "bold"), 
+                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
+        
+        # Video tutorial section
+        video_frame = ttk.Frame(scrollable_frame)
+        video_frame.pack(**pad, fill='x')
+        
+        # Helper function to open videos
+        def open_video(video_path_or_url: str) -> None:
+            """Open video file or URL in default application/browser."""
+            try:
+                if video_path_or_url.startswith(('http://', 'https://')):
+                    # Open URL in default browser
+                    webbrowser.open(video_path_or_url)
+                else:
+                    # Open local file with default application
+                    video_path = Path(video_path_or_url)
+                    if not video_path.is_absolute():
+                        # If relative path, assume it's in a Videos folder in project root
+                        video_path = _PROJECT_ROOT / "Videos" / video_path_or_url
+                    
+                    if video_path.exists():
+                        if sys.platform == "win32":
+                            os.startfile(str(video_path))
+                        elif sys.platform == "darwin":  # macOS
+                            subprocess.run(["open", str(video_path)])
+                        else:  # Linux
+                            subprocess.run(["xdg-open", str(video_path)])
+                    else:
+                        messagebox.showerror("Video Not Found", 
+                                            f"Video file not found:\n{video_path}\n\n"
+                                            f"Please ensure the video file is in the 'Videos' folder.")
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not open video:\n{str(e)}")
+        
+        # Load video configuration from JSON file
+        video_config_path = _PROJECT_ROOT / "Json_Files" / "help_videos.json"
+        video_config = []
+        
+        try:
+            if video_config_path.exists():
+                with open(video_config_path, 'r', encoding='utf-8') as f:
+                    config_data = json.load(f)
+                    video_config = config_data.get("videos", [])
+        except Exception as e:
+            # If JSON loading fails, show error but continue
+            print(f"Warning: Could not load video config: {e}")
+        
+        if video_config:
+            for video_item in video_config:
+                video_title = video_item.get("title", "Untitled Video")
+                video_path = video_item.get("path", "")
+                video_desc = video_item.get("description", "")
+                
+                if not video_path:
+                    continue
+                
+                # Create button frame for each video
+                btn_frame = ttk.Frame(video_frame)
+                btn_frame.pack(side='top', fill='x', pady=5)
+                
+                # Video button
+                btn = tk.Button(
+                    btn_frame,
+                    text=f"▶ {video_title}",
+                    font=("Segoe UI", 10, "bold"),
+                    bg="#4CAF50",
+                    fg="white",
+                    activebackground="#45a049",
+                    activeforeground="white",
+                    relief='raised',
+                    cursor='hand2',
+                    padx=15,
+                    pady=8,
+                    command=lambda v=video_path: open_video(v)
+                )
+                btn.pack(side='left', padx=(0, 10))
+                
+                # Description label
+                if video_desc:
+                    desc_label = tk.Label(
+                        btn_frame,
+                        text=video_desc,
+                        font=("Segoe UI", 9),
+                        bg="#f0f0f0",
+                        fg="#666",
+                        justify='left'
+                    )
+                    desc_label.pack(side='left', fill='x', expand=True)
+        else:
+            tk.Label(video_frame,
+                    text="No video tutorials configured.\n"
+                         "To add videos, edit Json_Files/help_videos.json\n"
+                         "See the file for examples and instructions.",
+                    justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
+        
+        tk.Label(scrollable_frame,
+                text="\nNote: Videos can be local files (place in Videos/ folder) or online URLs (YouTube, Vimeo, etc.).\n"
+                     "Edit Json_Files/help_videos.json to add or modify video tutorials.",
+                justify="left", bg="#f0f0f0", fg="#666", font=("Segoe UI", 9)).pack(**pad)
     
     # ------------------------------------------------------------------
     # Tabbed Content Area
@@ -528,6 +663,7 @@ class MeasurementGUILayoutBuilder:
         self._build_sweep_parameters_collapsible(left_panel)
         self._build_sequential_controls_collapsible(left_panel)
         self._build_custom_measurement_quick_select(left_panel)
+        self._build_conditional_testing_quick_select(left_panel)
         self._build_telegram_bot_collapsible(left_panel)
         
         # RIGHT PANEL - Graphs (will be populated by plot_panels)
@@ -984,6 +1120,115 @@ class MeasurementGUILayoutBuilder:
         
         self.widgets["custom_measurement_quick"] = container
     
+    def _build_conditional_testing_quick_select(self, parent: tk.Misc) -> None:
+        """Quick conditional testing selector (collapsible)"""
+        gui = self.gui
+        
+        container = tk.Frame(parent, bg=self.COLOR_BG)
+        container.pack(fill='x', padx=5, pady=5)
+        
+        # Header with consistent theme
+        header_frame = tk.Frame(container, bg='#fff3e0', relief='raised', borderwidth=1, cursor='hand2')
+        header_frame.pack(fill='x')
+        
+        is_expanded = tk.BooleanVar(value=False)  # Collapsed by default
+        arrow_label = tk.Label(header_frame, text="►", bg='#fff3e0', font=self.FONT_HEADING, fg='#e65100')
+        arrow_label.pack(side='left', padx=8)
+        
+        tk.Label(header_frame, text="⚡ Conditional Testing", font=self.FONT_HEADING, bg='#fff3e0', fg='#e65100').pack(side='left', pady=8)
+        
+        # Content
+        content_frame = tk.Frame(container, bg=self.COLOR_BG, relief='solid', borderwidth=1, padx=10, pady=10)
+        
+        def toggle_collapse():
+            if is_expanded.get():
+                content_frame.pack_forget()
+                arrow_label.config(text="►")
+                is_expanded.set(False)
+            else:
+                content_frame.pack(fill='x')
+                arrow_label.config(text="▼")
+                is_expanded.set(True)
+        
+        header_frame.bind("<Button-1>", lambda e: toggle_collapse())
+        arrow_label.bind("<Button-1>", lambda e: toggle_collapse())
+        
+        # Content
+        tk.Label(content_frame, text="Conditional Testing Configuration:", font=self.FONT_MAIN, bg=self.COLOR_BG).pack(anchor='w', pady=(0, 5))
+        
+        # Status label
+        gui.conditional_testing_status_var = tk.StringVar(value="No config loaded")
+        status_label = tk.Label(content_frame, textvariable=gui.conditional_testing_status_var, font=self.FONT_MAIN, bg=self.COLOR_BG, fg='gray')
+        status_label.pack(anchor='w', pady=(0, 10))
+        
+        # Buttons
+        btn_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
+        btn_frame.pack(fill='x')
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+        
+        load_config_btn = tk.Button(
+            btn_frame,
+            text="Load Config",
+            font=self.FONT_BUTTON,
+            bg='#2196f3',
+            fg='white',
+            activebackground='#1976d2',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=6,
+            command=lambda: self._load_conditional_config_to_main(gui)
+        )
+        load_config_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
+        
+        run_conditional_btn = tk.Button(
+            btn_frame,
+            text="Run Conditional",
+            font=("Segoe UI", 10, "bold"),
+            bg='#4CAF50',
+            fg='white',
+            activebackground='#388e3c',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=8,
+            command=self.callbacks.get("run_conditional_testing")
+        )
+        run_conditional_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
+        gui.run_conditional_button_main = run_conditional_btn
+        
+        # Update button state
+        if hasattr(gui, 'connected') and gui.connected:
+            run_conditional_btn.config(state=tk.NORMAL)
+        else:
+            run_conditional_btn.config(state=tk.DISABLED)
+        
+        self.widgets["conditional_testing_quick"] = container
+    
+    def _load_conditional_config_to_main(self, gui) -> None:
+        """Load conditional testing configuration and update status"""
+        if hasattr(gui, '_load_conditional_test_config'):
+            config = gui._load_conditional_test_config()
+            if config:
+                quick_test = config.get("quick_test", {}).get("custom_sweep_name", "")
+                basic_test = config.get("tests", {}).get("basic_memristive", {}).get("custom_sweep_name", "")
+                high_quality_test = config.get("tests", {}).get("high_quality", {}).get("custom_sweep_name", "")
+                final_test = config.get("final_test", {}).get("custom_sweep_name", "")
+                
+                if quick_test and basic_test:
+                    status_parts = [f"Quick: {quick_test[:15]}..."]
+                    if final_test:
+                        status_parts.append(f"Final: {final_test[:15]}...")
+                    status_text = " | ".join(status_parts)
+                    if hasattr(gui, 'conditional_testing_status_var'):
+                        gui.conditional_testing_status_var.set(status_text)
+                    
+                    final_info = f"\nFinal Test: {final_test}" if final_test else "\nFinal Test: Not configured"
+                    messagebox.showinfo("Config Loaded", f"Conditional testing configuration loaded:\n\nQuick Test: {quick_test}\nBasic Test: {basic_test}\nHigh Quality: {high_quality_test or 'Not set'}{final_info}")
+                else:
+                    messagebox.showwarning("Incomplete Config", "Configuration is incomplete. Please configure in Advanced Tests tab.")
+    
     def _build_telegram_bot_collapsible(self, parent: tk.Misc) -> None:
         """Telegram messaging section (collapsible)"""
         gui = self.gui
@@ -1075,6 +1320,9 @@ class MeasurementGUILayoutBuilder:
         
         # Build endurance and retention controls
         self._build_manual_endurance_retention(content)
+        
+        # Build conditional memristive testing section
+        self._build_conditional_testing_section(content)
         
         self.widgets["advanced_tests_tab"] = tab
     
@@ -2325,78 +2573,85 @@ class MeasurementGUILayoutBuilder:
         gui = self.gui
         
         tab = tk.Frame(notebook, bg=self.COLOR_BG)
-        notebook.add(tab, text="  Graphing  ")
+        notebook.add(tab, text="  Sample Analysis  ")
         
-        # Configure grid
+        # Configure grid - single column centered layout for better presentation
         tab.columnconfigure(0, weight=1)
-        tab.rowconfigure(1, weight=1)
+        tab.rowconfigure(0, weight=1)
         
-        # Title
-        title_frame = tk.Frame(tab, bg=self.COLOR_BG)
-        title_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        # Main scrollable panel
+        main_panel = self._create_scrollable_panel(tab)
+        main_panel._container.grid(row=0, column=0, sticky="nsew", padx=20, pady=10)
+        
+        # Title Section
+        title_frame = tk.Frame(main_panel, bg=self.COLOR_BG)
+        title_frame.pack(fill='x', pady=(0, 20))
         
         tk.Label(
             title_frame,
-            text="Sample Analysis & Plotting",
-            font=("Segoe UI", 14, "bold"),
+            text="Sample Analysis and Plotting",
+            font=("Segoe UI", 16, "bold"),
             bg=self.COLOR_BG
         ).pack()
         
         tk.Label(
             title_frame,
-            text="Generate comprehensive analysis plots for entire sample using existing data",
+            text="Generate comprehensive analysis plots and reports for the entire sample",
             font=("Segoe UI", 10),
             bg=self.COLOR_BG,
-            wraplength=600
-        ).pack(pady=5)
+            fg="#666666"
+        ).pack(pady=(5, 0))
         
-        # Main content frame
-        content_frame = tk.Frame(tab, bg=self.COLOR_BG)
-        content_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=10)
-        content_frame.columnconfigure(0, weight=1)
-        
-        # Sample selection frame
-        selection_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
-        selection_frame.grid(row=0, column=0, sticky="ew", pady=10)
+        # 1. Data Selection Section
+        selection_frame = tk.LabelFrame(
+            main_panel,
+            text="1. Data Selection",
+            font=("Segoe UI", 11, "bold"),
+            bg=self.COLOR_BG,
+            padx=15,
+            pady=15
+        )
+        selection_frame.pack(fill='x', pady=(0, 20))
         selection_frame.columnconfigure(1, weight=1)
         
+        # Row 1: Folder Selection
         tk.Label(
             selection_frame,
             text="Sample Folder:",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 10),
             bg=self.COLOR_BG
-        ).grid(row=0, column=0, padx=5, sticky="w")
+        ).grid(row=0, column=0, padx=(0, 10), pady=10, sticky="w")
         
-        # Folder path display
         gui.analysis_folder_var = tk.StringVar()
         gui.analysis_folder_var.set("(Use current sample)")
         folder_entry = tk.Entry(
             selection_frame,
             textvariable=gui.analysis_folder_var,
             font=("Segoe UI", 9),
-            state="readonly",
-            width=50
+            state="readonly"
         )
-        folder_entry.grid(row=0, column=1, padx=5, sticky="ew")
+        folder_entry.grid(row=0, column=1, padx=(0, 10), pady=10, sticky="ew")
         
-        # Browse button
+        # Folder buttons
+        folder_btn_frame = tk.Frame(selection_frame, bg=self.COLOR_BG)
+        folder_btn_frame.grid(row=0, column=2, pady=10, sticky="e")
+        
         browse_btn = tk.Button(
-            selection_frame,
+            folder_btn_frame,
             text="Browse...",
             command=lambda: gui.browse_sample_folder_for_analysis(),
             font=("Segoe UI", 9),
             bg="#2196F3",
             fg="white",
-            padx=10,
+            padx=15,
             pady=5,
             cursor="hand2"
         )
-        browse_btn.grid(row=0, column=2, padx=5)
+        browse_btn.pack(side="left", padx=(0, 5))
         
-        # Clear selection button
         clear_btn = tk.Button(
-            selection_frame,
-            text="Clear",
+            folder_btn_frame,
+            text="Reset",
             command=lambda: gui.clear_sample_folder_selection(),
             font=("Segoe UI", 9),
             bg="#757575",
@@ -2405,122 +2660,151 @@ class MeasurementGUILayoutBuilder:
             pady=5,
             cursor="hand2"
         )
-        clear_btn.grid(row=0, column=3, padx=5)
-        
-        # Code name filter (like old module)
-        filter_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
-        filter_frame.grid(row=1, column=0, pady=(10, 5), padx=20, sticky="ew")
-        
+        clear_btn.pack(side="left")
+
+        # Row 2: Code Name Filter
         tk.Label(
-            filter_frame,
-            text="Filter by Code Name (optional):",
+            selection_frame,
+            text="Code Name (Optional):",
             font=("Segoe UI", 10),
             bg=self.COLOR_BG
-        ).pack(side=tk.LEFT, padx=(0, 10))
+        ).grid(row=1, column=0, padx=(0, 10), pady=10, sticky="w")
+        
+        filter_layout_frame = tk.Frame(selection_frame, bg=self.COLOR_BG)
+        filter_layout_frame.grid(row=1, column=1, columnspan=2, sticky="w", pady=10)
         
         gui.analysis_code_name_var = tk.StringVar(value="")
         code_name_combo = ttk.Combobox(
-            filter_frame,
+            filter_layout_frame,
             textvariable=gui.analysis_code_name_var,
             values=[""] + list(gui.code_names.values()) if hasattr(gui, 'code_names') else [""],
             state="readonly",
-            width=20
+            width=25,
+            font=("Segoe UI", 9)
         )
-        code_name_combo.pack(side=tk.LEFT)
+        code_name_combo.pack(side="left")
         
         tk.Label(
-            filter_frame,
+            filter_layout_frame,
             text="(Leave empty to analyze all measurements)",
-            font=("Segoe UI", 8),
+            font=("Segoe UI", 9, "italic"),
             bg=self.COLOR_BG,
             fg="#666666"
-        ).pack(side=tk.LEFT, padx=(10, 0))
+        ).pack(side="left", padx=(10, 0))
         
-        # Button frame
-        btn_frame = tk.Frame(content_frame, bg=self.COLOR_BG)
-        btn_frame.grid(row=2, column=0, pady=20)
-        
-        # Main analysis button
-        analyze_btn = tk.Button(
-            btn_frame,
-            text="Run Full Sample Analysis",
-            command=gui.run_full_sample_analysis,
+        # 2. Actions Section
+        actions_frame = tk.LabelFrame(
+            main_panel,
+            text="2. Actions",
             font=("Segoe UI", 11, "bold"),
+            bg=self.COLOR_BG,
+            padx=15,
+            pady=15
+        )
+        actions_frame.pack(fill='x', pady=(0, 20))
+        
+        # Main Analysis Button (Prominent)
+        analyze_btn = tk.Button(
+            actions_frame,
+            text="▶ Run Full Sample Analysis",
+            command=gui.run_full_sample_analysis,
+            font=("Segoe UI", 12, "bold"),
             bg="#4CAF50",
             fg="white",
-            padx=20,
-            pady=10,
+            padx=30,
+            pady=12,
             cursor="hand2",
             relief=tk.RAISED,
-            bd=2
+            bd=1
         )
-        analyze_btn.pack(pady=10)
+        analyze_btn.pack(fill='x', pady=(0, 20))
         
-        # Device plotting button (separate from sample analysis)
+        # Plotting buttons container
+        plot_btns_frame = tk.Frame(actions_frame, bg=self.COLOR_BG)
+        plot_btns_frame.pack(fill='x')
+        plot_btns_frame.columnconfigure(0, weight=1)
+        plot_btns_frame.columnconfigure(1, weight=1)
+        
+        # Plot Device Button
         plot_device_btn = tk.Button(
-            btn_frame,
-            text="Plot All Graphs for Current Device",
+            plot_btns_frame,
+            text="Plot Current Device Graphs",
             command=gui.plot_all_device_graphs,
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 10),
             bg="#FF9800",
             fg="white",
             padx=20,
-            pady=10,
-            cursor="hand2",
-            relief=tk.RAISED,
-            bd=2
+            pady=8,
+            cursor="hand2"
         )
-        plot_device_btn.pack(pady=10)
+        plot_device_btn.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         
-        # Sample plotting button
+        # Plot Sample Button
         plot_sample_btn = tk.Button(
-            btn_frame,
-            text="Plot All Graphs for Current SAMPLE",
+            plot_btns_frame,
+            text="Plot All Sample Graphs",
             command=gui.plot_all_sample_graphs,
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 10),
             bg="#9C27B0",
             fg="white",
             padx=20,
-            pady=10,
-            cursor="hand2",
-            relief=tk.RAISED,
-            bd=2
+            pady=8,
+            cursor="hand2"
         )
-        plot_sample_btn.pack(pady=10)
+        plot_sample_btn.grid(row=0, column=1, sticky="ew", padx=(10, 0))
         
         tk.Label(
-            btn_frame,
-            text="(Plots dashboard, conduction, and SCLC graphs for all measurement files in current device)",
-            font=("Segoe UI", 8),
+            actions_frame,
+            text="* Plotting buttons generate dashboard, conduction, and SCLC graphs for immediate visualization",
+            font=("Segoe UI", 9),
             bg=self.COLOR_BG,
             fg="#666666"
-        ).pack(pady=(0, 10))
+        ).pack(pady=(15, 0))
         
-        # Status label
+        # Status Section
+        status_frame = tk.Frame(main_panel, bg=self.COLOR_BG)
+        status_frame.pack(fill='x', pady=(0, 20))
+        
+        tk.Label(
+            status_frame,
+            text="Status:",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG
+        ).pack(anchor="w")
+        
         gui.analysis_status_label = tk.Label(
-            content_frame,
-            text="",
+            status_frame,
+            text="Ready",
             font=("Segoe UI", 10),
-            bg=self.COLOR_BG,
-            fg="#666666"
+            bg="#F5F5F5",
+            fg="#333333",
+            relief=tk.SUNKEN,
+            bd=1,
+            padx=10,
+            pady=8,
+            anchor="w"
         )
-        gui.analysis_status_label.grid(row=3, column=0, pady=10)
+        gui.analysis_status_label.pack(fill='x', pady=(5, 0))
         
         # Info text
+        # Information Section
+        info_frame = tk.LabelFrame(
+            main_panel,
+            text="Information",
+            font=("Segoe UI", 10, "bold"),
+            bg=self.COLOR_BG,
+            padx=15,
+            pady=10
+        )
+        info_frame.pack(fill='x', pady=10)
+
         info_text = """
-This will:
-• Analyze raw measurement files if needed (retroactive analysis)
-• Load all device tracking data
-• Generate 12 advanced plot types
-• Export Origin-ready data files
-• Create comprehensive sample report
-
-For old data: If no tracking data exists, will automatically
-analyze raw .txt measurement files first, then generate plots.
-
-Options:
-• Use current sample: Automatically uses the selected sample
-• Browse for folder: Select any sample folder to analyze retroactively
+This module performs:
+• Retroactive analysis of raw measurement files
+• Loading of device tracking data
+• Generation of 12 advanced plot types per device
+• Export of Origin-ready data files (CSV)
+• Creation of comprehensive sample report
 
 Output location: {sample_dir}/sample_analysis/
   - plots/ : All PNG figures
@@ -2528,16 +2812,14 @@ Output location: {sample_dir}/sample_analysis/
         """
         
         info_label = tk.Label(
-            content_frame,
+            info_frame,
             text=info_text.strip(),
-            font=("Segoe UI", 9),
-            bg="#f0f0f0",
+            font=("Consolas", 9),
+            bg=self.COLOR_BG,
             justify=tk.LEFT,
-            anchor="w",
-            padx=15,
-            pady=10
+            anchor="w"
         )
-        info_label.grid(row=4, column=0, sticky="ew", pady=10)
+        info_label.pack(fill='x')
         
         # Store reference to tab for later terminal creation (after plot_panels is initialized)
         self.widgets["graphing_tab"] = tab
@@ -2545,36 +2827,35 @@ Output location: {sample_dir}/sample_analysis/
     
     def _create_custom_sweeps_graphing_tab(self, notebook: ttk.Notebook) -> None:
         """
-        Create Custom Sweeps Graphing tab for comparing sweeps from custom measurement methods.
+        Create Sweep Combinations Editor tab for managing test_configurations.json.
         """
         gui = self.gui
         
         tab = tk.Frame(notebook, bg=self.COLOR_BG)
-        notebook.add(tab, text="  Custom Sweeps Graphing  ")
+        notebook.add(tab, text="  Sweep Combinations Editor  ")
         
-        # Configure grid
-        tab.columnconfigure(0, weight=0, minsize=400)  # Left panel - controls
-        tab.columnconfigure(1, weight=1)  # Right panel - plot
+        # Configure grid - single column layout
+        tab.columnconfigure(0, weight=1)
         tab.rowconfigure(0, weight=1)
         
-        # LEFT PANEL - Controls
-        left_panel = self._create_scrollable_panel(tab)
-        left_panel._container.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+        # Main panel - Controls
+        main_panel = self._create_scrollable_panel(tab)
+        main_panel._container.grid(row=0, column=0, sticky="nsew", padx=20, pady=10)
         
         # Title
-        title_frame = tk.Frame(left_panel, bg=self.COLOR_BG)
+        title_frame = tk.Frame(main_panel, bg=self.COLOR_BG)
         title_frame.pack(fill='x', pady=(0, 15))
         
         tk.Label(
             title_frame,
-            text="Custom Sweeps Graphing",
+            text="Sweep Combinations Editor",
             font=("Segoe UI", 14, "bold"),
             bg=self.COLOR_BG
         ).pack()
         
         tk.Label(
             title_frame,
-            text="Compare sweeps from custom measurement methods",
+            text="Manage sweep combinations in test_configurations.json",
             font=("Segoe UI", 9),
             bg=self.COLOR_BG,
             fg="#666666"
@@ -2582,7 +2863,7 @@ Output location: {sample_dir}/sample_analysis/
         
         # Section 1: Select Custom Sweep Method
         method_frame = tk.LabelFrame(
-            left_panel,
+            main_panel,
             text="1. Select Custom Sweep Method",
             font=("Segoe UI", 10, "bold"),
             bg=self.COLOR_BG,
@@ -2625,7 +2906,7 @@ Output location: {sample_dir}/sample_analysis/
         
         # Section 2: Select Sweep Combinations
         combo_frame = tk.LabelFrame(
-            left_panel,
+            main_panel,
             text="2. Select Sweep Combinations",
             font=("Segoe UI", 10, "bold"),
             bg=self.COLOR_BG,
@@ -2674,7 +2955,7 @@ Output location: {sample_dir}/sample_analysis/
         
         # Section 2.5: Manage Sweep Combinations (Add/Edit/Delete)
         manage_frame = tk.LabelFrame(
-            left_panel,
+            main_panel,
             text="2.5. Manage Sweep Combinations",
             font=("Segoe UI", 10, "bold"),
             bg=self.COLOR_BG,
@@ -2795,141 +3076,16 @@ Output location: {sample_dir}/sample_analysis/
         )
         save_combos_btn.pack(pady=(10, 0))
         
-        # Section 3: Custom Title (optional)
-        title_custom_frame = tk.LabelFrame(
-            left_panel,
-            text="3. Custom Title (Optional)",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.COLOR_BG,
-            padx=10,
-            pady=10
-        )
-        title_custom_frame.pack(fill='x', pady=10)
-        
-        tk.Label(
-            title_custom_frame,
-            text="Plot title:",
-            font=("Segoe UI", 9),
-            bg=self.COLOR_BG
-        ).pack(anchor='w', pady=(0, 5))
-        
-        gui.custom_sweep_plot_title_var = tk.StringVar()
-        title_entry = tk.Entry(
-            title_custom_frame,
-            textvariable=gui.custom_sweep_plot_title_var,
-            font=("Segoe UI", 9),
-            width=30
-        )
-        title_entry.pack(fill='x', pady=(0, 10))
-        
-        # Section 4: Sample Folder Selection
-        folder_frame = tk.LabelFrame(
-            left_panel,
-            text="4. Sample Data Location",
-            font=("Segoe UI", 10, "bold"),
-            bg=self.COLOR_BG,
-            padx=10,
-            pady=10
-        )
-        folder_frame.pack(fill='x', pady=10)
-        
-        tk.Label(
-            folder_frame,
-            text="Sample folder:",
-            font=("Segoe UI", 9),
-            bg=self.COLOR_BG
-        ).pack(anchor='w', pady=(0, 5))
-        
-        gui.custom_sweep_sample_folder_var = tk.StringVar()
-        gui.custom_sweep_sample_folder_var.set("(Use current sample)")
-        folder_entry = tk.Entry(
-            folder_frame,
-            textvariable=gui.custom_sweep_sample_folder_var,
-            font=("Segoe UI", 9),
-            state="readonly",
-            width=30
-        )
-        folder_entry.pack(fill='x', pady=(0, 5))
-        
-        folder_btn_frame = tk.Frame(folder_frame, bg=self.COLOR_BG)
-        folder_btn_frame.pack(fill='x')
-        
-        browse_folder_btn = tk.Button(
-            folder_btn_frame,
-            text="Browse...",
-            command=gui.browse_custom_sweep_sample_folder,
-            font=("Segoe UI", 9),
-            bg="#757575",
-            fg="white",
-            padx=10,
-            pady=5,
-            cursor="hand2"
-        )
-        browse_folder_btn.pack(side='left', padx=(0, 5))
-        
-        clear_folder_btn = tk.Button(
-            folder_btn_frame,
-            text="Clear",
-            command=gui.clear_custom_sweep_sample_folder,
-            font=("Segoe UI", 9),
-            bg="#757575",
-            fg="white",
-            padx=10,
-            pady=5,
-            cursor="hand2"
-        )
-        clear_folder_btn.pack(side='left')
-        
-        # Section 5: Plot Button
-        plot_frame = tk.Frame(left_panel, bg=self.COLOR_BG)
-        plot_frame.pack(fill='x', pady=20)
-        
-        plot_btn = tk.Button(
-            plot_frame,
-            text="Plot Selected Sweeps",
-            command=gui.plot_custom_sweeps,
-            font=("Segoe UI", 11, "bold"),
-            bg="#4CAF50",
-            fg="white",
-            padx=20,
-            pady=10,
-            cursor="hand2",
-            relief=tk.RAISED,
-            bd=2
-        )
-        plot_btn.pack(fill='x')
-        
         # Status label
         gui.custom_sweep_status_label = tk.Label(
-            left_panel,
+            main_panel,
             text="",
             font=("Segoe UI", 9),
             bg=self.COLOR_BG,
             fg="#666666",
-            wraplength=350
+            wraplength=600
         )
-        gui.custom_sweep_status_label.pack(pady=10)
-        
-        # RIGHT PANEL - Plot
-        right_panel = tk.Frame(tab, bg=self.COLOR_BG)
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
-        right_panel.columnconfigure(0, weight=1)
-        right_panel.rowconfigure(0, weight=1)
-        
-        # Matplotlib figure
-        from matplotlib.figure import Figure
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        
-        gui.custom_sweep_fig = Figure(figsize=(10, 6), dpi=100)
-        gui.custom_sweep_ax = gui.custom_sweep_fig.add_subplot(111)
-        gui.custom_sweep_ax.set_xlabel("Voltage (V)", fontsize=11)
-        gui.custom_sweep_ax.set_ylabel("Current (A)", fontsize=11)
-        gui.custom_sweep_ax.set_title("Custom Sweeps Comparison", fontsize=12, fontweight='bold')
-        gui.custom_sweep_ax.grid(True, alpha=0.3)
-        
-        gui.custom_sweep_canvas = FigureCanvasTkAgg(gui.custom_sweep_fig, right_panel)
-        gui.custom_sweep_canvas.draw()
-        gui.custom_sweep_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        gui.custom_sweep_status_label.pack(pady=20)
         
         # Store reference
         self.widgets["custom_sweeps_graphing_tab"] = tab
@@ -4470,6 +4626,332 @@ Output location: {sample_dir}/sample_analysis/
         tk.Label(ret_frame, textvariable=gui.ret_estimate_var, fg="grey").grid(row=6, column=0, columnspan=2, sticky="w")
 
         start_retention_cb = self.callbacks.get("start_manual_retention") or getattr(gui, "start_manual_retention", None)
+    
+    def _build_conditional_testing_section(self, parent: tk.Misc) -> None:
+        """Build the Conditional Memristive Testing section in Advanced Tests tab"""
+        gui = self.gui
+        
+        frame = tk.LabelFrame(
+            parent,
+            text="Conditional Memristive Testing",
+            font=self.FONT_HEADING,
+            bg=self.COLOR_BG,
+            padx=10,
+            pady=10
+        )
+        frame.grid(row=7, column=0, padx=10, pady=10, sticky="ew")
+        frame.columnconfigure(1, weight=1)
+        
+        # Thresholds section
+        thresholds_frame = tk.LabelFrame(frame, text="Thresholds", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+        thresholds_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=5)
+        
+        tk.Label(thresholds_frame, text="Basic Memristive (≥):", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=0, column=0, sticky="w", padx=5)
+        gui.conditional_basic_threshold = tk.DoubleVar(value=60.0)
+        tk.Spinbox(
+            thresholds_frame,
+            from_=0,
+            to=100,
+            increment=1,
+            textvariable=gui.conditional_basic_threshold,
+            width=10
+        ).grid(row=0, column=1, sticky="w", padx=5)
+        
+        tk.Label(thresholds_frame, text="High Quality (≥):", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=1, column=0, sticky="w", padx=5)
+        gui.conditional_high_quality_threshold = tk.DoubleVar(value=80.0)
+        tk.Spinbox(
+            thresholds_frame,
+            from_=0,
+            to=100,
+            increment=1,
+            textvariable=gui.conditional_high_quality_threshold,
+            width=10
+        ).grid(row=1, column=1, sticky="w", padx=5)
+        
+        # Re-evaluate checkbox
+        gui.conditional_re_evaluate = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            frame,
+            text="Re-evaluate during test (check score after basic test)",
+            variable=gui.conditional_re_evaluate,
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=5)
+        
+        # Include memcapacitive checkbox
+        gui.conditional_include_memcapacitive = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            frame,
+            text="Include memcapacitive devices (uncheck to test only memristive)",
+            variable=gui.conditional_include_memcapacitive,
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
+        
+        # Quick test selector
+        test_config_frame = tk.LabelFrame(frame, text="Test Configuration", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+        test_config_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=5)
+        
+        tk.Label(test_config_frame, text="Quick Test:", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=0, column=0, sticky="w", padx=5)
+        gui.conditional_quick_test = tk.StringVar(value="")
+        quick_test_combo = ttk.Combobox(
+            test_config_frame,
+            textvariable=gui.conditional_quick_test,
+            width=30,
+            state="readonly"
+        )
+        quick_test_combo.grid(row=0, column=1, sticky="ew", padx=5)
+        # Populate with custom sweeps
+        if hasattr(gui, 'custom_sweeps') and gui.custom_sweeps:
+            quick_test_combo['values'] = list(gui.custom_sweeps.keys())
+        
+        tk.Label(test_config_frame, text="Basic Test:", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=1, column=0, sticky="w", padx=5)
+        gui.conditional_basic_test = tk.StringVar(value="")
+        basic_test_combo = ttk.Combobox(
+            test_config_frame,
+            textvariable=gui.conditional_basic_test,
+            width=30,
+            state="readonly"
+        )
+        basic_test_combo.grid(row=1, column=1, sticky="ew", padx=5)
+        if hasattr(gui, 'custom_sweeps') and gui.custom_sweeps:
+            basic_test_combo['values'] = list(gui.custom_sweeps.keys())
+        
+        tk.Label(test_config_frame, text="High Quality Test:", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=2, column=0, sticky="w", padx=5)
+        gui.conditional_high_quality_test = tk.StringVar(value="")
+        high_quality_test_combo = ttk.Combobox(
+            test_config_frame,
+            textvariable=gui.conditional_high_quality_test,
+            width=30,
+            state="readonly"
+        )
+        high_quality_test_combo.grid(row=2, column=1, sticky="ew", padx=5)
+        if hasattr(gui, 'custom_sweeps') and gui.custom_sweeps:
+            high_quality_test_combo['values'] = list(gui.custom_sweeps.keys())
+        
+        # Final test section
+        final_test_frame = tk.LabelFrame(frame, text="Final Test (After All Devices)", font=self.FONT_MAIN, bg=self.COLOR_BG, padx=5, pady=5)
+        final_test_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=5)
+        
+        gui.conditional_final_test_enabled = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            final_test_frame,
+            text="Enable Final Test",
+            variable=gui.conditional_final_test_enabled,
+            font=self.FONT_MAIN,
+            bg=self.COLOR_BG,
+            command=lambda: self._update_final_test_controls(gui)
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
+        
+        # Selection mode
+        tk.Label(final_test_frame, text="Selection Mode:", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=1, column=0, sticky="w", padx=5)
+        gui.conditional_final_test_mode = tk.StringVar(value="top_x")
+        mode_combo = ttk.Combobox(
+            final_test_frame,
+            textvariable=gui.conditional_final_test_mode,
+            values=["top_x", "all_above_score"],
+            state="readonly",
+            width=15
+        )
+        mode_combo.grid(row=1, column=1, sticky="w", padx=5)
+        mode_combo.bind("<<ComboboxSelected>>", lambda e: self._update_final_test_controls(gui))
+        
+        # Top X parameters
+        top_x_frame = tk.Frame(final_test_frame, bg=self.COLOR_BG)
+        top_x_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=5)
+        
+        top_x_label = tk.Label(top_x_frame, text="Top X Count:", bg=self.COLOR_BG, font=self.FONT_MAIN)
+        top_x_label.grid(row=0, column=0, sticky="w", padx=5)
+        gui.conditional_final_test_top_x = tk.IntVar(value=3)
+        top_x_spinbox = tk.Spinbox(
+            top_x_frame,
+            from_=1,
+            to=100,
+            increment=1,
+            textvariable=gui.conditional_final_test_top_x,
+            width=10
+        )
+        top_x_spinbox.grid(row=0, column=1, sticky="w", padx=5)
+        
+        min_score_label = tk.Label(top_x_frame, text="Min Score:", bg=self.COLOR_BG, font=self.FONT_MAIN)
+        min_score_label.grid(row=1, column=0, sticky="w", padx=5)
+        gui.conditional_final_test_min_score = tk.DoubleVar(value=80.0)
+        min_score_spinbox = tk.Spinbox(
+            top_x_frame,
+            from_=0,
+            to=100,
+            increment=1,
+            textvariable=gui.conditional_final_test_min_score,
+            width=10
+        )
+        min_score_spinbox.grid(row=1, column=1, sticky="w", padx=5)
+        
+        # Final test selector
+        tk.Label(final_test_frame, text="Final Test:", bg=self.COLOR_BG, font=self.FONT_MAIN).grid(row=3, column=0, sticky="w", padx=5)
+        gui.conditional_final_test_name = tk.StringVar(value="")
+        final_test_combo = ttk.Combobox(
+            final_test_frame,
+            textvariable=gui.conditional_final_test_name,
+            width=30,
+            state="readonly"
+        )
+        final_test_combo.grid(row=3, column=1, sticky="ew", padx=5)
+        if hasattr(gui, 'custom_sweeps') and gui.custom_sweeps:
+            final_test_combo['values'] = list(gui.custom_sweeps.keys())
+        
+        gui.conditional_final_test_widgets = {
+            'mode_combo': mode_combo,
+            'top_x_frame': top_x_frame,
+            'final_test_combo': final_test_combo,
+            'top_x_label': top_x_label,
+            'top_x_spinbox': top_x_spinbox,
+            'min_score_label': min_score_label,
+            'min_score_spinbox': min_score_spinbox
+        }
+        
+        # Buttons
+        button_frame = tk.Frame(frame, bg=self.COLOR_BG)
+        button_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        
+        tk.Button(
+            button_frame,
+            text="Load Config",
+            command=lambda: self._load_conditional_config(gui),
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_PRIMARY,
+            fg="white",
+            padx=10,
+            pady=5
+        ).pack(side="left", padx=5)
+        
+        tk.Button(
+            button_frame,
+            text="Save Config",
+            command=lambda: self._save_conditional_config(gui),
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_PRIMARY,
+            fg="white",
+            padx=10,
+            pady=5
+        ).pack(side="left", padx=5)
+        
+        run_callback = self.callbacks.get("run_conditional_testing") or getattr(gui, "run_conditional_testing", None)
+        gui.conditional_testing_run_button = tk.Button(
+            button_frame,
+            text="Run Conditional Testing",
+            command=run_callback,
+            font=self.FONT_BUTTON,
+            bg=self.COLOR_SUCCESS,
+            fg="white",
+            padx=10,
+            pady=5,
+            state=tk.DISABLED if not hasattr(gui, 'connected') or not gui.connected else tk.NORMAL
+        )
+        gui.conditional_testing_run_button.pack(side="left", padx=5)
+        
+        # Update control states
+        self._update_conditional_testing_controls(gui)
+        self._update_final_test_controls(gui)
+    
+    def _update_conditional_testing_controls(self, gui) -> None:
+        """Enable/disable conditional testing controls"""
+        # All controls are always enabled now (removed enable checkbox)
+        pass
+    
+    def _update_final_test_controls(self, gui) -> None:
+        """Update final test controls based on enabled state and mode"""
+        enabled = gui.conditional_final_test_enabled.get() if hasattr(gui, 'conditional_final_test_enabled') else False
+        state = tk.NORMAL if enabled else tk.DISABLED
+        
+        if hasattr(gui, 'conditional_final_test_widgets'):
+            widgets = gui.conditional_final_test_widgets
+            widgets['mode_combo'].config(state=state)
+            widgets['final_test_combo'].config(state=state)
+            widgets['min_score_label'].config(state=state)
+            widgets['min_score_spinbox'].config(state=state)
+            
+            # Update top_x visibility based on mode
+            mode = gui.conditional_final_test_mode.get() if hasattr(gui, 'conditional_final_test_mode') else "top_x"
+            if mode == "top_x":
+                widgets['top_x_label'].grid()
+                widgets['top_x_spinbox'].config(state=state)
+                widgets['top_x_spinbox'].grid()
+            else:
+                # For "all_above_score", hide top_x controls
+                widgets['top_x_label'].grid_remove()
+                widgets['top_x_spinbox'].grid_remove()
+    
+    def _load_conditional_config(self, gui) -> None:
+        """Load conditional testing configuration from JSON file"""
+        if hasattr(gui, '_load_conditional_test_config'):
+            config = gui._load_conditional_test_config()
+            if config:
+                if hasattr(gui, 'conditional_basic_threshold'):
+                    gui.conditional_basic_threshold.set(config.get("thresholds", {}).get("basic_memristive", 60))
+                if hasattr(gui, 'conditional_high_quality_threshold'):
+                    gui.conditional_high_quality_threshold.set(config.get("thresholds", {}).get("high_quality", 80))
+                if hasattr(gui, 'conditional_re_evaluate'):
+                    gui.conditional_re_evaluate.set(config.get("re_evaluate_during_test", {}).get("enabled", True))
+                if hasattr(gui, 'conditional_include_memcapacitive'):
+                    gui.conditional_include_memcapacitive.set(config.get("include_memcapacitive", True))
+                if hasattr(gui, 'conditional_quick_test'):
+                    gui.conditional_quick_test.set(config.get("quick_test", {}).get("custom_sweep_name", ""))
+                if hasattr(gui, 'conditional_basic_test'):
+                    gui.conditional_basic_test.set(config.get("tests", {}).get("basic_memristive", {}).get("custom_sweep_name", ""))
+                if hasattr(gui, 'conditional_high_quality_test'):
+                    gui.conditional_high_quality_test.set(config.get("tests", {}).get("high_quality", {}).get("custom_sweep_name", ""))
+                
+                # Load final test config
+                final_test = config.get("final_test", {})
+                if hasattr(gui, 'conditional_final_test_enabled'):
+                    gui.conditional_final_test_enabled.set(final_test.get("enabled", False))
+                if hasattr(gui, 'conditional_final_test_mode'):
+                    gui.conditional_final_test_mode.set(final_test.get("selection_mode", "top_x"))
+                if hasattr(gui, 'conditional_final_test_top_x'):
+                    gui.conditional_final_test_top_x.set(final_test.get("top_x_count", 3))
+                if hasattr(gui, 'conditional_final_test_min_score'):
+                    gui.conditional_final_test_min_score.set(final_test.get("min_score_threshold", 80.0))
+                if hasattr(gui, 'conditional_final_test_name'):
+                    gui.conditional_final_test_name.set(final_test.get("custom_sweep_name", ""))
+                
+                messagebox.showinfo("Config Loaded", "Conditional testing configuration loaded successfully.")
+                self._update_conditional_testing_controls(gui)
+                self._update_final_test_controls(gui)
+    
+    def _save_conditional_config(self, gui) -> None:
+        """Save conditional testing configuration to JSON file"""
+        if hasattr(gui, '_save_conditional_test_config'):
+            config = {
+                "quick_test": {
+                    "custom_sweep_name": gui.conditional_quick_test.get() if hasattr(gui, 'conditional_quick_test') else "",
+                    "timeout_s": 300
+                },
+                "thresholds": {
+                    "basic_memristive": gui.conditional_basic_threshold.get() if hasattr(gui, 'conditional_basic_threshold') else 60,
+                    "high_quality": gui.conditional_high_quality_threshold.get() if hasattr(gui, 'conditional_high_quality_threshold') else 80
+                },
+                "re_evaluate_during_test": {
+                    "enabled": gui.conditional_re_evaluate.get() if hasattr(gui, 'conditional_re_evaluate') else True
+                },
+                "include_memcapacitive": gui.conditional_include_memcapacitive.get() if hasattr(gui, 'conditional_include_memcapacitive') else True,
+                "tests": {
+                    "basic_memristive": {
+                        "custom_sweep_name": gui.conditional_basic_test.get() if hasattr(gui, 'conditional_basic_test') else ""
+                    },
+                    "high_quality": {
+                        "custom_sweep_name": gui.conditional_high_quality_test.get() if hasattr(gui, 'conditional_high_quality_test') else ""
+                    }
+                },
+                "final_test": {
+                    "enabled": gui.conditional_final_test_enabled.get() if hasattr(gui, 'conditional_final_test_enabled') else False,
+                    "selection_mode": gui.conditional_final_test_mode.get() if hasattr(gui, 'conditional_final_test_mode') else "top_x",
+                    "top_x_count": gui.conditional_final_test_top_x.get() if hasattr(gui, 'conditional_final_test_top_x') else 3,
+                    "min_score_threshold": gui.conditional_final_test_min_score.get() if hasattr(gui, 'conditional_final_test_min_score') else 80.0,
+                    "custom_sweep_name": gui.conditional_final_test_name.get() if hasattr(gui, 'conditional_final_test_name') else ""
+                }
+            }
+            if gui._save_conditional_test_config(config):
+                messagebox.showinfo("Config Saved", "Conditional testing configuration saved successfully.")
         tk.Button(
             ret_frame,
             text="Start Retention",

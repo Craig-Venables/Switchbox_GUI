@@ -263,6 +263,27 @@ All should print "All tests passed!" ✓
 
 ---
 
+## ⚡ Conditional Testing
+
+Smart workflow that screens devices and runs tests only on memristive devices:
+
+**Configuration** (`Json_Files/conditional_test_config.json`):
+- Quick test: Fast screening (e.g., 0-2.8V sweep)
+- Thresholds: Score ≥60 for basic test, ≥80 for high-quality test
+- Re-evaluation: Check score after basic test, run high-quality if improved
+- Final test: Run on best devices after all complete (e.g., laser test)
+
+**Selection Modes**:
+- `"top_x"`: Top X devices above threshold
+- `"all_above_score"`: All devices above threshold
+
+**Usage**:
+1. Configure in **Advanced Tests** tab
+2. Save configuration
+3. Run from **Advanced Tests** or **Measurements** tab
+
+---
+
 ## 🚀 Next Steps
 
 1. ✅ Understand this reference

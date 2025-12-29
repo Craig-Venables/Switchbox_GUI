@@ -1,0 +1,29 @@
+{
+  "videos": [
+    {
+      "title": "Getting Started Tutorial",
+      "path": "getting_started.mp4",
+      "description": "Learn the basics of using the Measurement GUI"
+    },
+    {
+      "title": "Conditional Testing Guide",
+      "path": "conditional_testing.mp4",
+      "description": "How to set up and use conditional memristive testing"
+    },
+    {
+      "title": "Advanced Features",
+      "path": "https://www.youtube.com/watch?v=example",
+      "description": "Explore advanced measurement features and custom sweeps"
+    }
+  ],
+  "notes": {
+    "local_files": "Local video files should be placed in the 'Videos' folder in the project root. Use just the filename (e.g., 'my_video.mp4').",
+    "urls": "For online videos (YouTube, Vimeo, etc.), use the full URL starting with http:// or https://",
+    "examples": {
+      "local": "my_tutorial.mp4",
+      "youtube": "https://www.youtube.com/watch?v=VIDEO_ID",
+      "vimeo": "https://vimeo.com/VIDEO_ID"
+    }
+  }
+}
+

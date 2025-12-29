@@ -486,6 +486,7 @@ class MeasurementGUI:
                 "stop_sequential_measurement": self.set_measurment_flag_true,
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
                 "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
+                "run_conditional_testing": self.run_conditional_testing,
             },
         )
         
@@ -3372,251 +3373,6 @@ class MeasurementGUI:
             if hasattr(self, 'custom_sweep_status_label'):
                 self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
 
-    def browse_custom_sweep_sample_folder(self) -> None:
-        """Browse for sample folder containing measurement data"""
-        try:
-            from tkinter import filedialog
-            import os
-
-            # Get default directory
-            initial_dir = None
-            if hasattr(self, 'sample_name_var') and self.sample_name_var.get():
-                try:
-                    initial_dir = self._get_sample_save_directory(self.sample_name_var.get())
-                    initial_dir = os.path.dirname(initial_dir) if os.path.exists(initial_dir) else None
-                except:
-                    pass
-
-            if not initial_dir:
-                try:
-                    if hasattr(self, 'data_saver') and hasattr(self.data_saver, 'base_directory'):
-                        initial_dir = self.data_saver.base_directory
-                except:
-                    pass
-
-            folder = filedialog.askdirectory(
-                title="Select Sample Folder with Measurement Data",
-                initialdir=initial_dir
-            )
-
-            if folder:
-                self.custom_sweep_sample_folder_var.set(folder)
-                if hasattr(self, 'custom_sweep_status_label'):
-                    self.custom_sweep_status_label.config(text=f"✓ Selected: {os.path.basename(folder)}", fg="#4CAF50")
-
-        except Exception as e:
-            error_msg = f"Error browsing folder: {e}"
-            print(f"[CUSTOM SWEEPS] {error_msg}")
-            if hasattr(self, 'custom_sweep_status_label'):
-                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
-
-    def clear_custom_sweep_sample_folder(self) -> None:
-        """Clear sample folder selection"""
-        if hasattr(self, 'custom_sweep_sample_folder_var'):
-            self.custom_sweep_sample_folder_var.set("(Use current sample)")
-            if hasattr(self, 'custom_sweep_status_label'):
-                self.custom_sweep_status_label.config(text="", fg="#666666")
-
-    def plot_custom_sweeps(self) -> None:
-        """Plot selected sweep combinations"""
-        try:
-            import numpy as np
-            from pathlib import Path
-            import os
-
-            # Get selected combinations
-            if not hasattr(self, 'custom_sweep_combinations_listbox'):
-                return
-
-            selected_indices = self.custom_sweep_combinations_listbox.curselection()
-            if not selected_indices:
-                from tkinter import messagebox
-                messagebox.showwarning("No Selection", "Please select at least one sweep combination to plot.")
-                return
-
-            # Get selected combinations
-            selected_combos = []
-            for idx in selected_indices:
-                if idx < len(self.custom_sweep_combinations):
-                    selected_combos.append(self.custom_sweep_combinations[idx])
-
-            if not selected_combos:
-                return
-
-            # Get sample folder
-            sample_folder = None
-            if hasattr(self, 'custom_sweep_sample_folder_var'):
-                folder_str = self.custom_sweep_sample_folder_var.get()
-                if folder_str and folder_str != "(Use current sample)":
-                    sample_folder = Path(folder_str)
-                elif hasattr(self, 'sample_name_var') and self.sample_name_var.get():
-                    try:
-                        sample_folder = Path(self._get_sample_save_directory(self.sample_name_var.get()))
-                    except:
-                        pass
-
-            if not sample_folder or not sample_folder.exists():
-                from tkinter import messagebox
-                messagebox.showerror("Error", "Please select a valid sample folder containing measurement data.")
-                return
-
-            # Update status
-            if hasattr(self, 'custom_sweep_status_label'):
-                self.custom_sweep_status_label.config(text="Loading data files...", fg="#2196F3")
-            self.master.update_idletasks()
-
-            # Clear plot
-            if hasattr(self, 'custom_sweep_ax'):
-                self.custom_sweep_ax.clear()
-
-            # Plot each combination
-            colors = ['#2196F3', '#4CAF50', '#FF9800', '#F44336', '#9C27B0', '#00BCD4', '#FFC107', '#795548']
-            color_idx = 0
-
-            all_plotted = False
-
-            for combo_idx, combo in enumerate(selected_combos):
-                sweeps = combo.get("sweeps", [])
-                title = combo.get("title", f"Combination {combo_idx + 1}")
-
-                # Try to find and load data files for each sweep number
-                for sweep_num in sweeps:
-                    sweep_files = []
-
-                    # Search in Multiplexer_IV_sweep subfolder (standard location)
-                    iv_sweep_folder = sample_folder / "Multiplexer_IV_sweep"
-                    if iv_sweep_folder.exists():
-                        # Search in device number subfolders
-                        for device_num_dir in iv_sweep_folder.iterdir():
-                            if not device_num_dir.is_dir():
-                                continue
-
-                            # Look for .txt files that start with sweep number
-                            for txt_file in device_num_dir.glob("*.txt"):
-                                filename = txt_file.stem
-                                # Check if filename starts with sweep number (e.g., "1-FS-..." or "1_...")
-                                if filename.startswith(f"{sweep_num}-") or filename.startswith(f"{sweep_num}_"):
-                                    sweep_files.append(txt_file)
-
-                    # Also search in direct device subfolders (letter/number structure)
-                    for letter_dir in sample_folder.iterdir():
-                        if not letter_dir.is_dir() or letter_dir.name.startswith('.'):
-                            continue
-
-                        for number_dir in letter_dir.iterdir():
-                            if not number_dir.is_dir():
-                                continue
-
-                            # Look for .txt files
-                            for txt_file in number_dir.glob("*.txt"):
-                                filename = txt_file.stem
-                                if filename.startswith(f"{sweep_num}-") or filename.startswith(f"{sweep_num}_"):
-                                    if txt_file not in sweep_files:
-                                        sweep_files.append(txt_file)
-
-                    # If no files found with sweep number prefix, try to find by index in each device folder
-                    if not sweep_files:
-                        # Search in Multiplexer_IV_sweep first
-                        if iv_sweep_folder.exists():
-                            for device_num_dir in iv_sweep_folder.iterdir():
-                                if not device_num_dir.is_dir():
-                                    continue
-                                all_txt_files = sorted(device_num_dir.glob("*.txt"))
-                                # Use sweep_num as 1-based index
-                                if 1 <= sweep_num <= len(all_txt_files):
-                                    sweep_files.append(all_txt_files[sweep_num - 1])
-                                    break
-
-                        # If still not found, try device subfolders
-                        if not sweep_files:
-                            for letter_dir in sample_folder.iterdir():
-                                if not letter_dir.is_dir() or letter_dir.name.startswith('.'):
-                                    continue
-                                for number_dir in letter_dir.iterdir():
-                                    if not number_dir.is_dir():
-                                        continue
-                                    all_txt_files = sorted(number_dir.glob("*.txt"))
-                                    if 1 <= sweep_num <= len(all_txt_files):
-                                        sweep_files.append(all_txt_files[sweep_num - 1])
-                                        break
-                                if sweep_files:
-                                    break
-
-                    # Load and plot the first matching file
-                    for file_path in sweep_files[:1]:  # Only plot first match
-                        try:
-                            # Load data file
-                            data = np.loadtxt(file_path, skiprows=1)
-                            if data.shape[1] < 2:
-                                continue
-
-                            voltage = data[:, 0]
-                            current = data[:, 1]
-
-                            # Plot
-                            label = f"{title} - Sweep {sweep_num}"
-                            color = colors[color_idx % len(colors)]
-                            self.custom_sweep_ax.plot(
-                                voltage, current,
-                                marker='o', markersize=3,
-                                linewidth=1.5,
-                                label=label,
-                                color=color,
-                                alpha=0.8
-                            )
-                            all_plotted = True
-                            break
-                        except Exception as e:
-                            print(f"[CUSTOM SWEEPS] Error loading {file_path}: {e}")
-                            continue
-
-                color_idx += 1
-
-            if not all_plotted:
-                from tkinter import messagebox
-                messagebox.showwarning(
-                    "No Data Found",
-                    "Could not find measurement files matching the selected sweeps.\n\n"
-                    "Make sure:\n"
-                    "- Files are named with sweep numbers (e.g., '1-FS-...' or '1_...')\n"
-                    "- Sample folder contains device subfolders with .txt files"
-                )
-                if hasattr(self, 'custom_sweep_status_label'):
-                    self.custom_sweep_status_label.config(text="✗ No data files found", fg="#F44336")
-                return
-
-            # Set plot title
-            plot_title = "Custom Sweeps Comparison"
-            if hasattr(self, 'custom_sweep_plot_title_var') and self.custom_sweep_plot_title_var.get():
-                plot_title = self.custom_sweep_plot_title_var.get()
-
-            self.custom_sweep_ax.set_title(plot_title, fontsize=12, fontweight='bold')
-            self.custom_sweep_ax.set_xlabel("Voltage (V)", fontsize=11)
-            self.custom_sweep_ax.set_ylabel("Current (A)", fontsize=11)
-            self.custom_sweep_ax.grid(True, alpha=0.3)
-            self.custom_sweep_ax.legend(loc='best', fontsize=8)
-
-            # Update canvas
-            if hasattr(self, 'custom_sweep_canvas'):
-                self.custom_sweep_canvas.draw()
-
-            if hasattr(self, 'custom_sweep_status_label'):
-                self.custom_sweep_status_label.config(
-                    text=f"✓ Plotted {len(selected_combos)} combination(s)",
-                    fg="#4CAF50"
-                )
-
-        except Exception as e:
-            error_msg = f"Error plotting sweeps: {e}"
-            print(f"[CUSTOM SWEEPS] {error_msg}")
-            import traceback
-            traceback.print_exc()
-
-            if hasattr(self, 'custom_sweep_status_label'):
-                self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
-
-            from tkinter import messagebox
-            messagebox.showerror("Plot Error", error_msg)
 
     def _run_retroactive_analysis(self, sample_dir: str, sample_name: str, log_callback: Optional[Callable] = None) -> int:
         """
@@ -4072,6 +3828,478 @@ class MeasurementGUI:
             print(f"[Custom Sweeps] Invalid format in {file_path}; expected object at top level.")
             return {}
         return data
+
+    def _load_conditional_test_config(self) -> Dict[str, Any]:
+        """Load conditional testing configuration from JSON file."""
+        config_path = _PROJECT_ROOT / "Json_Files" / "conditional_test_config.json"
+        if not config_path.exists():
+            print(f"[Conditional Testing] Config not found at {config_path}, using defaults.")
+            return {
+                "quick_test": {"custom_sweep_name": "", "timeout_s": 300},
+                "thresholds": {"basic_memristive": 60, "high_quality": 80},
+                "re_evaluate_during_test": {"enabled": True},
+                "include_memcapacitive": True,
+                "tests": {
+                    "basic_memristive": {"custom_sweep_name": ""},
+                    "high_quality": {"custom_sweep_name": ""}
+                },
+                "final_test": {
+                    "enabled": False,
+                    "selection_mode": "top_x",
+                    "top_x_count": 3,
+                    "min_score_threshold": 80.0,
+                    "custom_sweep_name": ""
+                }
+            }
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            return data
+        except Exception as exc:
+            print(f"[Conditional Testing] Failed to load {config_path}: {exc}")
+            return {
+                "quick_test": {"custom_sweep_name": "", "timeout_s": 300},
+                "thresholds": {"basic_memristive": 60, "high_quality": 80},
+                "re_evaluate_during_test": {"enabled": True},
+                "include_memcapacitive": True,
+                "tests": {
+                    "basic_memristive": {"custom_sweep_name": ""},
+                    "high_quality": {"custom_sweep_name": ""}
+                },
+                "final_test": {
+                    "enabled": False,
+                    "selection_mode": "top_x",
+                    "top_x_count": 3,
+                    "min_score_threshold": 80.0,
+                    "custom_sweep_name": ""
+                }
+            }
+
+    def _save_conditional_test_config(self, config: Dict[str, Any]) -> bool:
+        """Save conditional testing configuration to JSON file."""
+        config_path = _PROJECT_ROOT / "Json_Files" / "conditional_test_config.json"
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with config_path.open("w", encoding="utf-8") as handle:
+                json.dump(config, handle, indent=2, ensure_ascii=False)
+            return True
+        except Exception as exc:
+            print(f"[Conditional Testing] Failed to save {config_path}: {exc}")
+            messagebox.showerror("Save Error", f"Failed to save conditional testing config:\n{exc}")
+            return False
+
+    def _run_analysis_sync(
+        self,
+        voltage: List[float],
+        current: List[float],
+        timestamps: Optional[List[float]],
+        device_id: str,
+        save_dir: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Run analysis synchronously (blocking until complete).
+        Returns analysis dictionary or None if failed.
+        """
+        from Helpers.IV_Analysis.iv_sweep_analyzer import quick_analyze
+        
+        try:
+            # Determine analysis level
+            analysis_level = getattr(self, 'analysis_level', 'full')
+            if not hasattr(self, 'analysis_enabled') or not self.analysis_enabled:
+                analysis_level = 'none'
+            
+            if analysis_level == 'none':
+                return None
+            
+            # Run analysis
+            print(f"[Conditional Testing] Running synchronous analysis on {len(voltage)} points...")
+            analysis_data = quick_analyze(
+                voltage=voltage,
+                current=current,
+                time=timestamps,
+                analysis_level=analysis_level,
+                device_id=device_id,
+                save_directory=save_dir
+            )
+            
+            return analysis_data
+        except Exception as exc:
+            print(f"[Conditional Testing] Analysis failed: {exc}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _run_quick_test(self, custom_sweep_name: str, device: str) -> Tuple[List[float], List[float], List[float]]:
+        """
+        Run quick screening test using a custom sweep.
+        Returns (voltage_array, current_array, timestamps_array).
+        """
+        if not custom_sweep_name or custom_sweep_name not in self.custom_sweeps:
+            raise ValueError(f"Quick test '{custom_sweep_name}' not found in custom sweeps")
+        
+        print(f"[Conditional Testing] Running quick test '{custom_sweep_name}' on device {device}")
+        
+        # Temporarily store original custom measurement selection
+        original_selection = getattr(self, 'custom_measurement_var', None)
+        if original_selection:
+            original_value = original_selection.get()
+        else:
+            original_value = None
+        
+        # Set the quick test as the selected measurement
+        if hasattr(self, 'custom_measurement_var'):
+            self.custom_measurement_var.set(custom_sweep_name)
+        
+        # Get the first sweep from the quick test
+        sweeps = self.custom_sweeps[custom_sweep_name]["sweeps"]
+        if not sweeps:
+            raise ValueError(f"Quick test '{custom_sweep_name}' has no sweeps defined")
+        
+        # Get the first sweep parameters
+        first_sweep_key = sorted(sweeps.keys(), key=lambda x: int(x) if x.isdigit() else 0)[0]
+        params = sweeps[first_sweep_key]
+        
+        # Execute the sweep
+        try:
+            # Use the existing custom measurement infrastructure but run just one sweep
+            v_arr, c_arr, t_arr = self._execute_single_sweep_for_conditional_test(params, device)
+            return v_arr, c_arr, t_arr
+        finally:
+            # Restore original selection
+            if original_selection and original_value:
+                original_selection.set(original_value)
+
+    def _execute_single_sweep_for_conditional_test(
+        self,
+        params: Dict[str, Any],
+        device: str
+    ) -> Tuple[List[float], List[float], List[float]]:
+        """Execute a single sweep for conditional testing."""
+        from Measurments.source_modes import SourceMode
+        
+        # Read measurement type
+        measurement_type = str(params.get("measurement_type", "IV"))
+        if "mode" in params:
+            measurement_type = params["mode"]
+        elif "excitation" in params:
+            excitation_map = {
+                "DC Triangle IV": "IV",
+                "SMU Pulsed IV": "PulsedIV",
+                "SMU Fast Pulses": "FastPulses",
+                "SMU Fast Hold": "Hold"
+            }
+            measurement_type = excitation_map.get(params["excitation"], "IV")
+        
+        # Read parameters
+        start_v = params.get("start_v", 0)
+        stop_v = params.get("stop_v", 1)
+        step_v = params.get("step_v", 0.1)
+        num_sweeps = params.get("sweeps", 1)
+        step_delay = params.get("step_delay", 0.05)
+        sweep_type = params.get("Sweep_type", "FS")
+        icc_val = params.get("icc", float(self.icc.get()) if hasattr(self, 'icc') else 1e-3)
+        
+        # LED control
+        led = bool(params.get("LED_ON", 0))
+        power = params.get("power", 1)
+        sequence = params.get("sequence", None)
+        if sequence == 0:
+            sequence = None
+        
+        # Execute IV sweep
+        if measurement_type == "IV":
+            def _on_point(v, i, t_s):
+                pass  # Don't update display for quick test
+            
+            v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
+                keithley=self.keithley,
+                start_v=start_v,
+                stop_v=stop_v,
+                step_v=step_v,
+                sweeps=num_sweeps,
+                step_delay=step_delay,
+                sweep_type=sweep_type,
+                icc=icc_val,
+                psu=getattr(self, 'psu', None),
+                led=led,
+                power=power,
+                optical=getattr(self, 'optical', None),
+                sequence=sequence,
+                pause_s=0,
+                smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
+                source_mode=SourceMode.VOLTAGE,
+                should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                on_point=_on_point
+            )
+            return v_arr, c_arr, timestamps
+        else:
+            raise ValueError(f"Quick test measurement type '{measurement_type}' not supported for conditional testing")
+
+    def _run_tiered_test(self, test_config: Dict[str, Any], device: str) -> Optional[Tuple[List[float], List[float], List[float]]]:
+        """
+        Run a tiered test (basic or high-quality) using a custom sweep.
+        Returns (v_arr, c_arr, t_arr) of the last sweep for re-evaluation, or None.
+        """
+        custom_sweep_name = test_config.get("custom_sweep_name", "")
+        if not custom_sweep_name or custom_sweep_name not in self.custom_sweeps:
+            print(f"[Conditional Testing] Warning: Test '{custom_sweep_name}' not found, skipping")
+            return None
+        
+        print(f"[Conditional Testing] Running tiered test '{custom_sweep_name}' on device {device}")
+        
+        # Temporarily store original selection
+        original_selection = getattr(self, 'custom_measurement_var', None)
+        if original_selection:
+            original_value = original_selection.get()
+        else:
+            original_value = None
+        
+        last_v_arr, last_c_arr, last_t_arr = None, None, None
+        
+        try:
+            # Set the test as selected
+            if hasattr(self, 'custom_measurement_var'):
+                self.custom_measurement_var.set(custom_sweep_name)
+            
+            # Run the custom measurement (but only for this device)
+            sweeps = self.custom_sweeps[custom_sweep_name]["sweeps"]
+            
+            for key, params in sweeps.items():
+                if self.stop_measurement_flag:
+                    break
+                
+                # Execute this sweep
+                v_arr, c_arr, t_arr = self._execute_single_sweep_for_conditional_test(params, device)
+                last_v_arr, last_c_arr, last_t_arr = v_arr, c_arr, t_arr
+                
+                # Save the data
+                save_dir = self._get_save_directory(
+                    self.sample_name_var.get(),
+                    self.final_device_letter,
+                    self.final_device_number
+                )
+                import os
+                os.makedirs(save_dir, exist_ok=True)
+                
+                from Measurments.single_measurement_runner import find_largest_number_in_folder
+                key_num = find_largest_number_in_folder(save_dir)
+                save_key = 0 if key_num is None else key_num + 1
+                
+                import numpy as np
+                from pathlib import Path
+                name = f"{save_key}-CONDITIONAL-{custom_sweep_name}-{key}-Py"
+                file_path = Path(save_dir) / f"{name}.txt"
+                
+                try:
+                    data = np.column_stack((v_arr, c_arr, t_arr))
+                    np.savetxt(
+                        file_path,
+                        data,
+                        fmt="%0.3E\t%0.3E\t%0.3E",
+                        header="Voltage(V) Current(A) Time(s)",
+                        comments=""
+                    )
+                    print(f"[Conditional Testing] Saved: {file_path}")
+                except Exception as exc:
+                    print(f"[Conditional Testing] Failed to save {file_path}: {exc}")
+        finally:
+            # Restore original selection
+            if original_selection and original_value:
+                original_selection.set(original_value)
+        
+        # Return last sweep data for re-evaluation
+        if last_v_arr is not None:
+            return (last_v_arr, last_c_arr, last_t_arr)
+        return None
+
+    def _get_latest_analysis_for_device(self, device: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the latest analysis result for a device.
+        This checks saved analysis files or pending results.
+        """
+        # Check pending analysis results first
+        if hasattr(self, '_pending_analysis_results'):
+            # Find the most recent analysis for this device
+            for key, result in self._pending_analysis_results.items():
+                if device in key:
+                    return result.get('analysis_data')
+        
+        # Try to load from saved analysis files
+        try:
+            save_dir = self._get_save_directory(
+                self.sample_name_var.get(),
+                self.final_device_letter,
+                self.final_device_number
+            )
+            analysis_dir = Path(save_dir) / "sample_analysis" / "analysis" / "sweeps" / device
+            if analysis_dir.exists():
+                # Find the most recent analysis JSON file
+                json_files = list(analysis_dir.glob("*.json"))
+                if json_files:
+                    latest_file = max(json_files, key=lambda p: p.stat().st_mtime)
+                    with latest_file.open("r", encoding="utf-8") as f:
+                        return json.load(f)
+        except Exception as exc:
+            print(f"[Conditional Testing] Failed to load analysis for {device}: {exc}")
+        
+        return None
+
+    def run_conditional_testing(self) -> None:
+        """
+        Main entry point for conditional memristive testing.
+        Runs quick test on all devices, analyzes, and conditionally runs additional tests.
+        """
+        if not self.connected:
+            messagebox.showwarning("Warning", "Not connected to Keithley!")
+            return
+        
+        # Load config
+        config = self._load_conditional_test_config()
+        
+        # Get configuration values
+        quick_test_name = config.get("quick_test", {}).get("custom_sweep_name", "")
+        if not quick_test_name:
+            messagebox.showerror("Error", "Quick test not configured. Please select a quick test.")
+            return
+        
+        basic_threshold = config.get("thresholds", {}).get("basic_memristive", 60)
+        high_quality_threshold = config.get("thresholds", {}).get("high_quality", 80)
+        re_evaluate_enabled = config.get("re_evaluate_during_test", {}).get("enabled", True)
+        include_memcapacitive = config.get("include_memcapacitive", True)
+        
+        basic_test_name = config.get("tests", {}).get("basic_memristive", {}).get("custom_sweep_name", "")
+        high_quality_test_name = config.get("tests", {}).get("high_quality", {}).get("custom_sweep_name", "")
+        
+        if not basic_test_name:
+            messagebox.showerror("Error", "Basic memristive test not configured.")
+            return
+        
+        # Reset stop flag
+        self.stop_measurement_flag = False
+        
+        # Track device scores for final test selection
+        device_scores = {}  # {device: score}
+        
+        # Iterate through devices
+        device_count = len(self.device_list)
+        start_index = 0
+        if self.current_device in self.device_list:
+            start_index = self.device_list.index(self.current_device)
+        
+        for i in range(device_count):
+            device = self.device_list[(start_index + i) % device_count]
+            
+            if self.stop_measurement_flag:
+                print("[Conditional Testing] Measurement interrupted!")
+                break
+            
+            print(f"[Conditional Testing] Processing device {device}")
+            self.set_status_message(f"Conditional Testing: Device {device}")
+            self.master.update()
+            
+            try:
+                # 1. Run quick test
+                v_arr, c_arr, t_arr = self._run_quick_test(quick_test_name, device)
+                
+                # 2. Analyze synchronously
+                save_dir = self._get_save_directory(
+                    self.sample_name_var.get(),
+                    self.final_device_letter,
+                    self.final_device_number
+                )
+                analysis = self._run_analysis_sync(v_arr, c_arr, t_arr, device, save_dir)
+                
+                if not analysis:
+                    print(f"[Conditional Testing] Analysis failed for device {device}, skipping")
+                    continue
+                
+                score = analysis.get('classification', {}).get('memristivity_score', 0)
+                device_type = analysis.get('classification', {}).get('device_type', '')
+                
+                # Store score for final test selection
+                device_scores[device] = score
+                
+                # Check if device qualifies (memristive or memcapacitive, unless excluded)
+                is_qualified = False
+                if include_memcapacitive:
+                    is_qualified = device_type in ['memristive', 'memcapacitive'] or score >= basic_threshold
+                else:
+                    is_qualified = device_type == 'memristive' or score >= basic_threshold
+                
+                print(f"[Conditional Testing] Device {device}: Score={score:.1f}, Type={device_type}, Qualified={is_qualified} (include_memcapacitive={include_memcapacitive})")
+                
+                # 3. Conditionally run tests
+                if is_qualified:
+                    # Run basic memristive test
+                    basic_test_data = None
+                    if basic_test_name:
+                        basic_test_data = self._run_tiered_test(
+                            {"custom_sweep_name": basic_test_name},
+                            device
+                        )
+                    
+                    # Check if already qualified for high-quality test
+                    if score >= high_quality_threshold:
+                        if high_quality_test_name:
+                            self._run_tiered_test(
+                                {"custom_sweep_name": high_quality_test_name},
+                                device
+                            )
+                    
+                    # If re-evaluation enabled, check during/after basic test
+                    elif re_evaluate_enabled and basic_test_name and basic_test_data:
+                        # Re-analyze the basic test results
+                        basic_v, basic_c, basic_t = basic_test_data
+                        basic_test_analysis = self._run_analysis_sync(basic_v, basic_c, basic_t, device, save_dir)
+                        if basic_test_analysis:
+                            new_score = basic_test_analysis.get('classification', {}).get('memristivity_score', 0)
+                            new_device_type = basic_test_analysis.get('classification', {}).get('device_type', '')
+                            
+                            # Check if qualifies for high-quality test (using same logic)
+                            qualifies_high_quality = False
+                            if include_memcapacitive:
+                                qualifies_high_quality = new_device_type in ['memristive', 'memcapacitive'] or new_score >= high_quality_threshold
+                            else:
+                                qualifies_high_quality = new_device_type == 'memristive' or new_score >= high_quality_threshold
+                            
+                            print(f"[Conditional Testing] Device {device}: Re-evaluation score={new_score:.1f}, type={new_device_type}, qualifies={qualifies_high_quality}")
+                            if qualifies_high_quality:
+                                # Score improved during basic test, run high-quality test
+                                if high_quality_test_name:
+                                    print(f"[Conditional Testing] Device {device}: Score improved to {new_score:.1f}, running high-quality test")
+                                    self._run_tiered_test(
+                                        {"custom_sweep_name": high_quality_test_name},
+                                        device
+                                    )
+                else:
+                    print(f"[Conditional Testing] Device {device}: Score {score:.1f} below threshold {basic_threshold}, skipping additional tests")
+                
+            except Exception as exc:
+                print(f"[Conditional Testing] Error processing device {device}: {exc}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        # Run final test if enabled
+        final_test_config = config.get("final_test", {})
+        if final_test_config.get("enabled", False):
+            self._run_final_test(final_test_config, device_scores)
+        
+        self.set_status_message("Conditional Testing Complete")
+        messagebox.showinfo("Complete", "Conditional testing finished for all devices.")
+
+    def _update_conditional_testing_button_state(self) -> None:
+        """Update the conditional testing run button state based on connection status."""
+        if hasattr(self, 'conditional_testing_run_button'):
+            if self.connected:
+                self.conditional_testing_run_button.config(state=tk.NORMAL)
+            else:
+                self.conditional_testing_run_button.config(state=tk.DISABLED)
+        if hasattr(self, 'run_conditional_button_main'):
+            if self.connected:
+                self.run_conditional_button_main.config(state=tk.NORMAL)
+            else:
+                self.run_conditional_button_main.config(state=tk.DISABLED)
 
     def load_messaging_data(self) -> None:
         """Populate Telegram messaging metadata (names, token/chat IDs)."""
@@ -6629,11 +6857,12 @@ class MeasurementGUI:
                             )
 
                     elif measurement_type == "Endurance":
-                        set_v = float(self.end_set_v.get())
-                        reset_v = float(self.end_reset_v.get())
-                        pulse_ms = float(self.end_pulse_ms.get())
-                        cycles = int(self.end_cycles.get())
-                        read_v = float(self.end_read_v.get())
+                        # Read from JSON params first, fallback to GUI variables
+                        set_v = float(params.get("set_v", self.end_set_v.get()))
+                        reset_v = float(params.get("reset_v", self.end_reset_v.get()))
+                        pulse_ms = float(params.get("pulse_ms", self.end_pulse_ms.get()))
+                        cycles = int(params.get("cycles", self.end_cycles.get()))
+                        read_v = float(params.get("read_v", self.end_read_v.get()))
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -6659,11 +6888,16 @@ class MeasurementGUI:
                         print("endurance")
 
                     elif measurement_type == "Retention":
-                        set_v = float(self.ret_set_v.get())
-                        set_ms = float(self.ret_set_ms.get())
-                        read_v = float(self.ret_read_v.get())
-                        delay_s = float(self.ret_measure_delay.get())
-                        times_s = [delay_s]
+                        # Read from JSON params first, fallback to GUI variables
+                        set_v = float(params.get("set_v", self.ret_set_v.get()))
+                        set_ms = float(params.get("set_ms", self.ret_set_ms.get()))
+                        read_v = float(params.get("read_v", self.ret_read_v.get()))
+                        # Handle times_s array from JSON or single delay from GUI
+                        if "times_s" in params and isinstance(params["times_s"], list):
+                            times_s = [float(t) for t in params["times_s"]]
+                        else:
+                            delay_s = float(params.get("delay_s", self.ret_measure_delay.get()))
+                            times_s = [delay_s]
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -7438,12 +7672,14 @@ class MeasurementGUI:
             instrument = self.connections.connect_keithley(smu_type, address)
             self.keithley = instrument
             self.connected = self.connections.is_connected("keithley")
+            self._update_conditional_testing_button_state()
             if hasattr(self.keithley, 'beep'):
                 self.keithley.beep(4000, 0.2)
                 time.sleep(0.2)
                 self.keithley.beep(5000, 0.5)
         except RuntimeError as exc:
             self.connected = False
+            self._update_conditional_testing_button_state()
             error_str = str(exc)
             print(f"❌ ERROR: Unable to connect to SMU ({smu_type} @ {address})")
             print(f"   {error_str}")
@@ -7942,6 +8178,261 @@ class MeasurementGUI:
         device_path.mkdir(parents=True, exist_ok=True)
         return str(device_path)
     
+    def _get_sample_save_directory(self, sample_name: str) -> str:
+        """
+        Get sample-level save directory (for tracking/research that should be at sample level).
+        
+        Args:
+            sample_name: Sample name
+        
+        Returns:
+            String path to sample-level directory (e.g., base/test/)
+        """
+        base_path = Path(self._get_base_save_path())
+        sample_path = base_path / sample_name
+        sample_path.mkdir(parents=True, exist_ok=True)
+        return str(sample_path)
+    
+    def check_for_sample_name(self) -> None:
+        """Check if sample name is set, prompt if not (thread-safe)."""
+        sample_name = self.sample_name_var.get().strip()
+
+        if not sample_name:
+            # Must run dialog on main thread - schedule it
+            result_holder = [None]  # Mutable container to store result across thread boundary
+            
+            def ask_on_main_thread():
+                """Run the dialog on the main GUI thread."""
+                new_name = simpledialog.askstring(
+                    "Sample Name Required", 
+                    "Enter sample name (or cancel for 'undefined'):", 
+                    parent=self.master
+                )
+                
+                # Clean and validate the entered name
+                if new_name:
+                    cleaned_name = new_name.strip()
+                    # Remove/replace invalid file path characters
+                    invalid_chars = '<>:"|?*\\/[]'
+                    for char in invalid_chars:
+                        cleaned_name = cleaned_name.replace(char, '_')
+                    
+                    if cleaned_name:
+                        self.sample_name_var.set(cleaned_name)
+                    else:
+                        self.sample_name_var.set("undefined")
+                else:
+                    self.sample_name_var.set("undefined")
+                
+                result_holder[0] = True  # Signal completion
+            
+            # If we're on the main thread, just call it directly
+            try:
+                if threading.current_thread() == threading.main_thread():
+                    ask_on_main_thread()
+                else:
+                    # Schedule on main thread and wait
+                    self.master.after(0, ask_on_main_thread)
+                    # Wait for dialog to complete (with timeout)
+                    timeout = 60  # 60 seconds
+                    elapsed = 0
+                    while result_holder[0] is None and elapsed < timeout:
+                        time.sleep(0.1)
+                        elapsed += 0.1
+                    
+                    if result_holder[0] is None:
+                        # Timeout - just set undefined
+                        self.sample_name_var.set("undefined")
+            except Exception as e:
+                print(f"Error in sample name dialog: {e}")
+                self.sample_name_var.set("undefined")
+    
+    def _update_overlay_from_current_state(self) -> None:
+        """Helper method to update the orange overlay box with current state."""
+        if not hasattr(self, 'plot_panels') or not hasattr(self.plot_panels, 'update_overlay'):
+            return
+        
+        # Get sample name - prioritize in this order:
+        # 1. sample_name_var (user-entered or set from device)
+        # 2. current_device_name from sample_gui (saved device)
+        # 3. sample_type_var from sample_gui (selected sample type, even if no saved device)
+        sample_name = "—"
+        
+        # First try sample_name_var
+        if hasattr(self, 'sample_name_var'):
+            try:
+                name = self.sample_name_var.get().strip()
+                if name:
+                    sample_name = name
+            except Exception:
+                pass
+        
+        # If still empty, try current_device_name (saved device)
+        if sample_name == "—" or not sample_name:
+            if hasattr(self.sample_gui, 'current_device_name') and self.sample_gui.current_device_name:
+                sample_name = self.sample_gui.current_device_name
+        
+        # If still empty, fall back to sample_type_var (selected sample type)
+        # This ensures it updates even when no saved device is selected
+        if sample_name == "—" or not sample_name:
+            if hasattr(self.sample_gui, 'sample_type_var'):
+                try:
+                    sample_type = self.sample_gui.sample_type_var.get()
+                    if sample_type:
+                        sample_name = sample_type
+                except Exception:
+                    pass
+        
+        # Get device label
+        device_label = "—"
+        try:
+            # Try to get from device_section_and_number
+            if hasattr(self, 'device_section_and_number') and self.device_section_and_number:
+                device_label = self.device_section_and_number
+            # Fallback: get from sample_gui's current device selection
+            elif hasattr(self.sample_gui, 'device_var'):
+                try:
+                    device = self.sample_gui.device_var.get()
+                    if device:
+                        device_label = device
+                except Exception:
+                    pass
+            # Another fallback: use current_index to get device label
+            if device_label == "—" and hasattr(self, 'current_index') and hasattr(self.sample_gui, 'device_list'):
+                if 0 <= self.current_index < len(self.sample_gui.device_list):
+                    device_key = self.sample_gui.device_list[self.current_index]
+                    if hasattr(self.sample_gui, 'get_device_label'):
+                        device_label = self.sample_gui.get_device_label(device_key)
+                    else:
+                        device_label = str(device_key)
+        except Exception:
+            pass
+        
+        # Get current voltage
+        current_voltage = getattr(self, 'current_voltage', '0V')
+        if current_voltage == '0V' and hasattr(self, 'v_arr_disp') and self.v_arr_disp:
+            try:
+                v_now = float(self.v_arr_disp[-1])
+                current_voltage = f"{v_now:.3f}V"
+            except Exception:
+                pass
+        
+        # Get current loop
+        current_loop = getattr(self, 'current_loop', '#1')
+        if current_loop == '#1':
+            loop_val = None
+            if getattr(self, 'sweep_num', None) is not None:
+                loop_val = self.sweep_num
+            elif getattr(self, 'measurment_number', None) is not None:
+                loop_val = self.measurment_number
+            if loop_val is not None:
+                current_loop = f"#{loop_val}"
+        
+        # Update the overlay
+        self.plot_panels.update_overlay(
+            sample_name=sample_name,
+            device=device_label,
+            voltage=current_voltage,
+            loop=current_loop
+        )
+    
+    def on_sample_gui_change(self, change_type: str, **kwargs) -> None:
+        """Handle notifications from SampleGUI about changes.
+        
+        Args:
+            change_type: Type of change ('sample_type', 'section', 'device_name', 'device_selection')
+            **kwargs: Additional data about the change
+        """
+        try:
+            if change_type == 'device_name':
+                device_name = kwargs.get('device_name')
+                # Update sample_name_var if it exists
+                if hasattr(self, 'sample_name_var'):
+                    if device_name:
+                        self.sample_name_var.set(device_name)
+                    else:
+                        # If device name is cleared, try to get sample type as fallback
+                        if hasattr(self.sample_gui, 'sample_type_var'):
+                            try:
+                                sample_type = self.sample_gui.sample_type_var.get()
+                                if sample_type:
+                                    self.sample_name_var.set(sample_type)
+                            except Exception:
+                                pass
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+            
+            elif change_type == 'sample_type':
+                sample_type = kwargs.get('sample_type')
+                # Update sample_name_var if device_name is not set
+                if hasattr(self, 'sample_name_var'):
+                    current_name = self.sample_name_var.get().strip()
+                    # Only update if current name is empty or matches old sample type
+                    if not current_name or (hasattr(self.sample_gui, 'sample_type_var') and 
+                                           current_name == getattr(self.sample_gui, 'sample_type_var', None)):
+                        if sample_type:
+                            self.sample_name_var.set(sample_type)
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+            
+            elif change_type == 'section':
+                section = kwargs.get('section')
+                device = kwargs.get('device')
+                # Update current_index if device changed
+                if device and hasattr(self.sample_gui, 'device_list'):
+                    try:
+                        device_key = self.sample_gui.get_device_key_from_label(device)
+                        if device_key and device_key in self.sample_gui.device_list:
+                            new_index = self.sample_gui.device_list.index(device_key)
+                            if new_index != self.current_index:
+                                self.current_index = new_index
+                                # Update device-related attributes
+                                if hasattr(self, 'device_list') and self.current_index < len(self.device_list):
+                                    self.current_device = self.device_list[self.current_index]
+                                    self.device_section_and_number = self.convert_to_name(self.current_index)
+                                    self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
+                    except Exception:
+                        pass
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+            
+            elif change_type == 'device_selection':
+                selected_devices = kwargs.get('selected_devices', [])
+                selected_indices = kwargs.get('selected_indices', [])
+                # Update device_list if provided
+                if selected_devices:
+                    self.device_list = selected_devices.copy()
+                    # Update current_index if it's out of bounds
+                    if self.current_index >= len(self.device_list):
+                        self.current_index = 0 if self.device_list else 0
+                    # Update current_device and device_section_and_number
+                    if self.device_list and self.current_index < len(self.device_list):
+                        self.current_device = self.device_list[self.current_index]
+                        self.device_section_and_number = self.convert_to_name(self.current_index)
+                        self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
+                
+                # Update overlay
+                self._update_overlay_from_current_state()
+        except Exception as e:
+            print(f"Error handling sample_gui change notification ({change_type}): {e}")
+    
+    def check_connection(self) -> None:
+        self.connect_keithley()
+        time.sleep(0.1)
+        self.Check_connection_gui = CheckConnection(self.master, self.keithley)
+
+    def _start_plot_threads(self) -> None:
+        """Compatibility shim: delegate to PlotUpdaters."""
+        if hasattr(self, "plot_updaters"):
+            self.plot_updaters.start_all_threads()
+
+    def _start_temperature_thread(self) -> None:
+        """Compatibility shim for legacy callers."""
+        if hasattr(self, "plot_updaters"):
+            self.plot_updaters.start_temperature_thread(self.itc_connected)
     def _get_sample_save_directory(self, sample_name: str) -> str:
         """
         Get sample-level save directory (for tracking/research that should be at sample level).

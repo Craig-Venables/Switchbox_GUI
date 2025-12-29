@@ -1,0 +1,29 @@
+{
+  "quick_test": {
+    "custom_sweep_name": "",
+    "timeout_s": 300
+  },
+  "thresholds": {
+    "basic_memristive": 60.0,
+    "high_quality": 80.0
+  },
+  "re_evaluate_during_test": {
+    "enabled": true
+  },
+  "include_memcapacitive": true,
+  "tests": {
+    "basic_memristive": {
+      "custom_sweep_name": ""
+    },
+    "high_quality": {
+      "custom_sweep_name": ""
+    }
+  },
+  "final_test": {
+    "enabled": false,
+    "selection_mode": "top_x",
+    "top_x_count": 3,
+    "min_score_threshold": 80.0,
+    "custom_sweep_name": ""
+  }
+}
