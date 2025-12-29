@@ -123,6 +123,7 @@ class MeasurementPlotPanels:
             "current_time": tk.BooleanVar(value=False),
             "temp_time": tk.BooleanVar(value=False),
             "endurance": tk.BooleanVar(value=False),
+            "endurance_current": tk.BooleanVar(value=False),
             "retention": tk.BooleanVar(value=False),
             "analysis_stats": tk.BooleanVar(value=False),  # Stats panel
         }
@@ -375,6 +376,22 @@ class MeasurementPlotPanels:
         self.endurance_ratios: List[float] = []
         self._register("endurance", fig_end, ax_end, canvas_end, None)
         self.plot_frames["endurance"] = frame_end
+        
+        # Endurance Current (ON/OFF over time)
+        frame_end_curr = tk.LabelFrame(parent, text="Endurance Current", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
+        fig_end_curr, ax_end_curr = self._make_figure(title="Endurance Current (ON/OFF)", figsize=(4, 3))
+        ax_end_curr.set_yscale("log")
+        self._style_axis(ax_end_curr, "Time (s)", "Current (A)")
+        canvas_end_curr = FigureCanvasTkAgg(fig_end_curr, master=frame_end_curr)
+        canvas_end_curr.get_tk_widget().pack(fill='both', expand=True)
+        # Initialize endurance current tracking lists
+        if not hasattr(self, 'endurance_on_times'):
+            self.endurance_on_times: List[float] = []
+            self.endurance_on_currents: List[float] = []
+            self.endurance_off_times: List[float] = []
+            self.endurance_off_currents: List[float] = []
+        self._register("endurance_current", fig_end_curr, ax_end_curr, canvas_end_curr, None)
+        self.plot_frames["endurance_current"] = frame_end_curr
         
         # Retention
         frame_ret = tk.LabelFrame(parent, text="Retention", font=("Segoe UI", 9, "bold"), bg='white', padx=5, pady=5)
@@ -789,6 +806,77 @@ class MeasurementPlotPanels:
         
         canvas.draw()
     
+    def update_endurance_current_plot(
+        self, 
+        on_times: List[float], 
+        on_currents: List[float],
+        off_times: List[float],
+        off_currents: List[float]
+    ) -> None:
+        """Update endurance current plot with ON and OFF currents over time"""
+        if "endurance_current" not in self.axes:
+            return
+        
+        self.endurance_on_times = on_times if on_times else []
+        self.endurance_on_currents = on_currents if on_currents else []
+        self.endurance_off_times = off_times if off_times else []
+        self.endurance_off_currents = off_currents if off_currents else []
+        
+        ax = self.axes["endurance_current"]
+        canvas = self.canvases["endurance_current"]
+        
+        ax.clear()
+        ax.set_title("Endurance Current (ON/OFF)")
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("Current (A)")
+        ax.set_yscale("log")
+        
+        # Plot ON currents
+        if self.endurance_on_times and self.endurance_on_currents and len(self.endurance_on_times) == len(self.endurance_on_currents):
+            # Filter out zeros and negative values for log scale
+            valid_on_indices = [i for i in range(len(self.endurance_on_times))
+                              if self.endurance_on_times[i] > 0 and self.endurance_on_currents[i] > 0]
+            if valid_on_indices:
+                valid_on_times = [self.endurance_on_times[i] for i in valid_on_indices]
+                valid_on_currents = [self.endurance_on_currents[i] for i in valid_on_indices]
+                ax.plot(
+                    valid_on_times,
+                    valid_on_currents,
+                    marker="o",
+                    linestyle="-",
+                    linewidth=1.5,
+                    markersize=4,
+                    label="ON Current",
+                    color="green"
+                )
+        
+        # Plot OFF currents
+        if self.endurance_off_times and self.endurance_off_currents and len(self.endurance_off_times) == len(self.endurance_off_currents):
+            # Filter out zeros and negative values for log scale
+            valid_off_indices = [i for i in range(len(self.endurance_off_times))
+                                if self.endurance_off_times[i] > 0 and self.endurance_off_currents[i] > 0]
+            if valid_off_indices:
+                valid_off_times = [self.endurance_off_times[i] for i in valid_off_indices]
+                valid_off_currents = [self.endurance_off_currents[i] for i in valid_off_indices]
+                ax.plot(
+                    valid_off_times,
+                    valid_off_currents,
+                    marker="s",
+                    linestyle="-",
+                    linewidth=1.5,
+                    markersize=4,
+                    label="OFF Current",
+                    color="red"
+                )
+        
+        if self.endurance_on_times or self.endurance_off_times:
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            ax.relim()
+            ax.autoscale()
+        
+        canvas.draw()
+    
     def update_retention_plot(self, times: List[float], currents: List[float]) -> None:
         """Update retention plot with new data"""
         if "retention" not in self.axes:
@@ -934,16 +1022,31 @@ class MeasurementPlotPanels:
         canvas_ret = FigureCanvasTkAgg(fig_ret, master=frame)
         canvas_ret.get_tk_widget().grid(row=0, column=1, sticky="nsew")
 
+        # Add endurance current ON/OFF over time plot
+        fig_end_curr, ax_end_curr = self._make_figure(title="Endurance Current (ON/OFF)", figsize=(3, 2))
+        ax_end_curr.set_yscale("log")
+        self._style_axis(ax_end_curr, "Time (s)", "Current (A)")
+        canvas_end_curr = FigureCanvasTkAgg(fig_end_curr, master=frame)
+        canvas_end_curr.get_tk_widget().grid(row=1, column=0, columnspan=2, sticky="nsew")
+
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
         frame.rowconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
 
         self.endurance_ratios: List[float] = []
         self.retention_times: List[float] = []
         self.retention_currents: List[float] = []
+        
+        # Track ON and OFF currents with timestamps for endurance
+        self.endurance_on_times: List[float] = []
+        self.endurance_on_currents: List[float] = []
+        self.endurance_off_times: List[float] = []
+        self.endurance_off_currents: List[float] = []
 
         self._register("endurance", fig_end, ax_end, canvas_end, None)
         self._register("retention", fig_ret, ax_ret, canvas_ret, None)
+        self._register("endurance_current", fig_end_curr, ax_end_curr, canvas_end_curr, None)
 
     def create_current_time_plot(self, parent: tk.Misc) -> None:
         frame = tk.LabelFrame(parent, text="Current vs Time", padx=4, pady=3)
@@ -1239,7 +1342,9 @@ class MeasurementPlotPanels:
             if hasattr(self, name):
                 attrs.append(name)
         # Manual data holders
-        for name in ["endurance_ratios", "retention_times", "retention_currents"]:
+        for name in ["endurance_ratios", "retention_times", "retention_currents", 
+                     "endurance_on_times", "endurance_on_currents", 
+                     "endurance_off_times", "endurance_off_currents"]:
             if hasattr(self, name):
                 attrs.append(name)
         return attrs
