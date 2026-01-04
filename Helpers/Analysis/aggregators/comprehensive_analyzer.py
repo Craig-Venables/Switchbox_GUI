@@ -1,17 +1,65 @@
 """
-Comprehensive analysis orchestrator - one-stop shop for all analysis types.
+Comprehensive Analysis Orchestrator
+===================================
 
-This module provides:
-1. Auto-detection of all code_names from measurement files
-2. Analysis for each code_name found in test_configurations.json
-3. Device-level combined sweep plots (using sweep_combinations)
-4. Section-level and sample-level analysis
-5. Automatic execution after custom measurements
+Purpose:
+--------
+One-stop orchestrator for comprehensive sample analysis. This module coordinates
+all levels of analysis (device, section, and sample) into a single unified workflow.
+Called by the "Run Full Sample Analysis" button in the Measurement GUI.
+
+What This Module Does:
+----------------------
+1. Discovers all code_names (test types) from measurement files in the sample
+2. Filters to valid code_names that exist in test_configurations.json
+3. Generates device-level combined sweep plots (using sweep_combinations from config)
+4. Runs section-level analysis (stacked sweeps & statistics for each section)
+5. Runs sample-level analysis for each code_name (12 plot types per code_name)
+6. Runs overall sample analysis (all measurements combined, no code_name filter)
+
+Key Classes:
+------------
+- ComprehensiveAnalyzer: Main orchestrator class
+
+Key Methods:
+------------
+- run_comprehensive_analysis(): Main entry point - runs complete analysis workflow
+- discover_all_code_names(): Scans files to find all test types
+- get_valid_code_names(): Filters to code_names in test_configurations.json
+- plot_device_combined_sweeps(): Creates device-level combined plots
+
+Usage:
+------
+    from Helpers.Analysis import ComprehensiveAnalyzer
+    
+    analyzer = ComprehensiveAnalyzer(sample_directory="path/to/sample")
+    analyzer.set_log_callback(lambda msg: print(msg))  # Optional progress logging
+    analyzer.run_comprehensive_analysis()
+
+Output:
+-------
+All output saved to: {sample_dir}/sample_analysis/
+- Device plots: {sample_dir}/{section}/{device_num}/images/
+- Section plots: {sample_dir}/{section}/plots_combined/
+- Sample plots: {sample_dir}/sample_analysis/plots/{code_name}/ (code_name-specific)
+- Overall plots: {sample_dir}/sample_analysis/plots/ (no code_name filter)
+- Size comparison plots: {sample_dir}/sample_analysis/plots/size_comparison/
+- Origin data: {sample_dir}/sample_analysis/plots/data_origin_formatted/
+- Analysis data: {sample_dir}/sample_analysis/analysis/ (device_tracking, device_research, device_summaries)
+
+Called By:
+----------
+- gui/measurement_gui/main.py → run_full_sample_analysis() (via "Run Full Sample Analysis" button)
+
+Dependencies:
+-------------
+- section_analyzer.py: SectionAnalyzer for section-level analysis
+- sample_analyzer.py: SampleAnalysisOrchestrator for sample-level analysis
+- Json_Files/test_configurations.json: Test type configurations
 """
 
 import os
 import json
-import numpy as np
 import numpy as np
 import matplotlib
 # Force Agg backend
@@ -69,13 +117,28 @@ class ComprehensiveAnalyzer:
             print(f"[COMPREHENSIVE] Error loading test_configurations.json: {e}")
             return {}
     
+    def _is_valid_code_name(self, code_name: str) -> bool:
+        """
+        Check if code_name is valid (not purely numeric).
+        Numeric-only strings are misclassified code names and should be excluded.
+        """
+        if not code_name:
+            return False
+        # Check if code_name is purely numeric (misclassified)
+        if code_name.isdigit():
+            return False
+        return True
+    
     def _extract_code_name_from_filename(self, filename: str) -> Optional[str]:
         """Extract code_name from filename (position 6 after splitting by '-')."""
         try:
             filename = filename.replace('.txt', '')
             parts = filename.split('-')
             if len(parts) > 6:
-                return parts[6]
+                code_name = parts[6]
+                # Filter out numeric-only code names (misclassified)
+                if self._is_valid_code_name(code_name):
+                    return code_name
         except Exception:
             pass
         return None

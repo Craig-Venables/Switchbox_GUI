@@ -10,8 +10,8 @@ import re
 
 # Import analysis function
 try:
-    from Helpers.IV_Analysis import quick_analyze
-    from Helpers.IV_Analysis.single_file_metrics import read_data_file
+    from Helpers.Analysis import quick_analyze
+    from Helpers.Analysis.core.sweep_analyzer import read_data_file
 except ImportError:
     print("[BATCH] Warning: Could not import analysis functions")
     quick_analyze = None

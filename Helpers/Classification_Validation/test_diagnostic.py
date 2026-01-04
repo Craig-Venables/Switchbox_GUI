@@ -10,7 +10,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from Helpers.IV_Analysis.single_file_metrics import analyze_single_file, read_data_file
+from Helpers.Analysis import SweepAnalyzer
+from Helpers.Analysis.core.sweep_analyzer import read_data_file
 
 def test_file(filepath):
     """Test a single file and show detailed diagnostics."""
@@ -40,7 +41,7 @@ def test_file(filepath):
     
     # Analyze with full diagnostics
     try:
-        analyzer = analyze_single_file(
+        analyzer = SweepAnalyzer(
             voltage=voltage,
             current=current,
             time=time,

@@ -576,7 +576,7 @@ class ReviewPanel:
 
                 # Read voltage/current from file
 
-                from ...IV_Analysis.single_file_metrics import read_data_file
+                from ...Analysis.core.sweep_analyzer import read_data_file
 
                 result = read_data_file(file_path)
 

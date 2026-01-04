@@ -1,10 +1,65 @@
 """
-Section-level data analyzer for memristor device measurements.
+Section-Level Analyzer
+======================
 
-Restored from Switchbox_Data_Analysis_and_Graphing/data_analyzer.py to provide:
-1. Stacked sweep plots (first/second/third sweeps)
-2. Statistical comparisons
-3. Section-level summaries
+Purpose:
+--------
+Analyzes a section (single letter folder, e.g., "A", "B") of a sample/substrate
+containing multiple devices. Provides section-level aggregation, visualization,
+and statistical analysis.
+
+What This Module Does:
+----------------------
+1. Analyzes all devices within a section (letter folder)
+2. Categorizes sweeps by test type and voltage
+3. Generates stacked sweep plots:
+   - By test type (e.g., all "St_v1" sweeps combined)
+   - By voltage (e.g., all "0.5v" sweeps combined)
+4. Performs statistical comparisons between devices in the section
+5. Generates comparison plots for key metrics (Ron, Roff, ratios, etc.)
+
+Key Classes:
+------------
+- SectionAnalyzer: Main section analysis class
+- TestTypeAnalyzer: Manages test type configurations from JSON
+
+Key Methods:
+------------
+- analyze_section_sweeps(): Main entry point - runs complete section analysis
+- categorize_sweeps(): Organizes sweeps by type and voltage
+- plot_sweeps_by_type(): Creates stacked plots grouped by test type
+- plot_sweeps_by_voltage(): Creates stacked plots grouped by voltage
+- get_main_sweeps_stats(): Extracts statistics for main sweeps
+- plot_statistical_comparisons(): Creates comparison plots for key metrics
+
+Usage:
+------
+    from Helpers.Analysis import SectionAnalyzer
+    
+    analyzer = SectionAnalyzer(
+        top_level_path="path/to/sample",
+        section="A",  # Section letter
+        sample_name="sample_name"
+    )
+    analyzer.analyze_section_sweeps()
+
+Output:
+-------
+Saved to: {sample_dir}/{section}/plots_combined/
+- {test_type}/sweep_{n}_combined.png: Stacked sweeps by type
+- voltage_groups/voltage_{v}V_combined.png: Stacked sweeps by voltage
+- statistics/main_sweeps_comparison.png: Comparison of main sweeps
+- statistics/{metric}_comparison.png: Bar plots for key metrics
+
+Called By:
+----------
+- comprehensive_analyzer.py → ComprehensiveAnalyzer.run_comprehensive_analysis()
+  (runs section analysis for each section in the sample)
+
+Dependencies:
+-------------
+- core/sweep_analyzer.py: SweepAnalyzer (imported as AnalyzeSingleFile) for individual file analysis
+- Json_Files/test_configurations.json: Test type configurations
 """
 
 import numpy as np
@@ -21,7 +76,7 @@ import os
 
 # Import single file analyzer
 try:
-    from Helpers.IV_Analysis.single_file_metrics import analyze_single_file as AnalyzeSingleFile
+    from ..core.sweep_analyzer import SweepAnalyzer as AnalyzeSingleFile
 except ImportError:
     AnalyzeSingleFile = None
 
