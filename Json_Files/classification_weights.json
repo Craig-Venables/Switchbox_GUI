@@ -1,5 +1,5 @@
 {
-    "description": "Default classification weights for device type scoring in single_file_metrics.py",
+    "description": "Default classification weights for device type scoring in sweep_analyzer.py",
     "version": "1.0",
     "weights": {
         "memristive_has_hysteresis": 25.0,

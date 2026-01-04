@@ -123,7 +123,7 @@ sample_config = {
         "sections": {"A": True, "B": True, "C": True, "D": True},
         "devices": [str(i) for i in range(1, 10)]}}
 
-multiplexer_types = {'Pyswitchbox': {}, 'Electronic_Mpx': {}}
+multiplexer_types = {'Pyswitchbox': {}, 'Electronic_Mpx': {}, 'Manual': {}}
 
 
 # Function to load device mapping from JSON file
@@ -2693,6 +2693,11 @@ class SampleGUI:
                     controller=self.mpx
                 )
                 self.mpx_status_label.config(text=f"Multiplexer: {self.multiplexer_type} Connected", fg="#4CAF50")
+            elif self.multiplexer_type == "Manual":
+                # Manual mode: no hardware initialization, user manually moves probes
+                self.mpx_manager = None
+                self.log_terminal("Manual mode activated - no multiplexer routing, manual probe movement required", "SUCCESS")
+                self.mpx_status_label.config(text="Multiplexer: Manual Mode", fg="#FF9800")
             else:
                 self.log_terminal("Unknown multiplexer type", "ERROR")
                 self.mpx_status_label.config(text="Multiplexer: Unknown Type", fg="#F44336")
@@ -3270,7 +3275,14 @@ class SampleGUI:
                 return
 
         # Use unified multiplexer manager interface
-        if self.mpx_manager is not None:
+        if self.multiplexer_type == "Manual":
+            # Manual mode: just log and update GUI state, no actual routing
+            self.log_terminal(f"Manual mode: Device {label} selected (manually move probes to this device)", "INFO")
+            # Update measurement window if open
+            if self.measurement_window:
+                self.measuremnt_gui.current_index = self.current_index
+                self.measuremnt_gui.update_variables()
+        elif self.mpx_manager is not None:
             self.log_terminal(f"Routing to {label} via {self.multiplexer_type}")
             success = self.mpx_manager.route_to_device(current_device, self.current_index)
             

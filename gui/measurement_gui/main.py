@@ -687,7 +687,7 @@ class MeasurementGUI:
         
         Example usage (when wiring up analysis):
         ---------------------------------------
-        from Helpers.IV_Analysis import IVSweepAnalyzer
+        from Helpers.Analysis import IVSweepAnalyzer
         
         # After a sweep completes, analyze the data:
         analyzer = IVSweepAnalyzer(analysis_level=self.analysis_level_var.get())
@@ -874,7 +874,7 @@ class MeasurementGUI:
         
         try:
             # Import analysis module
-            from Helpers.IV_Analysis import quick_analyze
+            from Helpers.Analysis import quick_analyze
             
             # Get analysis level from GUI
             # Always use 'classification' for speed (memristive devices get research in background)
@@ -2599,7 +2599,7 @@ class MeasurementGUI:
             # Run in background thread to avoid blocking GUI
             def run_plotting():
                 try:
-                    from Helpers.IV_Analysis import quick_analyze
+                    from Helpers.Analysis import quick_analyze
                     from Helpers.plotting_core import UnifiedPlotter
                     import matplotlib
                     matplotlib.use('Agg')
@@ -2785,7 +2785,7 @@ class MeasurementGUI:
 
             def run_sample_plotting():
                 try:
-                    from Helpers.IV_Analysis import quick_analyze
+                    from Helpers.Analysis import quick_analyze
                     from Helpers.plotting_core import UnifiedPlotter
                     import matplotlib
                     # Force headless backend
@@ -2953,7 +2953,7 @@ class MeasurementGUI:
                 self.master.update_idletasks()
 
             # Use comprehensive analyzer for one-stop shop analysis
-            from Helpers.Sample_Analysis.comprehensive_analyzer import ComprehensiveAnalyzer
+            from Helpers.Analysis import ComprehensiveAnalyzer
 
             if hasattr(self, 'analysis_status_label'):
                 self.analysis_status_label.config(text="Running comprehensive analysis (all code_names)...")
@@ -3390,7 +3390,7 @@ class MeasurementGUI:
         """
         try:
             import numpy as np
-            from Helpers.IV_Analysis import quick_analyze
+            from Helpers.Analysis import quick_analyze
             from pathlib import Path
 
             analyzed_count = 0
@@ -3900,7 +3900,7 @@ class MeasurementGUI:
         Run analysis synchronously (blocking until complete).
         Returns analysis dictionary or None if failed.
         """
-        from Helpers.IV_Analysis.iv_sweep_analyzer import quick_analyze
+        from Helpers.Analysis import quick_analyze
         
         try:
             # Determine analysis level
@@ -7245,7 +7245,7 @@ class MeasurementGUI:
                     if sample_name:
                         sample_dir = self._get_sample_save_directory(sample_name)
                         if os.path.exists(sample_dir):
-                            from Helpers.Sample_Analysis.comprehensive_analyzer import ComprehensiveAnalyzer
+                            from Helpers.Analysis import ComprehensiveAnalyzer
                             comprehensive = ComprehensiveAnalyzer(sample_dir)
                             comprehensive.run_comprehensive_analysis()
                             print("[COMPREHENSIVE] Automatic analysis complete!")
@@ -7263,10 +7263,15 @@ class MeasurementGUI:
                     
                     break
                 if not self.single_device_flag:
-                    self.sample_gui.next_device()
-                    time.sleep(0.1)
-                    self.sample_gui.change_relays()
-                    print("Switching Device")
+                    # Check if in manual mode - skip automatic advancement
+                    if hasattr(self.sample_gui, 'multiplexer_type') and self.sample_gui.multiplexer_type == "Manual":
+                        print("Manual mode: Skipping automatic device advancement - user must manually advance")
+                        self.log_terminal("Manual mode: Measurement complete. Please manually advance to next device using GUI buttons.")
+                    else:
+                        self.sample_gui.next_device()
+                        time.sleep(0.1)
+                        self.sample_gui.change_relays()
+                        print("Switching Device")
 
 
             # Always mark measurement complete in GUI
