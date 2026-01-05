@@ -7072,7 +7072,6 @@ class MeasurementGUI:
                         # Since analysis now runs in background, check for pending results
                         if int(str(key)) == 1:
                             # Wait a bit for analysis to complete (with timeout)
-                            import time
                             max_wait = 10.0  # 10 seconds max
                             wait_start = time.time()
                             while time.time() - wait_start < max_wait:
