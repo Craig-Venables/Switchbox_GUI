@@ -174,11 +174,51 @@ class ComprehensiveAnalyzer:
         print(f"[COMPREHENSIVE] Valid code_names (in config): {valid}")
         return valid
     
+    def _find_min_sweep_for_code_name(self, device_path: Path, code_name: str) -> Optional[int]:
+        """
+        Find the minimum sweep number for a given code_name in a device folder.
+        This treats the lowest number as the first measurement for that code_name.
+        
+        Args:
+            device_path: Path to device directory
+            code_name: Code name to search for
+            
+        Returns:
+            int or None: Minimum sweep number for this code_name, or None if not found
+        """
+        if not device_path.exists():
+            return None
+        
+        files = list(device_path.glob('*.txt'))
+        min_sweep = None
+        
+        for f in files:
+            if f.name == 'log.txt':
+                continue
+            try:
+                parts = f.name.replace('.txt', '').split('-')
+                if len(parts) > 6:
+                    file_code_name = parts[6]
+                    if file_code_name == code_name:
+                        sweep_num = int(parts[0])
+                        if min_sweep is None or sweep_num < min_sweep:
+                            min_sweep = sweep_num
+            except (ValueError, IndexError):
+                continue
+        
+        return min_sweep
+    
     def plot_device_combined_sweeps(self, section: str, device_num: str, code_name: str) -> None:
         """
         Plot combined sweeps for a single device using sweep_combinations from config.
         
         This matches the old module's analyze_single_device() behavior.
+        Finds the minimum sweep number for the code_name and treats it as the first measurement.
+        
+        Special handling for endurance and retention measurements:
+        - Endurance: plots resistance vs cycle/iteration
+        - Retention: plots resistance vs time
+        - IV sweeps: plots voltage vs current (default)
         """
         device_path = self.sample_dir / section / device_num
         if not device_path.exists():
@@ -186,6 +226,11 @@ class ComprehensiveAnalyzer:
         
         images_dir = device_path / 'images'
         images_dir.mkdir(exist_ok=True)
+        
+        # Find minimum sweep number for this code_name (treat as first measurement)
+        min_sweep = self._find_min_sweep_for_code_name(device_path, code_name)
+        if min_sweep is None:
+            return  # No files found for this code_name
         
         # Get sweep combinations for this code_name
         if code_name not in self.test_configs:
@@ -197,6 +242,10 @@ class ComprehensiveAnalyzer:
         if not combinations:
             return
         
+        # Detect measurement type from code_name
+        is_endurance = 'end' in code_name.lower()
+        is_retention = 'ret' in code_name.lower()
+        
         # Process each combination
         for combo in combinations:
             sweeps = combo.get('sweeps', [])
@@ -205,52 +254,155 @@ class ComprehensiveAnalyzer:
             if not sweeps:
                 continue
             
-            # Create figure with linear and log subplots
-            fig = Figure(figsize=(16, 6))
-            FigureCanvasAgg(fig)
-            ax1 = fig.add_subplot(121)
-            ax2 = fig.add_subplot(122)
+            # Create figure - different layout for endurance/retention vs IV
+            if is_endurance or is_retention:
+                # Single plot for endurance/retention
+                fig = Figure(figsize=(12, 6))
+                FigureCanvasAgg(fig)
+                ax1 = fig.add_subplot(111)
+            else:
+                # Dual plot (linear + log) for IV sweeps
+                fig = Figure(figsize=(16, 6))
+                FigureCanvasAgg(fig)
+                ax1 = fig.add_subplot(121)
+                ax2 = fig.add_subplot(122)
             
             # Plot each sweep in the combination
-            for sweep_num in sweeps:
-                sweep_files = list(device_path.glob(f'{sweep_num}-*.txt'))
+            # sweeps from config are relative (1=first, 2=second, etc.)
+            # Add to min_sweep to get actual sweep numbers
+            for relative_sweep in sweeps:
+                actual_sweep_num = min_sweep + (relative_sweep - 1)  # Convert relative to absolute
+                sweep_files = list(device_path.glob(f'{actual_sweep_num}-*.txt'))
                 sweep_files = [f for f in sweep_files if f.name != 'log.txt']
                 
-                if sweep_files:
+                # Filter to only files with matching code_name
+                matching_files = []
+                for f in sweep_files:
+                    try:
+                        parts = f.name.replace('.txt', '').split('-')
+                        if len(parts) > 6 and parts[6] == code_name:
+                            matching_files.append(f)
+                    except (ValueError, IndexError):
+                        continue
+                
+                if matching_files:
                     try:
                         # Read data file
-                        data = np.loadtxt(sweep_files[0], skiprows=1 if self._has_header(sweep_files[0]) else 0)
-                        if data.shape[1] >= 2:
+                        data = np.loadtxt(matching_files[0], skiprows=1 if self._has_header(matching_files[0]) else 0)
+                        
+                        if data.shape[1] < 2:
+                            continue
+                        
+                        # Parse filename for metadata
+                        file_info = self._parse_filename(matching_files[0].name)
+                        
+                        # Determine label
+                        if is_endurance:
+                            label = f"Endurance {relative_sweep}"
+                            # Try to extract pulse time from filename if available
+                            if file_info:
+                                label += f" (Sweep {actual_sweep_num})"
+                        elif is_retention:
+                            label = f"Retention {relative_sweep}"
+                            if file_info:
+                                label += f" (Sweep {actual_sweep_num})"
+                        else:
+                            label = f"Sweep {actual_sweep_num}"
+                            if file_info and len(sweeps) >= 3:
+                                label += f" (V={file_info.get('voltage', '?')}, SD={file_info.get('step_delay', '?')})"
+                        
+                        # Plot based on measurement type
+                        if is_endurance:
+                            # Endurance: plot resistance vs cycle/iteration
+                            # Data format: typically has iteration/cycle, resistance columns
+                            if data.shape[1] >= 2:
+                                # Try to detect column structure
+                                # Common formats: [iteration, resistance] or [time, voltage, current, resistance]
+                                if data.shape[1] >= 4:
+                                    # Assume: time, voltage, current, resistance
+                                    x_data = data[:, 0]  # time or iteration
+                                    y_data = data[:, 3]  # resistance
+                                elif data.shape[1] >= 2:
+                                    # Assume: iteration/cycle, resistance
+                                    x_data = np.arange(len(data))  # cycle number
+                                    y_data = data[:, 1]  # resistance (or calculate from V/I)
+                                    # If second column looks like current, calculate resistance
+                                    if np.max(np.abs(y_data)) > 1e-3:  # Looks like current
+                                        voltage = data[:, 0]
+                                        current = data[:, 1]
+                                        y_data = np.abs(voltage / (current + 1e-12))  # Calculate resistance
+                                
+                                ax1.plot(x_data, y_data, label=label, linewidth=1.5, marker='o', markersize=3)
+                                
+                        elif is_retention:
+                            # Retention: plot resistance vs time
+                            if data.shape[1] >= 2:
+                                # Common formats: [time, resistance] or [time, voltage, current, resistance]
+                                if data.shape[1] >= 4:
+                                    # Assume: time, voltage, current, resistance
+                                    x_data = data[:, 0]  # time
+                                    y_data = data[:, 3]  # resistance
+                                elif data.shape[1] >= 2:
+                                    # Assume: time, resistance or time, voltage, current
+                                    x_data = data[:, 0]  # time
+                                    if data.shape[1] >= 3:
+                                        # time, voltage, current - calculate resistance
+                                        voltage = data[:, 1]
+                                        current = data[:, 2]
+                                        y_data = np.abs(voltage / (current + 1e-12))
+                                    else:
+                                        y_data = data[:, 1]  # resistance
+                                
+                                ax1.plot(x_data, y_data, label=label, linewidth=1.5, marker='o', markersize=3)
+                                
+                        else:
+                            # IV Sweep: plot voltage vs current
                             voltage = data[:, 0]
                             current = data[:, 1]
                             
-                            # Parse filename for metadata
-                            file_info = self._parse_filename(sweep_files[0].name)
-                            label = f"Sweep {sweep_num}"
-                            if file_info and len(sweeps) >= 3:
-                                label += f" (V={file_info.get('voltage', '?')}, SD={file_info.get('step_delay', '?')})"
-                            
                             # Plot on both axes
                             ax1.plot(voltage, current, label=label, linewidth=1.5)
-                            ax2.semilogy(voltage, np.abs(current), label=label, linewidth=1.5)
+                            if not is_endurance and not is_retention:
+                                ax2.semilogy(voltage, np.abs(current), label=label, linewidth=1.5)
+                                
                     except Exception as e:
-                        print(f"[COMPREHENSIVE] Error reading {sweep_files[0]}: {e}")
+                        print(f"[COMPREHENSIVE] Error reading {matching_files[0]}: {e}")
                         continue
             
-            # Format plots
-            ax1.set_xlabel('Voltage (V)', fontsize=12, fontweight='bold')
-            ax1.set_ylabel('Current (A)', fontsize=12, fontweight='bold')
-            ax1.set_title(f"{self.sample_name} {section}{device_num} {code_name} - {title}", 
-                         fontsize=13, fontweight='bold')
-            ax1.grid(True, alpha=0.3)
-            ax1.legend()
-            
-            ax2.set_xlabel('Voltage (V)', fontsize=12, fontweight='bold')
-            ax2.set_ylabel('|Current| (A)', fontsize=12, fontweight='bold')
-            ax2.set_title(f"{self.sample_name} {section}{device_num} {code_name} - {title} (Log)", 
-                         fontsize=13, fontweight='bold')
-            ax2.grid(True, alpha=0.3)
-            ax2.legend()
+            # Format plots based on measurement type
+            if is_endurance:
+                ax1.set_xlabel('Cycle/Iteration', fontsize=12, fontweight='bold')
+                ax1.set_ylabel('Resistance (Ω)', fontsize=12, fontweight='bold')
+                ax1.set_title(f"{self.sample_name} {section}{device_num} {code_name} - {title}", 
+                             fontsize=13, fontweight='bold')
+                ax1.grid(True, alpha=0.3)
+                ax1.legend()
+                ax1.set_yscale('log')  # Log scale for resistance
+                
+            elif is_retention:
+                ax1.set_xlabel('Time (s)', fontsize=12, fontweight='bold')
+                ax1.set_ylabel('Resistance (Ω)', fontsize=12, fontweight='bold')
+                ax1.set_title(f"{self.sample_name} {section}{device_num} {code_name} - {title}", 
+                             fontsize=13, fontweight='bold')
+                ax1.grid(True, alpha=0.3)
+                ax1.legend()
+                ax1.set_yscale('log')  # Log scale for resistance
+                
+            else:
+                # IV Sweep formatting
+                ax1.set_xlabel('Voltage (V)', fontsize=12, fontweight='bold')
+                ax1.set_ylabel('Current (A)', fontsize=12, fontweight='bold')
+                ax1.set_title(f"{self.sample_name} {section}{device_num} {code_name} - {title}", 
+                             fontsize=13, fontweight='bold')
+                ax1.grid(True, alpha=0.3)
+                ax1.legend()
+                
+                ax2.set_xlabel('Voltage (V)', fontsize=12, fontweight='bold')
+                ax2.set_ylabel('|Current| (A)', fontsize=12, fontweight='bold')
+                ax2.set_title(f"{self.sample_name} {section}{device_num} {code_name} - {title} (Log)", 
+                             fontsize=13, fontweight='bold')
+                ax2.grid(True, alpha=0.3)
+                ax2.legend()
             
             fig.tight_layout()
             

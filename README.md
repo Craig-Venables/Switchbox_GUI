@@ -1,6 +1,6 @@
 # Switchbox Measurement System
 
-Comprehensive measurement system for device characterization with support for IV sweeps, pulse testing, and real-time monitoring. Features modular GUI architecture, unified equipment management, and Telegram notifications.
+Comprehensive measurement system for device characterization with support for IV sweeps, pulse testing, and real-time monitoring. Features modular GUI architecture, unified equipment management, and Telegram notifications, designed for use within the university of nottingham under neil kemp
 
 ## Quick Start
 
@@ -285,7 +285,403 @@ Available via "Advanced Tests" in Measurement GUI:
 
 ### Custom Sweeps
 
-- Each sweep can set a `measurement type` within the GUI. For custom JSON, an `excitation` key enables pulse modes (examples provided in `Json_Files/Custom_Sweeps.json`).
+The system supports custom measurement configurations via JSON files, enabling complex multi-sweep measurements, endurance testing, retention testing, and conditional testing workflows.
+
+#### Custom_Sweeps.json
+
+**Location**: `Json_Files/Custom_Sweeps.json`
+
+This file defines custom measurement sequences that can be selected from the Measurement GUI's "Custom Measurements" dropdown. Each entry consists of:
+- **Test Name**: The display name (e.g., `"Simple_test_1.5V"`)
+- **code_name**: Unique identifier used for analysis and file naming (e.g., `"Simple_1.5V"`)
+- **sweeps**: Dictionary of sweep definitions, each numbered sequentially
+
+##### Structure
+
+```json
+{
+  "Test_Name": {
+    "code_name": "unique_code_name",
+    "sweeps": {
+      "1": { /* sweep 1 parameters */ },
+      "2": { /* sweep 2 parameters */ }
+    }
+  }
+}
+```
+
+##### Measurement Types
+
+###### 1. DC IV Sweeps
+
+Standard voltage sweeps for I-V characterization. Used for forming, characterization, and half-sweeps.
+
+**Example: Simple IV Sweep**
+```json
+"Simple_test_1.5V": {
+  "code_name": "Simple_1.5V",
+  "sweeps": {
+    "1": {
+      "start_v": 0,
+      "stop_v": 0.5,
+      "sweeps": 3,
+      "step_v": 0.05,
+      "step_delay": 0.05
+    },
+    "2": {
+      "start_v": 0,
+      "stop_v": 0.8,
+      "sweeps": 3,
+      "step_v": 0.05,
+      "step_delay": 0.05
+    }
+  }
+}
+```
+
+**Parameters**:
+- `start_v`: Starting voltage (V)
+- `stop_v`: Ending voltage (V)
+- `sweeps`: Number of loops (typically 3 for bipolar)
+- `step_v`: Voltage step size (V)
+- `step_delay`: Delay between steps (s)
+- `Sweep_type` (optional): `"PS"` (Positive only), `"FS"` (Full sweep), `"NS"` (Negative only)
+
+**Use Case**: Device forming, basic characterization, before/after comparisons
+
+###### 2. Endurance Measurements
+
+Pulse-based endurance testing for cycling stability. Automatically detects pulse patterns and plots resistance vs cycle number.
+
+**Example: Single Endurance Test**
+```json
+"Endurance_1.5V_10ms_x_50": {
+  "code_name": "end_short",
+  "sweeps": {
+    "1": {
+      "mode": "Endurance",
+      "set_v": 1.5,
+      "reset_v": -1.5,
+      "pulse_ms": 10,
+      "cycles": 50,
+      "read_v": 0.2,
+      "LED_ON": 0
+    }
+  }
+}
+```
+
+**Parameters**:
+- `mode`: `"Endurance"` (required)
+- `set_v`: SET pulse voltage (V)
+- `reset_v`: RESET pulse voltage (V)
+- `pulse_ms`: Pulse width (ms)
+- `cycles`: Number of SET/RESET cycles
+- `read_v`: Read voltage between pulses (V)
+- `LED_ON`: LED state (0=OFF, 1=ON)
+
+**Use Case**: Cycling stability, device lifetime estimation, degradation analysis
+
+###### 3. Combined Endurance Tests
+
+Multiple pulse times tested in sequence for comprehensive endurance analysis.
+
+**Example: Combined Endurance Test**
+```json
+"Endurance_Combined_1.5V": {
+  "code_name": "end_short",
+  "sweeps": {
+    "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+    "2": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+    "3": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+    "4": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+    "5": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+  }
+}
+```
+
+**Use Case**: Comparing endurance performance across different pulse times in one measurement
+
+###### 4. Retention Measurements
+
+State retention testing to measure resistance stability over time after programming.
+
+**Example: Single Retention Test**
+```json
+"Retention__1.5v_10ms": {
+  "code_name": "ret_quick",
+  "sweeps": {
+    "1": {
+      "mode": "Retention",
+      "set_v": 1.5,
+      "set_ms": 10,
+      "read_v": 0.2,
+      "times_s": [1, 3, 10, 30, 100, 300],
+      "LED_ON": 0
+    }
+  }
+}
+```
+
+**Parameters**:
+- `mode`: `"Retention"` (required)
+- `set_v`: Programming pulse voltage (V)
+- `set_ms`: Programming pulse width (ms)
+- `read_v`: Read voltage for retention checks (V)
+- `times_s`: Array of time points to measure retention (seconds)
+- `LED_ON`: LED state (0=OFF, 1=ON)
+
+**Use Case**: State stability analysis, retention time estimation, non-volatility validation
+
+###### 5. Combined Retention Tests
+
+Multiple pulse times tested in sequence for comprehensive retention analysis.
+
+**Example: Combined Retention Test**
+```json
+"Retention_Combined_1.5v": {
+  "code_name": "ret_quick",
+  "sweeps": {
+    "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+    "2": {"mode": "Retention", "set_v": 1.5, "set_ms": 100, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+    "3": {"mode": "Retention", "set_v": 1.5, "set_ms": 1000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+    "4": {"mode": "Retention", "set_v": 1.5, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+  }
+}
+```
+
+**Use Case**: Comparing retention performance across different programming pulse times
+
+##### Using Custom Sweeps in the GUI
+
+1. **Select Custom Measurement**: In the Measurement GUI, use the "Custom Measurement" dropdown to select your test
+2. **Run Measurement**: Click "Run Custom" to execute the entire sequence
+3. **File Naming**: Files are automatically named using the pattern: `{sweep_number}-{parameters}-Py-{code_name}.txt`
+4. **Sequential Numbering**: Sweep numbers continue from the highest existing file in the folder to prevent overwrites
+
+##### Code Name Best Practices
+
+- Use consistent code names for similar tests (e.g., `"end_short"` for all endurance tests)
+- Use unique code names for different test types (e.g., `"ret_quick"` for retention)
+- Code names are used for:
+  - File naming
+  - Conditional testing workflows
+  - Analysis filtering and grouping
+  - Plot organization
+
+#### test_configurations.json
+
+**Location**: `Json_Files/test_configurations.json`
+
+This file defines how measurements are analyzed and plotted. Each `code_name` from `Custom_Sweeps.json` can have an entry here that specifies:
+
+- **sweep_combinations**: Array of sweep number combinations to plot together
+- **main_sweep**: Primary sweep number for analysis (typically the forming/characterization sweep)
+
+##### Structure
+
+```json
+{
+  "code_name": {
+    "sweep_combinations": [
+      {
+        "sweeps": [1, 2],
+        "title": "Plot Title"
+      }
+    ],
+    "main_sweep": 1
+  }
+}
+```
+
+##### Examples
+
+###### 1. Simple IV Sweep Configuration
+
+For `Simple_1.5V` test:
+```json
+"Simple_1.5V": {
+  "sweep_combinations": [
+    {
+      "sweeps": [1, 9],
+      "title": "Same voltage sweep before and after forming"
+    },
+    {
+      "sweeps": [2, 8],
+      "title": "Same voltage sweep before and after forming"
+    },
+    {
+      "sweeps": [5],
+      "title": "Main Sweep"
+    },
+    {
+      "sweeps": [10, 11, 12, 13],
+      "title": "Combination of Half Sweeps All"
+    }
+  ],
+  "main_sweep": 5
+}
+```
+
+**Analysis Behavior**:
+- Individual plots for each sweep combination
+- Before/after forming comparisons
+- Half-sweep combinations for PS/NS analysis
+
+###### 2. Combined Endurance Configuration
+
+For `end_combined` test:
+```json
+"end_combined": {
+  "sweep_combinations": [
+    {
+      "sweeps": [1],
+      "title": "Endurance - 10ms pulse"
+    },
+    {
+      "sweeps": [2],
+      "title": "Endurance - 100ms pulse"
+    },
+    {
+      "sweeps": [3],
+      "title": "Endurance - 500ms pulse"
+    },
+    {
+      "sweeps": [4],
+      "title": "Endurance - 1s pulse"
+    },
+    {
+      "sweeps": [5],
+      "title": "Endurance - 2s pulse"
+    },
+    {
+      "sweeps": [1, 2, 3, 4, 5],
+      "title": "All Endurance Pulses Combined"
+    }
+  ],
+  "main_sweep": 1
+}
+```
+
+**Analysis Behavior**:
+- Individual plots for each pulse time (resistance vs cycle)
+- Combined plot with all pulse times overlaid for comparison
+- Specialized endurance metrics and degradation tracking
+
+###### 3. Combined Retention Configuration
+
+For `ret_combined` test:
+```json
+"ret_combined": {
+  "sweep_combinations": [
+    {
+      "sweeps": [1],
+      "title": "Retention - 10ms pulse"
+    },
+    {
+      "sweeps": [2],
+      "title": "Retention - 100ms pulse"
+    },
+    {
+      "sweeps": [3],
+      "title": "Retention - 1s pulse"
+    },
+    {
+      "sweeps": [4],
+      "title": "Retention - 2s pulse"
+    },
+    {
+      "sweeps": [1, 2, 3, 4],
+      "title": "All Retention Pulses Combined"
+    }
+  ],
+  "main_sweep": 1
+}
+```
+
+**Analysis Behavior**:
+- Individual plots for each pulse time (resistance vs time)
+- Combined plot with all pulse times overlaid for comparison
+- Retention time estimation and decay analysis
+
+###### 4. Quick Test Configuration
+
+For single-sweep tests:
+```json
+"end_short": {
+  "sweep_combinations": [
+    {
+      "sweeps": [1],
+      "title": "Endurance Single Test"
+    }
+  ],
+  "main_sweep": 1
+}
+```
+
+**Analysis Behavior**:
+- Single plot for the one sweep
+- Standard endurance or retention analysis depending on mode
+
+##### How Analysis Uses test_configurations.json
+
+When running the "Full Sample Analysis" in the Analysis tab:
+
+1. **Code Name Detection**: The system finds all unique `code_name` values from measurement files
+2. **Configuration Lookup**: For each code name, it looks up the corresponding entry in `test_configurations.json`
+3. **Sweep Identification**: Uses `main_sweep` or finds the minimum sweep number for the code name to identify the "first" measurement
+4. **Plot Generation**: Creates plots for each `sweep_combination` entry:
+   - **Individual Plots**: Each sweep combination gets its own plot
+   - **Combined Plots**: Multiple sweeps in one combination are overlaid
+5. **Specialized Analysis**: 
+   - Endurance: Plots resistance vs cycle with degradation tracking
+   - Retention: Plots resistance vs time with retention time estimation
+   - IV Sweeps: Standard I-V curves with hysteresis analysis
+
+##### Best Practices for test_configurations.json
+
+1. **Match code_names**: Ensure every `code_name` in `Custom_Sweeps.json` has an entry (or use a default)
+2. **Meaningful Titles**: Use descriptive titles that explain what the plot shows
+3. **Logical Groupings**: Group related sweeps together (e.g., before/after forming, different voltages)
+4. **Combined Views**: Add combined entries to compare multiple conditions
+5. **Main Sweep**: Set `main_sweep` to the most important/representative sweep for analysis
+
+##### Complete Workflow Example
+
+**Step 1: Define Custom Sweep** (`Custom_Sweeps.json`)
+```json
+"My_Endurance_Test": {
+  "code_name": "my_end_test",
+  "sweeps": {
+    "1": {"mode": "Endurance", "set_v": 2.0, "reset_v": -2.0, "pulse_ms": 50, "cycles": 100, "read_v": 0.2, "LED_ON": 0}
+  }
+}
+```
+
+**Step 2: Define Analysis Configuration** (`test_configurations.json`)
+```json
+"my_end_test": {
+  "sweep_combinations": [
+    {
+      "sweeps": [1],
+      "title": "My Endurance Test"
+    }
+  ],
+  "main_sweep": 1
+}
+```
+
+**Step 3: Run Measurement**
+- Select "My_Endurance_Test" from Custom Measurement dropdown
+- Click "Run Custom"
+- File saved as: `{sweep_number}-Endurance-{params}-Py-my_end_test.txt`
+
+**Step 4: Run Analysis**
+- Go to Analysis tab
+- Select "Full Sample Analysis"
+- System detects `code_name="my_end_test"`
+- Uses `test_configurations.json` to generate endurance plot (resistance vs cycle)
+- Analysis includes: degradation metrics, cycle-to-cycle consistency, switching ratio evolution
 
 ## TSP Testing System (Keithley 2450)
 
@@ -642,7 +1038,9 @@ Configuration files are located in `Json_Files/`:
 - **`system_configs.json`**: Instrument addresses and system configurations
 - **`mapping.json`**: Device layout mappings
 - **`pin_mapping.json`**: Device pin mappings for multiplexer control
-- **`Custom_Sweeps.json`**: Custom measurement sweep configurations
+- **`Custom_Sweeps.json`**: Custom measurement sweep configurations (see Custom Sweeps section above for detailed examples)
+- **`test_configurations.json`**: Analysis and plotting configurations for each code_name (see Custom Sweeps section above for detailed examples)
+- **`classification_weights.json`**: Device classification scoring weights
 - **`messaging_data.json`**: Telegram bot configurations
 - **`save_location_config.json`**: Data save location preferences
 

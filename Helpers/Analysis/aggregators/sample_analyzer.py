@@ -226,6 +226,7 @@ class SampleAnalysisOrchestrator:
         """
         Find code_name for a device by scanning device directory for measurement files.
         Matches old module's detect_test_type() behavior.
+        Returns the first code_name found (any valid code_name in the device folder).
         """
         # Try to find device directory: sample_name/section/device_number/
         # Device ID format: sample_letter_number (e.g., "test_B_6")
@@ -237,9 +238,9 @@ class SampleAnalysisOrchestrator:
                 device_dir = os.path.join(self.sample_dir, section, device_num)
                 
                 if os.path.exists(device_dir):
-                    # Look for first sweep file (sweep 1)
+                    # Scan all files to find any valid code_name
                     for file in os.listdir(device_dir):
-                        if file.startswith('1-') and file.endswith('.txt'):
+                        if file.endswith('.txt') and file != 'log.txt':
                             code_name = self._extract_code_name_from_filename(file)
                             if code_name:
                                 return code_name
@@ -1815,14 +1816,52 @@ class SampleAnalysisOrchestrator:
             import traceback
             traceback.print_exc()
     
+    # === Helper: Find Minimum Sweep Number for Code Name ===
+    def _find_min_sweep_for_code_name(self, device_dir: str, code_name: str) -> Optional[int]:
+        """
+        Find the minimum sweep number for a given code_name in a device folder.
+        This treats the lowest number as the first measurement for that code_name.
+        
+        Args:
+            device_dir: Path to device directory
+            code_name: Code name to search for
+            
+        Returns:
+            int or None: Minimum sweep number for this code_name, or None if not found
+        """
+        if not os.path.exists(device_dir):
+            return None
+        
+        import glob
+        files = glob.glob(os.path.join(device_dir, '*.txt'))
+        min_sweep = None
+        
+        for f in files:
+            filename = os.path.basename(f)
+            if filename == 'log.txt':
+                continue
+            try:
+                parts = filename.replace('.txt', '').split('-')
+                if len(parts) > 6:
+                    file_code_name = parts[6]
+                    if file_code_name == code_name:
+                        sweep_num = int(parts[0])
+                        if min_sweep is None or sweep_num < min_sweep:
+                            min_sweep = sweep_num
+            except (ValueError, IndexError):
+                continue
+        
+        return min_sweep
+    
     # === Helper: Load I-V Data from Device Files ===
-    def _load_iv_data_for_device(self, device_id: str, sweep_num: int = 1) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    def _load_iv_data_for_device(self, device_id: str, sweep_num: Optional[int] = None, code_name: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """
         Load voltage and current data for a device by reading sweep file.
         
         Args:
             device_id: Device ID (format: sample_section_device_num)
-            sweep_num: Sweep number to read (default: 1)
+            sweep_num: Sweep number to read (if None, finds minimum for code_name)
+            code_name: Code name to filter by (if provided, finds minimum sweep for this code_name)
             
         Returns:
             (voltage_array, current_array) or (None, None) if not available
@@ -1842,11 +1881,32 @@ class SampleAnalysisOrchestrator:
             if not os.path.exists(device_dir):
                 return None, None
             
+            # If code_name provided, find minimum sweep number for that code_name
+            if code_name and sweep_num is None:
+                sweep_num = self._find_min_sweep_for_code_name(device_dir, code_name)
+                if sweep_num is None:
+                    return None, None
+            elif sweep_num is None:
+                sweep_num = 1  # Default to 1 if neither provided
+            
             # Find sweep file (format: {sweep_num}-*.txt)
             import glob
             sweep_pattern = os.path.join(device_dir, f'{sweep_num}-*.txt')
             sweep_files = glob.glob(sweep_pattern)
             sweep_files = [f for f in sweep_files if os.path.basename(f) != 'log.txt']
+            
+            # If code_name provided, filter to only files with matching code_name
+            if code_name:
+                matching_files = []
+                for f in sweep_files:
+                    try:
+                        filename = os.path.basename(f)
+                        parts = filename.replace('.txt', '').split('-')
+                        if len(parts) > 6 and parts[6] == code_name:
+                            matching_files.append(f)
+                    except (ValueError, IndexError):
+                        continue
+                sweep_files = matching_files
             
             if not sweep_files:
                 return None, None
