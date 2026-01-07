@@ -4085,9 +4085,16 @@ class MeasurementGUI:
                 key_num = find_largest_number_in_folder(save_dir)
                 save_key = 0 if key_num is None else key_num + 1
                 
+                # Extract parameters for filename (matching custom measurement format)
+                stop_v = params.get("stop_v", 1)
+                step_v = params.get("step_v", 0.1)
+                step_delay = params.get("step_delay", 0.05)
+                sweep_type = params.get("Sweep_type", "FS")
+                code_name = self.custom_sweeps[custom_sweep_name].get("code_name", custom_sweep_name)
+                
                 import numpy as np
                 from pathlib import Path
-                name = f"{save_key}-CONDITIONAL-{custom_sweep_name}-{key}-Py"
+                name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}"
                 file_path = Path(save_dir) / f"{name}.txt"
                 
                 try:
@@ -7014,6 +7021,11 @@ class MeasurementGUI:
                     if not os.path.exists(save_dir):
                         os.makedirs(save_dir)
 
+                    # Find the largest existing file number to continue from the most recent
+                    from Measurments.single_measurement_runner import find_largest_number_in_folder
+                    key_num = find_largest_number_in_folder(save_dir)
+                    save_key = 0 if key_num is None else key_num + 1
+
                     if self.additional_info_var != "":
                         #extra_info = "-" + str(self.additional_info_entry.get())
                         # or
@@ -7021,13 +7033,8 @@ class MeasurementGUI:
                     else:
                         extra_info = ""
 
-                    name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}{extra_info}"
+                    name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}{extra_info}"
                     file_path = f"{save_dir}\\{name}.txt"
-
-                    if os.path.exists(file_path):
-                        print("filepath already exisits")
-                        messagebox.showerror("ERROR", "file already exists, you should check before continueing as "
-                                                      "this will overwrite")
 
                     try:
                         np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")

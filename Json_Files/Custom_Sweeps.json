@@ -5,7 +5,105 @@
         "1": {"start_v": 0,"stop_v": 1,"sweeps": 1,"step_v": 0.1},
         "2": {"start_v": 0,"stop_v": 2,"sweeps": 1,"step_v": 0.1}}
     },
-    "Sdt V1-(~75 mins)": {
+    "Simple_test_1.5V)": {
+      "code_name": "Simple_1.5V",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 1.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS"},
+        "11": {"start_v": 0, "stop_v": 1.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"},
+        "12": {"start_v": 0, "stop_v": 1.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "NS"},
+        "13": {"start_v": 0, "stop_v": 1.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"}  
+      }
+    },
+    "Simple_test_2v)": {
+      "code_name": "Simple_2V",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 1.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 1.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "12": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "13": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+
+        "14": {"start_v": 0, "stop_v": 2, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS"},
+        "15": {"start_v": 0, "stop_v": 2, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"},
+        "16": {"start_v": 0, "stop_v": 2, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "NS"},
+        "17": {"start_v": 0, "stop_v": 2, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"}  
+      }
+    },
+    "Simple_test_2.5v)": {
+      "code_name": "Simple_2.5V",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 1.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 2.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 2.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "12": {"start_v": 0, "stop_v": 1.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "13": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "14": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "15": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "16": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "17": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+
+        "18": {"start_v": 0, "stop_v": 2.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS"},
+        "19": {"start_v": 0, "stop_v": 2.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"},
+        "20": {"start_v": 0, "stop_v": 2.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "NS"},
+        "21": {"start_v": 0, "stop_v": 2.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"}  
+      }
+    },
+    "Simple_test_3v)": {
+      "code_name": "Simple_3V",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 1.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 2.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 2.8, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 3.0, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05},
+        "12": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "13": {"start_v": 0, "stop_v": 2.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "14": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "15": {"start_v": 0, "stop_v": 1.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "16": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "17": {"start_v": 0, "stop_v": 1.2, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "18": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "19": {"start_v": 0, "stop_v": 0.8, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "20": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+
+        "21": {"start_v": 0, "stop_v": 3, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "PS"},
+        "22": {"start_v": 0, "stop_v": 3, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"},
+        "23": {"start_v": 0, "stop_v": 3, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "NS"},
+        "24": {"start_v": 0, "stop_v": 3, "sweeps": 5, "step_v": 0.05,"step_delay": 0.05,"Sweep_type": "FS"}  
+      }
+    },
+    "Standard test V1-(~75 mins)": {
       "code_name": "St_v1",
       "sweeps": {
         "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
@@ -46,7 +144,7 @@
         "32": {"start_v": 0, "stop_v": 2.5, "sweeps": 5, "step_v": 0.05,"step_delay": 0.01}
       }
     },
-  "Sdt V2-(2.8v)": {
+  "Standard test V2-(2.8v)": {
       "code_name": "St_v2",
       "sweeps": {
         "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
@@ -76,7 +174,7 @@
 
       }
     },
-  "Sdt V2-LED()": {
+  "Standard test V2-LED()": {
       "code_name": "St_v2_led",
       "sweeps": {
         "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
@@ -173,24 +271,197 @@
       "19": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05, "ICC": 1e-3,"Sweep_type": "FS"}
     }
  },
-  "Manual_Endurance_Short": {
-    "code_name": "end_short",
-    "sweeps": {
-      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
-    }
-  },
-  "Manual_Retention_Quick": {
-    "code_name": "ret_quick",
-    "sweeps": {
-      "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
-    }
-  },
+ 
   "ITO_Test": {
     "code_name": "ITO_TEST",
     "sweeps": {
       "1": {"start_v": 0,"stop_v": 0.5,"sweeps": 1,"step_v": 0.1},
       "2": {"start_v": 0, "stop_v": 3, "sweeps": 1, "step_v": 0.1},
       "3": {"start_v": 0, "stop_v": 5, "sweeps": 3, "step_v": 0.2}
+    }
+  },
+  "Endurance_1.5V_10ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_1.5V_100ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_1.5V_500ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_1.5V_1s_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_1.5V_2s_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  
+  "Endurance_2V_10ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_2V_100ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_2V_500ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_2V_1s_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_2V_2s_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_3V_10ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_3V_100ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_3V_500ms_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_3V_1s_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_3V_2s_x_50": {
+    "code_name": "end_short",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Retention__1.5v_10ms": {
+    "code_name": "ret_quick",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention__1.5v_100ms": {
+    "code_name": "ret_quick",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 100, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention__1.5v_1s": {
+    "code_name": "ret_quick",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 1000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention__1.5v_2s": {
+    "code_name": "ret_quick",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention__2v_2s": {
+    "code_name": "ret_quick",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 2, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention__3v_2s": {
+    "code_name": "ret_quick",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 3, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Endurance_Combined_1.5V": {
+    "code_name": "end_combined",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "2": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "3": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "4": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "5": {"mode": "Endurance", "set_v": 1.5, "reset_v": -1.5, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_Combined_2V": {
+    "code_name": "end_combined",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "2": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "3": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "4": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "5": {"mode": "Endurance", "set_v": 2, "reset_v": -2, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Endurance_Combined_3V": {
+    "code_name": "end_combined",
+    "sweeps": {
+      "1": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 10, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "2": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 100, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "3": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 500, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "4": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 1000, "cycles": 50, "read_v": 0.2, "LED_ON": 0},
+      "5": {"mode": "Endurance", "set_v": 3, "reset_v": -3, "pulse_ms": 2000, "cycles": 50, "read_v": 0.2, "LED_ON": 0}
+    }
+  },
+  "Retention_Combined_1.5v": {
+    "code_name": "ret_combined",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 1.5, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "2": {"mode": "Retention", "set_v": 1.5, "set_ms": 100, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "3": {"mode": "Retention", "set_v": 1.5, "set_ms": 1000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "4": {"mode": "Retention", "set_v": 1.5, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention_Combined_2v": {
+    "code_name": "ret_combined",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 2, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "2": {"mode": "Retention", "set_v": 2, "set_ms": 100, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "3": {"mode": "Retention", "set_v": 2, "set_ms": 1000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "4": {"mode": "Retention", "set_v": 2, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
+    }
+  },
+  "Retention_Combined_3v": {
+    "code_name": "ret_combined",
+    "sweeps": {
+      "1": {"mode": "Retention", "set_v": 3, "set_ms": 10, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "2": {"mode": "Retention", "set_v": 3, "set_ms": 100, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "3": {"mode": "Retention", "set_v": 3, "set_ms": 1000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0},
+      "4": {"mode": "Retention", "set_v": 3, "set_ms": 2000, "read_v": 0.2, "times_s": [1,3,10,30,100,300], "LED_ON": 0}
     }
   },
   "Examples_Pulsed_Modes": {

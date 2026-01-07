@@ -168,9 +168,11 @@ class SectionAnalyzer:
         # Detect test type and working status
         for device in self.device_folders:
             test_type = self.detect_test_type(device)
-            main_sweep = self.test_analyzer.get_main_sweep(test_type) if test_type else None
-            working_device = self.check_working_device(device, main_sweep) if main_sweep else False
-            self.device_list_with_type_and_status[device] = (test_type, working_device, main_sweep)
+            # check_working_device now finds minimum sweep for code_name automatically
+            working_device = self.check_working_device(device, test_type) if test_type else False
+            # Store min_sweep for reference (or None if not found)
+            min_sweep = self._find_min_sweep_for_code_name(device, test_type) if test_type else None
+            self.device_list_with_type_and_status[device] = (test_type, working_device, min_sweep)
 
     @lru_cache(maxsize=128)
     def read_data_file(self, file_path) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[np.ndarray]]:
@@ -199,12 +201,77 @@ class SectionAnalyzer:
             if len(parts) > 6:
                 return parts[6]
         return None
+    
+    def _find_min_sweep_for_code_name(self, device_path, code_name):
+        """
+        Find the minimum sweep number for a given code_name in a device folder.
+        This treats the lowest number as the first measurement for that code_name.
+        
+        Args:
+            device_path: Path to device directory
+            code_name: Code name to search for
+            
+        Returns:
+            int or None: Minimum sweep number for this code_name, or None if not found
+        """
+        files = list(device_path.glob('*.txt'))
+        min_sweep = None
+        
+        for f in files:
+            if f.name == 'log.txt':
+                continue
+            try:
+                parts = f.name.replace('.txt', '').split('-')
+                if len(parts) > 6:
+                    file_code_name = parts[6]
+                    if file_code_name == code_name:
+                        sweep_num = int(parts[0])
+                        if min_sweep is None or sweep_num < min_sweep:
+                            min_sweep = sweep_num
+            except (ValueError, IndexError):
+                continue
+        
+        return min_sweep
 
-    def check_working_device(self, device_path, main_sweep):
-        sweep_files = list(device_path.glob(f'{main_sweep}-*.txt'))
+    def check_working_device(self, device_path, test_type_or_sweep):
+        """
+        Check if device is working by reading the first measurement for the code_name.
+        
+        Args:
+            device_path: Path to device directory
+            test_type_or_sweep: Code name (test_type) string, or legacy numeric sweep number
+        """
+        # If it's a code_name (string that's not a digit), use it directly
+        # Otherwise, detect test_type from device (legacy behavior)
+        if isinstance(test_type_or_sweep, str) and not test_type_or_sweep.isdigit():
+            test_type = test_type_or_sweep
+        else:
+            test_type = self.detect_test_type(device_path)
+        
+        if not test_type:
+            return False
+        
+        # Find minimum sweep number for this code_name (treat as first measurement)
+        min_sweep = self._find_min_sweep_for_code_name(device_path, test_type)
+        if min_sweep is None:
+            return False
+        
+        # Use the minimum sweep as the first measurement for this code_name
+        sweep_files = list(device_path.glob(f'{min_sweep}-*.txt'))
         sweep_files = [f for f in sweep_files if f.name != 'log.txt']
-        if sweep_files:
-            voltage, current, _ = self.read_data_file(sweep_files[0])
+        
+        # Filter to only files with matching code_name
+        matching_files = []
+        for f in sweep_files:
+            try:
+                parts = f.name.replace('.txt', '').split('-')
+                if len(parts) > 6 and parts[6] == test_type:
+                    matching_files.append(f)
+            except (ValueError, IndexError):
+                continue
+        
+        if matching_files:
+            voltage, current, _ = self.read_data_file(matching_files[0])
             if current is not None and len(current) > 0:
                 max_current = np.max(np.abs(current))
                 if max_current >= 1E-9:
@@ -374,15 +441,28 @@ class SectionAnalyzer:
                 device_num = int(device.name)
                 test_type = self.detect_test_type(device)
                 if test_type:
-                    main_sweep = self.test_analyzer.get_main_sweep(test_type)
-                    if main_sweep:
-                        main_sweep_files = list(device.glob(f'{main_sweep}-*.txt'))
-                        main_sweep_files = [f for f in main_sweep_files if f.name != 'log.txt']
+                    # Find minimum sweep number for this code_name (treat as first measurement)
+                    min_sweep = self._find_min_sweep_for_code_name(device, test_type)
+                    if min_sweep is not None:
+                        # Find files with this sweep number and matching code_name
+                        sweep_files = list(device.glob(f'{min_sweep}-*.txt'))
+                        sweep_files = [f for f in sweep_files if f.name != 'log.txt']
                         
-                        if main_sweep_files:
-                            working_device = self.check_working_device(device, main_sweep)
+                        # Filter to only files with matching code_name
+                        matching_files = []
+                        for f in sweep_files:
+                            try:
+                                parts = f.name.replace('.txt', '').split('-')
+                                if len(parts) > 6 and parts[6] == test_type:
+                                    matching_files.append(f)
+                            except (ValueError, IndexError):
+                                continue
+                        
+                        if matching_files:
+                            # check_working_device finds min_sweep itself based on test_type
+                            working_device = self.check_working_device(device, test_type)
                             if working_device:
-                                voltage, current, _ = self.read_data_file(main_sweep_files[0])
+                                voltage, current, _ = self.read_data_file(matching_files[0])
                                 if voltage is not None:
                                     main_sweep_data[device_num] = {
                                         'voltage': voltage,
