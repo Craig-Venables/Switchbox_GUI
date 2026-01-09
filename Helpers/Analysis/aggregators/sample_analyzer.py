@@ -3139,7 +3139,9 @@ class SampleAnalysisOrchestrator:
             # Add regression line (only if there's variation in x values)
             if len(confidences) > 1 and np.std(confidences) > 1e-10:
                 with warnings.catch_warnings():
-                    warnings.simplefilter("ignore", np.RankWarning)
+                    # Ignore rank warnings from polyfit (RankWarning removed in newer numpy)
+                    warnings.simplefilter("ignore", RuntimeWarning)
+                    warnings.simplefilter("ignore", UserWarning)
                     try:
                         z = np.polyfit(confidences, scores, 1)
                         p = np.poly1d(z)
@@ -3175,7 +3177,9 @@ class SampleAnalysisOrchestrator:
                 # Regression line for memristive (only if there's variation)
                 if len(memristive_conf) > 1 and np.std(memristive_conf) > 1e-10:
                     with warnings.catch_warnings():
-                        warnings.simplefilter("ignore", np.RankWarning)
+                        # Ignore rank warnings from polyfit (RankWarning removed in newer numpy)
+                        warnings.simplefilter("ignore", RuntimeWarning)
+                        warnings.simplefilter("ignore", UserWarning)
                         try:
                             z = np.polyfit(memristive_conf, memristive_scores, 1)
                             p = np.poly1d(z)
