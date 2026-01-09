@@ -11,6 +11,21 @@ from typing import List
 import textwrap
 from matplotlib.backends.backend_pdf import PdfPages
 
+# ==================== DEBUG CONTROL ====================
+# Set to True only when actively debugging. In normal use this should stay False
+# so the console isn't flooded with diagnostic messages.
+DEBUG_ENABLED = False
+
+def debug_print(*args, **kwargs):
+    """
+    Lightweight debug logger for diagnostic messages.
+    
+    NOTE: Kept for future troubleshooting, but disabled by default via
+    DEBUG_ENABLED=False to keep runtime output clean for end users.
+    """
+    if DEBUG_ENABLED:
+        print(*args, **kwargs)
+
 # Suppress expected numerical warnings that are handled by try-except blocks
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in log')
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in divide')
@@ -195,7 +210,7 @@ class analyze_single_file:
         # Process based on measurement type
         device_info = f" [{self.device_name}]" if self.device_name else ""
         num_cycles = self._detect_cycles()
-        print(f"[DIAGNOSTIC]{device_info} Detected measurement type: {self.measurement_type} (cycles: {num_cycles})")
+        debug_print(f"[DIAGNOSTIC]{device_info} Detected measurement type: {self.measurement_type} (cycles: {num_cycles})")
         
         if self.measurement_type == 'iv_sweep':
             self._process_iv_sweep()
@@ -256,13 +271,13 @@ class analyze_single_file:
         if self.device_name:
             name_lower = self.device_name.lower()
             has_fs_indicator = any(indicator in name_lower for indicator in ['fs', 'ps', 'ns', '-sweep', '_sweep'])
-            print(f"[DIAGNOSTIC] Filename check: '{self.device_name}' -> has IV sweep indicator: {has_fs_indicator}")
+            debug_print(f"[DIAGNOSTIC] Filename check: '{self.device_name}' -> has IV sweep indicator: {has_fs_indicator}")
             if has_fs_indicator:
                 # Filename indicates IV sweep, trust it
-                print(f"[DIAGNOSTIC] Forcing measurement type to 'iv_sweep' based on filename")
+                debug_print(f"[DIAGNOSTIC] Forcing measurement type to 'iv_sweep' based on filename")
                 return 'iv_sweep'
         else:
-            print(f"[DIAGNOSTIC] No device_name available for filename check")
+            debug_print(f"[DIAGNOSTIC] No device_name available for filename check")
 
         # Check if this might be a pulse measurement
         if self.time is not None:
@@ -463,7 +478,7 @@ class analyze_single_file:
             }
         except Exception as e:
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"[DIAGNOSTIC]{device_info} Warning: Could not fit retention model - {type(e).__name__}: {str(e)}")
+            debug_print(f"[DIAGNOSTIC]{device_info} Warning: Could not fit retention model - {type(e).__name__}: {str(e)}")
 
     def _calculate_cycles_to_failure(self, failure_threshold):
         """
@@ -686,7 +701,7 @@ class analyze_single_file:
         """
         try:
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"\n[DIAGNOSTIC]{device_info} Starting classification...")
+            debug_print(f"\n[DIAGNOSTIC]{device_info} Starting classification...")
             
             # Extract classification features
             self.classification_features = self._extract_classification_features()
@@ -812,7 +827,7 @@ class analyze_single_file:
             
             # DIAGNOSTIC: Print scoring breakdown
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"\n[DIAGNOSTIC]{device_info} Classification scores:")
+            debug_print(f"\n[DIAGNOSTIC]{device_info} Classification scores:")
             for device_type, score in scores.items():
                 print(f"  - {device_type}: {score:.1f}")
             print(f"  - Total score: {total_score:.1f}, Max score: {max_score:.1f}")
@@ -821,15 +836,15 @@ class analyze_single_file:
             if total_score == 0 or max_score < 30:
                 self.device_type = 'uncertain'
                 self.classification_confidence = 0.0
-                print(f"[DIAGNOSTIC]{device_info} !!! UNCERTAIN CLASSIFICATION !!!")
+                debug_print(f"[DIAGNOSTIC]{device_info} !!! UNCERTAIN CLASSIFICATION !!!")
                 if total_score == 0:
-                    print(f"[DIAGNOSTIC]{device_info}   Reason: All scores are 0 (no features detected)")
+                    debug_print(f"[DIAGNOSTIC]{device_info}   Reason: All scores are 0 (no features detected)")
                 else:
-                    print(f"[DIAGNOSTIC]{device_info}   Reason: Max score ({max_score:.1f}) is below threshold (30)")
+                    debug_print(f"[DIAGNOSTIC]{device_info}   Reason: Max score ({max_score:.1f}) is below threshold (30)")
             else:
                 self.device_type = max(scores, key=scores.get)
                 self.classification_confidence = max_score / 100.0
-                print(f"[DIAGNOSTIC]{device_info} Classification: {self.device_type} (confidence: {self.classification_confidence:.1%})")
+                debug_print(f"[DIAGNOSTIC]{device_info} Classification: {self.device_type} (confidence: {self.classification_confidence:.1%})")
 
 
             # Provide a human-friendly explanation map
@@ -857,8 +872,8 @@ class analyze_single_file:
                     
         except Exception as e:
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"\n[DIAGNOSTIC]{device_info} !!! ERROR IN CLASSIFICATION !!!")
-            print(f"[DIAGNOSTIC]{device_info} Exception: {type(e).__name__}: {str(e)}")
+            debug_print(f"\n[DIAGNOSTIC]{device_info} !!! ERROR IN CLASSIFICATION !!!")
+            debug_print(f"[DIAGNOSTIC]{device_info} Exception: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
             # Set safe defaults
@@ -2049,30 +2064,30 @@ POWER CHARACTERISTICS:
         
         # Check for empty critical data
         if len(self.normalized_areas) == 0:
-            print(f"[DIAGNOSTIC] WARNING: normalized_areas is empty - hysteresis detection will fail")
+            debug_print(f"[DIAGNOSTIC] WARNING: normalized_areas is empty - hysteresis detection will fail")
         if len(self.on_off) == 0:
-            print(f"[DIAGNOSTIC] WARNING: on_off is empty - switching detection will fail")
+            debug_print(f"[DIAGNOSTIC] WARNING: on_off is empty - switching detection will fail")
 
         # Detect compliance early for downstream logic
         try:
             if self.compliance_current is None:
                 self.compliance_current = self._detect_compliance_current()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in compliance detection: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in compliance detection: {e}")
             self.compliance_current = None
 
         # Check for hysteresis with robust estimator
         try:
             features['has_hysteresis'] = self._estimate_hysteresis_present()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in hysteresis estimation: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in hysteresis estimation: {e}")
             features['has_hysteresis'] = False
 
         # Check for pinched hysteresis (memristive fingerprint)
         try:
             features['pinched_hysteresis'] = self._check_pinched_hysteresis()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in pinched hysteresis check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in pinched hysteresis check: {e}")
             features['pinched_hysteresis'] = False
 
         # Check for switching behavior
@@ -2082,56 +2097,56 @@ POWER CHARACTERISTICS:
             else:
                 features['switching_behavior'] = False
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in switching behavior check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in switching behavior check: {e}")
             features['switching_behavior'] = False
 
         # Check I-V linearity (robust to compliance region)
         try:
             features['linear_iv'], features['nonlinear_iv'] = self._check_linearity()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in linearity check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in linearity check: {e}")
             features['linear_iv'], features['nonlinear_iv'] = False, False
 
         # Check for ohmic behavior at low voltages
         try:
             features['ohmic_behavior'] = self._check_ohmic_behavior()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in ohmic behavior check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in ohmic behavior check: {e}")
             features['ohmic_behavior'] = False
 
         # Check polarity dependence
         try:
             features['polarity_dependent'] = self._check_polarity_dependence()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in polarity dependence check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in polarity dependence check: {e}")
             features['polarity_dependent'] = False
 
         # Calculate phase shift (for capacitive detection)
         try:
             features['phase_shift'] = self._calculate_phase_shift()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in phase shift calculation: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in phase shift calculation: {e}")
             features['phase_shift'] = 0
 
         # Check for elliptical hysteresis pattern
         try:
             features['elliptical_hysteresis'] = self._check_elliptical_pattern()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in elliptical pattern check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in elliptical pattern check: {e}")
             features['elliptical_hysteresis'] = False
         
         # DIAGNOSTIC: Print feature extraction results
         device_info = f" [{self.device_name}]" if self.device_name else ""
-        print(f"\n[DIAGNOSTIC]{device_info} Feature extraction results:")
-        print(f"  - Data: V={debug_info['voltage_len']}, I={debug_info['current_len']}, loops={debug_info['num_loops']}")
-        print(f"  - Arrays: norm_areas={debug_info['normalized_areas']}, on_off={debug_info['on_off']}")
-        print(f"  - has_hysteresis: {features.get('has_hysteresis')}")
-        print(f"  - pinched_hysteresis: {features.get('pinched_hysteresis')}")
-        print(f"  - switching_behavior: {features.get('switching_behavior')}")
-        print(f"  - nonlinear_iv: {features.get('nonlinear_iv')}")
-        print(f"  - linear_iv: {features.get('linear_iv')}")
-        print(f"  - ohmic_behavior: {features.get('ohmic_behavior')}")
-        print(f"  - phase_shift: {features.get('phase_shift')}")
+        debug_print(f"\n[DIAGNOSTIC]{device_info} Feature extraction results:")
+        debug_print(f"  - Data: V={debug_info['voltage_len']}, I={debug_info['current_len']}, loops={debug_info['num_loops']}")
+        debug_print(f"  - Arrays: norm_areas={debug_info['normalized_areas']}, on_off={debug_info['on_off']}")
+        debug_print(f"  - has_hysteresis: {features.get('has_hysteresis')}")
+        debug_print(f"  - pinched_hysteresis: {features.get('pinched_hysteresis')}")
+        debug_print(f"  - switching_behavior: {features.get('switching_behavior')}")
+        debug_print(f"  - nonlinear_iv: {features.get('nonlinear_iv')}")
+        debug_print(f"  - linear_iv: {features.get('linear_iv')}")
+        debug_print(f"  - ohmic_behavior: {features.get('ohmic_behavior')}")
+        debug_print(f"  - phase_shift: {features.get('phase_shift')}")
 
         return features
 
