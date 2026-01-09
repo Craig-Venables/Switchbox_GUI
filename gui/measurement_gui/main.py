@@ -195,6 +195,21 @@ except Exception:  # pragma: no cover - optional dependency
     load_thresholds = None  # type: ignore
     _HAS_TEST_FRAMEWORK = False
 
+# ==================== DEBUG CONTROL ====================
+# Set to True only when actively debugging. In normal use this should stay False
+# so the console isn't flooded with messages.
+DEBUG_ENABLED = False
+
+def debug_print(*args, **kwargs):
+    """
+    Lightweight debug logger.
+    
+    NOTE: Kept for future troubleshooting, but disabled by default via
+    DEBUG_ENABLED=False to keep runtime output clean for end users.
+    """
+    if DEBUG_ENABLED:
+        print(*args, **kwargs)
+
 if TYPE_CHECKING:
     # Optional-only imports for typing; avoids runtime deps if unavailable
     try:
@@ -769,10 +784,10 @@ class MeasurementGUI:
             # Force GUI update
             self.master.update_idletasks()
             
-            print(f"[LIVE] {status_msg}")
+            debug_print(f"[LIVE] {status_msg}")
             
         except Exception as e:
-            print(f"[LIVE] Error updating display: {e}")
+            debug_print(f"[LIVE] Error updating display: {e}")
 
     def _send_classification_notification(
         self, 
@@ -860,16 +875,16 @@ class MeasurementGUI:
         # Skip if not first sweep AND device is not memristive
         if is_custom_sequence and sweep_number > 1:
             if not device_memristive_flag:
-                print(f"[ANALYSIS] Skipping sweep {sweep_number} - device not memristive")
+                debug_print(f"[ANALYSIS] Skipping sweep {sweep_number} - device not memristive")
                 return None
         
         # Validate input data
         if not voltage or not current or len(voltage) == 0 or len(current) == 0:
-            print("[ANALYSIS] Skipping analysis: empty voltage or current arrays")
+            debug_print("[ANALYSIS] Skipping analysis: empty voltage or current arrays")
             return None
         
         if len(voltage) != len(current):
-            print(f"[ANALYSIS] Skipping analysis: array length mismatch (V:{len(voltage)}, I:{len(current)})")
+            debug_print(f"[ANALYSIS] Skipping analysis: array length mismatch (V:{len(voltage)}, I:{len(current)})")
             return None
         
         try:
@@ -933,7 +948,7 @@ class MeasurementGUI:
                 cycle_number = getattr(self, 'measurement_count', None)
             
             # Run analysis in background thread to prevent crashes
-            print(f"[ANALYSIS] Queuing analysis (level: {analysis_level}) on {len(v_arr)} points...")
+            debug_print(f"[ANALYSIS] Queuing analysis (level: {analysis_level}) on {len(v_arr)} points...")
 
             # Ensure threading module is accessible (fix for UnboundLocalError)
             import threading as _threading
@@ -941,7 +956,7 @@ class MeasurementGUI:
             # Create a thread-safe way to update GUI after analysis
             def run_analysis_thread():
                 try:
-                    print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
+                    debug_print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
                     analysis_data = quick_analyze(
                         voltage=v_arr,
                         current=i_arr,
@@ -959,19 +974,19 @@ class MeasurementGUI:
                             # Update stats window and panel
                             self.update_analysis_stats(analysis_data, analysis_level)
                         except Exception as stats_exc:
-                            print(f"[ANALYSIS] Failed to update stats window: {stats_exc}")
+                            debug_print(f"[ANALYSIS] Failed to update stats window: {stats_exc}")
 
                         try:
                             # Update top bar classification display
                             self.update_classification_display(analysis_data.get('classification', {}))
                         except Exception as display_exc:
-                            print(f"[ANALYSIS] Failed to update classification display: {display_exc}")
+                            debug_print(f"[ANALYSIS] Failed to update classification display: {display_exc}")
 
                         try:
                             # Save analysis results to file
                             self._save_analysis_results(analysis_data, save_dir, file_name, analysis_level)
                         except Exception as save_exc:
-                            print(f"[ANALYSIS] Failed to save analysis results: {save_exc}")
+                            debug_print(f"[ANALYSIS] Failed to save analysis results: {save_exc}")
 
                         # Store analysis result for plotting
                         if not is_custom_sequence:
@@ -989,7 +1004,7 @@ class MeasurementGUI:
                             # Spawn background thread for research-level analysis
                             def run_research_analysis():
                                 try:
-                                    print(f"[RESEARCH] Starting background research analysis for {file_name}...")
+                                    debug_print(f"[RESEARCH] Starting background research analysis for {file_name}...")
                                     if hasattr(self, 'plot_panels'):
                                         self.plot_panels.log_graph_activity(f"Starting research analysis: {file_name}")
 
@@ -1008,11 +1023,11 @@ class MeasurementGUI:
                                     # Save to device-specific research folder
                                     self._save_research_analysis(research_data, sample_save_dir, file_name, device_id)
 
-                                    print(f"[RESEARCH] Background research analysis complete for {file_name}")
+                                    debug_print(f"[RESEARCH] Background research analysis complete for {file_name}")
                                     if hasattr(self, 'plot_panels'):
                                         self.plot_panels.log_graph_activity(f"Research analysis complete: {file_name}")
                                 except Exception as e:
-                                    print(f"[RESEARCH ERROR] Background analysis failed: {e}")
+                                    debug_print(f"[RESEARCH ERROR] Background analysis failed: {e}")
                                     import traceback
                                     traceback.print_exc()
 
@@ -1020,13 +1035,13 @@ class MeasurementGUI:
                             research_thread = _threading.Thread(target=run_research_analysis, daemon=True)
                             research_thread.start()
 
-                            print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
+                            debug_print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
 
                         # === RETURN FOR CUSTOM SEQUENCES ===
                         # For first sweep in custom sequence, store memristive flag
                         if is_custom_sequence and sweep_number == 1:
                             is_memristive = device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60)
-                            print(f"[ANALYSIS] First sweep: score={memristivity_score:.1f}, memristive={is_memristive}")
+                            debug_print(f"[ANALYSIS] First sweep: score={memristivity_score:.1f}, memristive={is_memristive}")
                             # Store result for custom measurement to use
                             if not hasattr(self, '_pending_analysis_results'):
                                 self._pending_analysis_results = {}
@@ -1063,7 +1078,7 @@ class MeasurementGUI:
                         update_gui()
 
                 except Exception as exc:
-                    print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
+                    debug_print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
                     import traceback
                     traceback.print_exc()
                     # Try to update GUI with error message
@@ -1095,7 +1110,7 @@ class MeasurementGUI:
             return None
             
             # Run analysis
-            print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
+            debug_print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
             analysis_data = quick_analyze(
                 voltage=v_arr,
                 current=i_arr,
@@ -1127,7 +1142,7 @@ class MeasurementGUI:
 
                 def run_research_analysis():
                     try:
-                        print(f"[RESEARCH] Starting background research analysis for {file_name}...")
+                        debug_print(f"[RESEARCH] Starting background research analysis for {file_name}...")
 
                         # Use sample-level directory for research (same as tracking)
                         research_save_dir = sample_save_dir
@@ -1147,21 +1162,21 @@ class MeasurementGUI:
                         # Save to device-specific research folder (within sample-level directory)
                         self._save_research_analysis(research_data, research_save_dir, file_name, device_id)
 
-                        print(f"[RESEARCH] Background research analysis complete for {file_name}")
+                        debug_print(f"[RESEARCH] Background research analysis complete for {file_name}")
                     except Exception as e:
-                        print(f"[RESEARCH ERROR] Background analysis failed: {e}")
+                        debug_print(f"[RESEARCH ERROR] Background analysis failed: {e}")
 
                 # Start background thread (daemon so it doesn't block exit)
                 research_thread = _threading.Thread(target=run_research_analysis, daemon=True)
                 research_thread.start()
 
-                print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
+                debug_print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
 
-            print("[ANALYSIS] Analysis complete and results saved")
+            debug_print("[ANALYSIS] Analysis complete and results saved")
 
         except Exception as exc:
             # Log error but don't interrupt measurement flow
-            print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
+            debug_print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
             import traceback
             traceback.print_exc()
             return None
@@ -1412,10 +1427,10 @@ class MeasurementGUI:
             with open(analysis_file, 'w', encoding='utf-8') as f:
                 f.write('\n'.join(lines))
             
-            print(f"[ANALYSIS] Results saved to: {os.path.abspath(analysis_file)}")
+            debug_print(f"[ANALYSIS] Results saved to: {os.path.abspath(analysis_file)}")
             
         except Exception as exc:
-            print(f"[ANALYSIS ERROR] Failed to save analysis results: {exc}")
+            debug_print(f"[ANALYSIS ERROR] Failed to save analysis results: {exc}")
             import traceback
             traceback.print_exc()
     
@@ -1475,10 +1490,10 @@ class MeasurementGUI:
             with open(research_file, 'w') as f:
                 json.dump(serializable_data, f, indent=2)
             
-            print(f"[RESEARCH] Saved to: {research_file}")
+            debug_print(f"[RESEARCH] Saved to: {research_file}")
             
         except Exception as e:
-            print(f"[RESEARCH ERROR] Failed to save research analysis: {e}")
+            debug_print(f"[RESEARCH ERROR] Failed to save research analysis: {e}")
 
     def _plot_measurement_in_background(
         self,
@@ -1630,24 +1645,24 @@ class MeasurementGUI:
                         save_name=f"{plot_filename}_sclc_fit.png"  # Explicit filename
                     )
                 
-                print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
-                print(f"[PLOT] Dashboard saved to: {graphs_dir}")
+                debug_print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
+                debug_print(f"[PLOT] Dashboard saved to: {graphs_dir}")
                 if is_memristive_flag:
-                    print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
-                    print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
+                    debug_print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
+                    debug_print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
                 
             except ImportError as e:
-                print(f"[PLOT ERROR] Failed to import UnifiedPlotter: {e}")
-                print(f"[PLOT ERROR] Make sure plotting_core is available")
+                debug_print(f"[PLOT ERROR] Failed to import UnifiedPlotter: {e}")
+                debug_print(f"[PLOT ERROR] Make sure plotting_core is available")
             except Exception as e:
-                print(f"[PLOT ERROR] Background plotting failed: {e}")
+                debug_print(f"[PLOT ERROR] Background plotting failed: {e}")
                 import traceback
                 traceback.print_exc()
         
         # Start background thread (daemon so it doesn't block exit)
         plot_thread = threading.Thread(target=run_plotting, daemon=True)
         plot_thread.start()
-        print(f"[PLOT] Background plotting queued for {device_name} sweep {sweep_number}")
+        debug_print(f"[PLOT] Background plotting queued for {device_name} sweep {sweep_number}")
 
     def _generate_sequence_summary(
         self,
@@ -1689,7 +1704,7 @@ class MeasurementGUI:
             # Create summaries directory at sample level
             sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
             if not sample_name:
-                print("[SUMMARY ERROR] No sample name available")
+                debug_print("[SUMMARY ERROR] No sample name available")
                 return
             
             sample_save_dir = self._get_sample_save_directory(sample_name)
@@ -1880,15 +1895,15 @@ class MeasurementGUI:
             with open(json_file, 'w', encoding='utf-8') as f:
                 json.dump(serializable_summary, f, indent=2, ensure_ascii=False)
             
-            print(f"[SUMMARY] Sequence summary saved:")
-            print(f"[SUMMARY]   Text: {text_file}")
-            print(f"[SUMMARY]   JSON: {json_file}")
+            debug_print(f"[SUMMARY] Sequence summary saved:")
+            debug_print(f"[SUMMARY]   Text: {text_file}")
+            debug_print(f"[SUMMARY]   JSON: {json_file}")
             # Handle None case for final_device_type
             final_type_str = (final_device_type or 'UNKNOWN').upper() if isinstance(final_device_type, str) else 'UNKNOWN'
-            print(f"[SUMMARY]   Overall Score: {overall_score:.1f}/100 ({final_type_str})")
+            debug_print(f"[SUMMARY]   Overall Score: {overall_score:.1f}/100 ({final_type_str})")
             
         except Exception as e:
-            print(f"[SUMMARY ERROR] Failed to generate sequence summary: {e}")
+            debug_print(f"[SUMMARY ERROR] Failed to generate sequence summary: {e}")
             import traceback
             traceback.print_exc()
     
@@ -7239,39 +7254,27 @@ class MeasurementGUI:
                         )
                 except Exception as exc:
                     # Don't interrupt measurement flow if summary generation fails
-                    print(f"[SUMMARY ERROR] Failed to generate sequence summary: {exc}")
+                    debug_print(f"[SUMMARY ERROR] Failed to generate sequence summary: {exc}")
                     import traceback
                     traceback.print_exc()
                 
                 # === AUTOMATIC COMPREHENSIVE ANALYSIS AFTER CUSTOM MEASUREMENT ===
-                # Generate all combined plots and analysis automatically
-                try:
-                    print("[COMPREHENSIVE] Starting automatic comprehensive analysis after custom measurement...")
-                    sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
-                    if sample_name:
-                        sample_dir = self._get_sample_save_directory(sample_name)
-                        if os.path.exists(sample_dir):
-                            from Helpers.Analysis import ComprehensiveAnalyzer
-                            comprehensive = ComprehensiveAnalyzer(sample_dir)
-                            comprehensive.run_comprehensive_analysis()
-                            print("[COMPREHENSIVE] Automatic analysis complete!")
-                except Exception as exc:
-                    # Don't interrupt measurement flow if comprehensive analysis fails
-                    print(f"[COMPREHENSIVE ERROR] Failed to run comprehensive analysis: {exc}")
-                    import traceback
-                    traceback.print_exc()
+                # DISABLED: Auto analysis should only run after the very last sample is measured
+                # This will be a later feature - for now, only dashboard/general graphs are plotted
+                # (Dashboard graphs are handled by the plotting system automatically)
+                pass
 
-                print(self.single_device_flag,device_count)
+                debug_print(self.single_device_flag,device_count)
                 
                 if self.single_device_flag:
-                    print("Measuring one device only")
+                    debug_print("Measuring one device only")
                     # Stop iterating further devices by exiting the device loop
                     
                     break
                 if not self.single_device_flag:
                     # Check if in manual mode - skip automatic advancement
                     if hasattr(self.sample_gui, 'multiplexer_type') and self.sample_gui.multiplexer_type == "Manual":
-                        print("Manual mode: Skipping automatic device advancement - user must manually advance")
+                        debug_print("Manual mode: Skipping automatic device advancement - user must manually advance")
                         self.log_terminal("Manual mode: Measurement complete. Please manually advance to next device using GUI buttons.")
                     else:
                         self.sample_gui.next_device()
