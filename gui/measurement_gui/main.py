@@ -6641,10 +6641,6 @@ class MeasurementGUI:
                     self.measurment_number = key
                     print("Working on device -", device, ": Measurement -", key)
 
-                    # Clear individual graphs for this new sweep (keep combined graphs)
-                    if hasattr(self, '_reset_plots_for_new_sweep'):
-                        self._reset_plots_for_new_sweep(self)
-
                     # Runtime: pause between sweeps if requested
                     while getattr(self, 'pause_requested', False) and not self.stop_measurement_flag:
                         time.sleep(0.1)
@@ -6812,7 +6808,17 @@ class MeasurementGUI:
                                 integration_time = float(params.get("integration_time", 0.01))
                                 debug = 1 if _is_truthy(params.get("debug", True)) else 0
                             
+                            # Flag to track if graphs have been cleared for this measurement
+                            _graphs_cleared_for_this_measurement = False
+                            
                             def _on_point(v, i, t_s):
+                                nonlocal _graphs_cleared_for_this_measurement
+                                # Clear graphs on first data point (right before plotting new data)
+                                if not _graphs_cleared_for_this_measurement:
+                                    if hasattr(self, '_reset_plots_for_new_sweep'):
+                                        self._reset_plots_for_new_sweep(self)
+                                    _graphs_cleared_for_this_measurement = True
+                                
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
                                 self.t_arr_disp.append(t_s)
@@ -6852,7 +6858,17 @@ class MeasurementGUI:
                                 neg_stop_v=neg_stop_v_param,
                             )
                             
+                            # Flag to track if graphs have been cleared for this measurement
+                            _graphs_cleared_for_this_measurement = False
+                            
                             def _on_point(v, i, t_s):
+                                nonlocal _graphs_cleared_for_this_measurement
+                                # Clear graphs on first data point (right before plotting new data)
+                                if not _graphs_cleared_for_this_measurement:
+                                    if hasattr(self, '_reset_plots_for_new_sweep'):
+                                        self._reset_plots_for_new_sweep(self)
+                                    _graphs_cleared_for_this_measurement = True
+                                
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
                                 self.t_arr_disp.append(t_s)

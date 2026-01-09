@@ -1,14 +1,14 @@
 {
     "description": "Default classification weights for device type scoring in sweep_analyzer.py",
-    "version": "1.0",
+    "version": "1.1",
     "weights": {
         "memristive_has_hysteresis": 25.0,
         "memristive_pinched_hysteresis": 30.0,
         "memristive_switching_behavior": 25.0,
         "memristive_nonlinear_iv": 10.0,
         "memristive_polarity_dependent": 10.0,
-        "memristive_penalty_linear_iv": -20.0,
-        "memristive_penalty_ohmic": -30.0,
+        "memristive_penalty_linear_iv": -40.0,
+        "memristive_penalty_ohmic": -50.0,
         "capacitive_hysteresis_unpinched": 40.0,
         "capacitive_phase_shift": 40.0,
         "capacitive_elliptical": 20.0,
@@ -20,15 +20,18 @@
         "conductive_no_hysteresis": 30.0,
         "conductive_nonlinear_no_switching": 40.0,
         "conductive_advanced_mechanism": 30.0,
-        "ohmic_linear_clean": 60.0,
-        "ohmic_model_fit": 20.0
+        "ohmic_linear_clean": 90.0,
+        "ohmic_model_fit": 30.0
     },
     "notes": {
         "memristive": "Scores for devices showing hysteresis, pinched loops, and switching behavior",
         "capacitive": "Scores for devices with unpinched hysteresis, phase shift, and elliptical patterns",
         "memcapacitive": "Scores for devices combining capacitive and memristive characteristics",
         "conductive": "Scores for non-linear devices without hysteresis (non-ohmic, non-memristive)",
-        "ohmic": "Scores for linear resistive behavior",
-        "penalties": "Negative scores to prevent misclassification (e.g., linear devices as memristive)"
+        "ohmic": "Scores for linear resistive behavior - increased to 90/30 to better compete",
+        "penalties": "Negative scores to prevent misclassification - strengthened to -40/-50 for ohmic devices"
+    },
+    "changelog": {
+        "v1.1": "Fixed ohmic device misclassification: (1) Increased ohmic weights 60→90, 20→30, (2) Strengthened memristive penalties -20→-40, -30→-50, (3) Added ohmic guard in classification logic, (4) Fixed pinched hysteresis false positives"
     }
 }
