@@ -1,37 +1,52 @@
 {
     "description": "Default classification weights for device type scoring in sweep_analyzer.py",
-    "version": "1.1",
+    "version": "1.4",
     "weights": {
         "memristive_has_hysteresis": 25.0,
         "memristive_pinched_hysteresis": 30.0,
         "memristive_switching_behavior": 25.0,
+        "memristive_switching_plus_nonlinear_bonus": 20.0,
         "memristive_nonlinear_iv": 10.0,
         "memristive_polarity_dependent": 10.0,
-        "memristive_penalty_linear_iv": -40.0,
-        "memristive_penalty_ohmic": -50.0,
+        "memristive_penalty_linear_iv": -20.0,
+        "memristive_penalty_ohmic": -30.0,
+        "memristive_penalty_no_switching": -40.0,
         "capacitive_hysteresis_unpinched": 40.0,
         "capacitive_phase_shift": 40.0,
         "capacitive_elliptical": 20.0,
-        "memcapacitive_hysteresis_unpinched": 40.0,
-        "memcapacitive_switching_behavior": 30.0,
-        "memcapacitive_nonlinear_iv": 20.0,
+        "memcapacitive_double_zero_crossing": 50.0,
         "memcapacitive_phase_shift": 20.0,
-        "memcapacitive_penalty_pinched": -20.0,
+        "memcapacitive_switching_behavior": 30.0,
+        "memcapacitive_penalty_strong_switching": -25.0,
+        "memcapacitive_elliptical": 15.0,
+        "memcapacitive_nonlinear_iv": 20.0,
+        "memcapacitive_penalty_pinched": -30.0,
+        "memcapacitive_hysteresis_unpinched": 20.0,
         "conductive_no_hysteresis": 30.0,
         "conductive_nonlinear_no_switching": 40.0,
         "conductive_advanced_mechanism": 30.0,
-        "ohmic_linear_clean": 90.0,
-        "ohmic_model_fit": 30.0
+        "ohmic_strong": 80.0,
+        "ohmic_clear": 70.0,
+        "ohmic_with_artifact": 60.0,
+        "ohmic_weak": 40.0,
+        "ohmic_linear_clean": 60.0,
+        "ohmic_model_fit": 20.0
     },
     "notes": {
-        "memristive": "Scores for devices showing hysteresis, pinched loops, and switching behavior",
-        "capacitive": "Scores for devices with unpinched hysteresis, phase shift, and elliptical patterns",
-        "memcapacitive": "Scores for devices combining capacitive and memristive characteristics",
+        "memristive": "Scores for devices showing SINGLE pinched loop (ONE zero crossing) + switching behavior. Pinched hysteresis = figure-8 with lobes meeting at origin. v1.3: +20 bonus for switching+nonlinearity combination. Switching is THE defining memristive feature.",
+        "capacitive": "Scores for devices with unpinched hysteresis, phase shift, and elliptical patterns (pure capacitive, no memory)",
+        "memcapacitive": "CORRECTED v1.4: Memcapacitors show DOUBLE zero crossing (TWO crossings per cycle) - butterfly/horizontal figure-8 pattern. This is charge-dependent capacitance. Primary signature (50 pts): double_zero_crossing. Penalty -30 for single pinched crossing (that's memristive, not memcapacitive!). Strong switching penalty (-25) still applies.",
         "conductive": "Scores for non-linear devices without hysteresis (non-ohmic, non-memristive)",
-        "ohmic": "Scores for linear resistive behavior - increased to 90/30 to better compete",
-        "penalties": "Negative scores to prevent misclassification - strengthened to -40/-50 for ohmic devices"
+        "ohmic": "Enhanced graduated scoring system: ohmic_strong (80) for perfect ohmic, ohmic_clear (70), ohmic_with_artifact (60) for linear with weak hysteresis, ohmic_weak (40) for marginal cases. Legacy weights preserved for compatibility.",
+        "penalties": "Negative scores to prevent misclassification. Critical: memristive_penalty_no_switching (-40) prevents devices with hysteresis but NO switching from being classified as memristive.",
+        "adaptive_thresholds": "v1.3+: Area thresholds scale with current magnitude (sqrt scaling) to handle devices from 1e-9 to 1e-3 A. Pinched check relaxed to 10% for switching devices to handle non-ideal zero crossing.",
+        "zero_crossing_distinction": "v1.4: CRITICAL DISTINCTION - Memristive: ONE crossing (pinched at origin), Memcapacitive: TWO crossings (double crossing pattern). This properly distinguishes resistance-based from charge-based memory."
     },
     "changelog": {
-        "v1.1": "Fixed ohmic device misclassification: (1) Increased ohmic weights 60→90, 20→30, (2) Strengthened memristive penalties -20→-40, -30→-50, (3) Added ohmic guard in classification logic, (4) Fixed pinched hysteresis false positives"
+        "v1.0": "Initial classification weights",
+        "v1.1": "Fixed ohmic device misclassification: (1) Increased ohmic weights 60→90, 20→30, (2) Strengthened memristive penalties -20→-40, -30→-50, (3) Added ohmic guard in classification logic, (4) Fixed pinched hysteresis false positives",
+        "v1.2": "Major enhancement to ohmic classification: (1) NEW graduated ohmic scoring system with 4 quality levels (strong/clear/artifact/weak), (2) NEW memristive_penalty_no_switching (-40) for devices with hysteresis but no switching/nonlinearity, (3) Enhanced artifact filtering in pinched hysteresis detection with minimum area requirement, (4) Improved hysteresis presence detection with multi-level thresholds (1e-4 to 1e-2) and consistency checks, (5) Added artifact detection logic for linear+pinched+no_switching cases",
+        "v1.3": "CRITICAL FIX for memristive vs memcapacitive competition: (1) NEW memristive_switching_plus_nonlinear_bonus (+20) - if device has BOTH switching AND nonlinearity, strongly favor memristive classification, (2) NEW memcapacitive_penalty_strong_switching (-25) - strong switching (ON/OFF > 2) is memristive, not memcapacitive, (3) ADAPTIVE area thresholds now scale with current magnitude using sqrt(I/1mA) to handle devices from 1e-9 to 1e-3 A, (4) Relaxed pinched hysteresis check to 10% (from 5%) for switching devices to handle non-ideal zero crossing due to series resistance, (5) Adaptive minimum area for pinched check (10x more lenient for switching devices)",
+        "v1.4": "FUNDAMENTAL CORRECTION to memcapacitive classification logic: (1) NEW _check_double_zero_crossing() - detects TWO zero crossings per cycle (memcapacitive fingerprint), (2) NEW memcapacitive_double_zero_crossing (+50) - PRIMARY memcapacitive signature, (3) NEW memcapacitive_elliptical (+15) - elliptical pattern support, (4) CORRECTED logic: Memcapacitors have DOUBLE crossing (butterfly/horizontal figure-8), NOT unpinched hysteresis, (5) Increased memcapacitive_penalty_pinched to -30 (from -20) - single pinch is memristive!, (6) Reduced memcapacitive_hysteresis_unpinched to 20 (from 40) - de-emphasized legacy logic, (7) Updated classification notes to clarify: ONE crossing = memristive, TWO crossings = memcapacitive"
     }
 }
