@@ -1958,10 +1958,29 @@ class IVControllerManager:
                         clarius_debug=0
                     )
                     
-                    # Calculate wait time based on sweep parameters
+                    # Calculate dynamic wait time based on sweep parameters
+                    # Account for: points per cycle, number of cycles, step delay, and system overhead
                     time_per_point = step_delay + (integration_time * 0.01)  # Rough: 1 PLC ≈ 0.01s
-                    estimated_time = num_points * time_per_point
-                    wait_time = max(2.0, estimated_time * 1.5)  # Minimum 2s, add 50% safety margin
+                    time_per_cycle = points_per_cycle * time_per_point
+                    # Add cycle overhead: each cycle has setup/teardown overhead (~0.1s per cycle)
+                    cycle_overhead = num_cycles * 0.1
+                    # Base time calculation
+                    estimated_time = (time_per_cycle * num_cycles) + cycle_overhead
+                    # Add system-specific safety margin (more conservative for longer measurements)
+                    # For measurements with more cycles, add extra margin due to potential system delays
+                    safety_factor = 1.5 + (0.1 * num_cycles)  # Increase margin with more cycles
+                    wait_time = max(2.0, estimated_time * safety_factor)
+                    # Additional minimum wait based on number of cycles (ensures enough time for C module processing)
+                    min_wait_per_cycle = 0.5  # Minimum 0.5s per cycle
+                    wait_time = max(wait_time, num_cycles * min_wait_per_cycle)
+                    
+                    # Debug output for wait time calculation
+                    if hasattr(self, '_debug') and self._debug:
+                        print(f"[4200A] Dynamic wait time calculation:")
+                        print(f"  - Points per cycle: {points_per_cycle}, Num cycles: {num_cycles}")
+                        print(f"  - Time per point: {time_per_point:.4f}s, Time per cycle: {time_per_cycle:.2f}s")
+                        print(f"  - Estimated time: {estimated_time:.2f}s, Safety factor: {safety_factor:.2f}")
+                        print(f"  - Final wait time: {wait_time:.2f}s")
                     
                     # Execute EX command with calculated wait time
                     # IMPORTANT: Ensure we're in UL mode before executing
@@ -1991,7 +2010,9 @@ class IVControllerManager:
                             raise RuntimeError(f"4200A EX command returned unexpected value: {return_value} (expected 0)")
                     
                     # Additional wait to ensure EX command is fully complete and data arrays are written
-                    time.sleep(0.5)  # Give C module time to write data to output arrays
+                    # Scale wait time based on number of cycles (more cycles = more data to write)
+                    post_wait = 0.5 + (num_cycles * 0.1)  # Base 0.5s + 0.1s per cycle
+                    time.sleep(post_wait)  # Give C module time to write data to output arrays
                     
                     # Ensure we're still in UL mode for GP commands (smu_ivsweep requires UL mode for GP)
                     if not kxci._ul_mode_active:

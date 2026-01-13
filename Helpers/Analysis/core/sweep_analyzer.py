@@ -11,6 +11,21 @@ from typing import List
 import textwrap
 from matplotlib.backends.backend_pdf import PdfPages
 
+# ==================== DEBUG CONTROL ====================
+# Set to True only when actively debugging. In normal use this should stay False
+# so the console isn't flooded with diagnostic messages.
+DEBUG_ENABLED = False
+
+def debug_print(*args, **kwargs):
+    """
+    Lightweight debug logger for diagnostic messages.
+    
+    NOTE: Kept for future troubleshooting, but disabled by default via
+    DEBUG_ENABLED=False to keep runtime output clean for end users.
+    """
+    if DEBUG_ENABLED:
+        print(*args, **kwargs)
+
 # Suppress expected numerical warnings that are handled by try-except blocks
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in log')
 warnings.filterwarnings('ignore', category=RuntimeWarning, message='invalid value encountered in divide')
@@ -62,7 +77,13 @@ class SweepAnalyzer:
     Supports I-V characterization, pulse measurements, endurance, and retention testing.
     Includes theoretical model fitting and advanced device classification.
     """
-
+    
+    # ========================================================================
+    # CLASSIFICATION TOGGLES - Configure behavior at class level
+    # ========================================================================
+    ENABLE_MEMCAPACITIVE_CLASSIFICATION = True  # Set to False to disable memcapacitive category
+    UNCERTAIN_THRESHOLD = 40.0  # Score below this → "uncertain" classification
+    
     def __init__(self, voltage, current, time=None, measurement_type='iv_sweep', analysis_level='full', classification_weights=None, device_name=None):
         """
         Initialize device analysis.
@@ -141,6 +162,9 @@ class SweepAnalyzer:
         self.model_parameters = {}
         self.classification_breakdown = {}
         self.classification_explanation = {}
+        self.classification_reasoning = ""  # Detailed explanation of classification
+        self.classification_warnings = []  # Red flags for inconsistent features
+        self.switching_strength = 0.0  # Continuous score 0-100 for switching quality
         
         # === ENHANCED CLASSIFICATION (Phase 1) ===
         # These are ADDITIONAL metrics that don't affect core classification
@@ -149,7 +173,6 @@ class SweepAnalyzer:
         self.adaptive_thresholds = {}  # Context-aware thresholds
         self.memory_window_quality = {}  # Detailed window quality metrics
         self.hysteresis_shape_features = {}  # Shape analysis
-        self.classification_warnings = []  # Physical plausibility warnings
         self.enhanced_classification_enabled = True  # Can be disabled if needed
         
         # === DEVICE TRACKING (Phase 2) ===
@@ -195,7 +218,7 @@ class SweepAnalyzer:
         # Process based on measurement type
         device_info = f" [{self.device_name}]" if self.device_name else ""
         num_cycles = self._detect_cycles()
-        print(f"[DIAGNOSTIC]{device_info} Detected measurement type: {self.measurement_type} (cycles: {num_cycles})")
+        debug_print(f"[DIAGNOSTIC]{device_info} Detected measurement type: {self.measurement_type} (cycles: {num_cycles})")
         
         if self.measurement_type == 'iv_sweep':
             self._process_iv_sweep()
@@ -256,13 +279,13 @@ class SweepAnalyzer:
         if self.device_name:
             name_lower = self.device_name.lower()
             has_fs_indicator = any(indicator in name_lower for indicator in ['fs', 'ps', 'ns', '-sweep', '_sweep'])
-            print(f"[DIAGNOSTIC] Filename check: '{self.device_name}' -> has IV sweep indicator: {has_fs_indicator}")
+            debug_print(f"[DIAGNOSTIC] Filename check: '{self.device_name}' -> has IV sweep indicator: {has_fs_indicator}")
             if has_fs_indicator:
                 # Filename indicates IV sweep, trust it
-                print(f"[DIAGNOSTIC] Forcing measurement type to 'iv_sweep' based on filename")
+                debug_print(f"[DIAGNOSTIC] Forcing measurement type to 'iv_sweep' based on filename")
                 return 'iv_sweep'
         else:
-            print(f"[DIAGNOSTIC] No device_name available for filename check")
+            debug_print(f"[DIAGNOSTIC] No device_name available for filename check")
 
         # Check if this might be a pulse measurement
         if self.time is not None:
@@ -463,7 +486,7 @@ class SweepAnalyzer:
             }
         except Exception as e:
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"[DIAGNOSTIC]{device_info} Warning: Could not fit retention model - {type(e).__name__}: {str(e)}")
+            debug_print(f"[DIAGNOSTIC]{device_info} Warning: Could not fit retention model - {type(e).__name__}: {str(e)}")
 
     def _calculate_cycles_to_failure(self, failure_threshold):
         """
@@ -686,7 +709,7 @@ class SweepAnalyzer:
         """
         try:
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"\n[DIAGNOSTIC]{device_info} Starting classification...")
+            debug_print(f"\n[DIAGNOSTIC]{device_info} Starting classification...")
             
             # Extract classification features
             self.classification_features = self._extract_classification_features()
@@ -703,6 +726,18 @@ class SweepAnalyzer:
                 self.classification_features['switching_behavior'] = False
                 self.classification_features['nonlinear_iv'] = False
                 self.classification_features['pinched_hysteresis'] = False
+                
+            # === ARTIFACT FILTERING ===
+            # If pinched hysteresis is detected BUT device is linear with no switching,
+            # it's likely measurement artifact, not true memristive behavior
+            if (self.classification_features.get('pinched_hysteresis') and 
+                self.classification_features.get('linear_iv') and 
+                not self.classification_features.get('switching_behavior')):
+                # This is likely an ohmic device with artifacts
+                debug_print(f"[DIAGNOSTIC]{device_info} Artifact detected: pinched+linear+no_switching -> likely ohmic")
+                self.classification_features['pinched_hysteresis'] = False
+                # Keep has_hysteresis but mark as weak
+                self.classification_features['artifact_hysteresis'] = True
                 
             # === CONSISTENCY CHECK ===
             # If pinched loop is detected, hysteresis MUST be present (overriding area check)
@@ -721,7 +756,8 @@ class SweepAnalyzer:
                 'memcapacitive': 0,
                 'capacitive': 0,
                 'conductive': 0,
-                'ohmic': 0
+                'ohmic': 0,
+                'uncertain': 0  # Added for low-confidence cases
             }
 
             # Score memristive characteristics (NOW CONFIGURABLE)
@@ -730,7 +766,15 @@ class SweepAnalyzer:
             if self.classification_features['pinched_hysteresis']:
                 scores['memristive'] += weights.get('memristive_pinched_hysteresis', 30.0)
             if self.classification_features['switching_behavior']:
+                # CRITICAL: Switching is THE defining memristive feature
+                # Boost score significantly for switching devices
                 scores['memristive'] += weights.get('memristive_switching_behavior', 25.0)
+                
+                # BONUS: If device has switching + nonlinearity, it's almost certainly memristive
+                # Even without perfect pinched loop or large hysteresis area
+                if self.classification_features['nonlinear_iv']:
+                    scores['memristive'] += weights.get('memristive_switching_plus_nonlinear_bonus', 20.0)
+                    
             if self.classification_features['nonlinear_iv']:
                 scores['memristive'] += weights.get('memristive_nonlinear_iv', 10.0)
             if self.classification_features['polarity_dependent']:
@@ -741,6 +785,15 @@ class SweepAnalyzer:
                 scores['memristive'] += weights.get('memristive_penalty_linear_iv', -20.0)  # Note: weight is already negative
             if self.classification_features['ohmic_behavior']:
                 scores['memristive'] += weights.get('memristive_penalty_ohmic', -30.0)  # Note: weight is already negative
+            
+            # === CRITICAL PENALTY: Missing core memristive features ===
+            # A true memristor MUST have switching behavior (state change)
+            # Without it, any hysteresis is likely artifact/capacitive
+            if (self.classification_features.get('has_hysteresis') and 
+                not self.classification_features.get('switching_behavior') and
+                not self.classification_features.get('nonlinear_iv')):
+                # Hysteresis without switching or nonlinearity = not memristive
+                scores['memristive'] += weights.get('memristive_penalty_no_switching', -40.0)
 
             # Score capacitive characteristics (NOW CONFIGURABLE)
             if self.classification_features['has_hysteresis'] and not self.classification_features['pinched_hysteresis']:
@@ -750,22 +803,51 @@ class SweepAnalyzer:
             if self.classification_features['elliptical_hysteresis']:
                 scores['capacitive'] += weights.get('capacitive_elliptical', 20.0)
 
-            # Score memcapacitive characteristics (NOW CONFIGURABLE)
-            # Logic: Unpinched hysteresis (capacitive) + Switching/Nonlinear (memristive)
-            if self.classification_features['has_hysteresis'] and not self.classification_features['pinched_hysteresis']:
-                 scores['memcapacitive'] += weights.get('memcapacitive_hysteresis_unpinched', 40.0)
+            # Score memcapacitive characteristics (CONFIGURABLE - can be disabled)
+            # CORRECTED LOGIC: Memcapacitors have DOUBLE zero crossing (not unpinched)
+            # They show charge-dependent capacitance with butterfly/horizontal figure-8 pattern
             
-            if self.classification_features['switching_behavior']:
-                 scores['memcapacitive'] += weights.get('memcapacitive_switching_behavior', 30.0)
-                 
-            if self.classification_features['nonlinear_iv']:
-                 scores['memcapacitive'] += weights.get('memcapacitive_nonlinear_iv', 20.0)
-                 
-            if self.classification_features['phase_shift'] > 30: 
-                 scores['memcapacitive'] += weights.get('memcapacitive_phase_shift', 20.0)
-                 
-            if self.classification_features['pinched_hysteresis']:
-                 scores['memcapacitive'] += weights.get('memcapacitive_penalty_pinched', -20.0)
+            # Check if memcapacitive classification is enabled
+            if self.ENABLE_MEMCAPACITIVE_CLASSIFICATION:
+                # PRIMARY SIGNATURE: Double zero crossing (TWO crossings through origin per cycle)
+                if self.classification_features.get('double_zero_crossing', False):
+                    scores['memcapacitive'] += weights.get('memcapacitive_double_zero_crossing', 50.0)
+            
+                # SECONDARY: Phase shift indicates capacitive component
+                if self.classification_features['phase_shift'] > 30: 
+                     scores['memcapacitive'] += weights.get('memcapacitive_phase_shift', 20.0)
+                
+                # TERTIARY: Weak switching can be memcapacitive (charge-state dependent)
+                if self.classification_features['switching_behavior']:
+                     mean_onoff = safe_mean(self.on_off, default=1.0)
+                     if mean_onoff > 2.0:
+                         # Strong switching → penalize memcapacitive, favor memristive
+                         scores['memcapacitive'] += weights.get('memcapacitive_penalty_strong_switching', -25.0)
+                     else:
+                         # Weak switching → could be memcapacitive
+                         scores['memcapacitive'] += weights.get('memcapacitive_switching_behavior', 30.0)
+                
+                # Elliptical pattern (can indicate capacitive)
+                if self.classification_features['elliptical_hysteresis']:
+                    scores['memcapacitive'] += weights.get('memcapacitive_elliptical', 15.0)
+                     
+                if self.classification_features['nonlinear_iv']:
+                     scores['memcapacitive'] += weights.get('memcapacitive_nonlinear_iv', 20.0)
+                     
+                # PENALTY: Single pinched crossing is memristive, NOT memcapacitive
+                if self.classification_features['pinched_hysteresis']:
+                     scores['memcapacitive'] += weights.get('memcapacitive_penalty_pinched', -30.0)
+                
+                # LEGACY support: Unpinched hysteresis (kept for backward compatibility but de-emphasized)
+                # Only add points if NO double crossing detected (avoids double-counting)
+                if (self.classification_features['has_hysteresis'] and 
+                    not self.classification_features['pinched_hysteresis'] and
+                    not self.classification_features.get('double_zero_crossing', False)):
+                     scores['memcapacitive'] += weights.get('memcapacitive_hysteresis_unpinched', 20.0)  # Reduced from 40
+            else:
+                # Memcapacitive classification is DISABLED
+                scores['memcapacitive'] = -999  # Force it to never win
+                debug_print(f"[DIAGNOSTIC]{device_info} Memcapacitive classification is DISABLED")
 
 
             # Score conductive characteristics (updated per user requirements)
@@ -784,26 +866,52 @@ class SweepAnalyzer:
             if self.classification_features['elliptical_hysteresis']:
                 scores['conductive'] -= 15.0  # Elliptical pattern suggests capacitive
 
-            # Score ohmic characteristics (guarded to avoid false-ohmic due to compliance or small-signal linearity)
+            # === ENHANCED OHMIC SCORING SYSTEM ===
+            # Score ohmic characteristics with graduated scoring for quality
             median_norm_area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0.0
             mean_on_off = safe_mean(self.on_off, default=1.0)
             has_compliance = self.compliance_current is not None and self.compliance_current > 0
 
-            # Only consider ohmic if: linear_iv AND no clear hysteresis AND small memory window AND no compliance plateau (NOW CONFIGURABLE)
-            if (self.classification_features['linear_iv']
-                and not self.classification_features['has_hysteresis']
-                and not self.classification_features['switching_behavior']
-                and median_norm_area < 1e-3
-                and mean_on_off < 1.5
-                and not has_compliance):
-                scores['ohmic'] += weights.get('ohmic_linear_clean', 60.0)
-            # Additional support for ohmic if model fit indicates ohmic strongly and still passes guards
-            if (self.conduction_mechanism == 'ohmic'
-                and self.model_parameters.get('R2', 0) > 0.98
-                and median_norm_area < 1e-3
-                and mean_on_off < 1.5
-                and not has_compliance):
-                scores['ohmic'] += weights.get('ohmic_model_fit', 20.0)
+            # Primary ohmic indicators
+            is_linear = self.classification_features['linear_iv']
+            is_ohmic_behavior = self.classification_features['ohmic_behavior']
+            has_weak_hysteresis = self.classification_features.get('has_hysteresis', False) and median_norm_area < 1e-3
+            has_strong_hysteresis = self.classification_features.get('has_hysteresis', False) and median_norm_area >= 1e-3
+            no_switching = not self.classification_features['switching_behavior']
+            
+            # Graduated ohmic scoring system
+            # 1. Strong ohmic: Linear + Ohmic behavior + No hysteresis
+            if (is_linear and is_ohmic_behavior and 
+                not self.classification_features['has_hysteresis'] and
+                no_switching and mean_on_off < 1.5 and not has_compliance):
+                scores['ohmic'] += weights.get('ohmic_strong', 80.0)
+                
+            # 2. Clear ohmic: Linear + No hysteresis + Small window
+            elif (is_linear and not self.classification_features['has_hysteresis'] and
+                  no_switching and median_norm_area < 1e-3 and mean_on_off < 1.5):
+                scores['ohmic'] += weights.get('ohmic_clear', 70.0)
+                
+            # 3. Likely ohmic: Linear + Weak hysteresis (artifact) + No switching
+            elif (is_linear and has_weak_hysteresis and no_switching and mean_on_off < 1.5):
+                scores['ohmic'] += weights.get('ohmic_with_artifact', 60.0)
+                
+            # 4. Weak ohmic: Linear + Ohmic behavior but has some hysteresis
+            elif (is_linear and is_ohmic_behavior and no_switching and mean_on_off < 2.0):
+                scores['ohmic'] += weights.get('ohmic_weak', 40.0)
+            
+            # 5. Ohmic model support: If conduction model strongly indicates ohmic
+            if (self.conduction_mechanism == 'ohmic' and 
+                self.model_parameters.get('R2', 0) > 0.95):
+                # Graduated bonus based on R² quality
+                r2 = self.model_parameters.get('R2', 0)
+                model_bonus = 20.0 if r2 > 0.98 else 15.0 if r2 > 0.95 else 10.0
+                scores['ohmic'] += model_bonus
+                
+            # 6. Penalize ohmic if has strong features of other types
+            if has_strong_hysteresis and self.classification_features.get('switching_behavior'):
+                scores['ohmic'] -= 30.0  # Clearly not ohmic
+            if self.classification_features.get('nonlinear_iv'):
+                scores['ohmic'] -= 20.0  # Nonlinearity contradicts ohmic
 
             # Keep breakdown and normalize to get confidence-style weights
             self.classification_breakdown = scores.copy()
@@ -812,24 +920,35 @@ class SweepAnalyzer:
             
             # DIAGNOSTIC: Print scoring breakdown
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"\n[DIAGNOSTIC]{device_info} Classification scores:")
+            debug_print(f"\n[DIAGNOSTIC]{device_info} Classification scores:")
             for device_type, score in scores.items():
                 print(f"  - {device_type}: {score:.1f}")
             print(f"  - Total score: {total_score:.1f}, Max score: {max_score:.1f}")
             print(f"  - Conduction mechanism: {self.conduction_mechanism}")
 
-            if total_score == 0 or max_score < 30:
+            # === UNCERTAIN CLASSIFICATION ===
+            # If max score below threshold (default 40%), classify as "uncertain"
+            if total_score == 0 or max_score < self.UNCERTAIN_THRESHOLD:
                 self.device_type = 'uncertain'
-                self.classification_confidence = 0.0
-                print(f"[DIAGNOSTIC]{device_info} !!! UNCERTAIN CLASSIFICATION !!!")
+                self.classification_confidence = max_score / 100.0
+                debug_print(f"[DIAGNOSTIC]{device_info} !!! UNCERTAIN CLASSIFICATION !!!")
                 if total_score == 0:
-                    print(f"[DIAGNOSTIC]{device_info}   Reason: All scores are 0 (no features detected)")
+                    debug_print(f"[DIAGNOSTIC]{device_info}   Reason: All scores are 0 (no features detected)")
                 else:
-                    print(f"[DIAGNOSTIC]{device_info}   Reason: Max score ({max_score:.1f}) is below threshold (30)")
+                    debug_print(f"[DIAGNOSTIC]{device_info}   Reason: Max score ({max_score:.1f}) is below threshold ({self.UNCERTAIN_THRESHOLD})")
+                
+                # For uncertain, note the top candidates
+                sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+                top_candidates = [f"{dtype} ({score:.1f})" for dtype, score in sorted_scores[:3] if score > 0]
+                self.classification_reasoning = f"Uncertain classification - max score ({max_score:.1f}) below threshold ({self.UNCERTAIN_THRESHOLD}). Top candidates: {', '.join(top_candidates) if top_candidates else 'None'}"
             else:
                 self.device_type = max(scores, key=scores.get)
                 self.classification_confidence = max_score / 100.0
-                print(f"[DIAGNOSTIC]{device_info} Classification: {self.device_type} (confidence: {self.classification_confidence:.1%})")
+                debug_print(f"[DIAGNOSTIC]{device_info} Classification: {self.device_type} (confidence: {self.classification_confidence:.1%})")
+            
+            # === REALITY CHECK WARNINGS (Item 6) ===
+            # Check for inconsistent features and raise red flags
+            self._check_feature_consistency()
 
 
             # Provide a human-friendly explanation map
@@ -837,6 +956,7 @@ class SweepAnalyzer:
                 'has_hysteresis': self.classification_features.get('has_hysteresis'),
                 'pinched_hysteresis': self.classification_features.get('pinched_hysteresis'),
                 'switching_behavior': self.classification_features.get('switching_behavior'),
+                'switching_strength': self.classification_features.get('switching_strength', 0.0),
                 'nonlinear_iv': self.classification_features.get('nonlinear_iv'),
                 'polarity_dependent': self.classification_features.get('polarity_dependent'),
                 'phase_shift': self.classification_features.get('phase_shift'),
@@ -845,6 +965,10 @@ class SweepAnalyzer:
                 'ohmic_behavior': self.classification_features.get('ohmic_behavior'),
                 'best_conduction_model': self.conduction_mechanism,
             }
+            
+            # === GENERATE DETAILED EXPLANATION (Item 8) ===
+            if self.device_type != 'uncertain':
+                self._generate_classification_explanation()
             
             # === ENHANCED CLASSIFICATION (Phase 1) ===
             # Calculate additional metrics without affecting core classification
@@ -857,8 +981,8 @@ class SweepAnalyzer:
                     
         except Exception as e:
             device_info = f" [{self.device_name}]" if self.device_name else ""
-            print(f"\n[DIAGNOSTIC]{device_info} !!! ERROR IN CLASSIFICATION !!!")
-            print(f"[DIAGNOSTIC]{device_info} Exception: {type(e).__name__}: {str(e)}")
+            debug_print(f"\n[DIAGNOSTIC]{device_info} !!! ERROR IN CLASSIFICATION !!!")
+            debug_print(f"[DIAGNOSTIC]{device_info} Exception: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
             # Set safe defaults
@@ -868,6 +992,206 @@ class SweepAnalyzer:
             self.classification_features = {}
             self.classification_explanation = {}
 
+    def _check_feature_consistency(self):
+        """
+        Check for inconsistent features and raise warnings (red flags).
+        This DOES NOT reduce confidence - just warns the user.
+        
+        Reality checks:
+        - Switching contradicts ohmic
+        - Linear contradicts memristive
+        - Strong hysteresis with no switching
+        - etc.
+        """
+        features = self.classification_features
+        device_info = f" [{self.device_name}]" if self.device_name else ""
+        
+        # Red Flag 1: Classified as Memristive but NO switching behavior
+        if self.device_type == 'memristive' and not features.get('switching_behavior', False):
+            self.classification_warnings.append(
+                f"⚠ RED FLAG: Classified as memristive but switching_behavior is False. "
+                f"True memristors require resistance switching."
+            )
+        
+        # Red Flag 2: Classified as Ohmic but has strong switching
+        if self.device_type == 'ohmic' and features.get('switching_behavior', False):
+            mean_onoff = safe_mean(self.on_off, default=1.0)
+            if mean_onoff > 2.0:
+                self.classification_warnings.append(
+                    f"⚠ RED FLAG: Classified as ohmic but shows switching (ON/OFF={mean_onoff:.2f}). "
+                    f"Ohmic devices should not switch states."
+                )
+        
+        # Red Flag 3: Classified as Memristive but linear I-V
+        if self.device_type == 'memristive' and features.get('linear_iv', False):
+            self.classification_warnings.append(
+                f"⚠ RED FLAG: Classified as memristive but I-V is linear. "
+                f"Memristors typically show nonlinear I-V characteristics."
+            )
+        
+        # Red Flag 4: Strong hysteresis but no switching (might be capacitive/artifact)
+        if (features.get('has_hysteresis', False) and 
+            not features.get('switching_behavior', False) and
+            self.device_type == 'memristive'):
+            median_area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0.0
+            if median_area > 1e-2:
+                self.classification_warnings.append(
+                    f"⚠ WARNING: Large hysteresis (area={median_area:.2e}) but no switching detected. "
+                    f"May be capacitive or artifact."
+                )
+        
+        # Red Flag 5: Pinched hysteresis but classified as something other than memristive
+        if (features.get('pinched_hysteresis', False) and 
+            self.device_type not in ['memristive', 'memcapacitive']):
+            self.classification_warnings.append(
+                f"⚠ WARNING: Pinched hysteresis detected (memristive fingerprint) but classified as {self.device_type}. "
+                f"Consider if classification is correct."
+            )
+        
+        # Red Flag 6: Compliance current detected (affects classification)
+        if self.compliance_current is not None and self.compliance_current > 0:
+            max_i = np.max(np.abs(self.current)) if len(self.current) > 0 else 0
+            if max_i > 0 and self.compliance_current / max_i > 0.9:
+                self.classification_warnings.append(
+                    f"⚠ WARNING: Current compliance detected ({self.compliance_current*1e6:.2f}µA). "
+                    f"This may affect switching behavior and classification accuracy."
+                )
+        
+        # Red Flag 7: Very low data quality (SNR)
+        if 'noise_floor' in self.adaptive_thresholds:
+            max_i = np.max(np.abs(self.current)) if len(self.current) > 0 else 0
+            noise = self.adaptive_thresholds['noise_floor']
+            if max_i > 0 and noise > 0:
+                snr = max_i / noise
+                if snr < 20:
+                    self.classification_warnings.append(
+                        f"⚠ WARNING: Low SNR (≈{snr:.1f}). Signal may be affected by noise. "
+                        f"Classification confidence may be reduced."
+                    )
+        
+        debug_print(f"[DIAGNOSTIC]{device_info} Reality checks: {len(self.classification_warnings)} warnings raised")
+    
+    def _generate_classification_explanation(self):
+        """
+        Generate detailed explanation of WHY this classification was chosen.
+        Includes primary indicators, concerns, and interpretation.
+        """
+        features = self.classification_features
+        scores = self.classification_breakdown
+        
+        # Get top 3 scoring categories
+        sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+        top_3 = [(dtype, score) for dtype, score in sorted_scores[:3] if score > 0]
+        
+        explanation_parts = []
+        
+        # Header
+        confidence_pct = self.classification_confidence * 100
+        explanation_parts.append(f"Classification: {self.device_type.upper()} ({confidence_pct:.0f}%)")
+        explanation_parts.append("")
+        
+        # Primary indicators (why this classification won)
+        primary_indicators = []
+        if self.device_type == 'memristive':
+            if features.get('switching_behavior'):
+                onoff = safe_mean(self.on_off, default=1.0)
+                strength = features.get('switching_strength', 0)
+                primary_indicators.append(f"✓ Switching behavior detected (ON/OFF: {onoff:.2f}, Strength: {strength:.0f}%)")
+            if features.get('pinched_hysteresis'):
+                primary_indicators.append(f"✓ Pinched hysteresis loop (memristive fingerprint)")
+            if features.get('nonlinear_iv'):
+                primary_indicators.append(f"✓ Nonlinear I-V characteristic")
+            if features.get('has_hysteresis'):
+                area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0
+                primary_indicators.append(f"✓ Hysteresis present (area: {area:.2e})")
+        
+        elif self.device_type == 'ohmic':
+            if features.get('linear_iv'):
+                primary_indicators.append(f"✓ Linear I-V relationship")
+            if features.get('ohmic_behavior'):
+                primary_indicators.append(f"✓ Ohmic behavior at low voltages")
+            if not features.get('has_hysteresis'):
+                primary_indicators.append(f"✓ No hysteresis detected")
+            elif features.get('has_hysteresis'):
+                area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0
+                if area < 1e-3:
+                    primary_indicators.append(f"✓ Minimal hysteresis (area: {area:.2e}, likely artifact)")
+        
+        elif self.device_type == 'capacitive':
+            if features.get('phase_shift', 0) > 30:
+                primary_indicators.append(f"✓ Significant phase shift ({features['phase_shift']:.1f}°)")
+            if features.get('elliptical_hysteresis'):
+                primary_indicators.append(f"✓ Elliptical hysteresis pattern")
+            if features.get('has_hysteresis') and not features.get('pinched_hysteresis'):
+                primary_indicators.append(f"✓ Unpinched hysteresis loop")
+        
+        elif self.device_type == 'memcapacitive':
+            if features.get('double_zero_crossing'):
+                primary_indicators.append(f"✓ Double zero-crossing pattern")
+            if features.get('phase_shift', 0) > 20:
+                primary_indicators.append(f"✓ Capacitive component (phase shift: {features['phase_shift']:.1f}°)")
+            if features.get('switching_behavior'):
+                primary_indicators.append(f"✓ Weak switching (charge-dependent)")
+        
+        elif self.device_type == 'conductive':
+            if features.get('nonlinear_iv'):
+                primary_indicators.append(f"✓ Nonlinear I-V characteristic")
+            if not features.get('has_hysteresis'):
+                primary_indicators.append(f"✓ No hysteresis (non-memristive)")
+            if self.conduction_mechanism and self.conduction_mechanism != 'ohmic':
+                primary_indicators.append(f"✓ Advanced conduction: {self.conduction_mechanism}")
+        
+        if primary_indicators:
+            explanation_parts.append("Primary Indicators:")
+            explanation_parts.extend(primary_indicators)
+            explanation_parts.append("")
+        
+        # Concerns (red flags or weak points)
+        concerns = []
+        if self.device_type == 'memristive':
+            if not features.get('pinched_hysteresis'):
+                concerns.append(f"⚠ No pinched hysteresis (non-ideal memristor)")
+            if features.get('phase_shift', 0) > 20:
+                concerns.append(f"⚠ Phase shift present ({features['phase_shift']:.1f}°) - capacitive component")
+            if features.get('linear_iv'):
+                concerns.append(f"⚠ I-V appears linear - unusual for memristors")
+        
+        if concerns:
+            explanation_parts.append("Concerns:")
+            explanation_parts.extend(concerns)
+            explanation_parts.append("")
+        
+        # Interpretation
+        interpretation = ""
+        if self.device_type == 'memristive':
+            if features.get('pinched_hysteresis') and features.get('switching_behavior'):
+                interpretation = "Ideal memristive device with clean switching and pinched loop."
+            elif features.get('switching_behavior') and not features.get('pinched_hysteresis'):
+                interpretation = "Memristive device with non-ideal pinching. Possibly due to series resistance, parasitic capacitance, or contact effects."
+            else:
+                interpretation = "Classified as memristive but lacks strong indicators. Confidence is moderate."
+        elif self.device_type == 'ohmic':
+            if features.get('has_hysteresis'):
+                interpretation = "Ohmic device with measurement artifacts (minor hysteresis). Essentially resistive behavior."
+            else:
+                interpretation = "Clean ohmic behavior - linear resistor."
+        
+        if interpretation:
+            explanation_parts.append("Interpretation:")
+            explanation_parts.append(interpretation)
+            explanation_parts.append("")
+        
+        # Alternatives (if close competition)
+        if len(top_3) > 1:
+            runner_up_name, runner_up_score = top_3[1]
+            if runner_up_score > confidence_pct * 0.6:  # Within 60% of winner
+                explanation_parts.append(f"Alternative: {runner_up_name.title()} ({runner_up_score:.0f}%)")
+        
+        # Store as formatted string
+        self.classification_reasoning = "\n".join(explanation_parts)
+        
+        debug_print(f"[DIAGNOSTIC] Classification explanation generated ({len(explanation_parts)} lines)")
+    
     def _get_default_classification_weights(self):
         """
         Return default classification weights.
@@ -901,25 +1225,35 @@ class SweepAnalyzer:
             'memristive_has_hysteresis': 25.0,
             'memristive_pinched_hysteresis': 30.0,
             'memristive_switching_behavior': 25.0,
+            'memristive_switching_plus_nonlinear_bonus': 20.0,  # NEW v1.3: Bonus for switching + nonlinearity
             'memristive_nonlinear_iv': 10.0,
             'memristive_polarity_dependent': 10.0,
             'memristive_penalty_linear_iv': -20.0,
             'memristive_penalty_ohmic': -30.0,
+            'memristive_penalty_no_switching': -40.0,
             # Capacitive
             'capacitive_hysteresis_unpinched': 40.0,
             'capacitive_phase_shift': 40.0,
             'capacitive_elliptical': 20.0,
-            # Memcapacitive
-            'memcapacitive_hysteresis_unpinched': 40.0,
-            'memcapacitive_switching_behavior': 30.0,
-            'memcapacitive_nonlinear_iv': 20.0,
+            # Memcapacitive (CORRECTED v1.4: Double zero crossing is THE signature)
+            'memcapacitive_double_zero_crossing': 50.0,  # NEW v1.4: PRIMARY signature
             'memcapacitive_phase_shift': 20.0,
-            'memcapacitive_penalty_pinched': -20.0,
+            'memcapacitive_switching_behavior': 30.0,
+            'memcapacitive_penalty_strong_switching': -25.0,
+            'memcapacitive_elliptical': 15.0,  # NEW v1.4: Elliptical pattern support
+            'memcapacitive_nonlinear_iv': 20.0,
+            'memcapacitive_penalty_pinched': -30.0,  # Increased from -20 (v1.4)
+            'memcapacitive_hysteresis_unpinched': 20.0,  # Legacy, reduced from 40 (v1.4)
             # Conductive
             'conductive_no_hysteresis': 30.0,
             'conductive_nonlinear_no_switching': 40.0,
             'conductive_advanced_mechanism': 30.0,
-            # Ohmic
+            # Ohmic (Enhanced graduated scoring)
+            'ohmic_strong': 80.0,           # Perfect ohmic: linear + ohmic behavior + no hysteresis
+            'ohmic_clear': 70.0,            # Clear ohmic: linear + no hysteresis
+            'ohmic_with_artifact': 60.0,    # Linear with weak hysteresis artifact
+            'ohmic_weak': 40.0,             # Linear + ohmic behavior but some hysteresis
+            # Legacy weights (kept for backwards compatibility if used in custom configs)
             'ohmic_linear_clean': 60.0,
             'ohmic_model_fit': 20.0,
         }
@@ -2049,120 +2383,196 @@ POWER CHARACTERISTICS:
         
         # Check for empty critical data
         if len(self.normalized_areas) == 0:
-            print(f"[DIAGNOSTIC] WARNING: normalized_areas is empty - hysteresis detection will fail")
+            debug_print(f"[DIAGNOSTIC] WARNING: normalized_areas is empty - hysteresis detection will fail")
         if len(self.on_off) == 0:
-            print(f"[DIAGNOSTIC] WARNING: on_off is empty - switching detection will fail")
+            debug_print(f"[DIAGNOSTIC] WARNING: on_off is empty - switching detection will fail")
 
         # Detect compliance early for downstream logic
         try:
             if self.compliance_current is None:
                 self.compliance_current = self._detect_compliance_current()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in compliance detection: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in compliance detection: {e}")
             self.compliance_current = None
 
         # Check for hysteresis with robust estimator
         try:
             features['has_hysteresis'] = self._estimate_hysteresis_present()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in hysteresis estimation: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in hysteresis estimation: {e}")
             features['has_hysteresis'] = False
 
         # Check for pinched hysteresis (memristive fingerprint)
         try:
             features['pinched_hysteresis'] = self._check_pinched_hysteresis()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in pinched hysteresis check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in pinched hysteresis check: {e}")
             features['pinched_hysteresis'] = False
 
-        # Check for switching behavior
+        # Check for switching behavior (ENHANCED with quality scoring)
         try:
-            if self.on_off:
-                features['switching_behavior'] = any(ratio > 2 for ratio in self.on_off if ratio > 0)
+            if self.on_off and len(self.on_off) > 0:
+                mean_onoff = np.mean([r for r in self.on_off if r > 0])
+                
+                # Binary check (backward compatibility)
+                features['switching_behavior'] = mean_onoff > 1.5
+                
+                # Continuous quality score (0-100) - SCALED relative to device
+                # Scale: ON/OFF = 1.0 → 0%, ON/OFF = 2.0 → 50%, ON/OFF = 10 → 95%, ON/OFF = 100+ → 100%
+                # Using sigmoid-like scaling for smooth gradation
+                if mean_onoff <= 1.0:
+                    switching_strength = 0.0
+                elif mean_onoff >= 100:
+                    switching_strength = 100.0
+                else:
+                    # Logarithmic scaling: 50% at ON/OFF=2, 90% at ON/OFF=10
+                    switching_strength = min(100.0, 50.0 * np.log10(mean_onoff) / np.log10(2))
+                
+                features['switching_strength'] = switching_strength
+                self.switching_strength = switching_strength  # Store as instance variable
+                
+                debug_print(f"[DIAGNOSTIC] Switching: ON/OFF={mean_onoff:.2f}, Strength={switching_strength:.1f}%")
             else:
                 features['switching_behavior'] = False
+                features['switching_strength'] = 0.0
+                self.switching_strength = 0.0
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in switching behavior check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in switching behavior check: {e}")
             features['switching_behavior'] = False
+            features['switching_strength'] = 0.0
+            self.switching_strength = 0.0
 
         # Check I-V linearity (robust to compliance region)
         try:
             features['linear_iv'], features['nonlinear_iv'] = self._check_linearity()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in linearity check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in linearity check: {e}")
             features['linear_iv'], features['nonlinear_iv'] = False, False
 
         # Check for ohmic behavior at low voltages
         try:
             features['ohmic_behavior'] = self._check_ohmic_behavior()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in ohmic behavior check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in ohmic behavior check: {e}")
             features['ohmic_behavior'] = False
 
         # Check polarity dependence
         try:
             features['polarity_dependent'] = self._check_polarity_dependence()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in polarity dependence check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in polarity dependence check: {e}")
             features['polarity_dependent'] = False
 
         # Calculate phase shift (for capacitive detection)
         try:
             features['phase_shift'] = self._calculate_phase_shift()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in phase shift calculation: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in phase shift calculation: {e}")
             features['phase_shift'] = 0
 
         # Check for elliptical hysteresis pattern
         try:
             features['elliptical_hysteresis'] = self._check_elliptical_pattern()
         except Exception as e:
-            print(f"[DIAGNOSTIC] Error in elliptical pattern check: {e}")
+            debug_print(f"[DIAGNOSTIC] Error in elliptical pattern check: {e}")
             features['elliptical_hysteresis'] = False
+        
+        # Check for double zero crossing (memcapacitive fingerprint)
+        try:
+            features['double_zero_crossing'] = self._check_double_zero_crossing()
+        except Exception as e:
+            debug_print(f"[DIAGNOSTIC] Error in double zero crossing check: {e}")
+            features['double_zero_crossing'] = False
         
         # DIAGNOSTIC: Print feature extraction results
         device_info = f" [{self.device_name}]" if self.device_name else ""
-        print(f"\n[DIAGNOSTIC]{device_info} Feature extraction results:")
-        print(f"  - Data: V={debug_info['voltage_len']}, I={debug_info['current_len']}, loops={debug_info['num_loops']}")
-        print(f"  - Arrays: norm_areas={debug_info['normalized_areas']}, on_off={debug_info['on_off']}")
-        print(f"  - has_hysteresis: {features.get('has_hysteresis')}")
-        print(f"  - pinched_hysteresis: {features.get('pinched_hysteresis')}")
-        print(f"  - switching_behavior: {features.get('switching_behavior')}")
-        print(f"  - nonlinear_iv: {features.get('nonlinear_iv')}")
-        print(f"  - linear_iv: {features.get('linear_iv')}")
-        print(f"  - ohmic_behavior: {features.get('ohmic_behavior')}")
-        print(f"  - phase_shift: {features.get('phase_shift')}")
+        debug_print(f"\n[DIAGNOSTIC]{device_info} Feature extraction results:")
+        debug_print(f"  - Data: V={debug_info['voltage_len']}, I={debug_info['current_len']}, loops={debug_info['num_loops']}")
+        debug_print(f"  - Arrays: norm_areas={debug_info['normalized_areas']}, on_off={debug_info['on_off']}")
+        debug_print(f"  - has_hysteresis: {features.get('has_hysteresis')}")
+        debug_print(f"  - pinched_hysteresis: {features.get('pinched_hysteresis')}")
+        debug_print(f"  - switching_behavior: {features.get('switching_behavior')}")
+        debug_print(f"  - nonlinear_iv: {features.get('nonlinear_iv')}")
+        debug_print(f"  - linear_iv: {features.get('linear_iv')}")
+        debug_print(f"  - ohmic_behavior: {features.get('ohmic_behavior')}")
+        debug_print(f"  - phase_shift: {features.get('phase_shift')}")
 
         return features
 
     def _estimate_hysteresis_present(self):
-        """Robust check for hysteresis presence using normalized loop areas."""
+        """
+        Robust check for hysteresis presence using normalized loop areas.
+        Uses ADAPTIVE thresholds based on current magnitude to handle devices
+        with currents ranging from 1e-9 to 1e-3.
+        """
         if not self.normalized_areas:
             return False
         areas = np.abs(np.asarray(self.normalized_areas))
         if areas.size == 0:
             return False
-        # Adaptive threshold: accept small areas while guarding noise
-        # Base threshold tuned low to avoid false negatives
-        base_threshold = 1e-3
+            
         median_area = float(np.median(areas))
-        return median_area > base_threshold
+        
+        # Calculate adaptive threshold based on current magnitude
+        # This allows proper detection across devices with vastly different current ranges
+        if len(self.current) > 0:
+            max_current = np.percentile(np.abs(self.current), 99)
+            
+            # Base thresholds for ~1mA (1e-3) devices
+            # Scale with sqrt(current) to handle orders of magnitude difference
+            current_scale = np.sqrt(max_current / 1e-3) if max_current > 0 else 1.0
+            current_scale = max(0.01, min(100, current_scale))  # Clamp to reasonable range
+            
+            # Adaptive thresholds
+            threshold_very_weak = 1e-4 * current_scale
+            threshold_weak = 1e-3 * current_scale
+            threshold_medium = 1e-2 * current_scale
+        else:
+            # Fallback to fixed thresholds
+            threshold_very_weak = 1e-4
+            threshold_weak = 1e-3
+            threshold_medium = 1e-2
+        
+        # Multi-level thresholding system:
+        # - Very weak: Likely noise/artifact -> False
+        # - Weak to Medium: Borderline, check other indicators
+        # - Medium to Strong: Clear hysteresis -> True
+        
+        if median_area < threshold_very_weak:
+            # Too small, likely noise
+            return False
+        elif median_area < threshold_weak:
+            # Borderline case - check if it's consistent across cycles
+            if len(areas) > 1:
+                # If area is consistent (low variance), it's real
+                cv = np.std(areas) / (np.mean(areas) + 1e-20)
+                if cv < 0.5:  # Consistent = real
+                    return True
+                else:  # Inconsistent = noise
+                    return False
+            else:
+                # Single cycle, borderline area -> be conservative
+                return median_area > (threshold_very_weak + threshold_weak) / 2
+        else:
+            # Clear hysteresis (above weak threshold)
+            return True
 
     def _check_pinched_hysteresis(self):
         """
-        Check if the I-V curve shows pinched hysteresis at origin.
-        Requires the loop to be 'closed' at V=0 (current -> 0).
+        Check if the I-V curve shows pinched hysteresis at origin (SINGLE zero crossing).
+        Memristive fingerprint: ONE crossing point at origin where two lobes meet.
+        Enhanced with adaptive thresholds and relaxed checking for devices with strong switching.
         """
         # Find currents strictly near zero voltage
         v_abs_max = max(abs(self.voltage.max()), abs(self.voltage.min()))
-        threshold_v = 0.02 * v_abs_max  # Tightened to 2% of voltage range
+        threshold_v = 0.02 * v_abs_max  # 2% of voltage range
         
         near_zero_mask = np.abs(self.voltage) < threshold_v
 
         if np.any(near_zero_mask):
             currents_near_zero = self.current[near_zero_mask]
             
-            # Robust max current (95th percentile to ignore spikes)
+            # Robust max current (99th percentile to ignore spikes)
             if len(self.current) > 0:
                 max_current = np.percentile(np.abs(self.current), 99)
             else:
@@ -2173,14 +2583,104 @@ POWER CHARACTERISTICS:
                 mean_zero_current = np.mean(np.abs(currents_near_zero))
                 
                 # Ratio of (Current at Zero) / (Max Current)
-                # For a Memristor, this should be ~0.
-                # For a Capacitor, this is I_cap / I_total, which is significant.
                 zero_ratio = mean_zero_current / max_current
                 
-                # Strict threshold: Must be less than 5% of max current to be considered "pinched"
-                return zero_ratio < 0.05
+                # Relaxed pinched threshold: 10% for devices with strong switching
+                # (Classic memristors don't always pass exactly through zero due to:
+                #  - Series resistance, - Contact effects, - Measurement offsets)
+                has_strong_switching = False
+                if self.on_off and len(self.on_off) > 0:
+                    mean_onoff = np.mean([r for r in self.on_off if r > 0])
+                    has_strong_switching = mean_onoff > 2.0  # ON/OFF > 2
+                
+                # Adaptive threshold based on switching strength
+                if has_strong_switching:
+                    pinch_threshold = 0.10  # 10% for switching devices (relaxed)
+                else:
+                    pinch_threshold = 0.05  # 5% for non-switching (strict)
+                
+                is_pinched_at_origin = zero_ratio < pinch_threshold
+                
+                # Additional validation with ADAPTIVE area threshold
+                if is_pinched_at_origin:
+                    median_norm_area = float(np.median(np.abs(self.normalized_areas))) if self.normalized_areas else 0.0
+                    
+                    # ADAPTIVE minimum area based on current magnitude
+                    # Scale with max current to handle 1e-9 to 1e-3 range
+                    # Base threshold: 1e-4 for ~1mA devices
+                    # Scale: (max_current / 1e-3)^0.5 to account for different orders of magnitude
+                    current_scale = np.sqrt(max_current / 1e-3) if max_current > 0 else 1.0
+                    min_area_for_pinched = 1e-4 * max(0.01, min(100, current_scale))
+                    
+                    # For devices with strong switching, be more lenient on area
+                    if has_strong_switching:
+                        min_area_for_pinched *= 0.1  # 10x more lenient
+                    
+                    if median_norm_area < min_area_for_pinched:
+                        # Area too small - likely ohmic with artifact
+                        debug_print(f"[DIAGNOSTIC] Pinched check: origin passes but area too small ({median_norm_area:.2e} < {min_area_for_pinched:.2e}) -> False")
+                        return False
+                    
+                    return True
+                else:
+                    return False
                 
         return False
+    
+    def _check_double_zero_crossing(self):
+        """
+        Check for DOUBLE zero crossing (memcapacitive fingerprint).
+        Memcapacitors cross zero TWICE in one cycle (horizontal figure-8).
+        Different from memristors which have ONE pinched crossing.
+        
+        Returns:
+        --------
+        bool : True if device shows double zero crossing pattern
+        """
+        if len(self.current) < 10:
+            return False
+        
+        # Find zero crossings in current
+        # A zero crossing occurs when current changes sign
+        zero_crossings = []
+        for i in range(1, len(self.current)):
+            # Check for sign change (considering small threshold for noise)
+            threshold = np.percentile(np.abs(self.current), 5) if len(self.current) > 0 else 1e-12
+            
+            if abs(self.current[i-1]) < threshold and abs(self.current[i]) < threshold:
+                continue  # Skip noise near zero
+            
+            if self.current[i-1] * self.current[i] < 0:  # Sign change
+                zero_crossings.append(i)
+        
+        # Count distinct zero crossing regions
+        # Group nearby crossings (within 5% of data length) as one region
+        if len(zero_crossings) < 2:
+            return False
+        
+        crossing_regions = []
+        current_region = [zero_crossings[0]]
+        region_threshold = len(self.current) * 0.05  # 5% of data length
+        
+        for i in range(1, len(zero_crossings)):
+            if zero_crossings[i] - zero_crossings[i-1] < region_threshold:
+                current_region.append(zero_crossings[i])
+            else:
+                crossing_regions.append(current_region)
+                current_region = [zero_crossings[i]]
+        crossing_regions.append(current_region)
+        
+        # Memcapacitive signature: At least 2 distinct crossing regions per cycle
+        # For a full bipolar sweep (0 → +V → 0 → -V → 0), we expect:
+        # - Memristive: 1-2 crossing regions (pinched at origin)
+        # - Memcapacitive: 3-4 crossing regions (double crossing)
+        
+        num_regions = len(crossing_regions)
+        debug_print(f"[DIAGNOSTIC] Zero crossing regions detected: {num_regions}")
+        
+        # Require at least 3 distinct regions for double crossing
+        # (more than memristive pinch, indicating butterfly/horizontal figure-8)
+        return num_regions >= 3
 
     def _check_linearity(self):
         """Check if I-V relationship is linear."""
@@ -2764,6 +3264,9 @@ POWER CHARACTERISTICS:
             'breakdown': self.classification_breakdown,
             'features': self.classification_features,
             'explanation': self.classification_explanation,
+            'reasoning': self.classification_reasoning,  # NEW: Detailed explanation
+            'warnings': self.classification_warnings,  # NEW: Red flags
+            'switching_strength': self.switching_strength,  # NEW: Continuous metric
             'conduction_mechanism': self.conduction_mechanism,
             'model_fit_r2': self.model_parameters.get('R2', 0) if isinstance(self.model_parameters, dict) else 0,
         }
