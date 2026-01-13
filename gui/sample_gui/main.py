@@ -1491,7 +1491,7 @@ class SampleGUI:
                 image_path = device_folder / f"quick_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             else:
                 sample = self.sample_type_var.get()
-                sample_dir = save_root / sample.replace(" ", "_")
+                sample_dir = save_root / sample
                 sample_dir.mkdir(parents=True, exist_ok=True)
                 image_path = sample_dir / f"quick_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
             
@@ -1784,8 +1784,7 @@ class SampleGUI:
                 pass
         
         # Fallback to old behavior
-        safe_sample = sample.replace(" ", "_")
-        return BASE_DIR / "Data_maps" / safe_sample
+        return BASE_DIR / "Data_maps" / sample
 
     def update_device_checkboxes(self) -> None:
         """Update the device checkboxes based on current device list with status indicators."""
@@ -2219,7 +2218,7 @@ class SampleGUI:
             if not sample:
                 return
             save_root = resolve_default_save_root()
-            save_dir = save_root / sample.replace(" ", "_")
+            save_dir = save_root / sample
         
         save_dir.mkdir(parents=True, exist_ok=True)
         
@@ -2268,7 +2267,7 @@ class SampleGUI:
             return
         
         save_root = resolve_default_save_root()
-        sample_dir = save_root / sample.replace(" ", "_")
+        sample_dir = save_root / sample
         json_path = sample_dir / "device_status.json"
         
         if not json_path.exists():
@@ -2299,7 +2298,7 @@ class SampleGUI:
             return
         
         save_root = resolve_default_save_root()
-        sample_dir = save_root / sample.replace(" ", "_")
+        sample_dir = save_root / sample
         sample_dir.mkdir(parents=True, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2320,7 +2319,7 @@ class SampleGUI:
         name = device_name or self.current_device_name
         if not name:
             raise ValueError("No device name specified")
-        return save_root / name.replace(" ", "_")
+        return save_root / name
 
     def set_current_device(self) -> None:
         """Set the current device name from user input."""
@@ -2555,7 +2554,7 @@ class SampleGUI:
             sample_name = self.current_device_name  # Current device name is the sample name (D104)
             if sample_name:
                 try:
-                    sample_folder = resolve_default_save_root() / sample_name.replace(" ", "_")
+                    sample_folder = resolve_default_save_root() / sample_name
                     notes_path = sample_folder / "notes.json"
                     if notes_path.exists():
                         with notes_path.open("r", encoding="utf-8") as f:

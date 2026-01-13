@@ -3158,7 +3158,7 @@ class TSPTestingGUI(tk.Toplevel):
                 
                 # Build path: [default_save_root]/[sample_name]/[section]/[device_number]/Pulse_measurements
                 # This matches exactly where SMU measurements are saved
-                save_dir = Path(default_save_root) / sample_name.replace(" ", "_") / section / device_num / "Pulse_measurements"
+                save_dir = Path(default_save_root) / sample_name / section / device_num / "Pulse_measurements"
                 save_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Get next index for sequential numbering
