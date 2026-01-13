@@ -50,6 +50,11 @@
         "temp_address": "12",
         "temp_controller": "Lakeshore 335"
     },
+
+    "Lab borrowing 2401": {
+        "SMU_address": "GPIB0::27::INSTR",
+        "SMU Type": "Keithley 2401"  
+    },
     "Hp4140b": {
         "SMU_address": "GPIB0::24::INSTR",
         "SMU Type": "Hp4140b"
