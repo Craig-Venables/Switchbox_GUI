@@ -5,6 +5,13 @@
         "1": {"start_v": 0,"stop_v": 1,"sweeps": 1,"step_v": 0.1},
         "2": {"start_v": 0,"stop_v": 2,"sweeps": 1,"step_v": 0.1}}
     },
+    "Controll sample test": {
+    "code_name": "cst_1",
+    "sweeps": {
+        "1": {"start_v": 0,"stop_v": 1,"sweeps": 3,"step_v": 0.05},
+        "2": {"start_v": 0,"stop_v": 2,"sweeps": 3,"step_v": 0.05},
+        "3": {"start_v": 0,"stop_v": 3,"sweeps": 3,"step_v": 0.05}}
+    },
     "Simple_test_1.5V)": {
       "code_name": "Simple_1.5V",
       "sweeps": {
