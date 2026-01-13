@@ -1460,8 +1460,9 @@ class MeasurementGUI:
             import json
             from datetime import datetime
             
-            # Create device research folder
-            research_dir = os.path.join(save_dir, "device_research", device_id)
+            # Save research data in sweep_analysis folder within device directory
+            # New structure: G/{device_num}/sweep_analysis/{filename}_research.json
+            research_dir = os.path.join(save_dir, "sweep_analysis")
             os.makedirs(research_dir, exist_ok=True)
             
             # Save as JSON for easy parsing
@@ -1492,8 +1493,159 @@ class MeasurementGUI:
             
             debug_print(f"[RESEARCH] Saved to: {research_file}")
             
+            # Also append to classification log
+            try:
+                self._append_classification_log(save_dir, file_name, research_data)
+            except Exception as log_exc:
+                debug_print(f"[CLASSIFICATION LOG ERROR] Failed to append log: {log_exc}")
+            
         except Exception as e:
             debug_print(f"[RESEARCH ERROR] Failed to save research analysis: {e}")
+
+    def _append_classification_log(
+        self,
+        save_dir: str,
+        file_name: str,
+        analysis_data: Dict[str, Any]
+    ) -> None:
+        """
+        Append classification results to device-level log file.
+        
+        Creates/appends to: {save_dir}/classification_log.txt
+        
+        Parameters:
+        -----------
+        save_dir : str
+            Device directory (e.g., G/1/)
+        file_name : str
+            Measurement filename
+        analysis_data : Dict[str, Any]
+            Analysis results containing classification data
+        """
+        try:
+            import os
+            from datetime import datetime
+            
+            # Log file path
+            log_file = os.path.join(save_dir, "classification_log.txt")
+            summary_log_file = os.path.join(save_dir, "classification_summary.txt")
+            
+            # Extract classification data
+            classification = analysis_data.get('classification', {})
+            device_type = classification.get('device_type', 'unknown')
+            confidence = classification.get('confidence', 0.0)
+            memristivity_score = classification.get('memristivity_score', 0.0)
+            switching_strength = classification.get('switching_strength', 0.0)
+            reasoning = classification.get('reasoning', '')
+            warnings = classification.get('warnings', [])
+            
+            # Get breakdown scores
+            breakdown = classification.get('breakdown', {})
+            
+            # Format log entry
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            separator = "=" * 80
+            
+            # Check if file exists to determine if we need a header
+            file_exists = os.path.exists(log_file)
+            
+            # === DETAILED LOG FILE ===
+            with open(log_file, 'a') as f:
+                # Add header if new file
+                if not file_exists:
+                    f.write(separator + "\n")
+                    f.write("DEVICE CLASSIFICATION LOG (DETAILED)\n")
+                    f.write(f"Device: {os.path.basename(save_dir)}\n")
+                    f.write(f"Created: {timestamp}\n")
+                    f.write(f"\n")
+                    f.write("NOTE: For quick reference, see classification_summary.txt\n")
+                    f.write(separator + "\n\n")
+                
+                # Write entry
+                f.write(f"{separator}\n")
+                f.write(f"Sweep: {file_name}\n")
+                f.write(f"Timestamp: {timestamp}\n")
+                f.write(f"\n")
+                f.write(f"CLASSIFICATION: {device_type.upper()}\n")
+                f.write(f"Confidence: {confidence:.1%}\n")
+                f.write(f"Memristivity Score: {memristivity_score:.1f}/100\n")
+                f.write(f"Switching Strength: {switching_strength:.1f}/100\n")
+                f.write(f"\n")
+                
+                # Score breakdown
+                f.write(f"Score Breakdown:\n")
+                for dtype, score in sorted(breakdown.items(), key=lambda x: x[1], reverse=True):
+                    if score > 0:
+                        f.write(f"  - {dtype:15s}: {score:6.1f}\n")
+                f.write(f"\n")
+                
+                # Detailed explanation/reasoning
+                if reasoning:
+                    f.write("DETAILED EXPLANATION:\n")
+                    f.write("-" * 80 + "\n")
+                    # Add proper indentation to multiline reasoning
+                    for line in reasoning.split('\n'):
+                        f.write(f"{line}\n")
+                    f.write("\n")
+                
+                # Warnings (red flags)
+                if warnings and len(warnings) > 0:
+                    f.write("⚠ WARNINGS / RED FLAGS:\n")
+                    f.write("-" * 80 + "\n")
+                    for i, warning in enumerate(warnings, 1):
+                        # Wrap long warnings to 75 characters
+                        import textwrap
+                        wrapped = textwrap.fill(warning, width=75, initial_indent=f"  {i}. ", 
+                                               subsequent_indent="     ")
+                        f.write(wrapped + "\n")
+                    f.write("\n")
+                else:
+                    f.write("No warnings detected.\n\n")
+            
+            # === SUMMARY FILE (Quick Reference) ===
+            # Read existing summary to update/append
+            summary_entries = []
+            summary_exists = os.path.exists(summary_log_file)
+            
+            if summary_exists:
+                # Read existing entries
+                try:
+                    with open(summary_log_file, 'r') as f:
+                        lines = f.readlines()
+                        # Skip header lines and parse entries
+                        for line in lines:
+                            if ' - ' in line and not line.startswith('=') and not line.startswith('QUICK'):
+                                summary_entries.append(line.strip())
+                except:
+                    pass
+            
+            # Add new entry
+            confidence_emoji = "✓" if confidence >= 0.75 else "~" if confidence >= 0.5 else "?"
+            score_emoji = "🟢" if memristivity_score >= 70 else "🟡" if memristivity_score >= 40 else "🔴"
+            new_entry = f"{file_name:50s} - {device_type.upper():15s} {confidence_emoji} ({confidence:.0%}) {score_emoji} {memristivity_score:.0f}/100"
+            summary_entries.append(new_entry)
+            
+            # Write updated summary
+            with open(summary_log_file, 'w') as f:
+                f.write(separator + "\n")
+                f.write("QUICK CLASSIFICATION SUMMARY\n")
+                f.write(f"Device: {os.path.basename(save_dir)}\n")
+                f.write(f"Updated: {timestamp}\n")
+                f.write(separator + "\n")
+                f.write("Format: Sweep Name - Classification ✓/~/? (Confidence) 🟢/🟡/🔴 Score/100\n")
+                f.write("Legend: ✓=High confidence, ~=Medium, ?=Low | 🟢=Strong, 🟡=Moderate, 🔴=Weak\n")
+                f.write(separator + "\n\n")
+                
+                for entry in summary_entries:
+                    f.write(entry + "\n")
+            
+            debug_print(f"[CLASSIFICATION LOG] Appended to: {log_file}")
+            debug_print(f"[CLASSIFICATION LOG] Updated summary: {summary_log_file}")
+            
+        except Exception as e:
+            debug_print(f"[CLASSIFICATION LOG ERROR] Failed to write log: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _plot_measurement_in_background(
         self,
@@ -1824,7 +1976,9 @@ class MeasurementGUI:
             lines.append(f"- Data Location: {save_dir}")
             lines.append(f"- Device Tracking: {sample_save_dir}/sample_analysis/device_tracking/{device_id}_history.json")
             if overall_score > 60:
-                lines.append(f"- Research Data: {sample_save_dir}/sample_analysis/device_research/{device_id}/")
+                lines.append(f"- Research Data: {save_dir}/sweep_analysis/")
+            lines.append(f"- Classification Summary: {save_dir}/classification_summary.txt (quick reference)")
+            lines.append(f"- Classification Log: {save_dir}/classification_log.txt (detailed)")
             lines.append("")
             lines.append("FUTURE ENHANCEMENTS:")
             lines.append("- [ ] Trend plots (score vs voltage, Ron/Roff evolution)")
@@ -1868,7 +2022,9 @@ class MeasurementGUI:
                 'data_locations': {
                     'raw_data': save_dir,
                     'tracking': f"{sample_save_dir}/sample_analysis/device_tracking/{device_id}_history.json",
-                    'research': f"{sample_save_dir}/sample_analysis/device_research/{device_id}/" if overall_score > 60 else None
+                    'research': f"{save_dir}/sweep_analysis/" if overall_score > 60 else None,
+                    'classification_summary': f"{save_dir}/classification_summary.txt",
+                    'classification_log': f"{save_dir}/classification_log.txt"
                 }
             }
             
@@ -2243,11 +2399,18 @@ class MeasurementGUI:
                 lines.append("-" * 40)
                 lines.append(f"  Tracking: {history_file}")
                 
-                # Check for research data
-                research_dir = os.path.join(save_root, "device_research", device_id)
+                # Check for research data (now in sweep_analysis folder within device dir)
+                # Device directory structure: G/{device_num}/sweep_analysis/
+                device_letter, device_num = device_id.rsplit('_', 1)
+                research_dir = os.path.join(save_root, device_letter, device_num, "sweep_analysis")
                 if os.path.exists(research_dir):
-                    research_files = [f for f in os.listdir(research_dir) if f.endswith('.json')]
+                    research_files = [f for f in os.listdir(research_dir) if f.endswith('_research.json')]
                     lines.append(f"  Research: {len(research_files)} file(s) in {research_dir}")
+                
+                # Check for classification log
+                classification_log = os.path.join(save_root, device_letter, device_num, "classification_log.txt")
+                if os.path.exists(classification_log):
+                    lines.append(f"  Classification Log: {classification_log}")
             else:
                 lines.append("No measurements recorded yet.")
             
@@ -6641,10 +6804,6 @@ class MeasurementGUI:
                     self.measurment_number = key
                     print("Working on device -", device, ": Measurement -", key)
 
-                    # Clear individual graphs for this new sweep (keep combined graphs)
-                    if hasattr(self, '_reset_plots_for_new_sweep'):
-                        self._reset_plots_for_new_sweep(self)
-
                     # Runtime: pause between sweeps if requested
                     while getattr(self, 'pause_requested', False) and not self.stop_measurement_flag:
                         time.sleep(0.1)
@@ -6812,7 +6971,17 @@ class MeasurementGUI:
                                 integration_time = float(params.get("integration_time", 0.01))
                                 debug = 1 if _is_truthy(params.get("debug", True)) else 0
                             
+                            # Flag to track if graphs have been cleared for this measurement
+                            _graphs_cleared_for_this_measurement = False
+                            
                             def _on_point(v, i, t_s):
+                                nonlocal _graphs_cleared_for_this_measurement
+                                # Clear graphs on first data point (right before plotting new data)
+                                if not _graphs_cleared_for_this_measurement:
+                                    if hasattr(self, '_reset_plots_for_new_sweep'):
+                                        self._reset_plots_for_new_sweep(self)
+                                    _graphs_cleared_for_this_measurement = True
+                                
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
                                 self.t_arr_disp.append(t_s)
@@ -6852,7 +7021,17 @@ class MeasurementGUI:
                                 neg_stop_v=neg_stop_v_param,
                             )
                             
+                            # Flag to track if graphs have been cleared for this measurement
+                            _graphs_cleared_for_this_measurement = False
+                            
                             def _on_point(v, i, t_s):
+                                nonlocal _graphs_cleared_for_this_measurement
+                                # Clear graphs on first data point (right before plotting new data)
+                                if not _graphs_cleared_for_this_measurement:
+                                    if hasattr(self, '_reset_plots_for_new_sweep'):
+                                        self._reset_plots_for_new_sweep(self)
+                                    _graphs_cleared_for_this_measurement = True
+                                
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
                                 self.t_arr_disp.append(t_s)
@@ -7074,8 +7253,9 @@ class MeasurementGUI:
                             except Exception:
                                 pass
                         
-                        # Use sweep-specific filename (without extra_info for analysis)
-                        sweep_file_name = f"{key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}"
+                        # Use sweep-specific filename (should match the actual saved file: save_key-based)
+                        # Note: 'name' uses save_key (line 7067), so use that for consistency
+                        sweep_file_name = name  # Use the actual filename that was saved
                         
                         # Run analysis with conditional logic
                         analysis_result = self._run_analysis_if_enabled(
@@ -7086,19 +7266,19 @@ class MeasurementGUI:
                             file_name=sweep_file_name,
                             metadata=sweep_metadata,
                             is_custom_sequence=True,
-                            sweep_number=int(str(key)),  # Convert key to int
+                            sweep_number=int(str(save_key)),  # Use save_key instead of key for consistency
                             device_memristive_flag=device_is_memristive
                         )
                         
                         # Update memristive flag after first sweep
                         # Since analysis now runs in background, check for pending results
-                        if int(str(key)) == 1:
+                        if save_key == 0:  # First sweep (use save_key instead of key)
                             # Wait a bit for analysis to complete (with timeout)
                             max_wait = 10.0  # 10 seconds max
                             wait_start = time.time()
                             while time.time() - wait_start < max_wait:
                                 if hasattr(self, '_pending_analysis_results'):
-                                    result_key = f"{sweep_file_name}_sweep_{int(str(key))}"
+                                    result_key = f"{sweep_file_name}_sweep_{save_key}"
                                     if result_key in self._pending_analysis_results:
                                         result = self._pending_analysis_results[result_key]
                                         device_is_memristive = result.get('is_memristive', False)
@@ -7110,39 +7290,51 @@ class MeasurementGUI:
                                 print(f"[CUSTOM ANALYSIS] Timeout waiting for first sweep analysis result")
                                 analysis_result = None
 
-                        # Collect analysis data
+                        # === AUTOMATIC PLOTTING FOR ALL SWEEPS ===
+                        # Plot IV dashboard for EVERY sweep (memristive or not)
+                        # Only include conduction/SCLC plots if device is memristive
+                        try:
+                            # Determine if memristive from analysis result (if available)
+                            is_memristive_for_plot = False
+                            if analysis_result and hasattr(analysis_result, 'get'):
+                                analysis_data = analysis_result.get('analysis_data') or analysis_result
+                                if analysis_data:
+                                    classification = analysis_data.get('classification', {})
+                                    is_memristive_for_plot = classification.get('memristivity_score', 0) > 60
+                            else:
+                                # No analysis result - use device flag from first sweep
+                                is_memristive_for_plot = device_is_memristive if device_is_memristive is not None else False
+                            
+                            # ALWAYS plot (dashboard always, conduction/SCLC only if memristive)
+                            self._plot_measurement_in_background(
+                                voltage=v_arr,
+                                current=c_arr,
+                                timestamps=timestamps,
+                                save_dir=save_dir,
+                                device_name=f"{self.final_device_letter}{self.final_device_number}",
+                                sweep_number=save_key,  # Use save_key for consistency
+                                is_memristive=is_memristive_for_plot,
+                                filename=name  # Use actual saved filename (includes extra_info if present)
+                            )
+                            debug_print(f"[PLOT] Queued plots for sweep {save_key}: {name} (memristive={is_memristive_for_plot})")
+                        except Exception as plot_exc:
+                            print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
+                        
+                        # Collect analysis data (if available)
                         if analysis_result and hasattr(analysis_result, 'get'):
                             try:
                                 analysis_data = analysis_result.get('analysis_data') or analysis_result
                                 sequence_analysis_results.append({
-                                    'sweep_number': int(str(key)),
+                                    'sweep_number': save_key,  # Use save_key for consistency
                                     'voltage': stop_v,
                                     'analysis': analysis_data
                                 })
                                 
-                                # === AUTOMATIC PLOTTING AFTER ANALYSIS ===
-                                # Plot graphs in background (basic always, advanced if memristive)
-                                # Use the actual saved filename (name) which includes extra_info
-                                try:
-                                    classification = analysis_data.get('classification', {})
-                                    is_memristive = classification.get('memristivity_score', 0) > 60
-                                    self._plot_measurement_in_background(
-                                        voltage=v_arr,
-                                        current=c_arr,
-                                        timestamps=timestamps,
-                                        save_dir=save_dir,
-                                        device_name=f"{self.final_device_letter}{self.final_device_number}",
-                                        sweep_number=int(str(key)),
-                                        is_memristive=is_memristive,
-                                        filename=name  # Use actual saved filename (includes extra_info if present)
-                                    )
-                                except Exception as plot_exc:
-                                    print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
-                                
                                 # Update live display (separate try-except to not block data collection)
                                 try:
+                                    classification = analysis_data.get('classification', {})
                                     self._update_live_classification_display(
-                                        sweep_num=int(str(key)),
+                                        sweep_num=save_key,  # Use save_key for consistency
                                         total_sweeps=total_sweeps_count,
                                         classification_data=classification
                                     )
@@ -7219,13 +7411,18 @@ class MeasurementGUI:
                             file_name = f"custom_{selected_measurement}"
                             
                             # Call analysis helper
+                            # NOTE: Pass is_custom_sequence=True to suppress automatic plotting
+                            # (Individual sweeps already have plots, this is just for combined stats)
                             self._run_analysis_if_enabled(
                                 voltage=v_arr,
                                 current=c_arr,
                                 timestamps=t_arr,
                                 save_dir=save_dir,
                                 file_name=file_name,
-                                metadata=metadata
+                                metadata=metadata,
+                                is_custom_sequence=True,  # Suppress automatic plotting
+                                sweep_number=9999,  # Dummy value (will be ignored for combined analysis)
+                                device_memristive_flag=True  # Allow analysis to run (combined data)
                             )
                 except Exception as exc:
                     # Don't interrupt measurement flow if analysis fails
