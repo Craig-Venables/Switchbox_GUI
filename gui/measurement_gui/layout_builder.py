@@ -3138,7 +3138,7 @@ Output location: {sample_dir}/sample_analysis/
             # Get previous devices by going backwards in the device list
             from pathlib import Path
             save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
-            sample_folder = save_root / sample_name.replace(" ", "_")
+            sample_folder = save_root / sample_name
             
             if not sample_folder.exists():
                 return previous_devices
@@ -3923,7 +3923,7 @@ Output location: {sample_dir}/sample_analysis/
         """Get the path to the notes JSON file for a sample"""
         from pathlib import Path
         save_root = Path(getattr(gui, 'default_save_root', Path.home() / "Documents" / "Data_folder"))
-        sample_folder = save_root / sample_name.replace(" ", "_")
+        sample_folder = save_root / sample_name
         return sample_folder / "notes.json"
     
     def _load_notes_data(self, gui, sample_name: str) -> dict:
