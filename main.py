@@ -21,6 +21,8 @@ from gui.sample_gui import SampleGUI
 # conditional testing dosnt work propperly seemigly dosnt save the data! but dies run the measurment 
 # if and when the switchbox is used, devices c and f 1-5 need too be not routed too as theres no auto pins for this location!
 
+# something to view the "memristive newss" od the samples and quick look 
+
 
 """ Classes for the Gui"""
 
