@@ -2719,6 +2719,30 @@ class MeasurementGUILayoutBuilder:
         )
         analyze_btn.pack(fill='x', pady=(0, 20))
         
+        # Reclassify Button
+        reclassify_btn = tk.Button(
+            actions_frame,
+            text="🔄 Reclassify All Devices",
+            command=gui.reclassify_all_devices,
+            font=("Segoe UI", 11, "bold"),
+            bg="#2196F3",
+            fg="white",
+            padx=30,
+            pady=10,
+            cursor="hand2",
+            relief=tk.RAISED,
+            bd=1
+        )
+        reclassify_btn.pack(fill='x', pady=(0, 20))
+        
+        tk.Label(
+            actions_frame,
+            text="* Reclassify updates all device classifications using current weights from classification_weights.json",
+            font=("Segoe UI", 9),
+            bg=self.COLOR_BG,
+            fg="#666666"
+        ).pack(pady=(0, 20))
+        
         # Plotting buttons container
         plot_btns_frame = tk.Frame(actions_frame, bg=self.COLOR_BG)
         plot_btns_frame.pack(fill='x')
