@@ -3552,6 +3552,399 @@ class MeasurementGUI:
                 self.custom_sweep_status_label.config(text=f"✗ {error_msg}", fg="#F44336")
 
 
+    def reclassify_all_devices(self) -> None:
+        """
+        Reclassify all devices in the current sample using updated classification weights.
+        
+        Scans all measurement files, re-runs analysis with current weights from classification_weights.json,
+        and updates device_tracking history files and research files accordingly.
+        """
+        try:
+            import os
+            import json
+            import numpy as np
+            from pathlib import Path
+            from tkinter import messagebox
+            from Helpers.Analysis import quick_analyze
+            from datetime import datetime
+
+            # Get sample directory (same logic as run_full_sample_analysis)
+            sample_dir = None
+            sample_name = None
+
+            if hasattr(self, 'analysis_folder_var'):
+                selected_folder = self.analysis_folder_var.get()
+                if selected_folder and selected_folder != "(Use current sample)":
+                    if os.path.exists(selected_folder):
+                        sample_dir = selected_folder
+                        sample_name = os.path.basename(selected_folder)
+                    else:
+                        messagebox.showerror("Error", f"Selected folder not found: {selected_folder}")
+                        return
+
+            # If no folder selected, use current sample
+            if not sample_dir:
+                sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else None
+                if not sample_name:
+                    messagebox.showwarning(
+                        "No Sample",
+                        "Please either:\n"
+                        "1. Select a sample in the GUI, OR\n"
+                        "2. Click 'Browse...' to select a sample folder"
+                    )
+                    return
+
+                sample_dir = self._get_sample_save_directory(sample_name)
+
+            if not os.path.exists(sample_dir):
+                messagebox.showerror("Error", f"Sample directory not found: {sample_dir}")
+                return
+
+            # Set up logging callback
+            def log_to_terminal(message: str) -> None:
+                """Log message to graph activity terminal"""
+                if hasattr(self, 'plot_panels') and self.plot_panels:
+                    self.plot_panels.log_graph_activity(message)
+                if hasattr(self, 'analysis_status_label'):
+                    self.analysis_status_label.config(text=message)
+                    self.master.update_idletasks()
+
+            # Confirm with user
+            response = messagebox.askyesno(
+                "Reclassify All Devices",
+                f"This will reclassify all devices in:\n{sample_dir}\n\n"
+                "This may take a while for large samples.\n\n"
+                "Continue?"
+            )
+            if not response:
+                return
+
+            log_to_terminal("Starting reclassification...")
+            print(f"[RECLASSIFY] Starting reclassification for: {sample_name or os.path.basename(sample_dir)}")
+
+            # Statistics
+            total_files = 0
+            reclassified_count = 0
+            type_changes = 0
+            errors = []
+
+            # Scan for device subfolders (letter/number structure)
+            sample_path = Path(sample_dir)
+            tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")
+            legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")
+
+            # Helper function to convert numpy types for JSON
+            def convert_for_json(obj):
+                if isinstance(obj, np.bool_):
+                    return bool(obj)
+                elif isinstance(obj, np.integer):
+                    return int(obj)
+                elif isinstance(obj, np.floating):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                elif isinstance(obj, dict):
+                    return {key: convert_for_json(value) for key, value in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_for_json(item) for item in obj]
+                return obj
+
+            # Process each device folder
+            for letter_dir in sample_path.iterdir():
+                if not letter_dir.is_dir() or letter_dir.name.startswith('.'):
+                    continue
+
+                letter = letter_dir.name
+
+                # Check if this is a device letter folder (contains numbered subfolders)
+                for number_dir in letter_dir.iterdir():
+                    if not number_dir.is_dir():
+                        continue
+
+                    try:
+                        device_number = number_dir.name
+                    except:
+                        continue
+
+                    # Find .txt measurement files in this device folder
+                    txt_files = list(number_dir.glob("*.txt"))
+
+                    if not txt_files:
+                        continue
+
+                    # Construct device ID
+                    device_id = f"{sample_name or os.path.basename(sample_dir)}_{letter}_{device_number}"
+
+                    # Load or create device history
+                    history_file = None
+                    history = None
+                    
+                    # Try new structure first, then legacy
+                    for tracking_path in [tracking_dir, legacy_tracking_dir]:
+                        potential_file = os.path.join(tracking_path, f"{device_id}_history.json")
+                        if os.path.exists(potential_file):
+                            history_file = potential_file
+                            try:
+                                with open(history_file, 'r') as f:
+                                    history = json.load(f)
+                                break
+                            except Exception as e:
+                                print(f"[RECLASSIFY] Error loading history file {potential_file}: {e}")
+                                errors.append(f"Error loading {device_id} history: {str(e)[:50]}")
+
+                    # If no history file exists, create new structure
+                    if history is None:
+                        # Create tracking directory if needed
+                        os.makedirs(tracking_dir, exist_ok=True)
+                        history_file = os.path.join(tracking_dir, f"{device_id}_history.json")
+                        history = {
+                            'device_id': device_id,
+                            'created': datetime.now().isoformat(),
+                            'measurements': []
+                        }
+
+                    log_to_terminal(f"Processing device {device_id}: {len(txt_files)} file(s)")
+
+                    # Process each measurement file
+                    for txt_file in txt_files:
+                        total_files += 1
+                        try:
+                            # Load data from file
+                            try:
+                                data = np.loadtxt(txt_file, skiprows=1)
+                            except:
+                                try:
+                                    data = np.loadtxt(txt_file)
+                                except:
+                                    # Try reading line by line
+                                    with open(txt_file, 'r') as f:
+                                        lines = f.readlines()
+                                        if lines and ('Voltage' in lines[0] or 'voltage' in lines[0].lower()):
+                                            lines = lines[1:]
+                                        data_lines = []
+                                        for line in lines:
+                                            if line.strip() and not line.strip().startswith('#'):
+                                                try:
+                                                    values = [float(x) for x in line.strip().split()]
+                                                    if len(values) >= 2:
+                                                        data_lines.append(values)
+                                                except:
+                                                    continue
+                                        if not data_lines:
+                                            raise ValueError("No valid data found")
+                                        data = np.array(data_lines)
+
+                            if len(data.shape) < 2 or data.shape[1] < 2:
+                                print(f"[RECLASSIFY] Skipping {txt_file.name}: insufficient columns")
+                                continue
+
+                            # Extract voltage, current, time
+                            voltage = data[:, 0]
+                            current = data[:, 1]
+                            timestamps = data[:, 2] if data.shape[1] > 2 else None
+
+                            if len(voltage) == 0 or len(current) == 0:
+                                print(f"[RECLASSIFY] Skipping {txt_file.name}: empty data")
+                                continue
+
+                            # Build metadata
+                            metadata = {
+                                'device_name': device_id,
+                                'file_name': txt_file.stem,
+                                'reclassification': True
+                            }
+
+                            # Run classification-level analysis with current weights
+                            log_to_terminal(f"Reclassifying {txt_file.name}...")
+                            analysis_data = quick_analyze(
+                                voltage=voltage,
+                                current=current,
+                                time=timestamps,
+                                metadata=metadata,
+                                analysis_level='classification',
+                                device_id=device_id,
+                                cycle_number=None,
+                                save_directory=sample_dir
+                            )
+
+                            # Get new classification
+                            classification = analysis_data.get('classification', {})
+                            new_device_type = classification.get('device_type', 'unknown')
+                            new_memristivity_score = classification.get('memristivity_score', 0)
+                            new_confidence = classification.get('confidence', 0.0)
+                            new_conduction_mechanism = classification.get('conduction_mechanism', 'N/A')
+
+                            # Find matching measurement in history
+                            file_stem = txt_file.stem
+                            measurement_found = False
+                            old_device_type = None
+
+                            # Try to match by filename first (if stored in metadata)
+                            for measurement in history.get('measurements', []):
+                                # Check if this measurement matches the file
+                                # Match by filename if stored, or by being the only measurement, or by timestamp proximity
+                                measurement_file = measurement.get('file_name')
+                                if measurement_file and measurement_file == file_stem:
+                                    measurement_found = True
+                                    old_classification = measurement.get('classification', {})
+                                    old_device_type = old_classification.get('device_type', 'unknown')
+                                    
+                                    # Update classification fields
+                                    measurement['classification'] = {
+                                        'device_type': new_device_type,
+                                        'confidence': float(new_confidence),
+                                        'memristivity_score': float(new_memristivity_score) if new_memristivity_score else None,
+                                        'conduction_mechanism': new_conduction_mechanism,
+                                    }
+                                    measurement['reclassified'] = True
+                                    measurement['reclassified_timestamp'] = datetime.now().isoformat()
+                                    
+                                    # Track type changes
+                                    if old_device_type != new_device_type:
+                                        type_changes += 1
+                                        print(f"[RECLASSIFY] {device_id}/{file_stem}: {old_device_type} → {new_device_type}")
+                                    
+                                    break
+
+                            # If no exact match found, try to match by being the only measurement or update most recent
+                            if not measurement_found:
+                                measurements = history.get('measurements', [])
+                                measurement_to_update = None
+                                
+                                if len(measurements) == 1:
+                                    # Only one measurement - update it
+                                    measurement_to_update = measurements[0]
+                                elif len(measurements) > 1:
+                                    # Multiple measurements - update the most recent one
+                                    # Sort by timestamp (most recent last)
+                                    sorted_measurements = sorted(
+                                        measurements,
+                                        key=lambda m: m.get('timestamp', ''),
+                                        reverse=False
+                                    )
+                                    measurement_to_update = sorted_measurements[-1]  # Most recent
+                                
+                                if measurement_to_update:
+                                    old_classification = measurement_to_update.get('classification', {})
+                                    old_device_type = old_classification.get('device_type', 'unknown')
+                                    
+                                    # Update classification fields
+                                    measurement_to_update['classification'] = {
+                                        'device_type': new_device_type,
+                                        'confidence': float(new_confidence),
+                                        'memristivity_score': float(new_memristivity_score) if new_memristivity_score else None,
+                                        'conduction_mechanism': new_conduction_mechanism,
+                                    }
+                                    measurement_to_update['file_name'] = file_stem  # Store filename for future matching
+                                    measurement_to_update['reclassified'] = True
+                                    measurement_to_update['reclassified_timestamp'] = datetime.now().isoformat()
+                                    
+                                    # Track type changes
+                                    if old_device_type != new_device_type:
+                                        type_changes += 1
+                                        print(f"[RECLASSIFY] {device_id}/{file_stem}: {old_device_type} → {new_device_type}")
+                                    
+                                    measurement_found = True
+
+                            # If still no match found, add new entry
+                            if not measurement_found:
+                                # Create new measurement entry (minimal, just classification)
+                                new_measurement = {
+                                    'timestamp': datetime.now().isoformat(),
+                                    'cycle_number': None,
+                                    'classification': {
+                                        'device_type': new_device_type,
+                                        'confidence': float(new_confidence),
+                                        'memristivity_score': float(new_memristivity_score) if new_memristivity_score else None,
+                                        'conduction_mechanism': new_conduction_mechanism,
+                                    },
+                                    'file_name': file_stem,
+                                    'reclassified': True,
+                                    'reclassified_timestamp': datetime.now().isoformat()
+                                }
+                                history['measurements'].append(new_measurement)
+
+                            # Update history metadata
+                            history['last_updated'] = datetime.now().isoformat()
+                            history['total_measurements'] = len(history['measurements'])
+
+                            # Save updated history
+                            serializable_history = convert_for_json(history)
+                            with open(history_file, 'w') as f:
+                                json.dump(serializable_history, f, indent=2)
+
+                            # Handle research files
+                            is_memristive = new_device_type in ['memristive', 'memcapacitive'] or (new_memristivity_score and new_memristivity_score > 60)
+                            
+                            if is_memristive:
+                                # Run research analysis and save
+                                try:
+                                    log_to_terminal(f"Running research analysis for {txt_file.name}...")
+                                    research_data = quick_analyze(
+                                        voltage=voltage,
+                                        current=current,
+                                        time=timestamps,
+                                        metadata=metadata,
+                                        analysis_level='research',
+                                        device_id=device_id,
+                                        cycle_number=None,
+                                        save_directory=sample_dir
+                                    )
+                                    
+                                    # Save research data
+                                    self._save_research_analysis(
+                                        research_data,
+                                        str(number_dir),  # Device directory
+                                        txt_file.stem,
+                                        device_id
+                                    )
+                                except Exception as research_exc:
+                                    print(f"[RECLASSIFY] Research analysis failed for {txt_file.name}: {research_exc}")
+                                    errors.append(f"Research analysis failed for {device_id}/{txt_file.name}: {str(research_exc)[:50]}")
+
+                            reclassified_count += 1
+
+                            # Update progress
+                            if reclassified_count % 5 == 0:
+                                log_to_terminal(f"Reclassified {reclassified_count}/{total_files} files...")
+
+                        except Exception as file_exc:
+                            error_msg = f"Error processing {txt_file.name}: {str(file_exc)[:100]}"
+                            print(f"[RECLASSIFY] {error_msg}")
+                            errors.append(f"{device_id}/{txt_file.name}: {str(file_exc)[:50]}")
+                            continue
+
+            # Show completion summary
+            summary = (
+                f"Reclassification complete!\n\n"
+                f"Total files processed: {total_files}\n"
+                f"Successfully reclassified: {reclassified_count}\n"
+                f"Type changes: {type_changes}\n"
+            )
+            
+            if errors:
+                summary += f"\nErrors: {len(errors)}\n"
+                summary += "\n".join(errors[:10])  # Show first 10 errors
+                if len(errors) > 10:
+                    summary += f"\n... and {len(errors) - 10} more errors"
+
+            log_to_terminal(f"✓ Reclassification complete: {reclassified_count} files, {type_changes} type changes")
+            messagebox.showinfo("Reclassification Complete", summary)
+            
+            print(f"[RECLASSIFY] Complete: {reclassified_count}/{total_files} files, {type_changes} type changes")
+
+        except Exception as e:
+            error_msg = f"Reclassification failed: {str(e)}"
+            print(f"[RECLASSIFY ERROR] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            
+            if hasattr(self, 'analysis_status_label'):
+                self.analysis_status_label.config(text=f"✗ {error_msg[:50]}")
+            
+            from tkinter import messagebox
+            messagebox.showerror("Reclassification Error", error_msg)
+
     def _run_retroactive_analysis(self, sample_dir: str, sample_name: str, log_callback: Optional[Callable] = None) -> int:
         """
         Run analysis on raw measurement files retroactively.
