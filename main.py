@@ -13,6 +13,15 @@ from gui.sample_gui import SampleGUI
 # make the current value when plotting red so you can see it when tracing
 
 
+# Some forming set up, allowing you to choose a current limit and we send pulses until the device "forms" form read form read etc
+# post form then runs measurmetns 
+
+#add into the anlaysis tab a way too run theough all the data and reclassify with new weights of whats memristive capacative etc... 
+
+# conditional testing dosnt work propperly seemigly dosnt save the data! but dies run the measurment 
+# if and when the switchbox is used, devices c and f 1-5 need too be not routed too as theres no auto pins for this location!
+
+
 """ Classes for the Gui"""
 
 if __name__ == "__main__":

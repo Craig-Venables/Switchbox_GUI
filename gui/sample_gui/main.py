@@ -114,7 +114,7 @@ BASE_DIR: Path = _PROJECT_ROOT
 sample_config = {
     "Cross_bar": {
         "sections": {"A": True, "B": True, "C": False, "D": True, "E": True, "F": False, "G": True, "H": True,
-                     "I": True, "J": True, "K": True, "L": True},
+                     "I": True, "J": False, "K": True, "L": True},
         "devices": [str(i) for i in range(1, 11)]},
     "Device_Array_10": {
         "sections": {"A": True},
