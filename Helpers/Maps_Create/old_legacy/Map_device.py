@@ -22,12 +22,12 @@ device_mapping = {}
 
 # Load image safely
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_IMAGE = SCRIPT_DIR / "15mmx15mm.JPG"
+DEFAULT_IMAGE = SCRIPT_DIR / "memristor.png"
 image_path = Path(DEFAULT_IMAGE)
 
 # Output file path (save in Maps_Create directory, one level up from script)
 OUTPUT_DIR = SCRIPT_DIR.parent
-OUTPUT_FILE = OUTPUT_DIR / "device_mapping_multiplexer.json"
+OUTPUT_FILE = OUTPUT_DIR / "test.json"
 
 if not image_path.is_file():
     raise FileNotFoundError(

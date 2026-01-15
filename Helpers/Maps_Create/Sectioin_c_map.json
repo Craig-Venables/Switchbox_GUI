@@ -1,0 +1,12 @@
+{
+    "device_101": {"x_min": 821,"y_min": 591,"x_max": 846,"y_max": 615},
+    "device_102": {"x_min": 871,"y_min": 594,"x_max": 891,"y_max": 615},
+    "device_103": {"x_min": 916,"y_min": 593,"x_max": 937,"y_max": 615},
+    "device_104": {"x_min": 964,"y_min": 593,"x_max": 986,"y_max": 614},
+    "device_105": {"x_min": 1012,"y_min": 593, "x_max":103,"y_max": 615},
+    "device_106": {"x_min": 354,"y_min": 593,"x_max": 374,"y_max": 615},
+    "device_107": {"x_min": 307,"y_min": 596,"x_max": 324,"y_max": 615},
+    "device_108": {"x_min": 259,"y_min": 594,"x_max": 279,"y_max": 625},
+    "device_109": {"x_min": 209,"y_min": 594,"x_max": 228,"y_max": 615},
+    "device_110": {"x_min": 163,"y_min": 591,"x_max": 186,"y_max": 615}
+}
