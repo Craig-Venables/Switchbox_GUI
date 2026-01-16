@@ -57,6 +57,10 @@ Launches:
   - Access: "Automated Tester" button
   - Purpose: Batch device testing
 
+- DeviceVisualizer: Device analysis visualization tool
+  - Access: "Device Visualizer" button
+  - Purpose: Browse and analyze device data with comprehensive visualizations
+
 Dependencies:
 -------------
 - Measurments.measurement_services_smu: SMU measurement service
@@ -1429,6 +1433,28 @@ class MeasurementGUI:
             
             debug_print(f"[ANALYSIS] Results saved to: {os.path.abspath(analysis_file)}")
             
+            # Update classification log if classification-level analysis was performed
+            if analysis_level in ['classification', 'full', 'research']:
+                try:
+                    # Get device directory from save_dir (should be G/{device_num}/)
+                    # If save_dir is already device-level, use it; otherwise try to extract
+                    device_dir = save_dir
+                    
+                    # If save_dir is sample-level, try to construct device directory
+                    if 'sample_analysis' in save_dir or not os.path.basename(save_dir).isdigit():
+                        # Try to extract device directory from path or use a fallback
+                        # For now, use save_dir as-is and let _append_classification_log handle it
+                        pass
+                    
+                    self._append_classification_log(
+                        save_dir=device_dir,
+                        file_name=file_name,
+                        analysis_data=analysis_data
+                    )
+                except Exception as log_exc:
+                    debug_print(f"[ANALYSIS] Failed to update classification log: {log_exc}")
+                    # Non-critical error, don't fail the whole save operation
+            
         except Exception as exc:
             debug_print(f"[ANALYSIS ERROR] Failed to save analysis results: {exc}")
             import traceback
@@ -1974,7 +2000,7 @@ class MeasurementGUI:
             lines.append("=" * 80)
             lines.append("NOTES FOR BATCH PROCESSING:")
             lines.append(f"- Data Location: {save_dir}")
-            lines.append(f"- Device Tracking: {sample_save_dir}/sample_analysis/device_tracking/{device_id}_history.json")
+            lines.append(f"- Device Tracking: {sample_save_dir}/sample_analysis/analysis/device_tracking/{device_id}_history.json")
             if overall_score > 60:
                 lines.append(f"- Research Data: {save_dir}/sweep_analysis/")
             lines.append(f"- Classification Summary: {save_dir}/classification_summary.txt (quick reference)")
@@ -2021,7 +2047,7 @@ class MeasurementGUI:
                 },
                 'data_locations': {
                     'raw_data': save_dir,
-                    'tracking': f"{sample_save_dir}/sample_analysis/device_tracking/{device_id}_history.json",
+                    'tracking': f"{sample_save_dir}/sample_analysis/analysis/device_tracking/{device_id}_history.json",
                     'research': f"{save_dir}/sweep_analysis/" if overall_score > 60 else None,
                     'classification_summary': f"{save_dir}/classification_summary.txt",
                     'classification_log': f"{save_dir}/classification_log.txt"
@@ -2113,15 +2139,21 @@ class MeasurementGUI:
             
             # Use sample-level directory (not device-level)
             save_root = self._get_sample_save_directory(sample_name)
-            tracking_dir = os.path.join(save_root, "device_tracking")
+            tracking_dir = os.path.join(save_root, "sample_analysis", "analysis", "device_tracking")
+            legacy_tracking_dir = os.path.join(save_root, "sample_analysis", "device_tracking")
+            old_legacy_tracking_dir = os.path.join(save_root, "device_tracking")
             
-            # List all device history files
+            # List all device history files (check new location first, then legacy)
             devices = []
-            if os.path.exists(tracking_dir):
-                for file in os.listdir(tracking_dir):
-                    if file.endswith('_history.json'):
-                        device_id = file.replace('_history.json', '')
-                        devices.append(device_id)
+            for check_dir in [tracking_dir, legacy_tracking_dir, old_legacy_tracking_dir]:
+                if os.path.exists(check_dir):
+                    for file in os.listdir(check_dir):
+                        if file.endswith('_history.json'):
+                            device_id = file.replace('_history.json', '')
+                            if device_id not in devices:  # Avoid duplicates
+                                devices.append(device_id)
+                    if devices:  # Found devices, stop checking other locations
+                        break
             
             # Update combobox
             if hasattr(self, 'stats_device_combo'):
@@ -2173,7 +2205,7 @@ class MeasurementGUI:
             sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else ""
             # Use sample-level directory (not device-level)
             save_root = self._get_sample_save_directory(sample_name)
-            history_file = os.path.join(save_root, "sample_analysis", "device_tracking", f"{device_id}_history.json")
+            history_file = os.path.join(save_root, "sample_analysis", "analysis", "device_tracking", f"{device_id}_history.json")
             
             if not os.path.exists(history_file):
                 if hasattr(self, 'stats_text_widget'):
@@ -2645,8 +2677,9 @@ class MeasurementGUI:
             )
             
             if folder:
-                # Accept folder if it has sample_analysis/device_tracking/research OR if it has device subfolders (for retroactive analysis)
-                has_tracking = os.path.exists(os.path.join(folder, "sample_analysis", "device_tracking")) or \
+                # Accept folder if it has sample_analysis/analysis/device_tracking (new) or old locations OR if it has device subfolders
+                has_tracking = os.path.exists(os.path.join(folder, "sample_analysis", "analysis", "device_tracking")) or \
+                               os.path.exists(os.path.join(folder, "sample_analysis", "device_tracking")) or \
                                os.path.exists(os.path.join(folder, "sample_analysis", "device_research")) or \
                                os.path.exists(os.path.join(folder, "device_tracking")) or \
                                os.path.exists(os.path.join(folder, "device_research"))  # Legacy support
@@ -2683,7 +2716,7 @@ class MeasurementGUI:
                         "Invalid Folder",
                         "Selected folder doesn't appear to be a sample folder.\n\n"
                         "Expected either:\n"
-                        "- 'sample_analysis/device_tracking' or 'sample_analysis/device_research' subfolders, OR\n"
+                        "- 'sample_analysis/analysis/device_tracking' or 'sample_analysis/device_research' subfolders, OR\n"
                         "- Device subfolders (letter/number) containing .txt measurement files"
                     )
         except Exception as e:
@@ -3095,10 +3128,12 @@ class MeasurementGUI:
 
             # Check if we need to run retroactive analysis on raw data
             # Check new structure first, then legacy
-            tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")
-            legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")
+            tracking_dir = os.path.join(sample_dir, "sample_analysis", "analysis", "device_tracking")
+            legacy_tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")  # Old location
+            old_legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")  # Very old location
             has_tracking = (os.path.exists(tracking_dir) and os.listdir(tracking_dir)) or \
-                          (os.path.exists(legacy_tracking_dir) and os.listdir(legacy_tracking_dir))
+                          (os.path.exists(legacy_tracking_dir) and os.listdir(legacy_tracking_dir)) or \
+                          (os.path.exists(old_legacy_tracking_dir) and os.listdir(old_legacy_tracking_dir))
 
             if not has_tracking:
                 # Need to run retroactive analysis on raw measurement files
@@ -3143,12 +3178,15 @@ class MeasurementGUI:
 
             # Count devices for status message
             device_count = 0
-            tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")
-            legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")
+            tracking_dir = os.path.join(sample_dir, "sample_analysis", "analysis", "device_tracking")
+            legacy_tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")  # Old location
+            old_legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")  # Very old location
             if os.path.exists(tracking_dir):
                 device_count = len([f for f in os.listdir(tracking_dir) if f.endswith('_history.json')])
             elif os.path.exists(legacy_tracking_dir):
                 device_count = len([f for f in os.listdir(legacy_tracking_dir) if f.endswith('_history.json')])
+            elif os.path.exists(old_legacy_tracking_dir):
+                device_count = len([f for f in os.listdir(old_legacy_tracking_dir) if f.endswith('_history.json')])
 
             # Success
             output_dir = os.path.join(sample_dir, "sample_analysis")
@@ -3630,8 +3668,9 @@ class MeasurementGUI:
 
             # Scan for device subfolders (letter/number structure)
             sample_path = Path(sample_dir)
-            tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")
-            legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")
+            tracking_dir = os.path.join(sample_dir, "sample_analysis", "analysis", "device_tracking")
+            legacy_tracking_dir = os.path.join(sample_dir, "sample_analysis", "device_tracking")  # Old location
+            old_legacy_tracking_dir = os.path.join(sample_dir, "device_tracking")  # Very old location
 
             # Helper function to convert numpy types for JSON
             def convert_for_json(obj):
@@ -3679,8 +3718,8 @@ class MeasurementGUI:
                     history_file = None
                     history = None
                     
-                    # Try new structure first, then legacy
-                    for tracking_path in [tracking_dir, legacy_tracking_dir]:
+                    # Try new structure first, then legacy (check all possible locations)
+                    for tracking_path in [tracking_dir, legacy_tracking_dir, old_legacy_tracking_dir]:
                         potential_file = os.path.join(tracking_path, f"{device_id}_history.json")
                         if os.path.exists(potential_file):
                             history_file = potential_file
@@ -3903,6 +3942,17 @@ class MeasurementGUI:
                                     errors.append(f"Research analysis failed for {device_id}/{txt_file.name}: {str(research_exc)[:50]}")
 
                             reclassified_count += 1
+
+                            # Update classification log files
+                            try:
+                                self._append_classification_log(
+                                    save_dir=str(number_dir),  # Device directory (e.g., G/1/)
+                                    file_name=txt_file.stem,
+                                    analysis_data=analysis_data
+                                )
+                            except Exception as log_exc:
+                                print(f"[RECLASSIFY] Failed to update classification log for {txt_file.name}: {log_exc}")
+                                # Don't add to errors - log failure is non-critical
 
                             # Update progress
                             if reclassified_count % 5 == 0:
@@ -5305,6 +5355,46 @@ class MeasurementGUI:
             )
         except Exception as exc:
             messagebox.showerror("Pulse Testing", f"Could not open Pulse Testing GUI:\n{exc}")
+
+    def open_device_visualizer(self) -> None:
+        """Launch the Device Analysis Visualizer with current sample/context info."""
+        # Get sample name (same logic as open_pulse_testing_gui)
+        sample_name = None
+        if hasattr(self, "sample_name_var"):
+            try:
+                sample_name = self.sample_name_var.get().strip()
+            except Exception:
+                sample_name = None
+        
+        # Fallback to sample_gui if available
+        if not sample_name and hasattr(self, "sample_gui") and self.sample_gui:
+            for attr in ("current_device_name", "current_sample_name", "sample_name"):
+                fallback = getattr(self.sample_gui, attr, None)
+                if fallback:
+                    sample_name = str(fallback).strip()
+                    break
+        
+        # Get sample save directory path
+        sample_path = None
+        if sample_name:
+            try:
+                sample_path = self._get_sample_save_directory(sample_name)
+            except Exception:
+                sample_path = None
+        
+        # Launch the visualizer
+        try:
+            from Helpers.Data_Analysis.device_visualizer_app import launch_visualizer
+            # Note: launch_visualizer creates its own QApplication, so this will
+            # run in a separate process/event loop
+            launch_visualizer(sample_path=sample_path)
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror(
+                "Device Visualizer", 
+                f"Could not open Device Visualizer:\n{exc}"
+            )
 
     def _start_custom_measurement_thread(self) -> None:
         """Start the custom measurement workflow in a background thread."""
