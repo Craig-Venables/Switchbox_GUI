@@ -277,6 +277,20 @@ class MeasurementGUILayoutBuilder:
         pulse_btn.pack(side='left', padx=5)
         gui.pulse_testing_button = pulse_btn
         
+        # Device Visualizer button (opens Qt5 visualization app)
+        visualizer_btn = tk.Button(
+            right_section,
+            text="Device Visualizer",
+            font=self.FONT_BUTTON,
+            command=lambda: self._open_device_visualizer(),
+            bg=self.COLOR_BG,
+            relief='raised',
+            padx=10,
+            pady=5
+        )
+        visualizer_btn.pack(side='left', padx=5)
+        gui.device_visualizer_button = visualizer_btn
+        
         # Oscilloscope Pulse button
         scope_btn = tk.Button(
             right_section,
@@ -407,6 +421,20 @@ class MeasurementGUILayoutBuilder:
         except Exception as e:
             print(f"Failed to open Pulse Testing GUI: {e}")
             messagebox.showerror("Error", f"Could not open Pulse Testing GUI:\n{e}")
+    
+    def _open_device_visualizer(self) -> None:
+        """Open the Device Analysis Visualizer Qt5 application"""
+        open_cb = getattr(self.gui, "open_device_visualizer", None)
+        if callable(open_cb):
+            open_cb()
+            return
+        # Fallback if method doesn't exist
+        try:
+            from Helpers.Data_Analysis.device_visualizer_app import launch_visualizer
+            launch_visualizer()
+        except Exception as e:
+            print(f"Failed to open Device Visualizer: {e}")
+            messagebox.showerror("Error", f"Could not open Device Visualizer:\n{e}")
     
     def _show_help(self, gui: object) -> None:
         """Display a help window with usage instructions."""
