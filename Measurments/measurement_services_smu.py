@@ -368,6 +368,7 @@ class MeasurementService:
         sequence: Optional[Iterable[str]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        read_pulse_width_s: Optional[float] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Run retention using the unified API.
@@ -376,6 +377,15 @@ class MeasurementService:
         instrument-specific implementations automatically.
         """
         from Measurments.measurement_context import MeasurementContext
+        
+        # Get default read pulse width if not provided
+        if read_pulse_width_s is None:
+            try:
+                limits = self.smu_limits.get_limits(smu_type)
+                min_pulse_width_ms = limits.get("min_pulse_width_ms", 1.0)
+                read_pulse_width_s = max(0.1, min_pulse_width_ms / 1000.0)  # Use max of 100ms or SMU minimum
+            except Exception:
+                read_pulse_width_s = 0.1  # Default 100ms fallback
         
         # Convert sequence to list if provided
         sequence_list = None
@@ -407,6 +417,7 @@ class MeasurementService:
                 optical=optical,
                 should_stop=should_stop,
                 on_point=on_point,
+                read_pulse_width_s=float(read_pulse_width_s),
             )
         else:
             raise RuntimeError("keithley object does not support unified API (do_retention_measurement). Expected IVControllerManager instance.")
@@ -432,6 +443,7 @@ class MeasurementService:
         optical=None,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        read_pulse_width_s: Optional[float] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Run endurance using the unified API.
@@ -439,6 +451,25 @@ class MeasurementService:
         Delegates to keithley.do_endurance_measurement() which routes to
         instrument-specific implementations automatically.
         """
+        # Get minimum read pulse width from SMU limits if not provided
+        if read_pulse_width_s is None:
+            try:
+                limits = self.smu_limits.get_limits(smu_type)
+                min_pulse_width_ms = limits.get("min_pulse_width_ms", 1.0)
+                read_pulse_width_s = max(0.1, min_pulse_width_ms / 1000.0)  # Use max of 100ms or SMU minimum
+            except Exception:
+                read_pulse_width_s = 0.1  # Default 100ms fallback
+        
+        # Validate read_pulse_width_s against SMU limits
+        try:
+            limits = self.smu_limits.get_limits(smu_type)
+            min_pulse_width_ms = limits.get("min_pulse_width_ms", 1.0)
+            min_pulse_width_s = min_pulse_width_ms / 1000.0
+            if read_pulse_width_s < min_pulse_width_s:
+                read_pulse_width_s = min_pulse_width_s
+        except Exception:
+            pass  # If validation fails, use provided value
+        
         # Use unified API
         if hasattr(keithley, 'do_endurance_measurement'):
             return keithley.do_endurance_measurement(
@@ -453,6 +484,7 @@ class MeasurementService:
                 optical=optical,
                 should_stop=should_stop,
                 on_point=on_point,
+                read_pulse_width_s=float(read_pulse_width_s),
             )
         else:
             raise RuntimeError("keithley object does not support unified API (do_endurance_measurement). Expected IVControllerManager instance.")

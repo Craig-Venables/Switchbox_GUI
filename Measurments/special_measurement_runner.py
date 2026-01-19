@@ -193,6 +193,21 @@ class SpecialMeasurementRunner:
             cycles = int(self.end_cycles.get())
             read_v = float(self.end_read_v.get())
             icc_val = float(self.icc.get())
+            
+            # Get read pulse width and inter cycle delay from GUI
+            read_pulse_ms = getattr(self, 'end_read_pulse_ms', None)
+            if read_pulse_ms is not None and hasattr(read_pulse_ms, 'get'):
+                read_pulse_width_s = max(0.1, read_pulse_ms.get() / 1000.0)
+            else:
+                read_pulse_width_s = 0.1  # Default 100ms fallback
+            
+            inter_cycle_delay_s_var = getattr(self, 'end_inter_cycle_delay_s', None)
+            if inter_cycle_delay_s_var is not None and hasattr(inter_cycle_delay_s_var, 'get'):
+                inter_cycle_delay_s = max(0.0, inter_cycle_delay_s_var.get())
+            else:
+                inter_cycle_delay_s = 0.0  # Default fallback
+            
+            print(f"Endurance (special_runner): inter_cycle_delay_s={inter_cycle_delay_s}, read_pulse_width_s={read_pulse_width_s}")
 
             def _on_point(v: float, i_val: float, t_s: float) -> None:
                 nonlocal endurance_start_time
@@ -240,6 +255,8 @@ class SpecialMeasurementRunner:
                 pulse_width_s=pulse_ms / 1000.0,
                 num_cycles=cycles,
                 read_voltage=read_v,
+                read_pulse_width_s=read_pulse_width_s,
+                inter_cycle_delay_s=inter_cycle_delay_s,
                 icc=icc_val,
                 psu=getattr(self, "psu", None),
                 led=False,
@@ -356,11 +373,35 @@ class SpecialMeasurementRunner:
             set_v = float(self.ret_set_v.get())
             set_ms = float(self.ret_set_ms.get())
             read_v = float(self.ret_read_v.get())
+            
+            # Get number of reads from GUI
             try:
-                delay_s = float(self.ret_measure_delay.get())
+                ret_num = getattr(self, 'ret_number_reads', None)
+                if ret_num is not None and hasattr(ret_num, 'get'):
+                    number_reads = int(ret_num.get())
+                else:
+                    number_reads = 30
             except Exception:
-                delay_s = 10.0
-            times_s = [delay_s]
+                number_reads = 30
+            
+            # Get repeat delay from GUI
+            try:
+                repeat_delay_s = float(self.ret_measure_delay.get())
+            except Exception:
+                repeat_delay_s = 10.0
+            
+            # Get read pulse width from GUI
+            try:
+                ret_read_pulse = getattr(self, 'ret_read_pulse_ms', None)
+                if ret_read_pulse is not None and hasattr(ret_read_pulse, 'get'):
+                    read_pulse_ms = float(ret_read_pulse.get())
+                else:
+                    read_pulse_ms = 100.0
+            except Exception:
+                read_pulse_ms = 100.0
+            
+            print(f"Retention (special_runner): number_reads={number_reads}, read_pulse_ms={read_pulse_ms}, repeat_delay_s={repeat_delay_s}")
+            
             icc_val = float(self.icc.get())
 
             def _on_point(v: float, i_val: float, t_s: float) -> None:
@@ -388,8 +429,9 @@ class SpecialMeasurementRunner:
                 set_voltage=set_v,
                 set_time_s=set_ms / 1000.0,
                 read_voltage=read_v,
-                repeat_delay_s=0.1,
-                number=len(times_s),
+                read_pulse_width_s=read_pulse_ms / 1000.0,
+                repeat_delay_s=repeat_delay_s,
+                number=number_reads,
                 icc=icc_val,
                 psu=getattr(self, "psu", None),
                 led=False,

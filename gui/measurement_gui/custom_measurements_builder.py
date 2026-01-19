@@ -544,7 +544,7 @@ class CustomMeasurementsBuilder:
             widgets['reset_v'] = reset_v
             
             tk.Label(params_row, text="Pulse (ms):", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
-            pulse_ms = tk.StringVar(value=str(sweep_data.get("pulse_ms", "10")))
+            pulse_ms = tk.StringVar(value=str(sweep_data.get("pulse_ms", "1000")))
             tk.Entry(params_row, textvariable=pulse_ms, width=8).pack(side='left', padx=2)
             widgets['pulse_ms'] = pulse_ms
             
@@ -557,6 +557,16 @@ class CustomMeasurementsBuilder:
             read_v = tk.StringVar(value=str(sweep_data.get("read_v", "0.2")))
             tk.Entry(params_row, textvariable=read_v, width=8).pack(side='left', padx=2)
             widgets['read_v'] = read_v
+            
+            tk.Label(params_row, text="Read Pulse (ms):", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
+            read_pulse_ms = tk.StringVar(value=str(sweep_data.get("read_pulse_ms", "100")))
+            tk.Entry(params_row, textvariable=read_pulse_ms, width=8).pack(side='left', padx=2)
+            widgets['read_pulse_ms'] = read_pulse_ms
+            
+            tk.Label(params_row, text="Cycle Delay (s):", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
+            inter_cycle_delay_s = tk.StringVar(value=str(sweep_data.get("inter_cycle_delay_s", "0.0")))
+            tk.Entry(params_row, textvariable=inter_cycle_delay_s, width=8).pack(side='left', padx=2)
+            widgets['inter_cycle_delay_s'] = inter_cycle_delay_s
         
         elif measurement_type == "Retention":
             tk.Label(params_row, text="Set V:", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
@@ -573,6 +583,21 @@ class CustomMeasurementsBuilder:
             read_v = tk.StringVar(value=str(sweep_data.get("read_v", "0.2")))
             tk.Entry(params_row, textvariable=read_v, width=8).pack(side='left', padx=2)
             widgets['read_v'] = read_v
+            
+            tk.Label(params_row, text="Read Pulse (ms):", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
+            read_pulse_ms = tk.StringVar(value=str(sweep_data.get("read_pulse_ms", "100")))
+            tk.Entry(params_row, textvariable=read_pulse_ms, width=8).pack(side='left', padx=2)
+            widgets['read_pulse_ms'] = read_pulse_ms
+            
+            tk.Label(params_row, text="# Reads:", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
+            number_reads = tk.StringVar(value=str(sweep_data.get("number_reads", "30")))
+            tk.Entry(params_row, textvariable=number_reads, width=8).pack(side='left', padx=2)
+            widgets['number_reads'] = number_reads
+            
+            tk.Label(params_row, text="Delay (s):", font=self.FONT_MAIN, bg='white').pack(side='left', padx=5)
+            repeat_delay_s = tk.StringVar(value=str(sweep_data.get("repeat_delay_s", "10.0")))
+            tk.Entry(params_row, textvariable=repeat_delay_s, width=8).pack(side='left', padx=2)
+            widgets['repeat_delay_s'] = repeat_delay_s
         
         # LED controls (common to all types)
         led_frame = tk.Frame(params_row, bg='white')
@@ -761,9 +786,11 @@ class CustomMeasurementsBuilder:
                 sweep_data.update({
                     "set_v": float(widgets.get('set_v', tk.StringVar(value="1.5")).get()),
                     "reset_v": float(widgets.get('reset_v', tk.StringVar(value="-1.5")).get()),
-                    "pulse_ms": float(widgets.get('pulse_ms', tk.StringVar(value="10")).get()),
+                    "pulse_ms": float(widgets.get('pulse_ms', tk.StringVar(value="1000")).get()),
                     "cycles": int(widgets.get('cycles', tk.StringVar(value="100")).get()),
-                    "read_v": float(widgets.get('read_v', tk.StringVar(value="0.2")).get())
+                    "read_v": float(widgets.get('read_v', tk.StringVar(value="0.2")).get()),
+                    "read_pulse_ms": float(widgets.get('read_pulse_ms', tk.StringVar(value="100")).get()),
+                    "inter_cycle_delay_s": float(widgets.get('inter_cycle_delay_s', tk.StringVar(value="0.0")).get())
                 })
             
             elif sweep_type == "Retention":
@@ -771,7 +798,9 @@ class CustomMeasurementsBuilder:
                     "set_v": float(widgets.get('set_v', tk.StringVar(value="1.5")).get()),
                     "set_ms": float(widgets.get('set_ms', tk.StringVar(value="10")).get()),
                     "read_v": float(widgets.get('read_v', tk.StringVar(value="0.2")).get()),
-                    "times_s": [1, 3, 10, 30, 100, 300]  # Default retention times
+                    "read_pulse_ms": float(widgets.get('read_pulse_ms', tk.StringVar(value="100")).get()),
+                    "number_reads": int(widgets.get('number_reads', tk.StringVar(value="30")).get()),
+                    "repeat_delay_s": float(widgets.get('repeat_delay_s', tk.StringVar(value="10.0")).get())
                 })
             
             # Add LED settings if present

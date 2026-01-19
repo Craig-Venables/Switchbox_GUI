@@ -1,10 +1,35 @@
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import FuncFormatter
+
+# Disable LaTeX/math text globally for this module to prevent parsing errors
+matplotlib.rcParams['text.usetex'] = False
+matplotlib.rcParams['mathtext.default'] = 'regular'
+matplotlib.rcParams['axes.formatter.use_mathtext'] = False
+matplotlib.rcParams['axes.formatter.min_exponent'] = 0
+matplotlib.rcParams['axes.unicode_minus'] = False
 
 from .base import PlotManager
+
+
+def plain_log_formatter(x, pos):
+    """
+    Format log scale values as plain text without math symbols.
+    Avoids matplotlib math text parsing errors.
+    """
+    if x <= 0:
+        return '0'
+    # Use scientific notation for very small/large numbers
+    if x < 0.01 or x > 1000:
+        return f'{x:.2e}'
+    # For normal range, use decimal
+    if x < 1:
+        return f'{x:.3f}'
+    return f'{x:.1f}'
 
 
 class IVGridPlotter:
@@ -72,10 +97,17 @@ class IVGridPlotter:
 
     @staticmethod
     def _plot_log(ax, v: np.ndarray, i: np.ndarray, label: str):
+        # Disable LaTeX to prevent parsing errors
+        plt.rcParams['text.usetex'] = False
+        plt.rcParams['mathtext.default'] = 'regular'
+        plt.rcParams['axes.formatter.use_mathtext'] = False
+        
         ax.plot(v, np.abs(i), "o-", markersize=2, label=label or "IV |log|")
         ax.set_yscale("log")
         ax.set_xlabel("Voltage (V)")
         ax.set_ylabel("|Current| (A)")
+        # Force plain text formatters for log scale to avoid math text parsing errors
+        ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
         if label:
             ax.legend()
         ax.grid(True, which="both", alpha=0.3)

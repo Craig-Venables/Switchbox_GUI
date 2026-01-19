@@ -1005,6 +1005,7 @@ class IVControllerManager:
         sequence: Optional[Iterable[str]] = None,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        read_pulse_width_s: float = 0.1,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Execute retention measurement using instrument-specific optimized method.
@@ -1016,7 +1017,7 @@ class IVControllerManager:
             set_time_s: Duration of set pulse (s)
             read_voltage: Read voltage for sampling (V)
             repeat_delay_s: Delay between reads (s)
-            number: Number of read samples
+            number: Number of read samples after SET pulse
             icc: Current compliance (A)
             psu: Optional power supply for LED control
             optical: Optional optical excitation system
@@ -1025,6 +1026,7 @@ class IVControllerManager:
             sequence: Optional LED sequence
             should_stop: Optional stop callback
             on_point: Optional callback for live plotting
+            read_pulse_width_s: Read pulse width (s) - time to wait at read voltage before measuring
             
         Returns:
             Tuple of (voltages, currents, timestamps) arrays
@@ -1045,22 +1047,22 @@ class IVControllerManager:
         if self.smu_type == 'Keithley 4200A':
             return self._do_retention_measurement_4200a(
                 set_voltage, set_time_s, read_voltage, repeat_delay_s,
-                number, icc, context, psu, optical, led_time_s
+                number, icc, context, psu, optical, led_time_s, read_pulse_width_s
             )
         elif self.smu_type == 'Keithley 2450':
             return self._do_retention_measurement_2450(
                 set_voltage, set_time_s, read_voltage, repeat_delay_s,
-                number, icc, context, psu, optical, led_time_s
+                number, icc, context, psu, optical, led_time_s, read_pulse_width_s
             )
         elif self.smu_type in ['Keithley 2401', 'Keithley 2400']:
             return self._do_retention_measurement_2400(
                 set_voltage, set_time_s, read_voltage, repeat_delay_s,
-                number, icc, context, psu, optical, led_time_s
+                number, icc, context, psu, optical, led_time_s, read_pulse_width_s
             )
         else:
             return self._do_retention_measurement_generic(
                 set_voltage, set_time_s, read_voltage, repeat_delay_s,
-                number, icc, context, psu, optical, led_time_s
+                number, icc, context, psu, optical, led_time_s, read_pulse_width_s
             )
     
     def do_endurance_measurement(
@@ -1078,6 +1080,7 @@ class IVControllerManager:
         power: float = 1.0,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
+        read_pulse_width_s: float = 0.1,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Execute endurance measurement using instrument-specific optimized method.
@@ -1098,6 +1101,7 @@ class IVControllerManager:
             power: LED power level
             should_stop: Optional stop callback
             on_point: Optional callback for live plotting
+            read_pulse_width_s: Read pulse width (s) - time to wait at read voltage before measuring
             
         Returns:
             Tuple of (voltages, currents, timestamps) arrays
@@ -1114,26 +1118,32 @@ class IVControllerManager:
             on_point=on_point
         )
         
+        print(f"do_endurance_measurement: inter_cycle_delay_s={inter_cycle_delay_s}, type={type(inter_cycle_delay_s)}")
+        
         # Route to instrument-specific implementation
         if self.smu_type == 'Keithley 4200A':
             return self._do_endurance_measurement_4200a(
                 set_voltage, reset_voltage, pulse_width_s, num_cycles,
-                read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+                read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+                read_pulse_width_s
             )
         elif self.smu_type == 'Keithley 2450':
             return self._do_endurance_measurement_2450(
                 set_voltage, reset_voltage, pulse_width_s, num_cycles,
-                read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+                read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+                read_pulse_width_s
             )
         elif self.smu_type in ['Keithley 2401', 'Keithley 2400']:
             return self._do_endurance_measurement_2400(
                 set_voltage, reset_voltage, pulse_width_s, num_cycles,
-                read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+                read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+                read_pulse_width_s
             )
         else:
             return self._do_endurance_measurement_generic(
                 set_voltage, reset_voltage, pulse_width_s, num_cycles,
-                read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+                read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+                read_pulse_width_s
             )
     
     def do_pulsed_iv_sweep(
@@ -1454,9 +1464,16 @@ class IVControllerManager:
         context: 'MeasurementContext',
         psu,
         optical,
-        led_time_s: Optional[float]
+        led_time_s: Optional[float],
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
-        """Point-by-point retention measurement for Keithley 2400."""
+        """Point-by-point retention measurement for Keithley 2400.
+        
+        Sequence:
+        1. Initial read: read_voltage (read_pulse_width_s) → measure → 0V (50ms)
+        2. SET pulse: set_voltage (set_time_s) → 0V (minimal delay)
+        3. Repeat for 'number' reads: read_voltage (read_pulse_width_s) → measure → 0V (repeat_delay_s)
+        """
         from Measurments.data_utils import safe_measure_current
         from Measurments.optical_controller import OpticalController
         
@@ -1472,23 +1489,54 @@ class IVControllerManager:
             optical_ctrl.enable(context.power)
         
         try:
-            # Apply set pulse
+            # Initial read BEFORE set pulse
+            try:
+                self.set_voltage(read_voltage, icc)
+                time.sleep(max(0.0, float(read_pulse_width_s)))
+                initial_current = safe_measure_current(self)
+            except Exception:
+                initial_current = float('nan')
+            t_now = time.perf_counter() - start_t
+            v_arr.append(read_voltage)
+            c_arr.append(initial_current)
+            t_arr.append(t_now)
+            context.call_on_point(read_voltage, initial_current, t_now)
+            
+            # Return to 0V and wait 50ms
+            try:
+                self.set_voltage(0, icc)
+                time.sleep(0.05)  # 50ms delay
+            except Exception:
+                pass
+            
+            if context.check_stop():
+                return v_arr, c_arr, t_arr
+            
+            # Apply SET pulse
             try:
                 self.set_voltage(set_voltage, icc)
             except Exception:
                 pass
             time.sleep(max(0.0, float(set_time_s)))
             
-            # Switch to read voltage
+            # Return to 0V (minimal delay)
             try:
-                self.set_voltage(read_voltage, icc)
+                self.set_voltage(0, icc)
+                time.sleep(0.001)  # Smallest delay possible
             except Exception:
                 pass
             
-            for i in range(int(number)):
+            # Repeat reads after SET pulse
+            num_reads = max(1, int(number)) if number is not None else 1
+            print(f"Retention: number={number}, num_reads={num_reads}")
+            for i in range(num_reads):
                 if context.check_stop():
                     break
+                
+                # Read voltage pulse
                 try:
+                    self.set_voltage(read_voltage, icc)
+                    time.sleep(max(0.0, float(read_pulse_width_s)))
                     current = safe_measure_current(self)
                 except Exception:
                     current = float('nan')
@@ -1497,7 +1545,13 @@ class IVControllerManager:
                 c_arr.append(current)
                 t_arr.append(t_now)
                 context.call_on_point(read_voltage, current, t_now)
-                time.sleep(max(0.0, float(repeat_delay_s)))
+                
+                # Return to 0V and wait for repeat delay
+                try:
+                    self.set_voltage(0, icc)
+                    time.sleep(max(0.0, float(repeat_delay_s)))
+                except Exception:
+                    pass
         finally:
             optical_ctrl.disable()
             try:
@@ -1518,7 +1572,8 @@ class IVControllerManager:
         icc: float,
         context: 'MeasurementContext',
         psu,
-        optical
+        optical,
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point endurance measurement for Keithley 2400."""
         from Measurments.data_utils import safe_measure_current
@@ -1545,17 +1600,26 @@ class IVControllerManager:
                 if context.check_stop():
                     break
                 
-                # SET pulse
+                # SET pulse: 0V -> SET voltage
                 try:
+                    self.set_voltage(0, icc)  # Start at 0V
+                    time.sleep(0.001)  # Brief transition time
                     self.set_voltage(set_voltage, icc)
                 except Exception:
                     pass
                 time.sleep(max(0.0, float(pulse_width_s)))
                 
-                # Read after SET
+                # Transition to 0V before read
+                try:
+                    self.set_voltage(0, icc)
+                    time.sleep(0.001)  # Brief transition time
+                except Exception:
+                    pass
+                
+                # Read after SET: 0V -> Read voltage
                 try:
                     self.set_voltage(read_voltage, icc)
-                    time.sleep(0.002)
+                    time.sleep(max(0.0, float(read_pulse_width_s)))
                     i_set_val = safe_measure_current(self)
                 except Exception:
                     i_set_val = float('nan')
@@ -1565,20 +1629,34 @@ class IVControllerManager:
                 t_arr.append(t_now)
                 context.call_on_point(read_voltage, i_set_val, t_now)
                 
+                # Return to 0V after read
+                try:
+                    self.set_voltage(0, icc)
+                    time.sleep(0.001)  # Brief transition time
+                except Exception:
+                    pass
+                
                 if context.check_stop():
                     break
                 
-                # RESET pulse
+                # RESET pulse: 0V -> RESET voltage
                 try:
                     self.set_voltage(reset_voltage, icc)
                 except Exception:
                     pass
                 time.sleep(max(0.0, float(pulse_width_s)))
                 
-                # Read after RESET
+                # Transition to 0V before read
+                try:
+                    self.set_voltage(0, icc)
+                    time.sleep(0.001)  # Brief transition time
+                except Exception:
+                    pass
+                
+                # Read after RESET: 0V -> Read voltage
                 try:
                     self.set_voltage(read_voltage, icc)
-                    time.sleep(0.002)
+                    time.sleep(max(0.0, float(read_pulse_width_s)))
                     i_reset_val = safe_measure_current(self)
                 except Exception:
                     i_reset_val = float('nan')
@@ -1588,21 +1666,21 @@ class IVControllerManager:
                 t_arr.append(t_now)
                 context.call_on_point(read_voltage, i_reset_val, t_now)
                 
-                if inter_cycle_delay_s:
-                    post_start = time.perf_counter()
-                    while (time.perf_counter() - post_start) < float(inter_cycle_delay_s):
-                        if context.check_stop():
-                            break
-                        try:
-                            it = self.measure_current()
-                            iv = it[1] if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
-                        except Exception:
-                            iv = float('nan')
-                        t_now = time.perf_counter() - start_t
-                        v_arr.append(read_voltage)
-                        c_arr.append(iv)
-                        t_arr.append(t_now)
-                        context.call_on_point(read_voltage, iv, t_now)
+                # Return to 0V after read
+                try:
+                    self.set_voltage(0, icc)
+                    time.sleep(0.001)  # Brief transition time
+                except Exception:
+                    pass
+                
+                # Inter-cycle delay at 0V (after complete SET+RESET cycle)
+                inter_cycle_delay_val = float(inter_cycle_delay_s) if inter_cycle_delay_s is not None else 0.0
+                print(f"Endurance cycle {k+1}/{num_cycles}: inter_cycle_delay_s={inter_cycle_delay_s}, inter_cycle_delay_val={inter_cycle_delay_val}")
+                if inter_cycle_delay_val > 0:
+                    print(f"  Waiting {inter_cycle_delay_val}s at 0V between cycles...")
+                    time.sleep(inter_cycle_delay_val)
+                else:
+                    print(f"  No delay (inter_cycle_delay_val={inter_cycle_delay_val})")
         finally:
             optical_ctrl.disable()
             try:
@@ -1720,12 +1798,13 @@ class IVControllerManager:
         context: 'MeasurementContext',
         psu,
         optical,
-        led_time_s: Optional[float]
+        led_time_s: Optional[float],
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """Generic point-by-point retention measurement."""
         return self._do_retention_measurement_2400(
             set_voltage, set_time_s, read_voltage, repeat_delay_s,
-            number, icc, context, psu, optical, led_time_s
+            number, icc, context, psu, optical, led_time_s, read_pulse_width_s
         )
     
     def _do_endurance_measurement_generic(
@@ -1739,12 +1818,14 @@ class IVControllerManager:
         icc: float,
         context: 'MeasurementContext',
         psu,
-        optical
+        optical,
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """Generic point-by-point endurance measurement."""
         return self._do_endurance_measurement_2400(
             set_voltage, reset_voltage, pulse_width_s, num_cycles,
-            read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+            read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+            read_pulse_width_s
         )
     
     def _do_pulsed_iv_sweep_generic(
@@ -2321,7 +2402,8 @@ class IVControllerManager:
         context: 'MeasurementContext',
         psu,
         optical,
-        led_time_s: Optional[float]
+        led_time_s: Optional[float],
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Retention measurement for Keithley 4200A.
@@ -2333,7 +2415,7 @@ class IVControllerManager:
         # TODO: Implement using C modules if available
         return self._do_retention_measurement_2400(
             set_voltage, set_time_s, read_voltage, repeat_delay_s,
-            number, icc, context, psu, optical, led_time_s
+            number, icc, context, psu, optical, led_time_s, read_pulse_width_s
         )
     
     def _do_endurance_measurement_4200a(
@@ -2347,7 +2429,8 @@ class IVControllerManager:
         icc: float,
         context: 'MeasurementContext',
         psu,
-        optical
+        optical,
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Endurance measurement for Keithley 4200A.
@@ -2359,7 +2442,8 @@ class IVControllerManager:
         # TODO: Implement using C modules if available (smu_endurance or similar)
         return self._do_endurance_measurement_2400(
             set_voltage, reset_voltage, pulse_width_s, num_cycles,
-            read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+            read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+            read_pulse_width_s
         )
     
     def _do_pulsed_iv_sweep_4200a(
@@ -2686,13 +2770,14 @@ print('SWEEP_DONE')
         context: 'MeasurementContext',
         psu,
         optical,
-        led_time_s: Optional[float]
+        led_time_s: Optional[float],
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point retention measurement for Keithley 2450."""
         # 2450 retention can use point-by-point
         return self._do_retention_measurement_2400(
             set_voltage, set_time_s, read_voltage, repeat_delay_s,
-            number, icc, context, psu, optical, led_time_s
+            number, icc, context, psu, optical, led_time_s, read_pulse_width_s
         )
     
     def _do_endurance_measurement_2450(
@@ -2706,13 +2791,15 @@ print('SWEEP_DONE')
         icc: float,
         context: 'MeasurementContext',
         psu,
-        optical
+        optical,
+        read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point endurance measurement for Keithley 2450."""
         # 2450 endurance can use point-by-point
         return self._do_endurance_measurement_2400(
             set_voltage, reset_voltage, pulse_width_s, num_cycles,
-            read_voltage, inter_cycle_delay_s, icc, context, psu, optical
+            read_voltage, inter_cycle_delay_s, icc, context, psu, optical,
+            read_pulse_width_s
         )
     
     def _do_pulsed_iv_sweep_2450(

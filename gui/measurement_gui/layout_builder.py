@@ -4607,10 +4607,10 @@ Output location: {sample_dir}/sample_analysis/
         tk.Entry(end_frame, textvariable=gui.end_reset_v, width=8).grid(row=2, column=1, sticky="w")
 
         tk.Label(end_frame, text="Pulse (ms)").grid(row=3, column=0, sticky="w")
-        end_pulse_default = getattr(gui, "end_pulse_ms", 10)
+        end_pulse_default = getattr(gui, "end_pulse_ms", 1000)
         if hasattr(end_pulse_default, "get"):
             end_pulse_default = end_pulse_default.get()
-        gui.end_pulse_ms = tk.DoubleVar(value=end_pulse_default or 10)
+        gui.end_pulse_ms = tk.DoubleVar(value=end_pulse_default or 1000)
         tk.Entry(end_frame, textvariable=gui.end_pulse_ms, width=8).grid(row=3, column=1, sticky="w")
 
         tk.Label(end_frame, text="Cycles").grid(row=4, column=0, sticky="w")
@@ -4627,13 +4627,29 @@ Output location: {sample_dir}/sample_analysis/
         gui.end_read_v = tk.DoubleVar(value=end_read_default or 0.2)
         tk.Entry(end_frame, textvariable=gui.end_read_v, width=8).grid(row=5, column=1, sticky="w")
 
+        # Read pulse width (ms)
+        tk.Label(end_frame, text="Read Pulse (ms)").grid(row=6, column=0, sticky="w")
+        end_read_pulse_default = getattr(gui, "end_read_pulse_ms", 100.0)
+        if hasattr(end_read_pulse_default, "get"):
+            end_read_pulse_default = end_read_pulse_default.get()
+        gui.end_read_pulse_ms = tk.DoubleVar(value=end_read_pulse_default or 100.0)
+        tk.Entry(end_frame, textvariable=gui.end_read_pulse_ms, width=8).grid(row=6, column=1, sticky="w")
+
+        # Inter cycle delay (s)
+        tk.Label(end_frame, text="Cycle Delay (s)").grid(row=7, column=0, sticky="w")
+        end_inter_cycle_default = getattr(gui, "end_inter_cycle_delay_s", 0.0)
+        if hasattr(end_inter_cycle_default, "get"):
+            end_inter_cycle_default = end_inter_cycle_default.get()
+        gui.end_inter_cycle_delay_s = tk.DoubleVar(value=end_inter_cycle_default or 0.0)
+        tk.Entry(end_frame, textvariable=gui.end_inter_cycle_delay_s, width=8).grid(row=7, column=1, sticky="w")
+
         start_endurance_cb = self.callbacks.get("start_manual_endurance") or getattr(gui, "start_manual_endurance", None)
         tk.Button(
             end_frame,
             text="Start Endurance",
             command=start_endurance_cb,
             state=tk.NORMAL if start_endurance_cb else tk.DISABLED,
-        ).grid(row=6, column=0, columnspan=2, pady=(4, 0), sticky="w")
+        ).grid(row=8, column=0, columnspan=2, pady=(4, 0), sticky="w")
 
         tk.Label(ret_frame, text="Retention").grid(row=0, column=0, columnspan=2, sticky="w")
         tk.Label(ret_frame, text="SET V").grid(row=1, column=0, sticky="w")
@@ -4657,19 +4673,26 @@ Output location: {sample_dir}/sample_analysis/
         gui.ret_read_v = tk.DoubleVar(value=ret_read_default or 0.2)
         tk.Entry(ret_frame, textvariable=gui.ret_read_v, width=8).grid(row=3, column=1, sticky="w")
 
-        tk.Label(ret_frame, text="Every (s)").grid(row=4, column=0, sticky="w")
+        tk.Label(ret_frame, text="Read Pulse (ms)").grid(row=4, column=0, sticky="w")
+        ret_read_pulse_default = getattr(gui, "ret_read_pulse_ms", 100.0)
+        if hasattr(ret_read_pulse_default, "get"):
+            ret_read_pulse_default = ret_read_pulse_default.get()
+        gui.ret_read_pulse_ms = tk.DoubleVar(value=ret_read_pulse_default or 100.0)
+        tk.Entry(ret_frame, textvariable=gui.ret_read_pulse_ms, width=8).grid(row=4, column=1, sticky="w")
+
+        tk.Label(ret_frame, text="# Reads").grid(row=5, column=0, sticky="w")
+        ret_number_reads_default = getattr(gui, "ret_number_reads", 30)
+        if hasattr(ret_number_reads_default, "get"):
+            ret_number_reads_default = ret_number_reads_default.get()
+        gui.ret_number_reads = tk.IntVar(value=ret_number_reads_default or 30)
+        tk.Entry(ret_frame, textvariable=gui.ret_number_reads, width=8).grid(row=5, column=1, sticky="w")
+
+        tk.Label(ret_frame, text="Delay (s)").grid(row=6, column=0, sticky="w")
         ret_every_default = getattr(gui, "ret_every_s", 10.0)
         if hasattr(ret_every_default, "get"):
             ret_every_default = ret_every_default.get()
         gui.ret_every_s = tk.DoubleVar(value=ret_every_default or 10.0)
-        tk.Entry(ret_frame, textvariable=gui.ret_every_s, width=8).grid(row=4, column=1, sticky="w")
-
-        tk.Label(ret_frame, text="# Points").grid(row=5, column=0, sticky="w")
-        ret_points_default = getattr(gui, "ret_points", 30)
-        if hasattr(ret_points_default, "get"):
-            ret_points_default = ret_points_default.get()
-        gui.ret_points = tk.IntVar(value=ret_points_default or 30)
-        tk.Entry(ret_frame, textvariable=gui.ret_points, width=8).grid(row=5, column=1, sticky="w")
+        tk.Entry(ret_frame, textvariable=gui.ret_every_s, width=8).grid(row=6, column=1, sticky="w")
 
         ret_estimate_default = getattr(gui, "ret_estimate_var", "Total: ~300 s")
         if hasattr(ret_estimate_default, "get"):
