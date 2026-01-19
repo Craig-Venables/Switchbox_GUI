@@ -74,7 +74,12 @@ def safe_measure_current(instrument) -> float:
         return normalize_measurement(raw_value)
     except Exception as e:
         # Log error but don't crash - return NaN for data continuity
-        print(f"Error measuring current: {e}")
+        # Handle encoding errors in exception messages
+        try:
+            error_msg = str(e)
+        except UnicodeDecodeError:
+            error_msg = repr(e)
+        print(f"Error measuring current: {error_msg}")
         return float('nan')
 
 
@@ -96,7 +101,12 @@ def safe_measure_voltage(instrument) -> float:
         raw_value = instrument.measure_voltage()
         return normalize_measurement(raw_value)
     except Exception as e:
-        print(f"Error measuring voltage: {e}")
+        # Handle encoding errors in exception messages
+        try:
+            error_msg = str(e)
+        except UnicodeDecodeError:
+            error_msg = repr(e)
+        print(f"Error measuring voltage: {error_msg}")
         return float('nan')
 
 
@@ -125,7 +135,12 @@ def safe_measure_both(instrument) -> Tuple[float, float]:
             i = safe_measure_current(instrument)
             return v, i
     except Exception as e:
-        print(f"Error measuring both: {e}")
+        # Handle encoding errors in exception messages
+        try:
+            error_msg = str(e)
+        except UnicodeDecodeError:
+            error_msg = repr(e)
+        print(f"Error measuring both: {error_msg}")
         return float('nan'), float('nan')
 
 

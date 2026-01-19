@@ -1559,6 +1559,9 @@ class MeasurementGUI:
             # Extract classification data
             classification = analysis_data.get('classification', {})
             device_type = classification.get('device_type', 'unknown')
+            # Handle None device_type
+            if device_type is None:
+                device_type = 'unknown'
             confidence = classification.get('confidence', 0.0)
             memristivity_score = classification.get('memristivity_score', 0.0)
             switching_strength = classification.get('switching_strength', 0.0)
@@ -1576,7 +1579,7 @@ class MeasurementGUI:
             file_exists = os.path.exists(log_file)
             
             # === DETAILED LOG FILE ===
-            with open(log_file, 'a') as f:
+            with open(log_file, 'a', encoding='utf-8') as f:
                 # Add header if new file
                 if not file_exists:
                     f.write(separator + "\n")
@@ -1636,7 +1639,7 @@ class MeasurementGUI:
             if summary_exists:
                 # Read existing entries
                 try:
-                    with open(summary_log_file, 'r') as f:
+                    with open(summary_log_file, 'r', encoding='utf-8') as f:
                         lines = f.readlines()
                         # Skip header lines and parse entries
                         for line in lines:
@@ -1652,7 +1655,7 @@ class MeasurementGUI:
             summary_entries.append(new_entry)
             
             # Write updated summary
-            with open(summary_log_file, 'w') as f:
+            with open(summary_log_file, 'w', encoding='utf-8') as f:
                 f.write(separator + "\n")
                 f.write("QUICK CLASSIFICATION SUMMARY\n")
                 f.write(f"Device: {os.path.basename(save_dir)}\n")
@@ -6092,8 +6095,31 @@ class MeasurementGUI:
                     idn = self.keithley.get_idn()
             except Exception as exc:
                 print(f"⚠️  Warning: Unable to query IDN: {exc}")
-            status_text = idn or f"{smu_type} @ {keithley_address}"
-            print(f"✓ Connected: {status_text}")
+            
+            # Extract model number from IDN string
+            model_number = smu_type  # Default fallback
+            if idn:
+                # IDN format is typically: "Manufacturer,MODEL XXXX,Serial,Firmware"
+                # Try to extract model number
+                parts = idn.split(',')
+                for part in parts:
+                    part = part.strip()
+                    # Look for "MODEL" keyword or common model patterns
+                    if 'MODEL' in part.upper():
+                        # Extract model number (e.g., "MODEL 2401" -> "2401")
+                        model_match = part.upper().replace('MODEL', '').strip()
+                        if model_match:
+                            model_number = model_match
+                            break
+                    # Also check if part looks like a model number (e.g., "2401", "2450", "4200A")
+                    elif any(char.isdigit() for char in part) and len(part) <= 10:
+                        # Check if it's likely a model number (contains digits and is short)
+                        if any(x in part.upper() for x in ['2400', '2450', '2600', '4200', '2636']):
+                            model_number = part
+                            break
+            
+            status_text = model_number
+            print(f"✓ Connected: {idn or f'{smu_type} @ {keithley_address}'}")
             if status_label:
                 status_label.config(text=f"● Connected: {status_text}", fg=success_color)
             return True
@@ -6415,6 +6441,20 @@ class MeasurementGUI:
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_cycles, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Read Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.end_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                # Initialize read pulse width variable if it doesn't exist
+                if not hasattr(self, 'end_read_pulse_ms'):
+                    self.end_read_pulse_ms = tk.DoubleVar(value=100.0)  # Default 100ms
+                tk.Label(self._excitation_params_frame, text="Read Pulse Width (ms)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_read_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                # Initialize inter cycle delay variable if it doesn't exist, preserve existing value if it does
+                if not hasattr(self, 'end_inter_cycle_delay_s'):
+                    self.end_inter_cycle_delay_s = tk.DoubleVar(value=0.0)
+                else:
+                    # Preserve existing value when re-rendering
+                    existing_val = self.end_inter_cycle_delay_s.get() if hasattr(self.end_inter_cycle_delay_s, 'get') else 0.0
+                    self.end_inter_cycle_delay_s = tk.DoubleVar(value=existing_val)
+                tk.Label(self._excitation_params_frame, text="Inter-Cycle Delay (s)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.end_inter_cycle_delay_s, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 try:
                     for w in self._dc_widgets:
                         try: w.grid_remove()
@@ -6430,9 +6470,19 @@ class MeasurementGUI:
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_set_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 tk.Label(self._excitation_params_frame, text="Read Voltage (V)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_read_v, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                # Initialize read pulse width variable if it doesn't exist
+                if not hasattr(self, 'ret_read_pulse_ms'):
+                    self.ret_read_pulse_ms = tk.DoubleVar(value=100.0)  # Default 100ms
+                tk.Label(self._excitation_params_frame, text="Read Pulse Width (ms)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.ret_read_pulse_ms, width=10).grid(row=r, column=1, sticky="w"); r+=1
+                # Initialize number of reads variable if it doesn't exist
+                if not hasattr(self, 'ret_number_reads'):
+                    self.ret_number_reads = tk.IntVar(value=30)
+                tk.Label(self._excitation_params_frame, text="Number of Reads", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
+                tk.Entry(self._excitation_params_frame, textvariable=self.ret_number_reads, width=10).grid(row=r, column=1, sticky="w"); r+=1
                 if not hasattr(self, "ret_measure_delay"):
                     self.ret_measure_delay = tk.DoubleVar(value=10.0)
-                tk.Label(self._excitation_params_frame, text="Measure after (s)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
+                tk.Label(self._excitation_params_frame, text="Delay Between Reads (s)", bg='#f0f0f0').grid(row=r, column=0, sticky="w")
                 tk.Entry(self._excitation_params_frame, textvariable=self.ret_measure_delay, width=14).grid(row=r, column=1, sticky="w"); r+=1
                 try:
                     for w in self._dc_widgets:
@@ -7266,6 +7316,23 @@ class MeasurementGUI:
                     time.sleep(1)
                     self.connect_keithley_psu()
 
+                # Initialize save_key once before the loop to ensure sequential numbering
+                # This ensures each sweep gets a unique number and graphs are saved properly
+                save_dir = self._get_save_directory(self.sample_name_var.get(), 
+                                                   self.final_device_letter, 
+                                                   self.final_device_number)
+                # make directory if doesn't exist
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                
+                # Find the largest existing file number to continue from the most recent
+                from Measurments.single_measurement_runner import find_largest_number_in_folder
+                key_num = find_largest_number_in_folder(save_dir)
+                save_key = 0 if key_num is None else key_num + 1
+                
+                # Track if this is the first sweep in the sequence
+                first_sweep_in_sequence = True
+
                 for key, params in sweeps.items():
                     # Apply live edits for this sweep (skip/stop_v) so mid-run changes take effect
                     try:
@@ -7547,6 +7614,37 @@ class MeasurementGUI:
                         pulse_ms = float(params.get("pulse_ms", self.end_pulse_ms.get()))
                         cycles = int(params.get("cycles", self.end_cycles.get()))
                         read_v = float(params.get("read_v", self.end_read_v.get()))
+                        # Get read pulse width and inter cycle delay - properly read from GUI
+                        read_pulse_ms = params.get("read_pulse_ms", None)
+                        if read_pulse_ms is None:
+                            ret_read_pulse = getattr(self, 'end_read_pulse_ms', None)
+                            if ret_read_pulse is not None and hasattr(ret_read_pulse, 'get'):
+                                read_pulse_ms = ret_read_pulse.get()
+                            else:
+                                read_pulse_ms = 100.0
+                        read_pulse_ms = float(read_pulse_ms)
+                        
+                        inter_cycle_delay_s = params.get("inter_cycle_delay_s", None)
+                        print(f"DEBUG: inter_cycle_delay_s from params: {inter_cycle_delay_s}")
+                        if inter_cycle_delay_s is None:
+                            # Try to get from GUI variable
+                            ret_delay = getattr(self, 'end_inter_cycle_delay_s', None)
+                            print(f"DEBUG: ret_delay from GUI: {ret_delay}, type: {type(ret_delay)}")
+                            if ret_delay is not None and hasattr(ret_delay, 'get'):
+                                try:
+                                    inter_cycle_delay_s = ret_delay.get()
+                                    print(f"DEBUG: Got value from GUI variable: {inter_cycle_delay_s}")
+                                except Exception as e:
+                                    print(f"DEBUG: Error reading GUI variable: {e}")
+                                    inter_cycle_delay_s = 0.0
+                            else:
+                                inter_cycle_delay_s = 0.0
+                                print(f"DEBUG: GUI variable not found, using default 0.0")
+                        else:
+                            print(f"DEBUG: Using value from params: {inter_cycle_delay_s}")
+                        inter_cycle_delay_s = float(inter_cycle_delay_s)
+                        
+                        print(f"Endurance params FINAL: inter_cycle_delay_s={inter_cycle_delay_s}, read_pulse_ms={read_pulse_ms}")
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
@@ -7560,6 +7658,8 @@ class MeasurementGUI:
                             pulse_width_s=pulse_ms/1000,
                             num_cycles=cycles,
                             read_voltage=read_v,
+                            read_pulse_width_s=read_pulse_ms/1000,
+                            inter_cycle_delay_s=inter_cycle_delay_s,
                             icc=icc_val,
                             psu=getattr(self, 'psu', None),
                             led=led,
@@ -7576,25 +7676,48 @@ class MeasurementGUI:
                         set_v = float(params.get("set_v", self.ret_set_v.get()))
                         set_ms = float(params.get("set_ms", self.ret_set_ms.get()))
                         read_v = float(params.get("read_v", self.ret_read_v.get()))
-                        # Handle times_s array from JSON or single delay from GUI
-                        if "times_s" in params and isinstance(params["times_s"], list):
-                            times_s = [float(t) for t in params["times_s"]]
-                        else:
-                            delay_s = float(params.get("delay_s", self.ret_measure_delay.get()))
-                            times_s = [delay_s]
                         
                         def _on_point(v, i, t_s):
                             self.v_arr_disp.append(v)
                             self.c_arr_disp.append(i)
                             self.t_arr_disp.append(t_s)
                         
+                        # Get read pulse width and number of reads - prioritize new parameters
+                        read_pulse_ms = float(params.get("read_pulse_ms", 
+                            getattr(self, 'ret_read_pulse_ms', None)))
+                        if read_pulse_ms is None or (hasattr(read_pulse_ms, 'get') and read_pulse_ms.get() is None):
+                            read_pulse_ms = 100.0
+                        elif hasattr(read_pulse_ms, 'get'):
+                            read_pulse_ms = read_pulse_ms.get()
+                        
+                        number_reads = params.get("number_reads", None)
+                        if number_reads is None:
+                            ret_num = getattr(self, 'ret_number_reads', None)
+                            if ret_num is not None and hasattr(ret_num, 'get'):
+                                number_reads = ret_num.get()
+                            else:
+                                number_reads = 30
+                        number_reads = int(number_reads)
+                        
+                        repeat_delay = params.get("repeat_delay_s", None)
+                        if repeat_delay is None:
+                            ret_delay = getattr(self, 'ret_measure_delay', None)
+                            if ret_delay is not None and hasattr(ret_delay, 'get'):
+                                repeat_delay = ret_delay.get()
+                            else:
+                                repeat_delay = 10.0
+                        repeat_delay = float(repeat_delay)
+                        
+                        print(f"Retention params: number_reads={number_reads}, read_pulse_ms={read_pulse_ms}, repeat_delay={repeat_delay}")
+                        
                         v_arr, c_arr, timestamps = self.measurement_service.run_retention(
                             keithley=self.keithley,
                             set_voltage=set_v,
                             set_time_s=set_ms/1000,
                             read_voltage=read_v,
-                            repeat_delay_s=0.1,
-                            number=len(times_s),
+                            read_pulse_width_s=read_pulse_ms/1000,
+                            repeat_delay_s=repeat_delay,
+                            number=number_reads,
                             icc=icc_val,
                             psu=getattr(self, 'psu', None),
                             led=led,
@@ -7689,19 +7812,10 @@ class MeasurementGUI:
                     # data arry to save
                     data = np.column_stack((v_arr, c_arr, timestamps))
 
-                    # creates save directory with the selected measurement device name letter and number
-                    save_dir = self._get_save_directory(self.sample_name_var.get(), 
-                                                       self.final_device_letter, 
-                                                       self.final_device_number)
-                    
-                    # make directory if dost exist.
-                    if not os.path.exists(save_dir):
-                        os.makedirs(save_dir)
-
-                    # Find the largest existing file number to continue from the most recent
-                    from Measurments.single_measurement_runner import find_largest_number_in_folder
-                    key_num = find_largest_number_in_folder(save_dir)
-                    save_key = 0 if key_num is None else key_num + 1
+                    # save_dir and save_key are now initialized before the loop
+                    # Increment save_key for this sweep to ensure unique filenames
+                    current_save_key = save_key
+                    save_key += 1  # Increment for next sweep
 
                     if self.additional_info_var != "":
                         #extra_info = "-" + str(self.additional_info_entry.get())
@@ -7710,7 +7824,7 @@ class MeasurementGUI:
                     else:
                         extra_info = ""
 
-                    name = f"{save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}{extra_info}"
+                    name = f"{current_save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}{extra_info}"
                     file_path = f"{save_dir}\\{name}.txt"
 
                     try:
@@ -7736,8 +7850,7 @@ class MeasurementGUI:
                             except Exception:
                                 pass
                         
-                        # Use sweep-specific filename (should match the actual saved file: save_key-based)
-                        # Note: 'name' uses save_key (line 7067), so use that for consistency
+                        # Use sweep-specific filename (should match the actual saved file: current_save_key-based)
                         sweep_file_name = name  # Use the actual filename that was saved
                         
                         # Run analysis with conditional logic
@@ -7749,19 +7862,19 @@ class MeasurementGUI:
                             file_name=sweep_file_name,
                             metadata=sweep_metadata,
                             is_custom_sequence=True,
-                            sweep_number=int(str(save_key)),  # Use save_key instead of key for consistency
+                            sweep_number=int(str(current_save_key)),  # Use current_save_key for consistency
                             device_memristive_flag=device_is_memristive
                         )
                         
                         # Update memristive flag after first sweep
                         # Since analysis now runs in background, check for pending results
-                        if save_key == 0:  # First sweep (use save_key instead of key)
+                        if first_sweep_in_sequence:  # First sweep in the sequence
                             # Wait a bit for analysis to complete (with timeout)
                             max_wait = 10.0  # 10 seconds max
                             wait_start = time.time()
                             while time.time() - wait_start < max_wait:
                                 if hasattr(self, '_pending_analysis_results'):
-                                    result_key = f"{sweep_file_name}_sweep_{save_key}"
+                                    result_key = f"{sweep_file_name}_sweep_{current_save_key}"
                                     if result_key in self._pending_analysis_results:
                                         result = self._pending_analysis_results[result_key]
                                         device_is_memristive = result.get('is_memristive', False)
@@ -7772,6 +7885,9 @@ class MeasurementGUI:
                             else:
                                 print(f"[CUSTOM ANALYSIS] Timeout waiting for first sweep analysis result")
                                 analysis_result = None
+                            
+                            # Mark that we've processed the first sweep
+                            first_sweep_in_sequence = False
 
                         # === AUTOMATIC PLOTTING FOR ALL SWEEPS ===
                         # Plot IV dashboard for EVERY sweep (memristive or not)
@@ -7795,11 +7911,11 @@ class MeasurementGUI:
                                 timestamps=timestamps,
                                 save_dir=save_dir,
                                 device_name=f"{self.final_device_letter}{self.final_device_number}",
-                                sweep_number=save_key,  # Use save_key for consistency
+                                sweep_number=current_save_key,  # Use current_save_key for consistency
                                 is_memristive=is_memristive_for_plot,
                                 filename=name  # Use actual saved filename (includes extra_info if present)
                             )
-                            debug_print(f"[PLOT] Queued plots for sweep {save_key}: {name} (memristive={is_memristive_for_plot})")
+                            debug_print(f"[PLOT] Queued plots for sweep {current_save_key}: {name} (memristive={is_memristive_for_plot})")
                         except Exception as plot_exc:
                             print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
                         
@@ -7808,7 +7924,7 @@ class MeasurementGUI:
                             try:
                                 analysis_data = analysis_result.get('analysis_data') or analysis_result
                                 sequence_analysis_results.append({
-                                    'sweep_number': save_key,  # Use save_key for consistency
+                                    'sweep_number': current_save_key,  # Use current_save_key for consistency
                                     'voltage': stop_v,
                                     'analysis': analysis_data
                                 })
@@ -7817,7 +7933,7 @@ class MeasurementGUI:
                                 try:
                                     classification = analysis_data.get('classification', {})
                                     self._update_live_classification_display(
-                                        sweep_num=save_key,  # Use save_key for consistency
+                                        sweep_num=current_save_key,  # Use current_save_key for consistency
                                         total_sweeps=total_sweeps_count,
                                         classification_data=classification
                                     )
