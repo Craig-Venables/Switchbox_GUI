@@ -111,6 +111,7 @@ class UnifiedPlotter:
         time: Optional[Sequence[float]] = None,
         device_name: str = "device",
         title_prefix: str = "",
+        analysis_data: Optional[dict] = None,
     ) -> dict:
         """
         Generate basic IV dashboard only (fast, always recommended).
@@ -121,6 +122,7 @@ class UnifiedPlotter:
             time: Optional time array
             device_name: Name for file naming and labels
             title_prefix: Optional prefix for plot titles
+            analysis_data: Optional analysis results dict to add resistance annotations
             
         Returns:
             Dictionary with figure objects
@@ -137,6 +139,12 @@ class UnifiedPlotter:
             arrows_points=self.iv_arrows_points,
             save_name=f"{device_name}_iv_dashboard.png" if self.save_dir else None,
         )
+        
+        # Add resistance annotations if analysis data is available
+        if analysis_data:
+            self._add_resistance_annotations(axes_iv[0, 0], voltage, current, analysis_data)  # Linear IV
+            self._add_resistance_annotations(axes_iv[0, 1], voltage, current, analysis_data)  # Log IV
+        
         results["iv"] = {"fig": fig_iv, "axes": axes_iv}
         
         return results
@@ -251,14 +259,26 @@ class UnifiedPlotter:
         device_name: str = "device",
         title: Optional[str] = None,
         save_name: Optional[str] = None,
+        analysis_data: Optional[dict] = None,
     ):
-        """Generate IV dashboard (2x2 grid)."""
+        """
+        Generate IV dashboard (2x2 grid).
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+            time: Optional time array
+            device_name: Name for file naming and labels
+            title: Optional plot title
+            save_name: Optional filename for saving
+            analysis_data: Optional analysis results dict to add resistance annotations
+        """
         if title is None:
             title = f"{device_name} - IV Dashboard"
         if save_name is None and self.save_dir:
             save_name = f"{device_name}_iv_dashboard.png"
         
-        return self.iv_plotter.plot_grid(
+        fig, axes = self.iv_plotter.plot_grid(
             voltage=voltage,
             current=current,
             time=time,
@@ -267,6 +287,13 @@ class UnifiedPlotter:
             arrows_points=self.iv_arrows_points,
             save_name=save_name,
         )
+        
+        # Add resistance annotations if analysis data is available
+        if analysis_data:
+            self._add_resistance_annotations(axes[0, 0], voltage, current, analysis_data)  # Linear IV
+            self._add_resistance_annotations(axes[0, 1], voltage, current, analysis_data)  # Log IV
+        
+        return fig, axes
 
     def plot_conduction_analysis(
         self,
@@ -321,6 +348,7 @@ class UnifiedPlotter:
         device_name: str = "device",
         title_prefix: str = "",
         is_memristive: bool = False,
+        analysis_data: Optional[dict] = None,
     ) -> dict:
         """
         Conditional plotting: always plot basic IV, optionally plot advanced analysis.
@@ -335,6 +363,7 @@ class UnifiedPlotter:
             device_name: Name for file naming and labels
             title_prefix: Optional prefix for plot titles
             is_memristive: If True, also generates advanced analysis plots
+            analysis_data: Optional analysis results dict to add resistance annotations
             
         Returns:
             Dictionary with figure objects
@@ -348,6 +377,7 @@ class UnifiedPlotter:
             time=time,
             device_name=device_name,
             title_prefix=title_prefix,
+            analysis_data=analysis_data,
         )
         results.update(basic_results)
         
@@ -362,6 +392,110 @@ class UnifiedPlotter:
             results.update(memristive_results)
         
         return results
+    
+    @staticmethod
+    def _add_resistance_annotations(
+        ax,
+        voltage: np.ndarray,
+        current: np.ndarray,
+        analysis_data: dict,
+    ) -> None:
+        """
+        Add resistance annotations (Ron, Roff, switching ratio) to IV plots.
+        
+        Args:
+            ax: Matplotlib axes to annotate
+            voltage: Voltage array
+            current: Current array
+            analysis_data: Analysis results dict containing resistance metrics
+        """
+        try:
+            # Extract resistance metrics from analysis data
+            resistance_metrics = analysis_data.get('resistance_metrics', {})
+            ron_mean = resistance_metrics.get('ron_mean', None)
+            roff_mean = resistance_metrics.get('roff_mean', None)
+            switching_ratio = resistance_metrics.get('switching_ratio_mean', None)
+            memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', None)
+            
+            # Helper function to format resistance values
+            def format_resistance(r_val):
+                """Format resistance with appropriate units."""
+                if r_val is None or r_val <= 0:
+                    return None
+                if r_val >= 1e6:
+                    return f"{r_val/1e6:.2f} MΩ"
+                elif r_val >= 1e3:
+                    return f"{r_val/1e3:.2f} kΩ"
+                else:
+                    return f"{r_val:.2e} Ω"
+            
+            # Find positions for annotations
+            v_pos = voltage[voltage > 0]
+            v_neg = voltage[voltage < 0]
+            
+            # Add Ron annotation at positive voltage region
+            if ron_mean and ron_mean > 0 and len(v_pos) > 0:
+                # Find a point in positive voltage region to place annotation
+                v_pos_mid = np.median(v_pos) if len(v_pos) > 0 else np.max(voltage) * 0.5
+                # Find corresponding current value (approximate)
+                v_idx = np.argmin(np.abs(voltage - v_pos_mid))
+                if v_idx < len(current):
+                    i_pos = current[v_idx]
+                    ron_str = format_resistance(ron_mean)
+                    if ron_str:
+                        ax.annotate(
+                            f"Ron: {ron_str}",
+                            xy=(v_pos_mid, i_pos),
+                            xytext=(10, 10),
+                            textcoords='offset points',
+                            bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.7),
+                            fontsize=9,
+                            ha='left',
+                            va='bottom'
+                        )
+            
+            # Add Roff annotation at negative voltage region
+            if roff_mean and roff_mean > 0 and len(v_neg) > 0:
+                # Find a point in negative voltage region to place annotation
+                v_neg_mid = np.median(v_neg) if len(v_neg) > 0 else np.min(voltage) * 0.5
+                # Find corresponding current value (approximate)
+                v_idx = np.argmin(np.abs(voltage - v_neg_mid))
+                if v_idx < len(current):
+                    i_neg = current[v_idx]
+                    roff_str = format_resistance(roff_mean)
+                    if roff_str:
+                        ax.annotate(
+                            f"Roff: {roff_str}",
+                            xy=(v_neg_mid, i_neg),
+                            xytext=(-10, -20),
+                            textcoords='offset points',
+                            bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcoral', alpha=0.7),
+                            fontsize=9,
+                            ha='right',
+                            va='top'
+                        )
+            
+            # Add switching ratio and memristivity score in corner
+            info_lines = []
+            if switching_ratio and switching_ratio > 0:
+                info_lines.append(f"Ratio: {switching_ratio:.1f}")
+            if memristivity_score is not None:
+                info_lines.append(f"Score: {memristivity_score:.0f}")
+            
+            if info_lines:
+                info_text = "\n".join(info_lines)
+                ax.text(
+                    0.98, 0.02,
+                    info_text,
+                    transform=ax.transAxes,
+                    fontsize=8,
+                    verticalalignment='bottom',
+                    horizontalalignment='right',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.8, edgecolor='gray'),
+                )
+        except Exception as e:
+            # Silently fail if annotation fails (don't break plotting)
+            pass
 
     def plot_endurance_analysis(
         self,
