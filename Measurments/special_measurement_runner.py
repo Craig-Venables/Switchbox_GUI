@@ -317,14 +317,59 @@ class SpecialMeasurementRunner:
             name = f"{save_key}-ENDURANCE-{set_v}v-{reset_v}v-{pulse_ms}ms-Py"
             file_path = Path(save_dir) / f"{name}.txt"
             try:
-                data = np.column_stack((v_arr, c_arr, t_arr))
-                np.savetxt(
-                    file_path,
-                    data,
-                    fmt="%0.3E\t%0.3E\t%0.3E",
-                    header="Voltage(V) Current(A) Time(s)",
-                    comments="",
-                )
+                # Process endurance data: extract SET and RESET currents per cycle
+                # Pattern: SET_pulse -> SET_read -> RESET_pulse -> RESET_read (repeat)
+                # Find all read measurements (at read_voltage)
+                read_indices = [i for i, v in enumerate(v_arr) if abs(v - read_v) < 0.01]
+                
+                if len(read_indices) >= 2:
+                    # Extract cycle data: pair consecutive reads (SET then RESET)
+                    cycles = []
+                    times = []
+                    i_set_arr = []
+                    i_reset_arr = []
+                    ratios = []
+                    
+                    start_time = t_arr[0] if t_arr else 0
+                    
+                    # Pair reads: even indices are SET reads, odd are RESET reads
+                    for cycle_idx in range(0, len(read_indices) - 1, 2):
+                        if cycle_idx + 1 < len(read_indices):
+                            set_idx = read_indices[cycle_idx]
+                            reset_idx = read_indices[cycle_idx + 1]
+                            
+                            cycle_num = (cycle_idx // 2) + 1
+                            time_val = t_arr[reset_idx] - start_time  # Time at end of cycle
+                            i_set = abs(c_arr[set_idx]) if c_arr[set_idx] != 0 else 1e-12
+                            i_reset = abs(c_arr[reset_idx]) if c_arr[reset_idx] != 0 else 1e-12
+                            ratio = i_set / i_reset if i_reset > 0 else float('nan')
+                            
+                            cycles.append(cycle_num)
+                            times.append(time_val)
+                            i_set_arr.append(i_set)
+                            i_reset_arr.append(i_reset)
+                            ratios.append(ratio)
+                    
+                    # Save structured data
+                    data = np.column_stack((cycles, times, i_set_arr, i_reset_arr, ratios))
+                    np.savetxt(
+                        file_path,
+                        data,
+                        fmt="%d\t%0.3E\t%0.3E\t%0.3E\t%0.3E",
+                        header="Cycle\tTime(s)\tI_SET(A)\tI_RESET(A)\tRatio",
+                        comments="",
+                    )
+                else:
+                    # Fallback: save raw data if we can't extract cycles
+                    data = np.column_stack((v_arr, c_arr, t_arr))
+                    np.savetxt(
+                        file_path,
+                        data,
+                        fmt="%0.3E\t%0.3E\t%0.3E",
+                        header="Voltage(V) Current(A) Time(s)",
+                        comments="",
+                    )
+                
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save endurance file: {exc}")
@@ -474,14 +519,71 @@ class SpecialMeasurementRunner:
             name = f"{save_key}-RETENTION-{set_v}v-{read_v}v-Py"
             file_path = Path(save_dir) / f"{name}.txt"
             try:
-                data = np.column_stack((t_arr, c_arr, v_arr))
-                np.savetxt(
-                    file_path,
-                    data,
-                    fmt="%0.3E\t%0.3E\t%0.3E",
-                    header="Time(s) Current(A) Voltage(V)",
-                    comments="",
-                )
+                # Process retention data: extract initial read and subsequent reads
+                # Pattern: Initial_read -> SET_pulse -> Read_1 -> Read_2 -> ... -> Read_N
+                # Find all read measurements (at read_voltage)
+                read_indices = [i for i, v in enumerate(v_arr) if abs(v - read_v) < 0.01]
+                
+                if len(read_indices) > 0:
+                    # Extract read data
+                    read_numbers = []
+                    times = []
+                    currents = []
+                    voltages = []
+                    
+                    start_time = t_arr[0] if t_arr else 0
+                    
+                    # Find SET pulse index (voltage = set_v)
+                    set_pulse_idx = None
+                    for i, v in enumerate(v_arr):
+                        if abs(v - set_v) < 0.01:
+                            set_pulse_idx = i
+                            break
+                    
+                    # Separate initial read (before SET) from subsequent reads (after SET)
+                    for read_idx in read_indices:
+                        if set_pulse_idx is not None and read_idx < set_pulse_idx:
+                            # This is the initial read (before SET pulse)
+                            read_num = 0
+                        elif set_pulse_idx is not None:
+                            # This is a subsequent read (after SET pulse)
+                            # Count how many reads have occurred after SET pulse up to this point
+                            reads_after_set = [idx for idx in read_indices if idx > set_pulse_idx and idx <= read_idx]
+                            read_num = len(reads_after_set)
+                        else:
+                            # No SET pulse found, number sequentially starting from 0
+                            reads_before_this = [idx for idx in read_indices if idx < read_idx]
+                            read_num = len(reads_before_this)
+                        
+                        time_val = t_arr[read_idx] - start_time
+                        current_val = c_arr[read_idx]
+                        voltage_val = v_arr[read_idx]
+                        
+                        read_numbers.append(read_num)
+                        times.append(time_val)
+                        currents.append(current_val)
+                        voltages.append(voltage_val)
+                    
+                    # Save structured data
+                    data = np.column_stack((read_numbers, times, currents, voltages))
+                    np.savetxt(
+                        file_path,
+                        data,
+                        fmt="%d\t%0.3E\t%0.3E\t%0.3E",
+                        header="Read_Number\tTime(s)\tCurrent(A)\tVoltage(V)",
+                        comments="",
+                    )
+                else:
+                    # Fallback: save raw data if we can't extract reads
+                    data = np.column_stack((t_arr, c_arr, v_arr))
+                    np.savetxt(
+                        file_path,
+                        data,
+                        fmt="%0.3E\t%0.3E\t%0.3E",
+                        header="Time(s) Current(A) Voltage(V)",
+                        comments="",
+                    )
+                
                 self.log_terminal(f"File saved: {file_path.resolve()}")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save retention file: {exc}")

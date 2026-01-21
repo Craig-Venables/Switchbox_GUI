@@ -460,6 +460,9 @@ class MeasurementGUI:
         self.c_arr_disp_abs_log = []
         self.r_arr_disp = []
         self.temp_time_disp = []
+        
+        # Pulse history storage
+        self.pulse_history = []  # List of dicts with pulse data
 
         # Central measurement engine
         self.measurement_service = MeasurementService()
@@ -506,6 +509,12 @@ class MeasurementGUI:
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
                 "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
                 "run_conditional_testing": self.run_conditional_testing,
+                "run_single_pulse": self._run_single_pulse,
+                "run_read_pulse": self._run_read_pulse,
+                "clear_pulse_history": self._clear_pulse_history,
+                "save_pulse_history": self._save_pulse_history,
+                "start_forming_measurement": self._start_forming_measurement_thread,
+                "stop_forming_measurement": self.set_measurment_flag_true,
             },
         )
         
@@ -1685,12 +1694,19 @@ class MeasurementGUI:
         device_name: str,
         sweep_number: int,
         is_memristive: Optional[bool] = None,
-        filename: Optional[str] = None
+        filename: Optional[str] = None,
+        measurement_type: str = "IV",
+        measurement_params: Optional[dict] = None
     ) -> None:
         """
         Plot measurement graphs in background thread using UnifiedPlotter.
         
-        Always plots basic IV dashboard. If memristive, also plots advanced analysis.
+        Plots based on measurement type:
+        - IV: IV dashboard (default)
+        - Endurance: Cycle vs Resistance, Cycle vs ON/OFF Ratio
+        - Retention: Log-log Time vs Current, Linear Time vs Current, Time vs Resistance
+        
+        If memristive and IV type, also plots advanced analysis.
         Saves to {save_dir}/Graphs/{filename}_graph/, {filename}_conduction/, {filename}_sclc_fit/ folders.
         
         Args:
@@ -1702,6 +1718,8 @@ class MeasurementGUI:
             sweep_number: Sweep number
             is_memristive: Optional memristive flag. If None, will check from analysis.
             filename: Optional measurement filename (without .txt). If None, will try to extract from save_dir.
+            measurement_type: Type of measurement ("IV", "Endurance", "Retention", etc.)
+            measurement_params: Optional dictionary with measurement parameters (read_voltage, etc.)
         """
         def run_plotting():
             try:
@@ -1794,43 +1812,110 @@ class MeasurementGUI:
                 sample_name = self.sample_name_var.get() if hasattr(self, 'sample_name_var') else ""
                 title_prefix = f"{sample_name} {device_name}" if sample_name else device_name
                 
-                # Plot basic IV dashboard (always) - save directly in Graphs folder
-                plotter_graph = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
-                # Use plot_iv_dashboard directly to specify exact filename
-                plotter_graph.plot_iv_dashboard(
-                    voltage=voltage,
-                    current=current,
-                    time=timestamps,
-                    device_name=plot_filename,  # Use filename instead of device_name_sweep
-                    title=f"{title_prefix} {plot_filename} - IV Dashboard",
-                    save_name=f"{plot_filename}_iv_dashboard.png"
-                )
+                # Capture measurement_type and params from outer scope
+                meas_type = measurement_type  # Capture from outer scope
+                meas_params = measurement_params if measurement_params else {}  # Capture from outer scope
                 
-                # Plot advanced analysis if memristive - save with filename in shared folders
-                if is_memristive_flag:
-                    plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
-                    plotter_cond.plot_conduction_analysis(
+                # Conditional plotting based on measurement type
+                if meas_type == "Endurance":
+                    # Plot endurance-specific graphs
+                    plotter_end = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                    read_voltage = meas_params.get("read_v", meas_params.get("read_voltage", 0.2))
+                    
+                    plotter_end.plot_endurance_analysis(
                         voltage=voltage,
                         current=current,
-                        device_name=plot_filename,  # Use filename
-                        title=f"{title_prefix} {plot_filename} - Conduction Analysis",
-                        save_name=f"{plot_filename}_conduction.png"  # Explicit filename
+                        timestamps=timestamps,
+                        device_name=plot_filename,
+                        title_prefix=title_prefix,
+                        read_voltage=read_voltage,
+                        save_name_cycle_resistance=f"{plot_filename}_endurance_cycle_resistance.png",
+                        save_name_onoff_ratio=f"{plot_filename}_endurance_onoff_ratio.png"
                     )
                     
-                    plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
-                    plotter_sclc.plot_sclc_fit(
+                    debug_print(f"[PLOT] Generated endurance plots for {plot_filename}")
+                    debug_print(f"[PLOT] Endurance plots saved to: {graphs_dir}")
+                    
+                elif meas_type == "Retention":
+                    # Plot retention-specific graphs
+                    plotter_ret = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                    read_voltage = meas_params.get("read_v", meas_params.get("read_voltage", 0.2))
+                    
+                    plotter_ret.plot_retention_analysis(
                         voltage=voltage,
                         current=current,
-                        device_name=plot_filename,  # Use filename
-                        title=f"{title_prefix} {plot_filename} - SCLC Fit",
-                        save_name=f"{plot_filename}_sclc_fit.png"  # Explicit filename
+                        timestamps=timestamps,
+                        device_name=plot_filename,
+                        title_prefix=title_prefix,
+                        read_voltage=read_voltage,
+                        save_name_loglog=f"{plot_filename}_retention_loglog.png",
+                        save_name_linear=f"{plot_filename}_retention_linear.png",
+                        save_name_resistance=f"{plot_filename}_retention_resistance.png"
                     )
-                
-                debug_print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
-                debug_print(f"[PLOT] Dashboard saved to: {graphs_dir}")
-                if is_memristive_flag:
-                    debug_print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
-                    debug_print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
+                    
+                    debug_print(f"[PLOT] Generated retention plots for {plot_filename}")
+                    debug_print(f"[PLOT] Retention plots saved to: {graphs_dir}")
+                    
+                elif meas_type == "Forming" or meas_type == "Pulse":
+                    # Plot forming/pulse-specific graphs
+                    plotter_form = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                    read_voltage = meas_params.get("read_voltage", meas_params.get("read_v", 0.1))
+                    forming_metadata = meas_params.get("forming_metadata", {})
+                    
+                    plotter_form.plot_pulse_forming_analysis(
+                        voltage=voltage,
+                        current=current,
+                        timestamps=timestamps,
+                        device_name=plot_filename,
+                        title_prefix=title_prefix,
+                        forming_metadata=forming_metadata,
+                        read_voltage=read_voltage,
+                        save_name_time_current=f"{plot_filename}_forming_time_current.png",
+                        save_name_pulse_current=f"{plot_filename}_forming_pulse_current.png",
+                        save_name_voltage_current=f"{plot_filename}_forming_voltage_current.png"
+                    )
+                    
+                    debug_print(f"[PLOT] Generated forming plots for {plot_filename}")
+                    debug_print(f"[PLOT] Forming plots saved to: {graphs_dir}")
+                    
+                else:
+                    # Default: Plot IV dashboard (for IV, PulsedIV, FastPulses, Hold, etc.)
+                    plotter_graph = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                    # Use plot_iv_dashboard directly to specify exact filename
+                    plotter_graph.plot_iv_dashboard(
+                        voltage=voltage,
+                        current=current,
+                        time=timestamps,
+                        device_name=plot_filename,  # Use filename instead of device_name_sweep
+                        title=f"{title_prefix} {plot_filename} - IV Dashboard",
+                        save_name=f"{plot_filename}_iv_dashboard.png"
+                    )
+                    
+                    # Plot advanced analysis if memristive - save with filename in shared folders
+                    if is_memristive_flag:
+                        plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
+                        plotter_cond.plot_conduction_analysis(
+                            voltage=voltage,
+                            current=current,
+                            device_name=plot_filename,  # Use filename
+                            title=f"{title_prefix} {plot_filename} - Conduction Analysis",
+                            save_name=f"{plot_filename}_conduction.png"  # Explicit filename
+                        )
+                        
+                        plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
+                        plotter_sclc.plot_sclc_fit(
+                            voltage=voltage,
+                            current=current,
+                            device_name=plot_filename,  # Use filename
+                            title=f"{title_prefix} {plot_filename} - SCLC Fit",
+                            save_name=f"{plot_filename}_sclc_fit.png"  # Explicit filename
+                        )
+                    
+                    debug_print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
+                    debug_print(f"[PLOT] Dashboard saved to: {graphs_dir}")
+                    if is_memristive_flag:
+                        debug_print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
+                        debug_print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
                 
             except ImportError as e:
                 debug_print(f"[PLOT ERROR] Failed to import UnifiedPlotter: {e}")
@@ -2332,18 +2417,25 @@ class MeasurementGUI:
                 device_type = classification.get('device_type') or 'N/A'
                 device_type_str = device_type.upper() if isinstance(device_type, str) else 'N/A'
                 lines.append(f"  Device Type: {device_type_str}")
-                lines.append(f"  Confidence: {classification.get('confidence', 0)*100:.1f}%")
-                
-                score = classification.get('memristivity_score', 0)
-                score_str = f"{score:.1f}/100"
-                if score >= 80:
-                    score_str += " (Excellent)"
-                elif score >= 60:
-                    score_str += " (Good)"
-                elif score >= 40:
-                    score_str += " (Fair)"
+                confidence = classification.get('confidence')
+                if confidence is not None:
+                    lines.append(f"  Confidence: {confidence*100:.1f}%")
                 else:
-                    score_str += " (Poor)"
+                    lines.append(f"  Confidence: N/A")
+                
+                score = classification.get('memristivity_score')
+                if score is not None:
+                    score_str = f"{score:.1f}/100"
+                    if score >= 80:
+                        score_str += " (Excellent)"
+                    elif score >= 60:
+                        score_str += " (Good)"
+                    elif score >= 40:
+                        score_str += " (Fair)"
+                    else:
+                        score_str += " (Poor)"
+                else:
+                    score_str = "N/A"
                 lines.append(f"  Memristivity Score: {score_str}")
                 lines.append(f"  Conduction: {classification.get('conduction_mechanism', 'N/A')}")
                 lines.append("")
@@ -5427,6 +5519,432 @@ class MeasurementGUI:
         self.measurement_thread = threading.Thread(target=self.sequential_measure, daemon=True)
         self.measurement_thread.start()
 
+    def _run_single_pulse(self) -> None:
+        """Run a single pulse measurement and display result."""
+        if not self.connected or not self.keithley:
+            messagebox.showerror("Error", "Please connect to SMU first.")
+            return
+        
+        try:
+            # Get parameters from GUI
+            pulse_voltage = float(getattr(self, "pulse_single_voltage", tk.DoubleVar(value=5.0)).get())
+            pulse_time = float(getattr(self, "pulse_single_time", tk.DoubleVar(value=1.0)).get())
+            icc = float(getattr(self, "pulse_single_icc", tk.DoubleVar(value=1e-3)).get())
+            read_voltage = float(getattr(self, "pulse_single_read_voltage", tk.DoubleVar(value=0.1)).get())
+            
+            # Update status
+            if hasattr(self, "pulse_single_result"):
+                self.pulse_single_result.set("Running pulse...")
+            
+            # Run measurement
+            voltage_during, current_during, current_at_read = self.measurement_service.run_single_pulse_measurement(
+                keithley=self.keithley,
+                pulse_voltage=pulse_voltage,
+                pulse_time_s=pulse_time,
+                read_voltage=read_voltage,
+                icc=icc,
+                smu_type=self.smu_type if hasattr(self, "smu_type") else "Keithley 2450"
+            )
+            
+            # Validate voltage reading
+            if abs(voltage_during) > 100.0 or voltage_during != voltage_during:  # NaN check
+                voltage_during = pulse_voltage
+            
+            # Display result
+            result_text = f"During pulse: {current_during:.2e} A @ {voltage_during:.3f} V\n"
+            result_text += f"At read ({read_voltage}V): {current_at_read:.2e} A"
+            
+            if hasattr(self, "pulse_single_result"):
+                self.pulse_single_result.set(result_text)
+            
+            self.log_terminal(f"Single pulse: {result_text}")
+            
+            # Add to pulse history
+            from datetime import datetime
+            pulse_entry = {
+                "timestamp": datetime.now(),
+                "type": "Single Pulse",
+                "voltage": voltage_during,
+                "current": current_during,
+                "pulse_time": pulse_time,
+                "read_voltage": read_voltage,
+                "current_at_read": current_at_read,
+                "current_limit": icc
+            }
+            self._add_pulse_to_history(pulse_entry)
+            
+        except Exception as exc:
+            error_msg = f"Error running single pulse: {exc}"
+            messagebox.showerror("Error", error_msg)
+            if hasattr(self, "pulse_single_result"):
+                self.pulse_single_result.set("Error: " + str(exc))
+            self.log_terminal(error_msg)
+            import traceback
+            traceback.print_exc()
+
+    def _run_read_pulse(self) -> None:
+        """Run a simple read pulse measurement and display result."""
+        if not self.connected or not self.keithley:
+            messagebox.showerror("Error", "Please connect to SMU first.")
+            return
+        
+        try:
+            # Get parameters from GUI
+            read_voltage = float(getattr(self, "pulse_single_read_voltage", tk.DoubleVar(value=0.1)).get())
+            icc = float(getattr(self, "pulse_single_icc", tk.DoubleVar(value=1e-3)).get())
+            
+            # Update status
+            if hasattr(self, "pulse_single_result"):
+                self.pulse_single_result.set("Running read pulse...")
+            
+            # Set voltage and measure
+            try:
+                self.keithley.enable_output(True)
+                self.keithley.set_voltage(read_voltage, icc)
+                import time
+                time.sleep(0.01)  # Brief settle time
+                
+                # Measure voltage and current
+                try:
+                    v_meas = self.keithley.measure_voltage()
+                    i_meas = self.keithley.measure_current()
+                    
+                    # Handle different return formats
+                    if isinstance(v_meas, (list, tuple)):
+                        v_meas = v_meas[-1] if len(v_meas) > 0 else read_voltage
+                    if isinstance(i_meas, (list, tuple)):
+                        i_meas = i_meas[1] if len(i_meas) > 1 else i_meas[0]
+                    
+                    v_meas = float(v_meas)
+                    i_meas = float(i_meas)
+                    
+                    # Validate voltage reading - if it's unreasonable (e.g., > 100V for typical SMU), use commanded voltage
+                    if abs(v_meas) > 100.0 or v_meas != v_meas:  # NaN check
+                        v_meas = read_voltage
+                    
+                except Exception:
+                    v_meas = read_voltage
+                    i_meas = 0.0
+                
+            except Exception as e:
+                raise Exception(f"Failed to apply read voltage: {e}")
+            
+            # Display result
+            result_text = f"Read: {i_meas:.2e} A @ {v_meas:.3f} V"
+            
+            if hasattr(self, "pulse_single_result"):
+                self.pulse_single_result.set(result_text)
+            
+            self.log_terminal(f"Read pulse: {result_text}")
+            
+            # Add to pulse history
+            from datetime import datetime
+            pulse_entry = {
+                "timestamp": datetime.now(),
+                "type": "Read Pulse",
+                "voltage": v_meas,
+                "current": i_meas,
+                "pulse_time": 0.0,  # Read pulses have no duration
+                "read_voltage": read_voltage,
+                "current_limit": icc
+            }
+            self._add_pulse_to_history(pulse_entry)
+            
+        except Exception as exc:
+            error_msg = f"Error running read pulse: {exc}"
+            messagebox.showerror("Error", error_msg)
+            if hasattr(self, "pulse_single_result"):
+                self.pulse_single_result.set("Error: " + str(exc))
+            self.log_terminal(error_msg)
+            import traceback
+            traceback.print_exc()
+
+    def _add_pulse_to_history(self, pulse_entry: dict) -> None:
+        """Add a pulse entry to history and update display."""
+        if not hasattr(self, 'pulse_history'):
+            self.pulse_history = []
+        
+        self.pulse_history.append(pulse_entry)
+        self._update_pulse_history_display()
+    
+    def _update_pulse_history_display(self) -> None:
+        """Update the pulse history text widget."""
+        if not hasattr(self, 'pulse_history_text') or not hasattr(self, 'pulse_history'):
+            return
+        
+        try:
+            self.pulse_history_text.config(state='normal')
+            self.pulse_history_text.delete('1.0', tk.END)
+            
+            if not self.pulse_history:
+                self.pulse_history_text.insert('1.0', "No pulses recorded yet.\n")
+            else:
+                # Compact header - fit within available width
+                header = f"{'#':<3} {'Time':<9} {'Type':<10} {'V(V)':<8} {'I(A)':<10} {'t(s)':<7} {'RV':<6} {'RI(A)':<10}\n"
+                self.pulse_history_text.insert('1.0', header)
+                self.pulse_history_text.insert('end', '-' * 70 + '\n')
+                
+                # Entries (show last 50)
+                display_history = self.pulse_history[-50:] if len(self.pulse_history) > 50 else self.pulse_history
+                start_idx = len(self.pulse_history) - len(display_history) + 1
+                
+                for idx, pulse in enumerate(display_history, start=start_idx):
+                    timestamp_str = pulse['timestamp'].strftime("%H:%M:%S")
+                    pulse_type = pulse.get('type', 'Unknown')[:10]  # Truncate if too long
+                    voltage = pulse.get('voltage', 0.0)
+                    current = pulse.get('current', 0.0)
+                    pulse_time = pulse.get('pulse_time', 0.0)
+                    read_voltage = pulse.get('read_voltage', 'N/A')
+                    read_current = pulse.get('current_at_read', 'N/A')
+                    
+                    # Format values compactly
+                    v_str = f"{voltage:.3f}" if isinstance(voltage, (int, float)) else str(voltage)[:7]
+                    i_str = f"{current:.2e}" if isinstance(current, (int, float)) else str(current)[:9]
+                    t_str = f"{pulse_time:.3f}" if isinstance(pulse_time, (int, float)) else str(pulse_time)[:6]
+                    rv_str = f"{read_voltage:.2f}" if isinstance(read_voltage, (int, float)) and read_voltage != 'N/A' else str(read_voltage)[:5]
+                    ri_str = f"{read_current:.2e}" if isinstance(read_current, (int, float)) and read_current != 'N/A' else str(read_current)[:9]
+                    
+                    # Compact line format
+                    line = f"{idx:<3} {timestamp_str:<9} {pulse_type:<10} {v_str:<8} {i_str:<10} {t_str:<7} {rv_str:<6} {ri_str:<10}\n"
+                    self.pulse_history_text.insert('end', line)
+                
+                if len(self.pulse_history) > 50:
+                    self.pulse_history_text.insert('end', f"\n... showing last 50 of {len(self.pulse_history)} pulses\n")
+            
+            self.pulse_history_text.see('end')
+            self.pulse_history_text.config(state='disabled')
+        except Exception as e:
+            print(f"Error updating pulse history display: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _clear_pulse_history(self) -> None:
+        """Clear pulse history."""
+        if hasattr(self, 'pulse_history'):
+            self.pulse_history = []
+        self._update_pulse_history_display()
+        self.log_terminal("Pulse history cleared")
+    
+    def _save_pulse_history(self) -> None:
+        """Save pulse history to a text file."""
+        if not hasattr(self, 'pulse_history') or not self.pulse_history:
+            messagebox.showinfo("Info", "No pulse history to save.")
+            return
+        
+        try:
+            # Get save directory
+            sample_name = self.sample_name_var.get() if hasattr(self, "sample_name_var") else "Unknown"
+            device_label = f"{self.final_device_letter}{self.final_device_number}" if hasattr(self, "final_device_letter") else "X0"
+            save_dir = self.data_saver.get_device_folder(sample_name, device_label)
+            
+            # Create filename with timestamp
+            from datetime import datetime
+            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"quick_pulses_{timestamp_str}.txt"
+            filepath = save_dir / filename
+            
+            # Write file
+            with open(filepath, 'w') as f:
+                # Header
+                f.write("Quick Pulse History\n")
+                f.write("=" * 90 + "\n")
+                f.write(f"Sample: {sample_name}\n")
+                f.write(f"Device: {device_label}\n")
+                f.write(f"Saved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Total Pulses: {len(self.pulse_history)}\n")
+                f.write("=" * 90 + "\n\n")
+                
+                # Column headers
+                f.write(f"{'#':<4} {'Date/Time':<20} {'Type':<12} {'Voltage (V)':<12} {'Current (A)':<15} "
+                       f"{'Pulse Time (s)':<15} {'Read Voltage (V)':<15} {'Read Current (A)':<15} {'Current Limit (A)':<15}\n")
+                f.write("-" * 140 + "\n")
+                
+                # Data rows
+                for idx, pulse in enumerate(self.pulse_history, start=1):
+                    timestamp_str = pulse['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
+                    pulse_type = pulse.get('type', 'Unknown')
+                    voltage = pulse.get('voltage', 0.0)
+                    current = pulse.get('current', 0.0)
+                    pulse_time = pulse.get('pulse_time', 0.0)
+                    read_voltage = pulse.get('read_voltage', 'N/A')
+                    read_current = pulse.get('current_at_read', 'N/A')
+                    current_limit = pulse.get('current_limit', 'N/A')
+                    
+                    # Format values
+                    v_str = f"{voltage:.6e}" if isinstance(voltage, (int, float)) else str(voltage)
+                    i_str = f"{current:.6e}" if isinstance(current, (int, float)) else str(current)
+                    t_str = f"{pulse_time:.6e}" if isinstance(pulse_time, (int, float)) else str(pulse_time)
+                    rv_str = f"{read_voltage:.6e}" if isinstance(read_voltage, (int, float)) and read_voltage != 'N/A' else str(read_voltage)
+                    ri_str = f"{read_current:.6e}" if isinstance(read_current, (int, float)) and read_current != 'N/A' else str(read_current)
+                    icc_str = f"{current_limit:.6e}" if isinstance(current_limit, (int, float)) and current_limit != 'N/A' else str(current_limit)
+                    
+                    f.write(f"{idx:<4} {timestamp_str:<20} {pulse_type:<12} {v_str:<12} {i_str:<15} "
+                           f"{t_str:<15} {rv_str:<15} {ri_str:<15} {icc_str:<15}\n")
+            
+            messagebox.showinfo("Success", f"Pulse history saved to:\n{filepath}")
+            self.log_terminal(f"Pulse history saved: {filepath}")
+            
+        except Exception as exc:
+            error_msg = f"Error saving pulse history: {exc}"
+            messagebox.showerror("Error", error_msg)
+            self.log_terminal(error_msg)
+            import traceback
+            traceback.print_exc()
+
+    def _start_forming_measurement_thread(self) -> None:
+        """Start the forming measurement workflow in a background thread."""
+        try:
+            if getattr(self, "measurement_thread", None) and self.measurement_thread.is_alive():
+                messagebox.showwarning("Measurement", "A measurement is already running.")
+                return
+        except Exception:
+            pass
+
+        self.measurement_thread = threading.Thread(target=self._run_forming_measurement, daemon=True)
+        self.measurement_thread.start()
+
+    def _run_forming_measurement(self) -> None:
+        """Run the forming measurement."""
+        if not self.connected or not self.keithley:
+            messagebox.showerror("Error", "Please connect to SMU first.")
+            return
+        
+        try:
+            # Get parameters from GUI
+            start_voltage = float(getattr(self, "forming_start_voltage", tk.DoubleVar(value=5.0)).get())
+            start_time = float(getattr(self, "forming_start_time", tk.DoubleVar(value=1.0)).get())
+            pulses_per_step = int(getattr(self, "forming_pulses_per_step", tk.IntVar(value=10)).get())
+            time_increment = float(getattr(self, "forming_time_increment", tk.DoubleVar(value=1.0)).get())
+            max_time = float(getattr(self, "forming_max_time", tk.DoubleVar(value=10.0)).get())
+            max_voltage = float(getattr(self, "forming_max_voltage", tk.DoubleVar(value=10.0)).get())
+            current_limit = float(getattr(self, "forming_current_limit", tk.DoubleVar(value=1e-3)).get())
+            target_current = float(getattr(self, "forming_target_current", tk.DoubleVar(value=1e-4)).get())
+            read_voltage = float(getattr(self, "forming_read_voltage", tk.DoubleVar(value=0.1)).get())
+            icc = current_limit  # Use current_limit as compliance
+            
+            # Reset stop flag
+            self.stop_measurement_flag = False
+            
+            # Update status
+            if hasattr(self, "forming_status"):
+                self.forming_status.set("Starting forming measurement...")
+            
+            self.log_terminal("Starting forming measurement...")
+            
+            # Callback for status updates
+            def on_point(v, i, t):
+                if hasattr(self, "forming_status"):
+                    status = f"V={v:.2f}V, I={i:.2e}A, t={t:.2f}s"
+                    self.forming_status.set(status)
+            
+            # Run forming measurement
+            voltages, currents, timestamps, metadata = self.measurement_service.run_forming_measurement(
+                keithley=self.keithley,
+                start_voltage=start_voltage,
+                start_time_s=start_time,
+                pulses_per_step=pulses_per_step,
+                time_increment_s=time_increment,
+                max_time_s=max_time,
+                max_voltage=max_voltage,
+                current_limit=current_limit,
+                target_current=target_current,
+                read_voltage=read_voltage,
+                icc=icc,
+                smu_type=self.smu_type if hasattr(self, "smu_type") else "Keithley 2450",
+                should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
+                on_point=on_point
+            )
+            
+            # Save data
+            try:
+                sample_name = self.sample_name_var.get() if hasattr(self, "sample_name_var") else "Unknown"
+                device_label = f"{self.final_device_letter}{self.final_device_number}" if hasattr(self, "final_device_letter") else "X0"
+                save_dir = self.data_saver.get_device_folder(sample_name, device_label)
+                
+                # Create filename with timestamp
+                from datetime import datetime
+                timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"{device_label}_{timestamp_str}_forming.txt"
+                filepath = save_dir / filename
+                
+                # Prepare data array: Time(s) Current(A) Voltage(V)
+                data_array = np.column_stack((timestamps, currents, voltages))
+                
+                # Write header with metadata
+                header_lines = [
+                    f"Forming Measurement Data",
+                    f"Device: {device_label}",
+                    f"Sample: {sample_name}",
+                    f"Timestamp: {timestamp_str}",
+                    f"Parameters:",
+                    f"  Start Voltage: {start_voltage} V",
+                    f"  Start Time: {start_time} s",
+                    f"  Pulses per Step: {pulses_per_step}",
+                    f"  Time Increment: {time_increment} s",
+                    f"  Max Time: {max_time} s",
+                    f"  Max Voltage: {max_voltage} V",
+                    f"  Current Limit: {current_limit} A",
+                    f"  Target Current: {target_current} A",
+                    f"  Read Voltage: {read_voltage} V",
+                    f"Results:",
+                    f"  Forming Successful: {metadata.get('forming_successful', False)}",
+                    f"  Final Voltage: {metadata.get('final_voltage', 'N/A')} V",
+                    f"  Final Time: {metadata.get('final_time', 'N/A')} s",
+                    f"  Total Pulses: {metadata.get('total_pulses', 'N/A')}",
+                    f"  Reason: {metadata.get('reason', 'N/A')}",
+                    f"",
+                    f"Time(s) Current(A) Voltage(V)"
+                ]
+                
+                # Save data
+                np.savetxt(filepath, data_array, fmt='%.6e', header='\n'.join(header_lines), comments='# ')
+                
+                self.log_terminal(f"Forming data saved to: {filepath}")
+                
+                # Plot measurement
+                self._plot_measurement_in_background(
+                    voltage=voltages,
+                    current=currents,
+                    timestamps=timestamps,
+                    save_dir=str(save_dir),
+                    device_name=device_label,
+                    sweep_number=1,
+                    is_memristive=None,
+                    filename=filename.replace('.txt', ''),
+                    measurement_type="Forming",
+                    measurement_params={
+                        "read_voltage": read_voltage,
+                        "forming_metadata": metadata
+                    }
+                )
+                
+            except Exception as save_exc:
+                self.log_terminal(f"Warning: Could not save forming data: {save_exc}")
+                import traceback
+                traceback.print_exc()
+            
+            # Update final status
+            if metadata.get("forming_successful", False):
+                final_status = f"Forming successful! Final: {metadata.get('final_voltage', 'N/A')}V, {metadata.get('final_time', 'N/A')}s"
+                messagebox.showinfo("Forming Complete", final_status)
+            else:
+                final_status = f"Forming incomplete. Reason: {metadata.get('reason', 'Unknown')}"
+                messagebox.showwarning("Forming Incomplete", final_status)
+            
+            if hasattr(self, "forming_status"):
+                self.forming_status.set(final_status)
+            
+            self.log_terminal(f"Forming measurement complete: {final_status}")
+            
+        except Exception as exc:
+            error_msg = f"Error running forming measurement: {exc}"
+            messagebox.showerror("Error", error_msg)
+            if hasattr(self, "forming_status"):
+                self.forming_status.set("Error: " + str(exc))
+            self.log_terminal(error_msg)
+            import traceback
+            traceback.print_exc()
+
     def start_manual_endurance(self) -> None:
         bw_start_manual_endurance(self)
 
@@ -7905,6 +8423,7 @@ class MeasurementGUI:
                                 is_memristive_for_plot = device_is_memristive if device_is_memristive is not None else False
                             
                             # ALWAYS plot (dashboard always, conduction/SCLC only if memristive)
+                            # Pass measurement_type and params for conditional plotting
                             self._plot_measurement_in_background(
                                 voltage=v_arr,
                                 current=c_arr,
@@ -7913,7 +8432,9 @@ class MeasurementGUI:
                                 device_name=f"{self.final_device_letter}{self.final_device_number}",
                                 sweep_number=current_save_key,  # Use current_save_key for consistency
                                 is_memristive=is_memristive_for_plot,
-                                filename=name  # Use actual saved filename (includes extra_info if present)
+                                filename=name,  # Use actual saved filename (includes extra_info if present)
+                                measurement_type=measurement_type,  # Pass measurement type for conditional plotting
+                                measurement_params=params  # Pass params for read_voltage, etc.
                             )
                             debug_print(f"[PLOT] Queued plots for sweep {current_save_key}: {name} (memristive={is_memristive_for_plot})")
                         except Exception as plot_exc:
