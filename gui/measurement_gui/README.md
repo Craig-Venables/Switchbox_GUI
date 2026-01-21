@@ -13,6 +13,7 @@ The Measurement GUI acts as the central hub for performing measurements. It prov
 - **Custom Measurements**: Load and execute custom measurement sweeps from JSON files
 - **Real-Time Plotting**: Live updates of voltage, current, and resistance plots
 - **Sequential Measurements**: Automated measurement of multiple devices
+- **Pulse Testing**: Single pulse measurements and memristor forming
 - **Manual Test Controls**: Endurance, retention, and transient measurements
 - **Data Saving**: Automatic file naming and data organization
 - **Telegram Integration**: Notification support for long-running measurements
@@ -103,7 +104,7 @@ measurement_gui/
 ├── README.md                    # This file
 ├── __init__.py                  # Package exports (MeasurementGUI)
 ├── main.py                      # MeasurementGUI class (~3658 lines)
-├── layout_builder.py            # UI layout construction
+├── layout_builder.py            # UI layout construction (includes pulse parameters UI)
 ├── plot_panels.py               # Plotting components
 ├── plot_updaters.py             # Real-time plot updates
 └── custom_measurements_builder.py  # Custom measurement UI builder

@@ -57,6 +57,51 @@ class Keithley2400_SCPI_Scripts:
         self.controller.set_voltage(0.0, Icc=icc)
         time.sleep(0.001)  # Small settle time
     
+    def _measure_v_i(self) -> tuple[float, float]:
+        """Perform a voltage and current measurement using explicit SCPI commands.
+        
+        Returns:
+            Tuple of (voltage, current)
+        
+        Raises:
+            RuntimeError: If measurement fails
+        """
+        device = self.controller.device
+        if not device:
+            raise RuntimeError("Device not connected")
+        
+        try:
+            # Ensure we're measuring current (when sourcing voltage)
+            device.write(":SENS:FUNC 'CURR'")
+            # Trigger a measurement and read both voltage and current
+            # :READ? returns: voltage,current,resistance,time,status
+            result = device.ask(":READ?")
+            
+            # Parse the result - format is typically: "voltage,current,resistance,time,status"
+            parts = result.strip().split(',')
+            if len(parts) >= 2:
+                v = float(parts[0])
+                i = float(parts[1])
+                return (v, i)
+            else:
+                raise ValueError(f"Unexpected :READ? response format: {result}")
+        except Exception as e:
+            # Fallback to PyMeasure properties if SCPI fails
+            v = self.controller.measure_voltage()
+            i = self.controller.measure_current()
+            if v is None or i is None:
+                raise RuntimeError(f"Failed to read measurement: {e}")
+            # Handle case where PyMeasure returns lists instead of single values
+            if isinstance(v, (list, tuple)):
+                v = float(v[0]) if len(v) > 0 else 0.0
+            else:
+                v = float(v)
+            if isinstance(i, (list, tuple)):
+                i = float(i[0]) if len(i) > 0 else 0.0
+            else:
+                i = float(i)
+            return (v, i)
+    
     def _read(self, voltage: float, icc: float = 0.1) -> tuple[float, float, float]:
         """Perform a read measurement.
         
@@ -68,16 +113,12 @@ class Keithley2400_SCPI_Scripts:
             Tuple of (voltage, current, resistance)
         """
         self.controller.set_voltage(voltage, Icc=icc)
-        time.sleep(0.01)  # Settle time for measurement
+        time.sleep(0.01)  # Settle time for measurement (10ms for GPIB)
         
-        v = self.controller.measure_voltage()
-        i = self.controller.measure_current()
-        
-        if v is None or i is None:
-            raise RuntimeError("Failed to read measurement")
+        # Use explicit SCPI measurement
+        v, i = self._measure_v_i()
         
         r = v / i if abs(i) > 1e-12 else 1e12
-        
         return (v, i, r)
     
     def _format_results(self, timestamps: List[float], voltages: List[float],
@@ -102,7 +143,8 @@ class Keithley2400_SCPI_Scripts:
                          read_voltage: float = 0.2,
                          delay_between: float = 0.01,
                          num_cycles: int = 10,
-                         clim: float = 100e-3) -> Dict[str, Any]:
+                         clim: float = 100e-3,
+                         **kwargs) -> Dict[str, Any]:
         """Pattern: Initial Read → (Pulse → Read → Delay) × N
         
         Args:
@@ -160,6 +202,10 @@ class Keithley2400_SCPI_Scripts:
         self.controller.set_voltage(0.0, Icc=clim)
         
         print(f"✓ pulse_read_repeat complete: {len(timestamps)} measurements")
+        print(f"timestamps: {timestamps}")
+        print(f"voltages: {voltages}")
+        print(f"currents: {currents}")
+        print(f"resistances: {resistances}")
         return self._format_results(timestamps, voltages, currents, resistances)
     
     def pulse_then_read(self, pulse_voltage: float = 1.0,
@@ -167,7 +213,8 @@ class Keithley2400_SCPI_Scripts:
                        delay_after_pulse: float = 0.01,
                        read_voltage: float = 0.2,
                        num_cycles: int = 10,
-                       clim: float = 100e-3) -> Dict[str, Any]:
+                       clim: float = 100e-3,
+                       **kwargs) -> Dict[str, Any]:
         """Pattern: (Pulse → Delay → Read) × N
         
         Args:
@@ -275,7 +322,8 @@ class Keithley2400_SCPI_Scripts:
                             pulses_per_width: int = 5,
                             read_voltage: float = 0.2,
                             delay_between: float = 0.01,
-                            clim: float = 100e-3) -> Dict[str, Any]:
+                            clim: float = 100e-3,
+                            **kwargs) -> Dict[str, Any]:
         """Test multiple pulse widths
         
         Args:
@@ -340,7 +388,8 @@ class Keithley2400_SCPI_Scripts:
                               num_pulses_per_width: int = 5,
                               reset_voltage: Optional[float] = None,
                               read_voltage: float = 0.2,
-                              clim: float = 100e-3) -> Dict[str, Any]:
+                              clim: float = 100e-3,
+                              **kwargs) -> Dict[str, Any]:
         """Width sweep: For each width: (Read→Pulse→Read)×N, Reset
         
         Args:
@@ -410,7 +459,9 @@ class Keithley2400_SCPI_Scripts:
                                          num_pulses_per_width: int = 5,
                                          reset_voltage: Optional[float] = None,
                                          read_voltage: float = 0.2,
-                                         clim: float = 100e-3) -> Dict[str, Any]:
+                                         clim: float = 100e-3,
+                                         delay_between_widths: float = 0.01,
+                                         **kwargs) -> Dict[str, Any]:
         """Width sweep with pulse peak measurements
         
         Similar to width_sweep_with_reads but also measures during pulses.
@@ -423,6 +474,8 @@ class Keithley2400_SCPI_Scripts:
             reset_voltage: Reset voltage (V), if None, uses -pulse_voltage
             read_voltage: Read voltage (V)
             clim: Current limit (A)
+            delay_between_widths: Delay between different width tests (seconds)
+            **kwargs: Additional parameters (ignored for compatibility)
         
         Returns:
             Standardized data dictionary with pulse_widths field
@@ -463,10 +516,11 @@ class Keithley2400_SCPI_Scripts:
                 self.controller.set_voltage(pulse_voltage, Icc=clim)
                 time.sleep(0.005)  # Small delay then measure
                 
-                # Measure during pulse
-                v_pulse = self.controller.measure_voltage()
-                i_pulse = self.controller.measure_current()
-                if v_pulse is None or i_pulse is None:
+                # Measure during pulse using explicit SCPI measurement
+                try:
+                    v_pulse, i_pulse = self._measure_v_i()
+                except Exception:
+                    # Fallback if measurement fails
                     v_pulse, i_pulse = pulse_voltage, 0.0
                 r_pulse = v_pulse / i_pulse if abs(i_pulse) > 1e-12 else 1e12
                 t = time.time() - start_time
@@ -497,6 +551,10 @@ class Keithley2400_SCPI_Scripts:
             if reset_voltage != 0:
                 self._pulse(reset_voltage, 0.01, icc=clim)
                 time.sleep(0.01)
+            
+            # Delay between widths (except after last)
+            if width != pulse_widths[-1] and delay_between_widths > 0:
+                time.sleep(delay_between_widths)
         
         self.controller.set_voltage(0.0, Icc=clim)
         return self._format_results(timestamps, voltages, currents, resistances,
@@ -507,7 +565,9 @@ class Keithley2400_SCPI_Scripts:
                                      read_voltage: float = 0.2,
                                      num_steps: int = 10,
                                      pulse_width: float = 0.01,
-                                     clim: float = 100e-3) -> Dict[str, Any]:
+                                     clim: float = 100e-3,
+                                     delay_between_pulses: float = 0.01,
+                                     **kwargs) -> Dict[str, Any]:
         """Pattern: Initial Read → Gradual SET → Gradual RESET
         
         Args:
@@ -517,6 +577,8 @@ class Keithley2400_SCPI_Scripts:
             num_steps: Number of steps in each direction
             pulse_width: Pulse width (seconds)
             clim: Current limit (A)
+            delay_between_pulses: Delay between pulses (seconds)
+            **kwargs: Additional parameters (ignored for compatibility)
         
         Returns:
             Standardized data dictionary with phase field
@@ -547,6 +609,8 @@ class Keithley2400_SCPI_Scripts:
         for step in range(1, num_steps + 1):
             pulse_v = set_voltage * (step / num_steps)
             self._pulse(pulse_v, pulse_width, icc=clim)
+            if delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
             v, i, r = self._read(read_voltage, icc=clim)
             t = time.time() - start_time
             timestamps.append(t)
@@ -559,6 +623,8 @@ class Keithley2400_SCPI_Scripts:
         for step in range(num_steps, 0, -1):
             pulse_v = reset_voltage * (step / num_steps)
             self._pulse(pulse_v, pulse_width, icc=clim)
+            if delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
             v, i, r = self._read(read_voltage, icc=clim)
             t = time.time() - start_time
             timestamps.append(t)
@@ -575,7 +641,8 @@ class Keithley2400_SCPI_Scripts:
                          pulse_width: float = 0.01,
                          read_voltage: float = 0.2,
                          num_pulses: int = 10,
-                         clim: float = 100e-3) -> Dict[str, Any]:
+                         clim: float = 100e-3,
+                         **kwargs) -> Dict[str, Any]:
         """Pattern: Initial Read → Repeated SET pulses with reads
         
         Args:
@@ -676,7 +743,8 @@ class Keithley2400_SCPI_Scripts:
                      read_voltage: float = 0.2,
                      num_cycles: int = 100,
                      pulse_width: float = 0.01,
-                     clim: float = 100e-3) -> Dict[str, Any]:
+                     clim: float = 100e-3,
+                     **kwargs) -> Dict[str, Any]:
         """Pattern: (SET → Read → RESET → Read) × N cycles
         
         Args:
@@ -737,7 +805,8 @@ class Keithley2400_SCPI_Scripts:
                       read_intervals: Optional[List[float]] = None,
                       total_time: Optional[float] = None,
                       pulse_width: float = 0.01,
-                      clim: float = 100e-3) -> Dict[str, Any]:
+                      clim: float = 100e-3,
+                      **kwargs) -> Dict[str, Any]:
         """Pattern: Pulse → Read @ t1 → Read @ t2 → Read @ t3...
         
         Args:
@@ -850,7 +919,8 @@ class Keithley2400_SCPI_Scripts:
     def multi_read_only(self, read_voltage: float = 0.2,
                        num_reads: int = 100,
                        delay_between_reads: float = 0.01,
-                       clim: float = 100e-3) -> Dict[str, Any]:
+                       clim: float = 100e-3,
+                       **kwargs) -> Dict[str, Any]:
         """Pattern: Just reads, no pulses
         
         Args:
@@ -942,7 +1012,8 @@ class Keithley2400_SCPI_Scripts:
                                      num_reads: int = 20,
                                      delay_between_reads: float = 0.01,
                                      pulse_width: float = 0.01,
-                                     clim: float = 100e-3) -> Dict[str, Any]:
+                                     clim: float = 100e-3,
+                                     **kwargs) -> Dict[str, Any]:
         """Pattern: 1×Read → N×Pulse → N×Read (measure reads only)
         
         Args:
@@ -1044,10 +1115,11 @@ class Keithley2400_SCPI_Scripts:
             self.controller.set_voltage(pulse_voltage, Icc=clim)
             time.sleep(0.005)  # Small delay then measure
             
-            # Measure during pulse
-            v_pulse = self.controller.measure_voltage()
-            i_pulse = self.controller.measure_current()
-            if v_pulse is None or i_pulse is None:
+            # Measure during pulse using explicit SCPI measurement
+            try:
+                v_pulse, i_pulse = self._measure_v_i()
+            except Exception:
+                # Fallback if measurement fails
                 v_pulse, i_pulse = pulse_voltage, 0.0
             r_pulse = v_pulse / i_pulse if abs(i_pulse) > 1e-12 else 1e12
             t = time.time() - start_time
@@ -1082,7 +1154,8 @@ class Keithley2400_SCPI_Scripts:
                                num_pulses_per_voltage: int = 5,
                                reset_voltage: Optional[float] = None,
                                pulse_width: float = 0.01,
-                               clim: float = 100e-3) -> Dict[str, Any]:
+                               clim: float = 100e-3,
+                               **kwargs) -> Dict[str, Any]:
         """Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset
         
         Args:
@@ -1201,7 +1274,8 @@ class Keithley2400_SCPI_Scripts:
                                read_voltage: float = 0.2,
                                pulse_width: float = 0.01,
                                threshold_current: float = 1e-6,
-                               clim: float = 100e-3) -> Dict[str, Any]:
+                               clim: float = 100e-3,
+                               **kwargs) -> Dict[str, Any]:
         """Pattern: Try increasing voltages, find minimum that causes switching
         
         Args:
@@ -1317,7 +1391,8 @@ class Keithley2400_SCPI_Scripts:
                                        read_voltage: float = 0.2,
                                        pulse_width: float = 0.01,
                                        num_cycles: int = 5,
-                                       clim: float = 100e-3) -> Dict[str, Any]:
+                                       clim: float = 100e-3,
+                                       **kwargs) -> Dict[str, Any]:
         """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
         
         Args:

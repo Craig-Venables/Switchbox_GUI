@@ -627,6 +627,293 @@ class MeasurementService:
         # Do not force output off here; caller manages lifecycle
         return out
 
+    def run_single_pulse_measurement(
+        self,
+        *,
+        keithley,
+        pulse_voltage: float,
+        pulse_time_s: float,
+        read_voltage: float = 0.1,
+        icc: float = 1e-3,
+        smu_type: str = "Keithley 2450",
+    ) -> Tuple[float, float, float]:
+        """
+        Send a single pulse and return current measurements.
+        
+        Measures current both during the pulse and at read voltage.
+        
+        Args:
+            keithley: SMU controller instance
+            pulse_voltage: Voltage for pulse (V)
+            pulse_time_s: Pulse duration (s)
+            read_voltage: Voltage for read measurement (V)
+            icc: Current compliance (A)
+            smu_type: SMU type identifier
+            
+        Returns:
+            Tuple of (voltage_during_pulse, current_during_pulse, current_at_read_voltage)
+        """
+        def _mv():
+            try:
+                v = keithley.measure_voltage()
+                if isinstance(v, (list, tuple)):
+                    return float(v[-1] if len(v) > 0 else float('nan'))
+                return float(v)
+            except Exception:
+                return float('nan')
+
+        def _mi():
+            try:
+                it = keithley.measure_current()
+                return float(it[1]) if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
+            except Exception:
+                return float('nan')
+
+        # Start at 0V
+        try:
+            keithley.enable_output(True)
+            keithley.set_voltage(0.0, icc)
+            time.sleep(0.01)
+        except Exception:
+            pass
+
+        # Apply pulse voltage
+        try:
+            keithley.set_voltage(float(pulse_voltage), float(icc))
+        except Exception:
+            pass
+        
+        # Hold for pulse duration and measure during pulse
+        t0 = time.perf_counter()
+        while (time.perf_counter() - t0) < float(pulse_time_s):
+            time.sleep(0.0005)
+        
+        voltage_during = _mv()
+        current_during = _mi()
+
+        # Return to read voltage and measure
+        try:
+            keithley.set_voltage(float(read_voltage), float(icc))
+        except Exception:
+            pass
+        time.sleep(0.002)
+        current_at_read = _mi()
+
+        return (voltage_during, current_during, current_at_read)
+
+    def run_forming_measurement(
+        self,
+        *,
+        keithley,
+        start_voltage: float,
+        start_time_s: float,
+        pulses_per_step: int,
+        time_increment_s: float,
+        max_time_s: float,
+        max_voltage: float,
+        current_limit: float,
+        target_current: float,
+        read_voltage: float = 0.1,
+        icc: float = 1e-3,
+        smu_type: str = "Keithley 2450",
+        should_stop: Optional[Callable[[], bool]] = None,
+        on_point: Optional[Callable[[float, float, float], None]] = None,
+    ) -> Tuple[List[float], List[float], List[float], dict]:
+        """
+        Run adaptive forming algorithm for memristors.
+        
+        Algorithm:
+        1. Start with start_voltage and start_time_s
+        2. Send pulses_per_step pulses
+        3. Measure current both during pulse and at read_voltage
+        4. If current < target_current:
+           - Increase time by time_increment_s
+           - Repeat until max_time_s reached
+        5. If still not formed and max_voltage not reached, increase voltage
+        6. Stop if current_limit exceeded or should_stop callback returns True
+        
+        Args:
+            keithley: SMU controller instance
+            start_voltage: Initial pulse voltage (V)
+            start_time_s: Initial pulse time (s)
+            pulses_per_step: Number of pulses per step before checking
+            time_increment_s: Amount to increment time each step (s)
+            max_time_s: Maximum pulse time (s)
+            max_voltage: Maximum pulse voltage (V)
+            current_limit: Maximum allowed current (A) - safety limit
+            target_current: Target current for successful forming (A)
+            read_voltage: Voltage for read measurements (V)
+            icc: Current compliance (A)
+            smu_type: SMU type identifier
+            should_stop: Optional callback to check if measurement should stop
+            on_point: Optional callback for each measurement point (voltage, current, time)
+            
+        Returns:
+            Tuple of (voltages, currents, timestamps, metadata_dict)
+            metadata_dict contains: forming_successful, final_voltage, final_time, 
+            total_pulses, etc.
+        """
+        voltages = []
+        currents = []
+        timestamps = []
+        
+        current_voltage = float(start_voltage)
+        current_time = float(start_time_s)
+        total_pulses = 0
+        forming_successful = False
+        voltage_increment = 0.5  # Default voltage increment (V)
+        
+        # Initialize at 0V
+        try:
+            keithley.enable_output(True)
+            keithley.set_voltage(0.0, icc)
+            time.sleep(0.01)
+        except Exception:
+            pass
+        
+        start_timestamp = time.perf_counter()
+        
+        while True:
+            # Check stop condition
+            if should_stop and should_stop():
+                break
+            
+            # Check voltage limit
+            if current_voltage > max_voltage:
+                break
+            
+            # Send pulses_per_step pulses at current settings
+            max_current_this_step = 0.0
+            for pulse_idx in range(pulses_per_step):
+                if should_stop and should_stop():
+                    break
+                
+                # Apply pulse voltage
+                try:
+                    keithley.set_voltage(current_voltage, icc)
+                except Exception:
+                    pass
+                
+                # Hold for pulse duration
+                t0 = time.perf_counter()
+                while (time.perf_counter() - t0) < current_time:
+                    time.sleep(0.0005)
+                
+                # Measure during pulse
+                try:
+                    v_pulse = keithley.measure_voltage()
+                    i_pulse = keithley.measure_current()
+                    if isinstance(v_pulse, (list, tuple)):
+                        v_pulse = v_pulse[-1] if len(v_pulse) > 0 else current_voltage
+                    if isinstance(i_pulse, (list, tuple)):
+                        i_pulse = i_pulse[1] if len(i_pulse) > 1 else i_pulse[0]
+                    v_pulse = float(v_pulse)
+                    i_pulse = float(i_pulse)
+                except Exception:
+                    v_pulse = current_voltage
+                    i_pulse = 0.0
+                
+                timestamp = time.perf_counter() - start_timestamp
+                voltages.append(v_pulse)
+                currents.append(i_pulse)
+                timestamps.append(timestamp)
+                
+                if on_point:
+                    try:
+                        on_point(v_pulse, i_pulse, timestamp)
+                    except Exception:
+                        pass
+                
+                # Check current limit
+                if abs(i_pulse) > current_limit:
+                    # Current limit exceeded - stop for safety
+                    metadata = {
+                        "forming_successful": False,
+                        "final_voltage": current_voltage,
+                        "final_time": current_time,
+                        "total_pulses": total_pulses + pulse_idx + 1,
+                        "reason": "current_limit_exceeded",
+                        "max_current": max(abs(i_pulse), max_current_this_step)
+                    }
+                    return (voltages, currents, timestamps, metadata)
+                
+                max_current_this_step = max(max_current_this_step, abs(i_pulse))
+                
+                # Return to read voltage and measure
+                try:
+                    keithley.set_voltage(read_voltage, icc)
+                except Exception:
+                    pass
+                time.sleep(0.002)
+                
+                try:
+                    i_read = keithley.measure_current()
+                    if isinstance(i_read, (list, tuple)):
+                        i_read = i_read[1] if len(i_read) > 1 else i_read[0]
+                    i_read = float(i_read)
+                except Exception:
+                    i_read = 0.0
+                
+                timestamp_read = time.perf_counter() - start_timestamp
+                voltages.append(read_voltage)
+                currents.append(i_read)
+                timestamps.append(timestamp_read)
+                
+                if on_point:
+                    try:
+                        on_point(read_voltage, i_read, timestamp_read)
+                    except Exception:
+                        pass
+                
+                # Check if forming successful (use max of pulse and read current)
+                max_current = max(abs(i_pulse), abs(i_read))
+                if max_current >= target_current:
+                    forming_successful = True
+                    metadata = {
+                        "forming_successful": True,
+                        "final_voltage": current_voltage,
+                        "final_time": current_time,
+                        "total_pulses": total_pulses + pulse_idx + 1,
+                        "reason": "target_current_reached",
+                        "final_current": max_current
+                    }
+                    return (voltages, currents, timestamps, metadata)
+                
+                max_current_this_step = max(max_current_this_step, abs(i_read))
+            
+            total_pulses += pulses_per_step
+            
+            # If not formed, increase time
+            current_time += time_increment_s
+            
+            # If time exceeds max, reset time and increase voltage
+            if current_time > max_time_s:
+                current_time = float(start_time_s)  # Reset to start time
+                current_voltage += voltage_increment
+                
+                # Check if voltage exceeds max
+                if current_voltage > max_voltage:
+                    metadata = {
+                        "forming_successful": False,
+                        "final_voltage": current_voltage - voltage_increment,  # Last valid voltage
+                        "final_time": max_time_s,
+                        "total_pulses": total_pulses,
+                        "reason": "max_voltage_reached",
+                        "max_current": max_current_this_step
+                    }
+                    return (voltages, currents, timestamps, metadata)
+        
+        # Loop ended without forming
+        metadata = {
+            "forming_successful": False,
+            "final_voltage": current_voltage,
+            "final_time": current_time,
+            "total_pulses": total_pulses,
+            "reason": "max_limits_reached",
+            "max_current": max_current_this_step if 'max_current_this_step' in locals() else 0.0
+        }
+        return (voltages, currents, timestamps, metadata)
+
     def run_pulsed_iv_sweep(
         self,
         *,

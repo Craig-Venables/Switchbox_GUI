@@ -126,6 +126,7 @@ class MeasurementPlotPanels:
             "endurance_current": tk.BooleanVar(value=False),
             "retention": tk.BooleanVar(value=False),
             "analysis_stats": tk.BooleanVar(value=False),  # Stats panel
+            "pulse_table": tk.BooleanVar(value=False),  # Pulse history table
         }
         
         # Create all plot frames (initially hidden except IV/LogIV)
@@ -155,6 +156,7 @@ class MeasurementPlotPanels:
             "endurance": "Endurance",
             "retention": "Retention",
             "analysis_stats": "Analysis Statistics",
+            "pulse_table": "Pulse Table",
         }
         
         for key, label in labels.items():
@@ -434,6 +436,77 @@ class MeasurementPlotPanels:
         # Store reference to stats frame
         self.plot_frames["analysis_stats"] = frame_stats
         self.stats_text_widget = self.stats_text  # For easy access
+        
+        # Pulse History Table
+        frame_pulse_table = tk.Frame(parent, bg='white')
+        # Control buttons frame
+        pulse_control_frame = tk.Frame(frame_pulse_table, bg='white')
+        pulse_control_frame.pack(fill='x', pady=(0, 5))
+        
+        tk.Label(pulse_control_frame, text="Pulse Table", font=("Segoe UI", 9, "bold"), bg='white').pack(side='left', padx=(0, 10))
+        
+        clear_pulse_btn = tk.Button(
+            pulse_control_frame,
+            text="Clear",
+            font=("Segoe UI", 8),
+            bg='#f44336',
+            fg='white',
+            activebackground='#d32f2f',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=2,
+            padx=8,
+            command=lambda: self.gui._clear_pulse_history() if hasattr(self.gui, '_clear_pulse_history') else None
+        )
+        clear_pulse_btn.pack(side='left', padx=(0, 5))
+        
+        save_pulse_btn = tk.Button(
+            pulse_control_frame,
+            text="Save",
+            font=("Segoe UI", 8),
+            bg='#4CAF50',
+            fg='white',
+            activebackground='#388e3c',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=2,
+            padx=8,
+            command=lambda: self.gui._save_pulse_history() if hasattr(self.gui, '_save_pulse_history') else None
+        )
+        save_pulse_btn.pack(side='left')
+        
+        # Text widget for pulse history (no border, simple)
+        pulse_text_frame = tk.Frame(frame_pulse_table, bg='white')
+        pulse_text_frame.pack(fill='both', expand=True)
+        
+        pulse_scrollbar = tk.Scrollbar(pulse_text_frame, orient='vertical')
+        pulse_scrollbar.pack(side='right', fill='y')
+        
+        # Store reference on GUI for access from main.py
+        if self.gui:
+            self.gui.pulse_history_text = tk.Text(
+                pulse_text_frame,
+                font=("Consolas", 7),
+                bg='white',
+                fg='black',
+                wrap='none',
+                relief='flat',
+                padx=5,
+                pady=5,
+                yscrollcommand=pulse_scrollbar.set,
+                state='disabled'
+            )
+            self.gui.pulse_history_text.pack(side='left', fill='both', expand=True)
+            pulse_scrollbar.config(command=self.gui.pulse_history_text.yview)
+            
+            # Initialize with empty message
+            self.gui.pulse_history_text.config(state='normal')
+            self.gui.pulse_history_text.insert('1.0', "No pulses recorded yet.\n")
+            self.gui.pulse_history_text.config(state='disabled')
+        
+        self.plot_frames["pulse_table"] = frame_pulse_table
     
     def _create_floating_overlay(self, parent: tk.Frame) -> None:
         """Create a floating info overlay with light orange transparency"""

@@ -23,6 +23,9 @@ from gui.sample_gui import SampleGUI
 
 # something to view the "memristive newss" od the samples and quick look 
 
+#the quick view organge aboive the grpoahds needs updating wiuth the current devices voltage and loop number 
+
+
 
 """ Classes for the Gui"""
 
