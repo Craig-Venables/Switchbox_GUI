@@ -3162,7 +3162,118 @@ class MeasurementGUI:
             messagebox.showerror("Error", f"Failed to start plotting: {e}")
 
     def run_full_sample_analysis(self) -> None:
-        """Run comprehensive sample analysis with all plots."""
+        """
+        Run comprehensive sample analysis with all plots and data exports.
+        
+        This is the main entry point for full sample analysis, called by the
+        "Run Full Sample Analysis" button in the Sample Analysis tab. It performs
+        a complete multi-level analysis workflow from raw data to publication-ready
+        visualizations.
+        
+        What This Method Does:
+        ----------------------
+        1. RETROACTIVE ANALYSIS (if needed):
+           - Scans sample folder for raw .txt measurement files
+           - Analyzes each file using quick_analyze() to classify devices
+           - Generates device_tracking and device_research JSON files
+           - Only runs if no existing tracking data is found
+           
+        2. COMPREHENSIVE ANALYSIS (via ComprehensiveAnalyzer):
+           - Discovers all code_names (test types) from measurement files
+           - Filters to valid code_names in test_configurations.json
+           
+        3. DEVICE-LEVEL ANALYSIS:
+           - Generates combined sweep plots for each device
+           - Combines multiple sweeps per device into single visualization
+           - Saved to: {sample_dir}/{section}/{device_num}/images/
+           
+        4. SECTION-LEVEL ANALYSIS:
+           - Analyzes each section (letter folder: A, B, C, etc.)
+           - Generates stacked sweep plots (first/second/third sweeps)
+           - Creates statistical comparisons between sweeps
+           - Saved to: {sample_dir}/{section}/plots_combined/
+           
+        5. SAMPLE-LEVEL ANALYSIS (per code_name):
+           - Runs for each discovered code_name (test type)
+           - Generates 26 main plot types:
+             1. Memristivity Score Heatmap (spatial distribution)
+             2. Conduction Mechanism Distribution (pie + bar charts)
+             3. Memory Window Quality Distribution (box plots)
+             4. Hysteresis Shape Radar (polar plot, memristive only)
+             5. Enhanced Classification Scatter (Ron vs Roff with encoding)
+             6. Forming Progress Tracking (multi-line plot over time)
+             7. Warning Flag Summary (bar chart of warning types)
+             8. Research Diagnostics Scatter Matrix (pairplot)
+             9. Power & Energy Efficiency (scatter + box plots)
+             10. Device Leaderboard (top 20 devices by composite score)
+             11. Spatial Distribution Maps (3 heatmaps: memristivity, quality, ratio)
+             12. Forming Status Distribution (pie + bar charts)
+             13. Device Size Comparison (box plots comparing 100um, 200um, 400um)
+             14-25. Additional analysis plots (correlation, stability, warnings, etc.)
+             26. On/Off Ratio Evolution (tracks ratio changes over multiple measurements)
+           - Saved to: {sample_dir}/sample_analysis/plots/{code_name}/
+           
+        6. OVERALL SAMPLE ANALYSIS:
+           - Runs same 26 plot types but for ALL measurements (no code_name filter)
+           - Provides sample-wide statistics and distributions
+           - Saved to: {sample_dir}/sample_analysis/plots/
+           
+        6a. DC ENDURANCE ANALYSIS (if applicable):
+           - Automatically detects devices with ≥10 sweeps
+           - Extracts current values at specific voltages (0.1V, 0.15V, 0.2V) across cycles
+           - Generates current vs cycle plots for each voltage
+           - Exports CSV data with current values per cycle
+           - Saved to: {sample_dir}/sample_analysis/plots/endurance/{code_name}/
+           
+        7. SPECIALIZED SIZE COMPARISON PLOTS:
+           - 3 I-V overlay plots grouped by device size:
+             * All memristive I-V curves grouped by size
+             * Top device per section grouped by size
+             * Top 5 devices overall grouped by size
+           - Saved to: {sample_dir}/sample_analysis/plots/size_comparison/
+           
+        8. ORIGIN-READY DATA EXPORT:
+           - Exports all analysis data as CSV files formatted for Origin import
+           - Includes device metrics, classifications, and statistics
+           - Saved to: {sample_dir}/sample_analysis/plots/data_origin_formatted/
+           
+        Output Structure:
+        ----------------
+        {sample_dir}/sample_analysis/
+        ├── analysis/
+        │   ├── device_tracking/          # Device history JSON files
+        │   ├── device_research/          # Research-level analysis JSON
+        │   └── device_summaries/         # Device summary files
+        ├── plots/
+        │   ├── {code_name}/              # Code-name specific plots (13 types)
+        │   ├── size_comparison/           # I-V overlay plots by size
+        │   └── data_origin_formatted/    # Origin-ready CSV exports
+        {sample_dir}/{section}/{device_num}/images/  # Device-level combined plots
+        {sample_dir}/{section}/plots_combined/       # Section-level stacked plots
+        
+        Parameters:
+        -----------
+        Uses sample from:
+        - analysis_folder_var (if user selected a folder via Browse button)
+        - OR current sample from sample_name_var (if no folder selected)
+        
+        Returns:
+        --------
+        None (displays completion messagebox and opens output folder)
+        
+        Raises:
+        -------
+        Shows error messagebox if:
+        - Sample directory not found
+        - No measurement files found (for retroactive analysis)
+        - Analysis process fails
+        
+        Progress Updates:
+        -----------------
+        - Updates analysis_status_label with current step
+        - Logs progress to graph activity terminal via log_callback
+        - Shows completion messagebox with device count and code_names processed
+        """
         #todo fix this to fully plot correctly!!
         try:
             import os

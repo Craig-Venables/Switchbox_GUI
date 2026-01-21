@@ -23,10 +23,8 @@ from gui.sample_gui import SampleGUI
 
 # something to view the "memristive newss" od the samples and quick look 
 
+# need to overhall the analysis stuff, we keep running trhe "memristive" classifiaction all the time 
 #the quick view organge aboive the grpoahds needs updating wiuth the current devices voltage and loop number 
-
-
-
 """ Classes for the Gui"""
 
 if __name__ == "__main__":

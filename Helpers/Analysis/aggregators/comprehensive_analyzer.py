@@ -71,8 +71,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Callable
 from collections import defaultdict
 
-# Get project root
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Get project root (go up 3 levels: aggregators -> Analysis -> Helpers -> project root)
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _CONFIG_PATH = _PROJECT_ROOT / "Json_Files" / "test_configurations.json"
 
 
@@ -364,6 +364,22 @@ class ComprehensiveAnalyzer:
                             ax1.plot(voltage, current, label=label, linewidth=1.5)
                             if not is_endurance and not is_retention:
                                 ax2.semilogy(voltage, np.abs(current), label=label, linewidth=1.5)
+                            
+                            # NOTE: SCLC plots are available but commented out per user request
+                            # Uncomment when ready to use
+                            # from Helpers.plotting_core import UnifiedPlotter
+                            # 
+                            # # Check if device is memristive (would need analysis data)
+                            # # device_is_memristive = ...  # Determine from analysis
+                            # 
+                            # # if device_is_memristive:
+                            # #     plotter = UnifiedPlotter(save_dir=images_dir)
+                            # #     plotter.plot_sclc_fit(
+                            # #         voltage=voltage,
+                            # #         current=current,
+                            # #         device_name=f"{section}{device_num}",
+                            # #         save_name=f"{code_name}_sclc_fit.png"
+                            # #     )
                                 
                     except Exception as e:
                         print(f"[COMPREHENSIVE] Error reading {matching_files[0]}: {e}")
@@ -415,6 +431,177 @@ class ComprehensiveAnalyzer:
                 pass
             
             print(f"[COMPREHENSIVE] Saved: {output_file}")
+    
+    def _analyze_dc_endurance_if_present(self, section: str, device_num: str, code_name: str) -> None:
+        """
+        Check if device has DC endurance data (≥10 sweeps) and analyze if found.
+        
+        Args:
+            section: Section letter (e.g., 'A')
+            device_num: Device number (e.g., '1')
+            code_name: Code name for the measurement type
+        """
+        try:
+            device_path = self.sample_dir / section / device_num
+            if not device_path.exists():
+                return
+            
+            # Count sweeps for this code_name
+            sweep_count = 0
+            matching_files = []
+            
+            for file in device_path.glob('*.txt'):
+                if file.name == 'log.txt':
+                    continue
+                try:
+                    parts = file.name.replace('.txt', '').split('-')
+                    if len(parts) > 6 and parts[6] == code_name:
+                        matching_files.append(file)
+                        # Try to extract sweep number from filename
+                        try:
+                            sweep_num = int(parts[0])
+                            sweep_count = max(sweep_count, sweep_num)
+                        except (ValueError, IndexError):
+                            pass
+                except (ValueError, IndexError):
+                    continue
+            
+            # Also check if a single file contains multiple loops (≥10)
+            # This handles the case where all sweeps are in one file
+            single_file_loops = 0
+            if len(matching_files) == 1:
+                # Check if single file has multiple loops
+                try:
+                    data = np.loadtxt(matching_files[0], skiprows=1 if self._has_header(matching_files[0]) else 0)
+                    if data.shape[1] >= 2:
+                        voltage = data[:, 0]
+                        # Simple loop detection: count zero crossings
+                        zero_crossings = 0
+                        for i in range(1, len(voltage)):
+                            if voltage[i-1] * voltage[i] < 0:  # Sign change
+                                zero_crossings += 1
+                        # Bipolar sweep typically has 4 zero crossings per loop
+                        if zero_crossings >= 4:
+                            single_file_loops = max(1, zero_crossings // 4)
+                except Exception:
+                    pass
+            
+            # Check if we have ≥10 sweeps (either multiple files or single file with loops)
+            total_sweeps = max(sweep_count, single_file_loops)
+            
+            if total_sweeps >= 10:
+                self._log(f"Detected DC endurance data for {section}{device_num} ({code_name}): {total_sweeps} sweeps")
+                self._run_dc_endurance_analysis(section, device_num, code_name, matching_files, total_sweeps)
+        
+        except Exception as e:
+            self._log(f"Error checking DC endurance for {section}{device_num}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _run_dc_endurance_analysis(
+        self,
+        section: str,
+        device_num: str,
+        code_name: str,
+        matching_files: List[Path],
+        num_sweeps: int
+    ) -> None:
+        """
+        Run DC endurance analysis on device data.
+        
+        Args:
+            section: Section letter
+            device_num: Device number
+            code_name: Code name
+            matching_files: List of matching measurement files
+            num_sweeps: Number of sweeps detected
+        """
+        try:
+            from .dc_endurance_analyzer import DCEnduranceAnalyzer
+            
+            # Collect all voltage/current data
+            split_v_data = []
+            split_c_data = []
+            
+            # If multiple files, read each one
+            if len(matching_files) > 1:
+                # Sort files by sweep number
+                def get_sweep_num(f: Path) -> int:
+                    try:
+                        return int(f.name.split('-')[0])
+                    except (ValueError, IndexError):
+                        return 0
+                
+                sorted_files = sorted(matching_files, key=get_sweep_num)
+                
+                for file in sorted_files[:num_sweeps]:  # Limit to detected number
+                    try:
+                        data = np.loadtxt(file, skiprows=1 if self._has_header(file) else 0)
+                        if data.shape[1] >= 2:
+                            split_v_data.append(data[:, 0])
+                            split_c_data.append(data[:, 1])
+                    except Exception as e:
+                        self._log(f"Error reading {file.name} for DC endurance: {e}")
+                        continue
+            
+            # If single file with multiple loops, split it
+            elif len(matching_files) == 1 and num_sweeps >= 10:
+                try:
+                    data = np.loadtxt(matching_files[0], skiprows=1 if self._has_header(matching_files[0]) else 0)
+                    if data.shape[1] >= 2:
+                        voltage = data[:, 0]
+                        current = data[:, 1]
+                        
+                        # Use loop detection to split
+                        # Simple approach: detect zero crossings to estimate loops
+                        # More sophisticated splitting can be added later
+                        zero_crossings = sum(1 for i in range(1, len(voltage)) if voltage[i-1] * voltage[i] < 0)
+                        estimated_loops = max(1, zero_crossings // 4) if zero_crossings >= 4 else 1
+                        
+                        if estimated_loops >= 10:
+                            # Split evenly for now (can be improved with proper loop detection)
+                            points_per_loop = len(voltage) // estimated_loops
+                            for i in range(estimated_loops):
+                                start_idx = i * points_per_loop
+                                end_idx = (i + 1) * points_per_loop if i < estimated_loops - 1 else len(voltage)
+                                split_v_data.append(voltage[start_idx:end_idx])
+                                split_c_data.append(current[start_idx:end_idx])
+                        else:
+                            # Fallback: split evenly based on num_sweeps
+                            points_per_sweep = len(voltage) // num_sweeps
+                            for i in range(num_sweeps):
+                                start_idx = i * points_per_sweep
+                                end_idx = (i + 1) * points_per_sweep if i < num_sweeps - 1 else len(voltage)
+                                split_v_data.append(voltage[start_idx:end_idx])
+                                split_c_data.append(current[start_idx:end_idx])
+                except Exception as e:
+                    self._log(f"Error splitting loops for DC endurance: {e}")
+                    return
+            
+            # Run DC endurance analysis if we have data
+            if len(split_v_data) >= 10 and len(split_v_data) == len(split_c_data):
+                # Use device path for file naming (no code_name in filename to avoid overwrites)
+                file_name = f"{section}{device_num}_endurance"
+                
+                # Get device path
+                device_path = self.sample_dir / section / device_num
+                
+                analyzer = DCEnduranceAnalyzer(
+                    split_voltage_data=split_v_data,
+                    split_current_data=split_c_data,
+                    file_name=file_name,
+                    device_path=str(device_path)
+                )
+                
+                analyzer.analyze_and_plot()
+                self._log(f"✓ DC endurance analysis complete for {section}{device_num} (saved to {device_path}/Graphs/)")
+            else:
+                self._log(f"⚠ Insufficient data for DC endurance: {len(split_v_data)} sweeps found")
+        
+        except Exception as e:
+            self._log(f"Error running DC endurance analysis for {section}{device_num}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _has_header(self, file_path: Path) -> bool:
         """Check if file has header."""
@@ -496,6 +683,10 @@ class ComprehensiveAnalyzer:
             
             if device_code_name:
                 self.plot_device_combined_sweeps(section, device_num, device_code_name)
+                
+                # Check for DC endurance data (≥10 sweeps) and analyze if found
+                self._analyze_dc_endurance_if_present(section, device_num, device_code_name)
+                
                 plotted_count += 1
                 remaining = total_devices - plotted_count
                 self._log(f"Plotted device {section}{device_num} ({device_code_name}) - {plotted_count}/{total_devices} done, {remaining} remaining")
