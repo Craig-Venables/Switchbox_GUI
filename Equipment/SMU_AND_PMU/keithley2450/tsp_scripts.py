@@ -1332,12 +1332,37 @@ class Keithley2450_TSP_Scripts:
         
         print(f"  {num_pulses} pulse(s): {pulse_voltage}V, {pulse_width*1e6:.1f}µs, then {num_reads} reads...")
         
+        # Calculate expected measurement duration based on all timing parameters
+        # Initial read: ~0.001s (measurement time)
+        initial_read_time = 0.001
+        
+        # Pulse phase: num_pulses * (pulse_width + delay_between_pulses)
+        pulse_phase_time = num_pulses * (pulse_width + delay_between_pulses)
+        
+        # Read phase: num_reads * (read_time + delay_between_reads)
+        # Each read takes ~0.001s for measurement, plus delay_between_reads
+        read_time_per_read = 0.001  # Measurement time per read
+        read_phase_time = num_reads * (read_time_per_read + delay_between_reads)
+        
+        # Total expected duration with safety margin
+        expected_duration = initial_read_time + pulse_phase_time + read_phase_time + 0.5  # +0.5s safety margin
+        print(f"  Expected duration: {expected_duration:.2f}s (pulses: {pulse_phase_time:.2f}s, reads: {read_phase_time:.2f}s)")
+        
+        # Set timeout for script execution (1.5x expected duration, minimum 30s)
+        script_timeout = max(30000, int(expected_duration * 1000 * 1.5))
+        
         # Clear any leftover data in the instrument's output buffer before starting
         self._flush_output_buffer()
         
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = script_timeout
+        
         self.tsp.device.write('pulseMultiRead()')
         self.tsp.device.write('waitcomplete()')
-        time.sleep(0.1)
+        
+        # Wait for full execution - dynamic sleep based on expected duration
+        print(f"  Waiting {expected_duration:.1f}s for instrument to complete...")
+        time.sleep(expected_duration + 0.5)  # Wait full duration + safety margin
         
         timestamps = []
         voltages = []
@@ -1346,8 +1371,23 @@ class Keithley2450_TSP_Scripts:
         
         print("  Collecting buffer data...")
         try:
-            original_timeout = self.tsp.device.timeout
-            self.tsp.device.timeout = 10000
+            # Calculate buffer read timeout based on data size
+            # Estimate: each measurement with timestamps takes ~100 bytes
+            buffer_size_estimate = (num_reads + 1) * 100  # +1 for initial read
+            # Conservative estimate: 1ms per 10 bytes for USB/GPIB transfer
+            buffer_read_time_ms = max(30000, int(buffer_size_estimate / 10))  # At least 30s
+            # Scale up for very large buffers
+            if num_reads > 100:
+                buffer_read_time_ms = int(buffer_read_time_ms * 1.5)
+            if num_reads > 500:
+                buffer_read_time_ms = int(buffer_read_time_ms * 2.0)
+            if num_reads > 1000:
+                buffer_read_time_ms = int(buffer_read_time_ms * 3.0)
+            
+            # Use the larger of script timeout or buffer read timeout
+            read_timeout = max(script_timeout, buffer_read_time_ms)
+            self.tsp.device.timeout = read_timeout
+            print(f"  Using timeout: {read_timeout/1000:.1f}s for reading {num_reads + 1} measurements")
             
             response = self.tsp.device.read().strip()
             self.tsp.device.timeout = original_timeout
@@ -1386,6 +1426,11 @@ class Keithley2450_TSP_Scripts:
                     print(f"  Read {read_num+1}/{num_reads}: R = {r:.2e} Ω")
         except Exception as e:
             print(f"  ❌ Error reading buffer: {e}")
+            # Restore timeout even on error
+            try:
+                self.tsp.device.timeout = original_timeout
+            except:
+                pass
         
         elapsed = time.time() - start_time
         print(f"✓ pulse_multi_read complete in {elapsed:.2f}s")

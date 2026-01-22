@@ -9395,17 +9395,31 @@ class MeasurementGUI:
             if self.keithley:
                  adapter = SMUAdapter(self.keithley)
             
-            # 2. Prepare Context
+            # 2. Get sample name - prioritize sample_name_var, then sample_gui.current_device_name
+            sample_name = None
+            if hasattr(self, 'sample_name_var') and self.sample_name_var.get().strip():
+                sample_name = self.sample_name_var.get().strip()
+            elif hasattr(self, 'sample_gui') and hasattr(self.sample_gui, 'current_device_name') and self.sample_gui.current_device_name:
+                sample_name = self.sample_gui.current_device_name
+            
+            if not sample_name:
+                sample_name = "Unknown"
+            
+            # 3. Get device label - use device_section_and_number (e.g., "B9") not current_device (e.g., "device_19")
+            device_label = getattr(self, 'device_section_and_number', None) or getattr(self, 'current_device', "Stand-alone")
+            
+            # 4. Prepare Context
             context = {
-                'device_label': self.current_device,
-                'sample_name': self.sample_gui.sample_name if hasattr(self.sample_gui, 'sample_name') else "Unknown",
+                'device_label': device_label,
+                'sample_name': sample_name,
                 'save_directory': self.default_save_root,
                 'smu_ports': [self.keithley_address], # Currently connected
                 'known_systems': self.systems if hasattr(self, 'systems') and isinstance(self.systems, list) else (list(self.systems.keys()) if hasattr(self, 'systems') else []),
-                'system': self.controller_type 
+                'system': self.controller_type,
+                'provider': self  # Pass self as provider so oscilloscope GUI can access measurement GUI attributes
             }
             
-            # 3. Launch
+            # 5. Launch
             OscilloscopePulseGUI(self.master, smu_instance=adapter, context=context)
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open Oscilloscope Pulse GUI:\n{e}")
