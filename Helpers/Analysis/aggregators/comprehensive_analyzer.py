@@ -580,8 +580,11 @@ class ComprehensiveAnalyzer:
             
             # Run DC endurance analysis if we have data
             if len(split_v_data) >= 10 and len(split_v_data) == len(split_c_data):
-                # Use device path for file naming (no code_name in filename to avoid overwrites)
-                file_name = f"{section}{device_num}_endurance"
+                # Extract original filename from the first measurement file (without .txt extension)
+                if matching_files:
+                    original_filename = matching_files[0].stem  # Get filename without extension
+                else:
+                    original_filename = f"{section}{device_num}"
                 
                 # Get device path
                 device_path = self.sample_dir / section / device_num
@@ -589,12 +592,12 @@ class ComprehensiveAnalyzer:
                 analyzer = DCEnduranceAnalyzer(
                     split_voltage_data=split_v_data,
                     split_current_data=split_c_data,
-                    file_name=file_name,
+                    file_name=original_filename,
                     device_path=str(device_path)
                 )
                 
                 analyzer.analyze_and_plot()
-                self._log(f"✓ DC endurance analysis complete for {section}{device_num} (saved to {device_path}/Graphs/)")
+                self._log(f"✓ DC endurance analysis complete for {section}{device_num} (saved to {device_path}/Graphs/dc endurance/)")
             else:
                 self._log(f"⚠ Insufficient data for DC endurance: {len(split_v_data)} sweeps found")
         

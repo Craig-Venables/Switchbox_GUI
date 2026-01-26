@@ -134,8 +134,12 @@ class PlotsTab(QWidget):
             self.ax_cycles.set_title('Measurement Data', fontweight='bold')
             self.ax_cycles.grid(True, alpha=0.3)
         
-        # Plot 4: Time series or placeholder
-        self._plot_timeseries_placeholder()
+        # Plot 4: Time series (if time data available) or voltage/current vs index
+        if measurement.time is not None and len(measurement.time) > 0:
+            self._plot_timeseries(np.array(measurement.time), voltage, current)
+        else:
+            # Fallback: plot voltage and current vs index
+            self._plot_timeseries_fallback(voltage, current)
         
         self.figure.tight_layout(pad=2.0)
         self.canvas.draw()
@@ -175,14 +179,76 @@ class PlotsTab(QWidget):
         self.ax_cycles.axhline(y=0, color='k', linestyle='-', linewidth=0.5, alpha=0.5)
         self.ax_cycles.axvline(x=0, color='k', linestyle='-', linewidth=0.5, alpha=0.5)
     
-    def _plot_timeseries_placeholder(self):
-        """Plot placeholder for time series (not yet implemented)."""
-        self.ax_timeseries.text(0.5, 0.5, 'Time Series\n(Future Feature)', 
-                               ha='center', va='center', fontsize=11, color='gray',
-                               transform=self.ax_timeseries.transAxes)
-        self.ax_timeseries.set_title('Time Series Analysis', fontweight='bold')
-        self.ax_timeseries.set_xticks([])
-        self.ax_timeseries.set_yticks([])
+    def _plot_timeseries(self, time: np.ndarray, voltage: np.ndarray, current: np.ndarray):
+        """
+        Plot time series data showing voltage and current over time.
+        
+        Args:
+            time: Time array
+            voltage: Voltage array
+            current: Current array
+        """
+        # Use twin axes for voltage and current
+        ax1 = self.ax_timeseries
+        ax2 = ax1.twinx()
+        
+        # Plot voltage on left axis
+        color1 = '#3498db'
+        ax1.plot(time, voltage, color=color1, linewidth=1.5, label='Voltage', alpha=0.8)
+        ax1.set_xlabel('Time (s)', fontweight='bold')
+        ax1.set_ylabel('Voltage (V)', fontweight='bold', color=color1)
+        ax1.tick_params(axis='y', labelcolor=color1)
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot current on right axis
+        color2 = '#e74c3c'
+        ax2.plot(time, current, color=color2, linewidth=1.5, label='Current', alpha=0.8)
+        ax2.set_ylabel('Current (A)', fontweight='bold', color=color2)
+        ax2.tick_params(axis='y', labelcolor=color2)
+        
+        # Set title
+        ax1.set_title('Time Series: Voltage & Current', fontweight='bold')
+        
+        # Add legends
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='best', fontsize=8)
+    
+    def _plot_timeseries_fallback(self, voltage: np.ndarray, current: np.ndarray):
+        """
+        Plot voltage and current vs index when time data is not available.
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+        """
+        # Use twin axes for voltage and current
+        ax1 = self.ax_timeseries
+        ax2 = ax1.twinx()
+        
+        indices = np.arange(len(voltage))
+        
+        # Plot voltage on left axis
+        color1 = '#3498db'
+        ax1.plot(indices, voltage, color=color1, linewidth=1.5, label='Voltage', alpha=0.8)
+        ax1.set_xlabel('Data Point Index', fontweight='bold')
+        ax1.set_ylabel('Voltage (V)', fontweight='bold', color=color1)
+        ax1.tick_params(axis='y', labelcolor=color1)
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot current on right axis
+        color2 = '#e74c3c'
+        ax2.plot(indices, current, color=color2, linewidth=1.5, label='Current', alpha=0.8)
+        ax2.set_ylabel('Current (A)', fontweight='bold', color=color2)
+        ax2.tick_params(axis='y', labelcolor=color2)
+        
+        # Set title
+        ax1.set_title('Voltage & Current vs Index', fontweight='bold')
+        
+        # Add legends
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='best', fontsize=8)
     
     def _show_no_data(self):
         """Show message when device has no measurement data."""

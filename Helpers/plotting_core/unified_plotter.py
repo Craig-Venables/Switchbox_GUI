@@ -112,6 +112,9 @@ class UnifiedPlotter:
         device_name: str = "device",
         title_prefix: str = "",
         analysis_data: Optional[dict] = None,
+        sample_name: str = "",
+        section: str = "",
+        device_num: str = "",
     ) -> dict:
         """
         Generate basic IV dashboard only (fast, always recommended).
@@ -123,6 +126,9 @@ class UnifiedPlotter:
             device_name: Name for file naming and labels
             title_prefix: Optional prefix for plot titles
             analysis_data: Optional analysis results dict to add resistance annotations
+            sample_name: Sample name for subplot title
+            section: Section letter for subplot title
+            device_num: Device number for subplot title
             
         Returns:
             Dictionary with figure objects
@@ -138,6 +144,9 @@ class UnifiedPlotter:
             device_label=device_name,
             arrows_points=self.iv_arrows_points,
             save_name=f"{device_name}_iv_dashboard.png" if self.save_dir else None,
+            sample_name=sample_name,
+            section=section,
+            device_num=device_num,
         )
         
         # Add resistance annotations if analysis data is available
@@ -260,6 +269,9 @@ class UnifiedPlotter:
         title: Optional[str] = None,
         save_name: Optional[str] = None,
         analysis_data: Optional[dict] = None,
+        sample_name: str = "",
+        section: str = "",
+        device_num: str = "",
     ):
         """
         Generate IV dashboard (2x2 grid).
@@ -272,6 +284,9 @@ class UnifiedPlotter:
             title: Optional plot title
             save_name: Optional filename for saving
             analysis_data: Optional analysis results dict to add resistance annotations
+            sample_name: Sample name for subplot title
+            section: Section letter for subplot title
+            device_num: Device number for subplot title
         """
         if title is None:
             title = f"{device_name} - IV Dashboard"
@@ -286,6 +301,9 @@ class UnifiedPlotter:
             device_label=device_name,
             arrows_points=self.iv_arrows_points,
             save_name=save_name,
+            sample_name=sample_name,
+            section=section,
+            device_num=device_num,
         )
         
         # Add resistance annotations if analysis data is available

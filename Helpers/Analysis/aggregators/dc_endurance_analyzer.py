@@ -41,10 +41,10 @@ Usage:
 
 Output:
 -------
-Saved to: {device_path}/Graphs/
-- Data/{file_name}_current_values_{voltage}V.csv
-- {file_name}_plot_{voltage}V.png (individual plots)
-- {file_name}_final_plot.png (summary plot with all voltages)
+Saved to: {device_path}/Graphs/dc endurance/
+- Data/{file_name}_endurance_{voltage}V.csv
+- {file_name}_endurance_{voltage}V.png (individual plots)
+- {file_name}_endurance_summary.png (summary plot with all voltages)
 
 Called By:
 ----------
@@ -98,9 +98,9 @@ class DCEnduranceAnalyzer:
         self.voltages = voltages if voltages is not None else [0.1, 0.15, 0.2]
         self.num_sweeps = len(split_voltage_data)
         
-        # Set up save directories - save to device's Graphs/ folder
+        # Set up save directories - save to device's Graphs/dc endurance/ folder
         device_path_obj = Path(device_path)
-        self.endurance_dir = device_path_obj / "Graphs"
+        self.endurance_dir = device_path_obj / "Graphs" / "dc endurance"
         self.data_dir = self.endurance_dir / "Data"
         self.endurance_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -228,7 +228,7 @@ class DCEnduranceAnalyzer:
         
         # Save plot
         fig.tight_layout()
-        fig_file = self.endurance_dir / f'{self.file_name}_plot_{voltage}V.png'
+        fig_file = self.endurance_dir / f'{self.file_name}_endurance_{voltage}V.png'
         plt.savefig(fig_file, dpi=200, bbox_inches='tight')
         plt.close(fig)
     
@@ -292,7 +292,7 @@ class DCEnduranceAnalyzer:
         fig.suptitle(f'Current vs Cycle for Different Voltages ({short_name})', fontsize=16)
         
         fig.tight_layout()
-        final_fig_file = self.endurance_dir / f'{self.file_name}_final_plot.png'
+        final_fig_file = self.endurance_dir / f'{self.file_name}_endurance_summary.png'
         plt.savefig(final_fig_file, dpi=200, bbox_inches='tight')
         plt.close(fig)
     
@@ -302,7 +302,7 @@ class DCEnduranceAnalyzer:
         """
         for v in self.voltages:
             df = self.extracted_data[v]
-            csv_file = self.data_dir / f'{self.file_name}_current_values_{v}V.csv'
+            csv_file = self.data_dir / f'{self.file_name}_endurance_{v}V.csv'
             df.to_csv(csv_file, index_label='Cycle')
     
     def analyze_and_plot(self) -> Dict[float, pd.DataFrame]:

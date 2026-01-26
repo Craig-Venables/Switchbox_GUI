@@ -1881,6 +1881,20 @@ class MeasurementGUI:
                 else:
                     # Default: Plot IV dashboard (for IV, PulsedIV, FastPulses, Hold, etc.)
                     plotter_graph = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                    
+                    # Extract section letter and device number from device_name (e.g., "A1" -> "A", "1")
+                    section_letter = ""
+                    dev_num = ""
+                    if device_name:
+                        # First character(s) that are letters = section, rest = device number
+                        for idx, char in enumerate(device_name):
+                            if char.isdigit():
+                                section_letter = device_name[:idx]
+                                dev_num = device_name[idx:]
+                                break
+                        if not section_letter:
+                            section_letter = device_name  # All letters, no number
+                    
                     # Use plot_iv_dashboard directly to specify exact filename
                     plotter_graph.plot_iv_dashboard(
                         voltage=voltage,
@@ -1888,7 +1902,10 @@ class MeasurementGUI:
                         time=timestamps,
                         device_name=plot_filename,  # Use filename instead of device_name_sweep
                         title=f"{title_prefix} {plot_filename} - IV Dashboard",
-                        save_name=f"{plot_filename}_iv_dashboard.png"
+                        save_name=f"{plot_filename}_iv_dashboard.png",
+                        sample_name=sample_name,
+                        section=section_letter,
+                        device_num=dev_num,
                     )
                     
                     # Plot advanced analysis if memristive - save with filename in shared folders
@@ -3136,12 +3153,18 @@ class MeasurementGUI:
                                 plotter = UnifiedPlotter(save_dir=device_dir, auto_close=True)
                                 # Dashboard - use plot_iv_dashboard instead of plot_dashboard
                                 filename_base = os.path.splitext(txt_file)[0]
+                                # Build title with sample info
+                                plot_title = f"{sample_name or ''} {section}{device_num} {filename_base} - IV Dashboard".strip()
                                 plotter.plot_iv_dashboard(
                                     voltage=voltage,
                                     current=current,
                                     time=timestamps,
                                     device_name=filename_base,
-                                    save_name=f"{filename_base}_iv_dashboard.png"
+                                    title=plot_title,
+                                    save_name=f"{filename_base}_iv_dashboard.png",
+                                    sample_name=sample_name or "",
+                                    section=section or "",
+                                    device_num=device_num or "",
                                 )
                                 total_success += 1
 
