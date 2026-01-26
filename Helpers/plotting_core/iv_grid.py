@@ -56,6 +56,9 @@ class IVGridPlotter:
         device_label: str = "",
         arrows_points: int = 12,
         save_name: Optional[str] = None,
+        sample_name: str = "",
+        section: str = "",
+        device_num: str = "",
     ):
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
@@ -73,7 +76,10 @@ class IVGridPlotter:
 
         # Bottom-left: averaged IV with arrows
         ax_avg = axes[1, 0]
-        self._plot_avg_with_arrows(ax_avg, v, i, arrows_points, device_label)
+        # Build sweep title from sample info if available
+        sweep_title_parts = [p for p in [sample_name, section, device_num] if p]
+        sweep_title = " - ".join(sweep_title_parts) if sweep_title_parts else device_label
+        self._plot_avg_with_arrows(ax_avg, v, i, arrows_points, device_label, sweep_title)
 
         # Bottom-right: current vs time/index
         ax_time = axes[1, 1]
@@ -126,12 +132,15 @@ class IVGridPlotter:
         ax.grid(True, alpha=0.3)
 
     @staticmethod
-    def _plot_avg_with_arrows(ax, v: np.ndarray, i: np.ndarray, num_points: int, label: str):
+    def _plot_avg_with_arrows(ax, v: np.ndarray, i: np.ndarray, num_points: int, label: str, sweep_title: str = ""):
         """
-        Plot averaged IV with direction arrows for the FULL sweep.
+        Plot a SINGLE complete sweep with direction arrows.
         
-        Processes entire voltage/current array, not just first half.
-        Averages all data points and adds arrows showing sweep direction throughout.
+        Detects one complete sweep cycle from the data and plots it with arrows
+        showing the sweep direction throughout the full cycle.
+        
+        A complete bipolar sweep goes: 0 → +V → 0 → -V → 0
+        Each loop has 2 "returns to zero" - we detect these to find loop boundaries.
         """
         if len(v) < 2:
             # Not enough data
@@ -140,21 +149,92 @@ class IVGridPlotter:
             ax.grid(True, alpha=0.3)
             return
         
-        # Process ENTIRE sweep (removed first-sweep detection)
-        # Average all data points
+        # Find voltage range to set zero tolerance
+        v_range = np.max(np.abs(v))
+        zero_tolerance = v_range * 0.05 if v_range > 0 else 0.01  # 5% of range or 10mV
+        
+        # Find all "zero regions" - where voltage returns to near 0
+        # Group consecutive near-zero points into single zero regions
+        zero_regions = []  # List of (start_idx, end_idx) for each zero region
+        in_zero_region = False
+        region_start = 0
+        
+        for idx in range(len(v)):
+            is_near_zero = np.abs(v[idx]) < zero_tolerance
+            
+            if is_near_zero and not in_zero_region:
+                # Starting a new zero region
+                in_zero_region = True
+                region_start = idx
+            elif not is_near_zero and in_zero_region:
+                # Ending a zero region
+                in_zero_region = False
+                zero_regions.append((region_start, idx - 1))
+        
+        # Don't forget the last region if we ended in one
+        if in_zero_region:
+            zero_regions.append((region_start, len(v) - 1))
+        
+        # Calculate number of complete loops
+        # Each loop: 0 → +V → 0 → -V → 0 has 2 zero returns (plus start)
+        # So for N loops, we have ~2N+1 zero regions (first zero, then 2 per loop)
+        # Actually: start_zero, mid_zero, end_zero for 1 loop = 3 regions
+        # For 2 loops: start, mid1, end1/start2, mid2, end2 = 5 regions (but end1=start2)
+        # So: num_loops = (num_zero_regions - 1) / 2 if num_zero_regions >= 3
+        
+        if len(zero_regions) >= 3:
+            # We have at least one complete loop
+            # First loop ends at the 3rd zero region (index 2)
+            # Use the END of the 3rd zero region as the sweep end
+            sweep_end = zero_regions[2][1] + 1  # +1 to include the last point
+            sweep_v = v[:sweep_end]
+            sweep_i = i[:sweep_end]
+        elif len(zero_regions) >= 2:
+            # Partial sweep - use up to second zero region
+            sweep_end = zero_regions[1][1] + 1
+            sweep_v = v[:sweep_end]
+            sweep_i = i[:sweep_end]
+        else:
+            # No clear zero structure - fall back to direction change detection
+            direction_changes = []
+            for idx in range(2, len(v)):
+                prev_dir = v[idx - 1] - v[idx - 2]
+                curr_dir = v[idx] - v[idx - 1]
+                if prev_dir * curr_dir < 0 and abs(prev_dir) > 1e-10 and abs(curr_dir) > 1e-10:
+                    direction_changes.append(idx)
+            
+            if len(direction_changes) >= 4:
+                # 4 direction changes = 1 complete bipolar sweep
+                sweep_end = direction_changes[3]
+                sweep_v = v[:sweep_end]
+                sweep_i = i[:sweep_end]
+            elif len(direction_changes) >= 2:
+                sweep_end = direction_changes[1]
+                sweep_v = v[:sweep_end]
+                sweep_i = i[:sweep_end]
+            else:
+                # No structure detected - use all data
+                sweep_v = v
+                sweep_i = i
+        
+        # Now plot this single sweep with arrows
         if num_points < 2:
-            num_points = 2
-        step = max(len(v) // num_points, 1)
-        avg_v = [np.mean(v[j : j + step]) for j in range(0, len(v), step)]
-        avg_i = [np.mean(i[j : j + step]) for j in range(0, len(i), step)]
+            num_points = 12
+        
+        # Sample points evenly from the sweep for arrows
+        n_points = min(num_points, len(sweep_v))
+        indices = np.linspace(0, len(sweep_v) - 1, n_points, dtype=int)
+        
+        sampled_v = sweep_v[indices]
+        sampled_i = sweep_i[indices]
 
-        ax.scatter(avg_v, avg_i, c="b", marker="o", s=10, label=label or "Averaged (full sweep)")
-        for k in range(1, len(avg_v)):
+        ax.scatter(sampled_v, sampled_i, c="b", marker="o", s=15, label=label or "Single sweep")
+        for k in range(1, len(sampled_v)):
             ax.annotate(
                 "",
-                xy=(avg_v[k], avg_i[k]),
-                xytext=(avg_v[k - 1], avg_i[k - 1]),
-                arrowprops=dict(arrowstyle="->", color="red", lw=1),
+                xy=(sampled_v[k], sampled_i[k]),
+                xytext=(sampled_v[k - 1], sampled_i[k - 1]),
+                arrowprops=dict(arrowstyle="->", color="red", lw=1.2),
             )
         ax.set_xlabel("Voltage (V)")
         ax.set_ylabel("Current (A)")

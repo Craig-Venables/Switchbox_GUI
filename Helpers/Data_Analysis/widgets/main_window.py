@@ -9,7 +9,7 @@ from PyQt5.QtWidgets import (
     QTabWidget, QAction, QMessageBox, QStatusBar, QApplication
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QKeySequence
 from pathlib import Path
 from typing import Optional, Dict
 import logging
@@ -146,7 +146,10 @@ class MainWindow(QMainWindow):
         # Create status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
+        self.status_bar.showMessage("Ready - Use arrow keys to navigate, Tab to switch tabs")
+        
+        # Enable keyboard shortcuts
+        self._setup_keyboard_shortcuts()
     
     def _create_menu_bar(self):
         """Create application menu bar."""
@@ -175,12 +178,61 @@ class MainWindow(QMainWindow):
         refresh_action.triggered.connect(self._refresh_current_sample)
         view_menu.addAction(refresh_action)
         
+        view_menu.addSeparator()
+        
+        # Tab navigation shortcuts
+        overview_action = QAction("&Overview Tab", self)
+        overview_action.setShortcut("Ctrl+1")
+        overview_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(0))
+        view_menu.addAction(overview_action)
+        
+        plots_action = QAction("&Plots Tab", self)
+        plots_action.setShortcut("Ctrl+2")
+        plots_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(1))
+        view_menu.addAction(plots_action)
+        
+        metrics_action = QAction("&Metrics Tab", self)
+        metrics_action.setShortcut("Ctrl+3")
+        metrics_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(2))
+        view_menu.addAction(metrics_action)
+        
+        classification_action = QAction("&Classification Tab", self)
+        classification_action.setShortcut("Ctrl+4")
+        classification_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
+        view_menu.addAction(classification_action)
+        
         # Help menu
         help_menu = menubar.addMenu("&Help")
+        
+        shortcuts_action = QAction("&Keyboard Shortcuts", self)
+        shortcuts_action.triggered.connect(self._show_shortcuts_help)
+        help_menu.addAction(shortcuts_action)
+        
+        help_menu.addSeparator()
         
         about_action = QAction("&About", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
+    
+    def _setup_keyboard_shortcuts(self):
+        """Set up keyboard shortcuts for quick navigation."""
+        # Override keyPressEvent to handle navigation
+        # Note: Device list will handle its own arrow key navigation
+        pass
+    
+    def keyPressEvent(self, event):
+        """Handle key press events for global shortcuts."""
+        # Tab navigation
+        if event.key() == Qt.Key_Tab and event.modifiers() == Qt.ControlModifier:
+            # Cycle through tabs
+            current = self.tab_widget.currentIndex()
+            next_tab = (current + 1) % self.tab_widget.count()
+            self.tab_widget.setCurrentIndex(next_tab)
+            event.accept()
+            return
+        
+        # Let device list handle arrow keys when it has focus
+        super().keyPressEvent(event)
     
     def _connect_signals(self):
         """Connect all widget signals to handlers."""
@@ -338,6 +390,35 @@ class MainWindow(QMainWindow):
             "<li>Classification breakdown</li>"
             "</ul>"
             "<p>© 2026 Switchbox GUI Team</p>"
+        )
+    
+    def _show_shortcuts_help(self):
+        """Show keyboard shortcuts help dialog."""
+        QMessageBox.information(
+            self,
+            "Keyboard Shortcuts",
+            "<h2>Keyboard Shortcuts</h2>"
+            "<p><b>Navigation:</b></p>"
+            "<ul>"
+            "<li><b>↑/↓</b> - Navigate through device list</li>"
+            "<li><b>Page Up/Down</b> - Jump up/down in device list</li>"
+            "<li><b>Home/End</b> - Go to first/last device</li>"
+            "<li><b>Enter</b> - Select device (when list has focus)</li>"
+            "</ul>"
+            "<p><b>Tabs:</b></p>"
+            "<ul>"
+            "<li><b>Ctrl+1</b> - Overview tab</li>"
+            "<li><b>Ctrl+2</b> - Plots tab</li>"
+            "<li><b>Ctrl+3</b> - Metrics tab</li>"
+            "<li><b>Ctrl+4</b> - Classification tab</li>"
+            "<li><b>Ctrl+Tab</b> - Cycle through tabs</li>"
+            "</ul>"
+            "<p><b>File Operations:</b></p>"
+            "<ul>"
+            "<li><b>Ctrl+O</b> - Open sample</li>"
+            "<li><b>F5</b> - Refresh current sample</li>"
+            "<li><b>Ctrl+Q</b> - Exit application</li>"
+            "</ul>"
         )
     
     def closeEvent(self, event):
