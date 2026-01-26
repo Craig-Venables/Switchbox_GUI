@@ -6,7 +6,7 @@ with minimal configuration.
 """
 
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple, List
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,6 +26,118 @@ class UnifiedPlotter:
         plotter = UnifiedPlotter(save_dir="output/plots")
         plotter.plot_all(voltage, current, device_name="Device_1")
     """
+    
+    @staticmethod
+    def _detect_sweeps_by_zero_crossings(
+        voltage: np.ndarray,
+        current: Optional[np.ndarray] = None,
+        zero_tolerance: Optional[float] = None,
+    ) -> List[Tuple[int, int]]:
+        """
+        Detect sweeps by finding zero crossings in voltage data.
+        
+        Pattern: 0 → +V → 0 → -V → 0 (where the last 0 is the start of the next sweep)
+        Each complete sweep has 3 zero regions: start, middle, end.
+        
+        Args:
+            voltage: Voltage array
+            current: Optional current array (for consistency, not used in detection)
+            zero_tolerance: Tolerance for detecting zero (if None, uses 5% of voltage range)
+            
+        Returns:
+            List of (start_idx, end_idx) tuples for each detected sweep.
+            Empty list if no sweeps detected.
+        """
+        if len(voltage) < 2:
+            return []
+        
+        v = np.asarray(voltage, dtype=float)
+        
+        # Set zero tolerance
+        if zero_tolerance is None:
+            v_range = np.max(np.abs(v))
+            zero_tolerance = v_range * 0.05 if v_range > 0 else 0.01  # 5% of range or 10mV
+        
+        # Find all "zero regions" - where voltage returns to near 0
+        # Group consecutive near-zero points into single zero regions
+        zero_regions = []  # List of (start_idx, end_idx) for each zero region
+        in_zero_region = False
+        region_start = 0
+        
+        for idx in range(len(v)):
+            is_near_zero = np.abs(v[idx]) < zero_tolerance
+            
+            if is_near_zero and not in_zero_region:
+                # Starting a new zero region
+                in_zero_region = True
+                region_start = idx
+            elif not is_near_zero and in_zero_region:
+                # Ending a zero region
+                in_zero_region = False
+                zero_regions.append((region_start, idx - 1))
+        
+        # Don't forget the last region if we ended in one
+        if in_zero_region:
+            zero_regions.append((region_start, len(v) - 1))
+        
+        # Each complete sweep: 0 → +V → 0 → -V → 0
+        # This gives us 3 zero regions per sweep: start, middle, end
+        # For N sweeps, we have 2N+1 zero regions (first zero, then 2 per sweep)
+        # Actually: for 1 sweep: start_zero, mid_zero, end_zero = 3 regions
+        # For 2 sweeps: start, mid1, end1/start2, mid2, end2 = 5 regions
+        
+        sweeps = []
+        if len(zero_regions) >= 3:
+            # We have at least one complete sweep
+            # First sweep: from first zero region start to third zero region end
+            num_sweeps = (len(zero_regions) - 1) // 2
+            
+            for sweep_idx in range(num_sweeps):
+                # Each sweep spans from zero region (2*sweep_idx) to zero region (2*sweep_idx + 2)
+                start_region_idx = 2 * sweep_idx
+                end_region_idx = 2 * sweep_idx + 2
+                
+                if end_region_idx < len(zero_regions):
+                    sweep_start = zero_regions[start_region_idx][0]  # Start of first zero region
+                    sweep_end = zero_regions[end_region_idx][1] + 1  # End of last zero region (+1 to include last point)
+                    sweeps.append((sweep_start, sweep_end))
+        
+        return sweeps
+    
+    @staticmethod
+    def _extract_sweep(
+        voltage: Sequence[float],
+        current: Sequence[float],
+        sweep_index: int = 1,
+        zero_tolerance: Optional[float] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Extract a specific sweep from voltage/current data.
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+            sweep_index: Which sweep to extract (0-indexed, default=1 for second sweep)
+            zero_tolerance: Tolerance for detecting zero
+            
+        Returns:
+            Tuple of (voltage_sweep, current_sweep) arrays
+        """
+        v = np.asarray(voltage, dtype=float)
+        i = np.asarray(current, dtype=float)
+        
+        sweeps = UnifiedPlotter._detect_sweeps_by_zero_crossings(v, i, zero_tolerance)
+        
+        if len(sweeps) > sweep_index:
+            start_idx, end_idx = sweeps[sweep_index]
+            return v[start_idx:end_idx], i[start_idx:end_idx]
+        elif len(sweeps) > 0:
+            # If requested sweep doesn't exist, use the last available sweep
+            start_idx, end_idx = sweeps[-1]
+            return v[start_idx:end_idx], i[start_idx:end_idx]
+        else:
+            # No sweeps detected, return all data
+            return v, i
 
     def __init__(
         self,
@@ -320,16 +432,46 @@ class UnifiedPlotter:
         device_name: str = "device",
         title: Optional[str] = None,
         save_name: Optional[str] = None,
+        use_second_sweep: bool = True,
     ):
-        """Generate conduction mechanism analysis (2x2 grid)."""
+        """
+        Generate conduction mechanism analysis (2x2 grid).
+        
+        Saves to: save_dir/device_name_conduction.png (in the main conduction folder)
+        Uses second sweep if multiple sweeps are detected.
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+            device_name: Name for file naming and labels
+            title: Optional plot title
+            save_name: Optional filename for saving (will be made unique if file exists)
+            use_second_sweep: If True and multiple sweeps detected, use the second sweep (index 1)
+        """
         if title is None:
             title = f"{device_name} - Conduction Analysis"
         if save_name is None and self.save_dir:
             save_name = f"{device_name}_conduction.png"
         
+        # Extract second sweep if requested and multiple sweeps are available
+        v_plot = np.asarray(voltage, dtype=float)
+        i_plot = np.asarray(current, dtype=float)
+        
+        if use_second_sweep:
+            sweeps = self._detect_sweeps_by_zero_crossings(v_plot, i_plot)
+            if len(sweeps) > 1:
+                # Use second sweep (index 1)
+                v_plot, i_plot = self._extract_sweep(v_plot, i_plot, sweep_index=1)
+                if title:
+                    title = f"{title} (Sweep 2)"
+        
+        # Prevent file overwriting
+        if save_name and self.save_dir:
+            save_name = self._get_unique_filename(self.save_dir, save_name)
+        
         return self.conduction_plotter.plot_conduction_grid(
-            voltage=voltage,
-            current=current,
+            voltage=v_plot,
+            current=i_plot,
             title=title,
             device_label=device_name,
             save_name=save_name,
@@ -342,16 +484,46 @@ class UnifiedPlotter:
         device_name: str = "device",
         title: Optional[str] = None,
         save_name: Optional[str] = None,
+        use_second_sweep: bool = True,
     ):
-        """Generate SCLC fit plot."""
+        """
+        Generate SCLC fit plot.
+        
+        Saves to: save_dir/device_name_sclc_fit.png (in the main sclc_fit folder)
+        Uses second sweep if multiple sweeps are detected.
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+            device_name: Name for file naming and labels
+            title: Optional plot title
+            save_name: Optional filename for saving (will be made unique if file exists)
+            use_second_sweep: If True and multiple sweeps detected, use the second sweep (index 1)
+        """
         if title is None:
             title = f"{device_name} - SCLC Fit"
         if save_name is None and self.save_dir:
             save_name = f"{device_name}_sclc_fit.png"
         
+        # Extract second sweep if requested and multiple sweeps are available
+        v_plot = np.asarray(voltage, dtype=float)
+        i_plot = np.asarray(current, dtype=float)
+        
+        if use_second_sweep:
+            sweeps = self._detect_sweeps_by_zero_crossings(v_plot, i_plot)
+            if len(sweeps) > 1:
+                # Use second sweep (index 1)
+                v_plot, i_plot = self._extract_sweep(v_plot, i_plot, sweep_index=1)
+                if title:
+                    title = f"{title} (Sweep 2)"
+        
+        # Prevent file overwriting
+        if save_name and self.save_dir:
+            save_name = self._get_unique_filename(self.save_dir, save_name)
+        
         return self.sclc_plotter.plot_sclc_fit(
-            voltage=voltage,
-            current=current,
+            voltage=v_plot,
+            current=i_plot,
             title=title,
             device_label=device_name,
             ref_slope=self.sclc_ref_slope,
@@ -896,6 +1068,153 @@ class UnifiedPlotter:
                 if save_name_voltage_current:
                     self.manager.save(fig3, save_name_voltage_current)
                 results["forming_voltage_current"] = {"fig": fig3, "axes": ax3}
+        
+        return results
+
+    @staticmethod
+    def _get_unique_filename(base_path: Path, filename: str) -> str:
+        """
+        Get a unique filename to prevent overwriting.
+        
+        If file exists, appends a counter: filename_1.png, filename_2.png, etc.
+        
+        Args:
+            base_path: Directory where file will be saved
+            filename: Desired filename
+            
+        Returns:
+            Unique filename (with counter if needed)
+        """
+        if not filename.endswith('.png'):
+            filename = f"{filename}.png"
+        
+        file_path = base_path / filename
+        
+        if not file_path.exists():
+            return filename
+        
+        # File exists, add counter
+        base_name = filename.rsplit('.', 1)[0]  # Remove .png
+        counter = 1
+        
+        while True:
+            new_filename = f"{base_name}_{counter}.png"
+            new_path = base_path / new_filename
+            if not new_path.exists():
+                return new_filename
+            counter += 1
+    
+    def plot_all_sweeps_separately(
+        self,
+        voltage: Sequence[float],
+        current: Sequence[float],
+        device_name: str = "device",
+        title_prefix: str = "",
+        include_conduction: bool = True,
+        include_sclc: bool = True,
+        base_save_dir: Optional[Path] = None,
+    ) -> dict:
+        """
+        Process each sweep separately and save plots in organized folders.
+        
+        Creates folder structure:
+        - base_save_dir/conduction/Individual/device_name/device_name_sweep_1_conduction.png
+        - base_save_dir/sclc_fit/Individual/device_name/device_name_sweep_1_sclc_fit.png
+        
+        Args:
+            voltage: Voltage array
+            current: Current array
+            device_name: Name for file naming and labels (used as folder name)
+            title_prefix: Optional prefix for plot titles
+            include_conduction: Whether to generate conduction analysis for each sweep
+            include_sclc: Whether to generate SCLC fit plot for each sweep
+            base_save_dir: Base directory for saving (if None, uses self.save_dir)
+            
+        Returns:
+            Dictionary with results for each sweep
+        """
+        v = np.asarray(voltage, dtype=float)
+        i = np.asarray(current, dtype=float)
+        
+        # Detect all sweeps
+        sweeps = self._detect_sweeps_by_zero_crossings(v, i)
+        
+        if len(sweeps) == 0:
+            # No sweeps detected, process all data as single sweep
+            sweeps = [(0, len(v))]
+        
+        results = {}
+        save_base = Path(base_save_dir) if base_save_dir else self.save_dir
+        
+        if save_base is None:
+            raise ValueError("save_dir must be set to save figures")
+        
+        title_base = f"{title_prefix} {device_name}".strip() if title_prefix else device_name
+        
+        for sweep_idx, (start_idx, end_idx) in enumerate(sweeps):
+            sweep_num = sweep_idx + 1  # 1-indexed for user display
+            v_sweep = v[start_idx:end_idx]
+            i_sweep = i[start_idx:end_idx]
+            
+            sweep_results = {}
+            
+            # Create Individual folder structure: Individual/device_name/
+            if include_conduction:
+                conduction_individual_dir = save_base / "conduction" / "Individual" / device_name
+                conduction_individual_dir.mkdir(parents=True, exist_ok=True)
+                
+                plotter_cond = ConductionPlotter(
+                    save_dir=conduction_individual_dir,
+                    figsize=self.conduction_plotter.figsize,
+                    target_slopes=self.conduction_plotter.target_slopes,
+                    high_slope_min=self.conduction_plotter.high_slope_min,
+                    min_points=self.conduction_plotter.min_points,
+                    enable_loglog_overlays=self.conduction_plotter.enable_loglog_overlays,
+                    enable_schottky_overlays=self.conduction_plotter.enable_schottky_overlays,
+                    enable_pf_overlays=self.conduction_plotter.enable_pf_overlays,
+                    target_slopes_schottky=self.conduction_plotter.target_slopes_schottky,
+                    target_slopes_pf=self.conduction_plotter.target_slopes_pf,
+                    schottky_slope_bounds=self.conduction_plotter.schottky_slope_bounds,
+                    pf_slope_bounds=self.conduction_plotter.pf_slope_bounds,
+                )
+                
+                # Create filename: device_name_sweep_N_conduction.png
+                save_filename = f"{device_name}_sweep_{sweep_num}_conduction.png"
+                save_filename = self._get_unique_filename(conduction_individual_dir, save_filename)
+                
+                fig_cond, axes_cond = plotter_cond.plot_conduction_grid(
+                    voltage=v_sweep,
+                    current=i_sweep,
+                    title=f"{title_base} - Conduction Analysis (Sweep {sweep_num})",
+                    device_label=f"{device_name} Sweep {sweep_num}",
+                    save_name=save_filename,
+                )
+                sweep_results["conduction"] = {"fig": fig_cond, "axes": axes_cond}
+            
+            if include_sclc:
+                sclc_individual_dir = save_base / "sclc_fit" / "Individual" / device_name
+                sclc_individual_dir.mkdir(parents=True, exist_ok=True)
+                
+                plotter_sclc = SCLCFitPlotter(
+                    save_dir=sclc_individual_dir,
+                    figsize=self.sclc_plotter.figsize,
+                )
+                
+                # Create filename: device_name_sweep_N_sclc_fit.png
+                save_filename = f"{device_name}_sweep_{sweep_num}_sclc_fit.png"
+                save_filename = self._get_unique_filename(sclc_individual_dir, save_filename)
+                
+                fig_sclc, ax_sclc = plotter_sclc.plot_sclc_fit(
+                    voltage=v_sweep,
+                    current=i_sweep,
+                    title=f"{title_base} - SCLC Fit (Sweep {sweep_num})",
+                    device_label=f"{device_name} Sweep {sweep_num}",
+                    ref_slope=self.sclc_ref_slope,
+                    save_name=save_filename,
+                )
+                sweep_results["sclc"] = {"fig": fig_sclc, "axes": ax_sclc}
+            
+            results[f"sweep_{sweep_num}"] = sweep_results
         
         return results
 
