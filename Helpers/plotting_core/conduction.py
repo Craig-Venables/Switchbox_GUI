@@ -4,7 +4,7 @@ from typing import Optional, Sequence, Tuple
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FuncFormatter, ScalarFormatter
 
 # Disable LaTeX/math text globally for this module
 matplotlib.rcParams['text.usetex'] = False
@@ -12,6 +12,7 @@ matplotlib.rcParams['mathtext.default'] = 'regular'
 matplotlib.rcParams['axes.formatter.use_mathtext'] = False
 matplotlib.rcParams['axes.formatter.min_exponent'] = 0
 matplotlib.rcParams['axes.unicode_minus'] = False
+matplotlib.rcParams['mathtext.fontset'] = 'dejavusans'  # Use non-math font
 
 from .base import PlotManager
 
@@ -20,16 +21,24 @@ def plain_log_formatter(x, pos):
     """
     Format log scale values as plain text without math symbols.
     Avoids matplotlib math text parsing errors.
+    Returns plain string that will not be parsed as math text.
     """
-    if x <= 0:
+    try:
+        if x <= 0 or not np.isfinite(x):
+            return '0'
+        # Use scientific notation for very small/large numbers
+        if x < 0.01 or x > 1000:
+            # Format as plain scientific notation without math symbols
+            # Use 'e' notation explicitly to avoid math parsing
+            val_str = f'{x:.2e}'
+            # Ensure no special characters that might trigger math parsing
+            return val_str.replace('×', 'x').replace('·', '*')
+        # For normal range, use decimal
+        if x < 1:
+            return f'{x:.3f}'
+        return f'{x:.1f}'
+    except Exception:
         return '0'
-    # Use scientific notation for very small/large numbers
-    if x < 0.01 or x > 1000:
-        return f'{x:.2e}'
-    # For normal range, use decimal
-    if x < 1:
-        return f'{x:.3f}'
-    return f'{x:.1f}'
 
 
 class ConductionPlotter:
@@ -88,6 +97,10 @@ class ConductionPlotter:
         i = np.asarray(current, dtype=float)
 
         fig, axes = plt.subplots(2, 2, figsize=self.figsize)
+        # Explicitly disable math text parsing on all axes
+        for ax in axes.flat:
+            ax.xaxis.get_major_formatter().set_useMathText(False)
+            ax.yaxis.get_major_formatter().set_useMathText(False)
         if title:
             fig.suptitle(title)
 
@@ -106,8 +119,16 @@ class ConductionPlotter:
         ax_loglog.set_xlabel("|Voltage| (V)")
         ax_loglog.set_ylabel("|Current| (A)")
         # Force plain text formatters for log scales - use custom formatter to avoid math text parsing errors
-        ax_loglog.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
-        ax_loglog.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+        # Create formatters that explicitly disable math text
+        x_formatter = FuncFormatter(plain_log_formatter)
+        y_formatter = FuncFormatter(plain_log_formatter)
+        ax_loglog.xaxis.set_major_formatter(x_formatter)
+        ax_loglog.yaxis.set_major_formatter(y_formatter)
+        # Ensure math text is disabled on these axes
+        if hasattr(x_formatter, 'set_useMathText'):
+            x_formatter.set_useMathText(False)
+        if hasattr(y_formatter, 'set_useMathText'):
+            y_formatter.set_useMathText(False)
         ax_loglog.grid(True, which="both", alpha=0.3)
 
         # Schottky: ln(I) vs sqrt(V)
@@ -118,7 +139,11 @@ class ConductionPlotter:
             i_pos = np.abs(i[pos_mask])
             ax_schottky.semilogy(sqrt_v, i_pos, "ko", markersize=3)
             # Force plain text formatter for log scale - use custom formatter to avoid math text parsing errors
-            ax_schottky.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            y_formatter = FuncFormatter(plain_log_formatter)
+            ax_schottky.yaxis.set_major_formatter(y_formatter)
+            # Ensure math text is disabled
+            if hasattr(y_formatter, 'set_useMathText'):
+                y_formatter.set_useMathText(False)
             if self.enable_schottky_overlays:
                 self._overlay_linear_windows(
                     ax_schottky,
@@ -143,7 +168,11 @@ class ConductionPlotter:
             sqrt_v = np.sqrt(safe_v)
             ax_pf.semilogy(sqrt_v, pf_y, "ko", markersize=3)
             # Force plain text formatter for log scale - use custom formatter to avoid math text parsing errors
-            ax_pf.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            y_formatter = FuncFormatter(plain_log_formatter)
+            ax_pf.yaxis.set_major_formatter(y_formatter)
+            # Ensure math text is disabled
+            if hasattr(y_formatter, 'set_useMathText'):
+                y_formatter.set_useMathText(False)
             if self.enable_pf_overlays:
                 self._overlay_linear_windows(
                     ax_pf,
@@ -158,11 +187,45 @@ class ConductionPlotter:
         ax_pf.set_title("Poole-Frenkel plot")
         ax_pf.grid(True, alpha=0.3)
 
-        fig.tight_layout()
+        # Before saving, ensure all axes have math text disabled
+        for ax in axes.flat:
+            for axis in [ax.xaxis, ax.yaxis]:
+                formatter = axis.get_major_formatter()
+                if hasattr(formatter, 'set_useMathText'):
+                    formatter.set_useMathText(False)
+                # Also disable on minor formatter
+                minor_formatter = axis.get_minor_formatter()
+                if hasattr(minor_formatter, 'set_useMathText'):
+                    minor_formatter.set_useMathText(False)
+        
+        # Disable math text globally before tight_layout and save
+        plt.rcParams['axes.formatter.use_mathtext'] = False
+        plt.rcParams['text.usetex'] = False
+        
+        try:
+            fig.tight_layout()
+        except Exception as e:
+            # If tight_layout fails due to math text, try without it
+            print(f"[CONDUCTION PLOT] Warning: tight_layout failed, saving without it: {e}")
+        
         if save_name:
             if self.manager.save_dir is None:
                 raise ValueError("save_dir must be set to save figures")
-            self.manager.save(fig, save_name)
+            try:
+                self.manager.save(fig, save_name)
+            except (ValueError, Exception) as e:
+                # If save fails due to math text parsing, try saving with explicit math text disabled
+                if 'ParseException' in str(type(e)) or 'mathtext' in str(e).lower():
+                    # Force disable math text one more time
+                    for ax in axes.flat:
+                        for axis in [ax.xaxis, ax.yaxis]:
+                            formatter = axis.get_major_formatter()
+                            if hasattr(formatter, 'set_useMathText'):
+                                formatter.set_useMathText(False)
+                    # Try saving again
+                    self.manager.save(fig, save_name)
+                else:
+                    raise
         return fig, axes
 
     def _plot_loglog_with_windows(self, ax, v: np.ndarray, i: np.ndarray, device_label: str):

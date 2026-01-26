@@ -1908,8 +1908,12 @@ class MeasurementGUI:
                         device_num=dev_num,
                     )
                     
-                    # Plot advanced analysis if memristive - save with filename in shared folders
-                    if is_memristive_flag:
+                    # Always plot conduction and SCLC analysis (uses second sweep if available)
+                    # These are useful for all IV measurements, not just memristive devices
+                    try:
+                        os.makedirs(conduction_dir, exist_ok=True)
+                        os.makedirs(sclc_dir, exist_ok=True)
+                        
                         plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
                         plotter_cond.plot_conduction_analysis(
                             voltage=voltage,
@@ -1927,12 +1931,13 @@ class MeasurementGUI:
                             title=f"{title_prefix} {plot_filename} - SCLC Fit",
                             save_name=f"{plot_filename}_sclc_fit.png"  # Explicit filename
                         )
+                        debug_print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
+                        debug_print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
+                    except Exception as e:
+                        debug_print(f"[PLOT] Error plotting conduction/SCLC for {plot_filename}: {e}")
                     
                     debug_print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
                     debug_print(f"[PLOT] Dashboard saved to: {graphs_dir}")
-                    if is_memristive_flag:
-                        debug_print(f"[PLOT] Conduction plot: {os.path.join(conduction_dir, plot_filename + '_conduction.png')}")
-                        debug_print(f"[PLOT] SCLC plot: {os.path.join(sclc_dir, plot_filename + '_sclc_fit.png')}")
                 
             except ImportError as e:
                 debug_print(f"[PLOT ERROR] Failed to import UnifiedPlotter: {e}")
@@ -2904,6 +2909,9 @@ class MeasurementGUI:
                 f"• Load each measurement file\n"
                 f"• Run analysis to determine if memristive\n"
                 f"• Plot dashboard graphs (all files)\n"
+                f"• Plot endurance graphs (endurance files)\n"
+                f"• Plot retention graphs (retention files)\n"
+                f"• Plot DC endurance graphs (if ≥10 sweeps detected)\n"
                 f"• Plot conduction & SCLC graphs (memristive files only)\n\n"
                 f"Continue?"
             )
@@ -2924,11 +2932,18 @@ class MeasurementGUI:
                 try:
                     from Helpers.Analysis import quick_analyze
                     from Helpers.plotting_core import UnifiedPlotter
+                    from Helpers.Analysis.aggregators.dc_endurance_analyzer import DCEnduranceAnalyzer
+                    from Helpers.plotting_core.unified_plotter import UnifiedPlotter as UP
                     import matplotlib
                     matplotlib.use('Agg')
 
                     success_count = 0
                     error_count = 0
+                    
+                    # Collect data for DC endurance analysis (if ≥10 sweeps)
+                    all_voltage_data = []
+                    all_current_data = []
+                    dc_endurance_filename = None
 
                     for idx, txt_file in enumerate(txt_files, 1):
                         try:
@@ -2961,6 +2976,7 @@ class MeasurementGUI:
                                     time=list(timestamps) if timestamps is not None else None,
                                     analysis_level='full'
                                 )
+                                classification = analysis_data.get('classification', {})
                                 device_type = classification.get('device_type', '')
                                 memristivity_score = classification.get('memristivity_score', 0)
                                 is_memristive = device_type in ['memristive', 'memcapacitive'] or memristivity_score > 60
@@ -2968,6 +2984,55 @@ class MeasurementGUI:
                                 print(f"[DEVICE PLOT] Analysis error for {txt_file}: {e}")
                                 is_memristive = False  # Default to non-memristive if analysis fails
 
+                            # Detect measurement type from filename
+                            measurement_type = "IV"  # Default
+                            measurement_params = {}
+                            
+                            filename_upper = txt_file.upper()
+                            if "ENDURANCE" in filename_upper:
+                                measurement_type = "Endurance"
+                                # Try to extract read voltage from filename or use default
+                                # Common pattern: ENDURANCE-{set_v}v-{reset_v}v-{pulse_ms}ms
+                                # Default read voltage is typically 0.2V
+                                measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
+                            elif "RETENTION" in filename_upper:
+                                measurement_type = "Retention"
+                                measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
+                            
+                            # Collect data for DC endurance analysis (skip if already endurance type)
+                            if measurement_type != "Endurance":  # Don't double-process endurance files
+                                # Check if this single file has multiple sweeps (≥10)
+                                sweeps_in_file = UP._detect_sweeps_by_zero_crossings(voltage, current)
+                                
+                                if len(sweeps_in_file) >= 10:
+                                    # Single file with ≥10 sweeps - run DC endurance directly
+                                    print(f"[DEVICE PLOT] Single file {txt_file} has {len(sweeps_in_file)} sweeps - running DC endurance")
+                                    try:
+                                        split_v_data = []
+                                        split_c_data = []
+                                        for start_idx, end_idx in sweeps_in_file:
+                                            split_v_data.append(voltage[start_idx:end_idx])
+                                            split_c_data.append(current[start_idx:end_idx])
+                                        
+                                        analyzer = DCEnduranceAnalyzer(
+                                            split_voltage_data=split_v_data,
+                                            split_current_data=split_c_data,
+                                            file_name=filename,
+                                            device_path=device_dir
+                                        )
+                                        analyzer.analyze_and_plot()
+                                        print(f"[DEVICE PLOT] ✓ DC endurance analysis complete for {filename}")
+                                    except Exception as e:
+                                        print(f"[DEVICE PLOT] DC endurance error for {txt_file}: {e}")
+                                        import traceback
+                                        traceback.print_exc()
+                                else:
+                                    # Collect for multi-file DC endurance check
+                                    all_voltage_data.append(voltage)
+                                    all_current_data.append(current)
+                                    if dc_endurance_filename is None:
+                                        dc_endurance_filename = filename
+                            
                             # Plot graphs using the same logic as background plotting
                             try:
                                 self._plot_measurement_in_background(
@@ -2978,10 +3043,12 @@ class MeasurementGUI:
                                     device_name=device_name,
                                     sweep_number=idx,  # Use index as sweep number
                                     is_memristive=is_memristive,
-                                    filename=filename
+                                    filename=filename,
+                                    measurement_type=measurement_type,
+                                    measurement_params=measurement_params
                                 )
                                 success_count += 1
-                                print(f"[DEVICE PLOT] ✓ Plotted {txt_file} (memristive={is_memristive})")
+                                print(f"[DEVICE PLOT] ✓ Plotted {txt_file} (type={measurement_type}, memristive={is_memristive})")
                             except Exception as e:
                                 print(f"[DEVICE PLOT] Plotting error for {txt_file}: {e}")
                                 error_count += 1
@@ -2990,6 +3057,59 @@ class MeasurementGUI:
                             print(f"[DEVICE PLOT] Unexpected error processing {txt_file}: {e}")
                             error_count += 1
                             continue
+                    
+                    # Check for DC endurance analysis (≥10 sweeps)
+                    if len(all_voltage_data) >= 10 and len(all_voltage_data) == len(all_current_data):
+                        try:
+                            print(f"[DEVICE PLOT] Detected {len(all_voltage_data)} sweeps - running DC endurance analysis")
+                            
+                            # Use first filename or device name for DC endurance
+                            endurance_filename = dc_endurance_filename if dc_endurance_filename else device_name
+                            
+                            analyzer = DCEnduranceAnalyzer(
+                                split_voltage_data=all_voltage_data,
+                                split_current_data=all_current_data,
+                                file_name=endurance_filename,
+                                device_path=device_dir
+                            )
+                            analyzer.analyze_and_plot()
+                            print(f"[DEVICE PLOT] ✓ DC endurance analysis complete (saved to {device_dir}/Graphs/dc endurance/)")
+                        except Exception as e:
+                            print(f"[DEVICE PLOT] DC endurance analysis error: {e}")
+                            import traceback
+                            traceback.print_exc()
+                    elif len(all_voltage_data) > 0:
+                        # Check if single file has multiple sweeps (≥10)
+                        # Combine all data and check for sweeps
+                        try:
+                            combined_voltage = np.concatenate(all_voltage_data)
+                            combined_current = np.concatenate(all_current_data)
+                            
+                            # Detect sweeps using zero crossings
+                            sweeps = UP._detect_sweeps_by_zero_crossings(combined_voltage, combined_current)
+                            
+                            if len(sweeps) >= 10:
+                                print(f"[DEVICE PLOT] Detected {len(sweeps)} sweeps in combined data - running DC endurance analysis")
+                                
+                                # Split data by detected sweeps
+                                split_v_data = []
+                                split_c_data = []
+                                for start_idx, end_idx in sweeps:
+                                    split_v_data.append(combined_voltage[start_idx:end_idx])
+                                    split_c_data.append(combined_current[start_idx:end_idx])
+                                
+                                endurance_filename = dc_endurance_filename if dc_endurance_filename else device_name
+                                
+                                analyzer = DCEnduranceAnalyzer(
+                                    split_voltage_data=split_v_data,
+                                    split_current_data=split_c_data,
+                                    file_name=endurance_filename,
+                                    device_path=device_dir
+                                )
+                                analyzer.analyze_and_plot()
+                                print(f"[DEVICE PLOT] ✓ DC endurance analysis complete (saved to {device_dir}/Graphs/dc endurance/)")
+                        except Exception as e:
+                            print(f"[DEVICE PLOT] DC endurance detection error: {e}")
 
                     # Update status
                     if hasattr(self, 'analysis_status_label'):
@@ -3110,6 +3230,8 @@ class MeasurementGUI:
                 try:
                     from Helpers.Analysis import quick_analyze
                     from Helpers.plotting_core import UnifiedPlotter
+                    from Helpers.Analysis.aggregators.dc_endurance_analyzer import DCEnduranceAnalyzer
+                    from Helpers.plotting_core.unified_plotter import UnifiedPlotter as UP
                     import matplotlib
                     # Force headless backend
                     matplotlib.use('Agg')
@@ -3121,6 +3243,11 @@ class MeasurementGUI:
 
                     for section, device_num, device_dir in device_dirs:
                         processed_devices += 1
+                        
+                        # Initialize data collection for DC endurance analysis per device
+                        device_voltage_data = []
+                        device_current_data = []
+                        dc_endurance_filename = None
 
                         # Update status (periodically)
                         if processed_devices % 1 == 0 and hasattr(self, 'analysis_status_label'):
@@ -3148,28 +3275,184 @@ class MeasurementGUI:
                                     time=list(timestamps) if timestamps is not None else None,
                                     analysis_level='full'
                                 )
+                                
+                                # Get classification for memristive check
+                                classification = analysis_data.get('classification', {})
+                                device_type = classification.get('device_type', '')
+                                memristivity_score = classification.get('memristivity_score', 0)
+                                is_memristive = device_type in ['memristive', 'memcapacitive'] or memristivity_score > 60
 
-                                # Plot
-                                plotter = UnifiedPlotter(save_dir=device_dir, auto_close=True)
-                                # Dashboard - use plot_iv_dashboard instead of plot_dashboard
+                                # Detect measurement type from filename
+                                measurement_type = "IV"  # Default
+                                measurement_params = {}
+                                
+                                filename_upper = txt_file.upper()
+                                if "ENDURANCE" in filename_upper:
+                                    measurement_type = "Endurance"
+                                    measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
+                                elif "RETENTION" in filename_upper:
+                                    measurement_type = "Retention"
+                                    measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
+
+                                # Create Graphs folder
+                                graphs_dir = os.path.join(device_dir, "Graphs")
+                                os.makedirs(graphs_dir, exist_ok=True)
+                                
                                 filename_base = os.path.splitext(txt_file)[0]
-                                # Build title with sample info
-                                plot_title = f"{sample_name or ''} {section}{device_num} {filename_base} - IV Dashboard".strip()
-                                plotter.plot_iv_dashboard(
-                                    voltage=voltage,
-                                    current=current,
-                                    time=timestamps,
-                                    device_name=filename_base,
-                                    title=plot_title,
-                                    save_name=f"{filename_base}_iv_dashboard.png",
-                                    sample_name=sample_name or "",
-                                    section=section or "",
-                                    device_num=device_num or "",
-                                )
+                                sample_name_str = sample_name or ""
+                                title_prefix = f"{sample_name_str} {section}{device_num}".strip()
+                                
+                                plotter = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                                
+                                # Collect data for DC endurance (skip if already endurance type)
+                                if measurement_type != "Endurance":
+                                    # Check if this single file has multiple sweeps (≥10)
+                                    sweeps_in_file = UP._detect_sweeps_by_zero_crossings(voltage, current)
+                                    
+                                    if len(sweeps_in_file) >= 10:
+                                        # Single file with ≥10 sweeps - run DC endurance directly
+                                        print(f"[SAMPLE PLOT] Single file {txt_file} has {len(sweeps_in_file)} sweeps - running DC endurance")
+                                        try:
+                                            split_v_data = []
+                                            split_c_data = []
+                                            for start_idx, end_idx in sweeps_in_file:
+                                                split_v_data.append(voltage[start_idx:end_idx])
+                                                split_c_data.append(current[start_idx:end_idx])
+                                            
+                                            analyzer = DCEnduranceAnalyzer(
+                                                split_voltage_data=split_v_data,
+                                                split_current_data=split_c_data,
+                                                file_name=filename_base,
+                                                device_path=device_dir
+                                            )
+                                            analyzer.analyze_and_plot()
+                                            print(f"[SAMPLE PLOT] ✓ DC endurance analysis complete for {filename_base}")
+                                        except Exception as e:
+                                            print(f"[SAMPLE PLOT] DC endurance error for {txt_file}: {e}")
+                                    else:
+                                        # Collect for multi-file DC endurance check
+                                        device_voltage_data.append(voltage)
+                                        device_current_data.append(current)
+                                        if dc_endurance_filename is None:
+                                            dc_endurance_filename = filename_base
+                                
+                                # Plot based on measurement type
+                                if measurement_type == "Endurance":
+                                    plotter.plot_endurance_analysis(
+                                        voltage=voltage,
+                                        current=current,
+                                        timestamps=timestamps,
+                                        device_name=filename_base,
+                                        title_prefix=title_prefix,
+                                        read_voltage=measurement_params.get("read_v", 0.2),
+                                        save_name_cycle_resistance=f"{filename_base}_endurance_cycle_resistance.png",
+                                        save_name_onoff_ratio=f"{filename_base}_endurance_onoff_ratio.png"
+                                    )
+                                elif measurement_type == "Retention":
+                                    plotter.plot_retention_analysis(
+                                        voltage=voltage,
+                                        current=current,
+                                        timestamps=timestamps,
+                                        device_name=filename_base,
+                                        title_prefix=title_prefix,
+                                        read_voltage=measurement_params.get("read_v", 0.2),
+                                        save_name_loglog=f"{filename_base}_retention_loglog.png",
+                                        save_name_linear=f"{filename_base}_retention_linear.png",
+                                        save_name_resistance=f"{filename_base}_retention_resistance.png"
+                                    )
+                                else:
+                                    # IV Dashboard
+                                    plot_title = f"{title_prefix} {filename_base} - IV Dashboard".strip()
+                                    plotter.plot_iv_dashboard(
+                                        voltage=voltage,
+                                        current=current,
+                                        time=timestamps,
+                                        device_name=filename_base,
+                                        title=plot_title,
+                                        save_name=f"{filename_base}_iv_dashboard.png",
+                                        sample_name=sample_name_str,
+                                        section=section or "",
+                                        device_num=device_num or "",
+                                    )
+                                    
+                                    # Always plot conduction and SCLC analysis (uses second sweep if available)
+                                    try:
+                                        conduction_dir = os.path.join(graphs_dir, "conduction")
+                                        sclc_dir = os.path.join(graphs_dir, "sclc_fit")
+                                        os.makedirs(conduction_dir, exist_ok=True)
+                                        os.makedirs(sclc_dir, exist_ok=True)
+                                        
+                                        plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
+                                        plotter_cond.plot_conduction_analysis(
+                                            voltage=voltage,
+                                            current=current,
+                                            device_name=filename_base,
+                                            title=f"{title_prefix} {filename_base} - Conduction Analysis",
+                                            save_name=f"{filename_base}_conduction.png"
+                                        )
+                                        
+                                        plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
+                                        plotter_sclc.plot_sclc_fit(
+                                            voltage=voltage,
+                                            current=current,
+                                            device_name=filename_base,
+                                            title=f"{title_prefix} {filename_base} - SCLC Fit",
+                                            save_name=f"{filename_base}_sclc_fit.png"
+                                        )
+                                    except Exception as e:
+                                        print(f"[SAMPLE PLOT] Error plotting conduction/SCLC for {txt_file}: {e}")
+                                
                                 total_success += 1
 
                             except Exception as e:
                                 print(f"Error processing {txt_file}: {e}")
+                        
+                        # Check for DC endurance analysis for this device (≥10 sweeps)
+                        if len(device_voltage_data) >= 10 and len(device_voltage_data) == len(device_current_data):
+                            try:
+                                print(f"[SAMPLE PLOT] Detected {len(device_voltage_data)} sweeps for {section}{device_num} - running DC endurance analysis")
+                                
+                                endurance_filename = dc_endurance_filename if dc_endurance_filename else f"{section}{device_num}"
+                                
+                                analyzer = DCEnduranceAnalyzer(
+                                    split_voltage_data=device_voltage_data,
+                                    split_current_data=device_current_data,
+                                    file_name=endurance_filename,
+                                    device_path=device_dir
+                                )
+                                analyzer.analyze_and_plot()
+                                print(f"[SAMPLE PLOT] ✓ DC endurance analysis complete for {section}{device_num}")
+                            except Exception as e:
+                                print(f"[SAMPLE PLOT] DC endurance analysis error for {section}{device_num}: {e}")
+                        elif len(device_voltage_data) > 0:
+                            # Check if combined data has multiple sweeps (≥10)
+                            try:
+                                combined_voltage = np.concatenate(device_voltage_data)
+                                combined_current = np.concatenate(device_current_data)
+                                
+                                sweeps = UP._detect_sweeps_by_zero_crossings(combined_voltage, combined_current)
+                                
+                                if len(sweeps) >= 10:
+                                    print(f"[SAMPLE PLOT] Detected {len(sweeps)} sweeps in combined data for {section}{device_num} - running DC endurance analysis")
+                                    
+                                    split_v_data = []
+                                    split_c_data = []
+                                    for start_idx, end_idx in sweeps:
+                                        split_v_data.append(combined_voltage[start_idx:end_idx])
+                                        split_c_data.append(combined_current[start_idx:end_idx])
+                                    
+                                    endurance_filename = dc_endurance_filename if dc_endurance_filename else f"{section}{device_num}"
+                                    
+                                    analyzer = DCEnduranceAnalyzer(
+                                        split_voltage_data=split_v_data,
+                                        split_current_data=split_c_data,
+                                        file_name=endurance_filename,
+                                        device_path=device_dir
+                                    )
+                                    analyzer.analyze_and_plot()
+                                    print(f"[SAMPLE PLOT] ✓ DC endurance analysis complete for {section}{device_num}")
+                            except Exception as e:
+                                print(f"[SAMPLE PLOT] DC endurance detection error for {section}{device_num}: {e}")
 
                     # Finished
                     msg = f"Completed! Generated plots for {processed_devices} devices ({total_success} files)."
