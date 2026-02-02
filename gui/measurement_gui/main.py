@@ -705,6 +705,12 @@ class MeasurementGUI:
         else:
             # Hide the stats window
             self.analysis_stats_window.hide()
+        
+        # Persist checkbox state so it restores on next load
+        try:
+            self._save_save_location_config()
+        except Exception:
+            pass
     
     def update_analysis_stats(self, analysis_data: Dict[str, Any], analysis_level: Optional[str] = None) -> None:
         """
@@ -718,7 +724,7 @@ class MeasurementGUI:
         from Helpers.Analysis import IVSweepAnalyzer
         
         # After a sweep completes, analyze the data:
-        analyzer = IVSweepAnalyzer(analysis_level=self.analysis_level_var.get())
+        analyzer = IVSweepAnalyzer(analysis_level='full')
         analysis_data = analyzer.analyze_sweep(voltage=voltage_data, current=current_data)
         
         # Update the stats window:
@@ -730,14 +736,10 @@ class MeasurementGUI:
             Analysis data from IVSweepAnalyzer.analyze_sweep()
         analysis_level : str, optional
             Analysis level ('basic', 'classification', 'full', 'research').
-            If None, uses the current value from analysis_level_var.
+            If None, uses default 'full'.
         """
-        # Get analysis level from GUI if not provided
         if analysis_level is None:
-            if hasattr(self, 'analysis_level_var'):
-                analysis_level = self.analysis_level_var.get()
-            else:
-                analysis_level = 'full'
+            analysis_level = 'full'
         
         # Update the stats panel (if it exists)
         if hasattr(self, 'plot_panels') and self.plot_panels:
@@ -881,8 +883,9 @@ class MeasurementGUI:
         Optional[Dict[str, Any]] - Analysis data dict, or None if skipped.
             For custom sequences, first sweep returns {'analysis_data': ..., 'is_memristive': bool}
         """
-        # ANALYSIS IS NOW AUTOMATIC - Always runs classification, background research for memristive
-        # (Checkbox is now redundant but kept for potential future use)
+        # Master switch: no analysis when checkbox is unchecked (graphs still plot)
+        if not (hasattr(self, 'analysis_enabled') and self.analysis_enabled.get()):
+            return None
         
         # === CONDITIONAL LOGIC FOR CUSTOM SEQUENCES ===
         # Skip if not first sweep AND device is not memristive
@@ -904,14 +907,8 @@ class MeasurementGUI:
             # Import analysis module
             from Helpers.Analysis import quick_analyze
             
-            # Get analysis level from GUI
-            # Always use 'classification' for speed (memristive devices get research in background)
+            # Fixed level: classification for speed (memristive devices get research in background)
             analysis_level = 'classification'
-            if hasattr(self, 'analysis_level_var'):
-                # Allow user override if they really want different level
-                user_level = self.analysis_level_var.get()
-                if user_level in ['basic', 'full', 'research']:
-                    analysis_level = user_level
             
             # Convert to numpy arrays if needed
             import numpy as np
@@ -5036,13 +5033,11 @@ class MeasurementGUI:
         from Helpers.Analysis import quick_analyze
         
         try:
-            # Determine analysis level
-            analysis_level = getattr(self, 'analysis_level', 'full')
-            if not hasattr(self, 'analysis_enabled') or not self.analysis_enabled:
-                analysis_level = 'none'
-            
-            if analysis_level == 'none':
+            # Gate on analysis checkbox
+            if not (hasattr(self, 'analysis_enabled') and self.analysis_enabled.get()):
                 return None
+            
+            analysis_level = 'full'
             
             # Run analysis
             print(f"[Conditional Testing] Running synchronous analysis on {len(voltage)} points...")
@@ -9856,6 +9851,9 @@ class MeasurementGUI:
                         self.custom_save_location_var.set(custom_path)
                     else:
                         self.custom_save_location_var.set("")
+                    # Restore analysis checkbox state (default False for first-time/shipping)
+                    if hasattr(self, 'analysis_enabled'):
+                        self.analysis_enabled.set(config.get('analysis_enabled', False))
         except Exception as e:
             print(f"Could not load save location config: {e}")
     
@@ -9870,6 +9868,7 @@ class MeasurementGUI:
             
             config['use_custom_save'] = self.use_custom_save_var.get()
             config['custom_save_path'] = str(self.custom_save_location) if self.custom_save_location else ""
+            config['analysis_enabled'] = self.analysis_enabled.get() if hasattr(self, 'analysis_enabled') else False
             
             config_file.parent.mkdir(parents=True, exist_ok=True)
             with open(config_file, 'w') as f:
