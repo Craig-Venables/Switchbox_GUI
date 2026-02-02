@@ -522,6 +522,11 @@ class SampleAnalysisOrchestrator:
         self._log(f"Plot {plot_num}/25: Section Spatial Gradient")
         self.plot_section_spatial_gradient()
         
+        # Plot 26: On/Off Ratio Evolution
+        plot_num += 1
+        self._log(f"Plot {plot_num}/26: On/Off Ratio Evolution")
+        self.plot_onoff_ratio_evolution()
+        
         self._log(f"✓ All {plot_num} main plots saved to: {self.plots_dir}")
         
         # Generate specialized size comparison plots (I-V overlays)
@@ -923,25 +928,37 @@ class SampleAnalysisOrchestrator:
             switching_ratios = []
             
             for dev in self.devices_data:
-                ron = dev['resistance'].get('ron_mean', np.nan)
-                roff = dev['resistance'].get('roff_mean', np.nan)
+                ron = dev['resistance'].get('ron_mean', None)
+                roff = dev['resistance'].get('roff_mean', None)
                 score = dev['classification'].get('memristivity_score', 0)
                 dtype = dev['classification'].get('device_type', 'unknown')
                 is_pinched = dev['hysteresis'].get('pinched', False)
-                ratio = dev['resistance'].get('switching_ratio', np.nan)
+                ratio = dev['resistance'].get('switching_ratio', None)
                 
-                if not np.isnan(ron) and not np.isnan(roff) and ron > 0 and roff > 0:
-                    ron_values.append(ron)
-                    roff_values.append(roff)
-                    scores.append(score)
-                    device_types.append(dtype)
-                    pinched.append(is_pinched)
-                    
-                    # Safe ratio handling
-                    safe_ratio = 1
-                    if ratio is not None and isinstance(ratio, (int, float)) and not np.isnan(ratio):
-                        safe_ratio = ratio
-                    switching_ratios.append(safe_ratio)
+                # Handle None values properly
+                if ron is not None and roff is not None:
+                    try:
+                        ron_val = float(ron) if not (isinstance(ron, float) and np.isnan(ron)) else None
+                        roff_val = float(roff) if not (isinstance(roff, float) and np.isnan(roff)) else None
+                        if ron_val is not None and roff_val is not None and not np.isnan(ron_val) and not np.isnan(roff_val) and ron_val > 0 and roff_val > 0:
+                            ron_values.append(ron_val)
+                            roff_values.append(roff_val)
+                            scores.append(score)
+                            device_types.append(dtype if dtype is not None else 'unknown')
+                            pinched.append(is_pinched)
+                            
+                            # Safe ratio handling
+                            safe_ratio = 1
+                            if ratio is not None:
+                                try:
+                                    ratio_float = float(ratio)
+                                    if not np.isnan(ratio_float) and ratio_float > 0:
+                                        safe_ratio = ratio_float
+                                except (ValueError, TypeError):
+                                    pass
+                            switching_ratios.append(safe_ratio)
+                    except (ValueError, TypeError):
+                        continue
             
             if not ron_values:
                 print("[PLOT] No resistance data for scatter")
@@ -1032,12 +1049,22 @@ class SampleAnalysisOrchestrator:
                 if len(measurements) < 2:  # Need at least 2 measurements
                     continue
                 
-                scores = [m.get('classification', {}).get('memristivity_score', 0) 
-                         for m in measurements]
+                scores = []
+                for m in measurements:
+                    score = m.get('classification', {}).get('memristivity_score', None)
+                    if score is not None:
+                        try:
+                            scores.append(float(score))
+                        except (ValueError, TypeError):
+                            continue
+                
+                if len(scores) < 2:  # Need at least 2 valid scores
+                    continue
+                    
                 measurement_nums = list(range(1, len(scores) + 1))
                 
                 # Determine status
-                if len(scores) > 1:
+                if len(scores) > 1 and scores[-1] is not None and scores[0] is not None:
                     improvement = scores[-1] - scores[0]
                     if improvement > 15:
                         color = 'green'  # Forming
@@ -1278,25 +1305,64 @@ class SampleAnalysisOrchestrator:
             for dev in self.devices_data:
                 memristivity = dev['classification'].get('memristivity_score', 0)
                 # Safely extract quality metrics
+                # Get memristivity score with None handling
+                memristivity = dev.get('classification', {}).get('memristivity_score', None)
+                if memristivity is None:
+                    memristivity = 0
+                else:
+                    try:
+                        memristivity = float(memristivity)
+                        if np.isnan(memristivity):
+                            memristivity = 0
+                    except (ValueError, TypeError):
+                        memristivity = 0
+                
                 quality_dict = dev.get('quality', {})
                 if isinstance(quality_dict, dict):
                     mw_quality = quality_dict.get('memory_window_quality', {})
                     if isinstance(mw_quality, dict):
-                        quality = mw_quality.get('overall_quality_score', 0)
-                        stability = mw_quality.get('avg_stability', 0)
+                        quality = mw_quality.get('overall_quality_score', None)
+                        stability = mw_quality.get('avg_stability', None)
                     else:
                         quality = 0
                         stability = 0
                 else:
                     quality = 0
                     stability = 0
-                switching_ratio = dev['resistance'].get('switching_ratio', 1)
+                
+                # Handle None values for quality and stability
+                if quality is None:
+                    quality = 0
+                else:
+                    try:
+                        quality = float(quality)
+                        if np.isnan(quality):
+                            quality = 0
+                    except (ValueError, TypeError):
+                        quality = 0
+                
+                if stability is None:
+                    stability = 0
+                else:
+                    try:
+                        stability = float(stability)
+                        if np.isnan(stability):
+                            stability = 0
+                    except (ValueError, TypeError):
+                        stability = 0
+                
+                switching_ratio = dev['resistance'].get('switching_ratio', None)
                 
                 # Composite score: memristivity (40%), quality (30%), switching ratio (20%), stability (10%)
                 # Normalize switching ratio (log scale)
                 ratio_val = 1
-                if switching_ratio is not None and isinstance(switching_ratio, (int, float)):
-                    ratio_val = switching_ratio
+                if switching_ratio is not None:
+                    try:
+                        ratio_val = float(switching_ratio)
+                        if np.isnan(ratio_val) or ratio_val <= 0:
+                            ratio_val = 1
+                    except (ValueError, TypeError):
+                        ratio_val = 1
                     
                 ratio_score = min(100, np.log10(ratio_val) * 10) if ratio_val > 1 else 0
                 
@@ -1363,24 +1429,62 @@ class SampleAnalysisOrchestrator:
         if device_scores is None:
             device_scores = []
             for dev in self.devices_data:
-                memristivity = dev['classification'].get('memristivity_score', 0)
+                # Get memristivity score with None handling
+                memristivity = dev.get('classification', {}).get('memristivity_score', None)
+                if memristivity is None:
+                    memristivity = 0
+                else:
+                    try:
+                        memristivity = float(memristivity)
+                        if np.isnan(memristivity):
+                            memristivity = 0
+                    except (ValueError, TypeError):
+                        memristivity = 0
+                
                 quality_dict = dev.get('quality', {})
                 if isinstance(quality_dict, dict):
                     mw_quality = quality_dict.get('memory_window_quality', {})
                     if isinstance(mw_quality, dict):
-                        quality = mw_quality.get('overall_quality_score', 0)
-                        stability = mw_quality.get('avg_stability', 0)
+                        quality = mw_quality.get('overall_quality_score', None)
+                        stability = mw_quality.get('avg_stability', None)
                     else:
                         quality = 0
                         stability = 0
                 else:
                     quality = 0
                     stability = 0
-                switching_ratio = dev['resistance'].get('switching_ratio', 1)
+                
+                # Handle None values for quality and stability
+                if quality is None:
+                    quality = 0
+                else:
+                    try:
+                        quality = float(quality)
+                        if np.isnan(quality):
+                            quality = 0
+                    except (ValueError, TypeError):
+                        quality = 0
+                
+                if stability is None:
+                    stability = 0
+                else:
+                    try:
+                        stability = float(stability)
+                        if np.isnan(stability):
+                            stability = 0
+                    except (ValueError, TypeError):
+                        stability = 0
+                
+                switching_ratio = dev['resistance'].get('switching_ratio', None)
                 
                 ratio_val = 1
-                if switching_ratio is not None and isinstance(switching_ratio, (int, float)):
-                    ratio_val = switching_ratio
+                if switching_ratio is not None:
+                    try:
+                        ratio_val = float(switching_ratio)
+                        if np.isnan(ratio_val) or ratio_val <= 0:
+                            ratio_val = 1
+                    except (ValueError, TypeError):
+                        ratio_val = 1
                     
                 ratio_score = min(100, np.log10(ratio_val) * 10) if ratio_val > 1 else 0
                 composite = (memristivity * 0.4 + quality * 0.3 + ratio_score * 0.2 + stability * 0.1)
@@ -1752,7 +1856,7 @@ class SampleAnalysisOrchestrator:
             
             # Plot 3: Device Type Distribution (Stacked Bar)
             ax3 = axes[1, 0]
-            type_names = sorted(set(t for counts in device_types_by_size.values() for t in counts.keys()))
+            type_names = sorted(set(t for counts in device_types_by_size.values() for t in counts.keys() if t is not None))
             if type_names and device_types_by_size:
                 x = np.arange(len(size_labels))
                 width = 0.6
@@ -2530,19 +2634,26 @@ class SampleAnalysisOrchestrator:
             roff_all = []
             
             for dev in self.devices_data:
-                ron = dev['resistance'].get('ron_mean', np.nan)
-                roff = dev['resistance'].get('roff_mean', np.nan)
+                ron = dev['resistance'].get('ron_mean', None)
+                roff = dev['resistance'].get('roff_mean', None)
                 dtype = dev['classification'].get('device_type', 'unknown')
                 
-                if not np.isnan(ron) and not np.isnan(roff) and ron > 0 and roff > 0:
-                    ron_all.append(ron)
-                    roff_all.append(roff)
-                    if dtype == 'memristive':
-                        ron_memristive.append(ron)
-                        roff_memristive.append(roff)
-                    elif dtype == 'ohmic':
-                        ron_ohmic.append(ron)
-                        roff_ohmic.append(roff)
+                # Handle None values properly
+                if ron is not None and roff is not None:
+                    try:
+                        ron_val = float(ron)
+                        roff_val = float(roff)
+                        if not np.isnan(ron_val) and not np.isnan(roff_val) and ron_val > 0 and roff_val > 0:
+                            ron_all.append(ron_val)
+                            roff_all.append(roff_val)
+                            if dtype == 'memristive':
+                                ron_memristive.append(ron_val)
+                                roff_memristive.append(roff_val)
+                            elif dtype == 'ohmic':
+                                ron_ohmic.append(ron_val)
+                                roff_ohmic.append(roff_val)
+                    except (ValueError, TypeError):
+                        continue
             
             if not ron_all:
                 print("[PLOT] No resistance data for distribution comparison")
@@ -2621,18 +2732,25 @@ class SampleAnalysisOrchestrator:
         if ron_all is None:
             ron_all, roff_all, ron_mem, roff_mem, ron_ohm, roff_ohm = [], [], [], [], [], []
             for dev in self.devices_data:
-                ron = dev['resistance'].get('ron_mean', np.nan)
-                roff = dev['resistance'].get('roff_mean', np.nan)
+                ron = dev['resistance'].get('ron_mean', None)
+                roff = dev['resistance'].get('roff_mean', None)
                 dtype = dev['classification'].get('device_type', 'unknown')
-                if not np.isnan(ron) and not np.isnan(roff) and ron > 0 and roff > 0:
-                    ron_all.append(ron)
-                    roff_all.append(roff)
-                    if dtype == 'memristive':
-                        ron_mem.append(ron)
-                        roff_mem.append(roff)
-                    elif dtype == 'ohmic':
-                        ron_ohm.append(ron)
-                        roff_ohm.append(roff)
+                # Handle None values properly
+                if ron is not None and roff is not None:
+                    try:
+                        ron_val = float(ron)
+                        roff_val = float(roff)
+                        if not np.isnan(ron_val) and not np.isnan(roff_val) and ron_val > 0 and roff_val > 0:
+                            ron_all.append(ron_val)
+                            roff_all.append(roff_val)
+                            if dtype == 'memristive':
+                                ron_mem.append(ron_val)
+                                roff_mem.append(roff_val)
+                            elif dtype == 'ohmic':
+                                ron_ohm.append(ron_val)
+                                roff_ohm.append(roff_val)
+                    except (ValueError, TypeError):
+                        continue
         
         data = {
             'All_Devices_Ron': ron_all + [np.nan] * max(0, len(roff_all) - len(ron_all)),
@@ -2830,7 +2948,7 @@ class SampleAnalysisOrchestrator:
                 return
             
             sizes = sorted(size_type_data.keys())
-            all_types = sorted(set(t for sizes_dict in size_type_data.values() for t in sizes_dict.keys()))
+            all_types = sorted(set(t for sizes_dict in size_type_data.values() for t in sizes_dict.keys() if t is not None))
             
             # Create data matrix
             matrix = np.zeros((len(sizes), len(all_types)))
@@ -2879,7 +2997,8 @@ class SampleAnalysisOrchestrator:
             for j, dtype in enumerate(all_types):
                 values = [100 * size_type_data[size].get(dtype, 0) / sum(size_type_data[size].values())
                          if sum(size_type_data[size].values()) > 0 else 0 for size in sizes]
-                ax2.bar(x, values, width, label=dtype.replace('_', ' ').title(),
+                dtype_label = dtype.replace('_', ' ').title() if dtype is not None else 'Unknown'
+                ax2.bar(x, values, width, label=dtype_label,
                        bottom=bottom, color=colors_list[j], alpha=0.8, edgecolor='black')
                 bottom += values
             
@@ -2917,7 +3036,7 @@ class SampleAnalysisOrchestrator:
                         size_type_data[size] = {}
                     size_type_data[size][dtype] = size_type_data[size].get(dtype, 0) + 1
             sizes = sorted(size_type_data.keys())
-            all_types = sorted(set(t for sizes_dict in size_type_data.values() for t in sizes_dict.keys()))
+            all_types = sorted(set(t for sizes_dict in size_type_data.values() for t in sizes_dict.keys() if t is not None))
         
         rows = []
         for size in sizes:
@@ -3132,9 +3251,10 @@ class SampleAnalysisOrchestrator:
                 ratio_subset = [r for r, m in zip(switching_ratios, mask) if m]
                 sizes = [min(200, max(20, np.log10(r) * 20)) if r > 1 else 20 for r in ratio_subset]
                 
+                dtype_label = dtype.replace('_', ' ').title() if dtype is not None else 'Unknown'
                 ax1.scatter(conf_subset, score_subset, c=type_colors.get(dtype, 'gray'),
                            s=sizes, alpha=0.6, edgecolors='black', linewidth=0.5,
-                           label=dtype.replace('_', ' ').title())
+                           label=dtype_label)
             
             # Add regression line (only if there's variation in x values)
             if len(confidences) > 1 and np.std(confidences) > 1e-10:
@@ -3284,9 +3404,10 @@ class SampleAnalysisOrchestrator:
                 mask = [dt == dtype for dt in device_types]
                 v_subset = [v for v, m in zip(max_voltages, mask) if m]
                 s_subset = [s for s, m in zip(scores, mask) if m]
+                dtype_label = dtype.replace('_', ' ').title() if dtype is not None else 'Unknown'
                 ax2.scatter(v_subset, s_subset, c=type_colors.get(dtype, 'gray'),
                            alpha=0.6, s=50, edgecolors='black', linewidth=0.5,
-                           label=dtype.replace('_', ' ').title())
+                           label=dtype_label)
             ax2.set_xlabel('Max Voltage (V)', fontweight='bold')
             ax2.set_ylabel('Memristivity Score', fontweight='bold')
             ax2.set_title('Voltage vs Performance', fontweight='bold')
@@ -3699,16 +3820,23 @@ class SampleAnalysisOrchestrator:
             device_types = []
             
             for dev in self.devices_data:
-                switching = dev['resistance'].get('switching_ratio', np.nan)
-                on_off = dev['resistance'].get('on_off_ratio', np.nan)
+                switching = dev['resistance'].get('switching_ratio', None)
+                on_off = dev['resistance'].get('on_off_ratio', None)
                 score = dev['classification'].get('memristivity_score', 0) or 0
                 dtype = dev['classification'].get('device_type', 'unknown')
                 
-                if not np.isnan(switching) and not np.isnan(on_off) and switching > 0 and on_off > 0:
-                    switching_ratios.append(switching)
-                    on_off_ratios.append(on_off)
-                    scores.append(score)
-                    device_types.append(dtype)
+                # Handle None values properly
+                if switching is not None and on_off is not None:
+                    try:
+                        switching_val = float(switching)
+                        on_off_val = float(on_off)
+                        if not np.isnan(switching_val) and not np.isnan(on_off_val) and switching_val > 0 and on_off_val > 0:
+                            switching_ratios.append(switching_val)
+                            on_off_ratios.append(on_off_val)
+                            scores.append(score)
+                            device_types.append(dtype if dtype is not None else 'unknown')
+                    except (ValueError, TypeError):
+                        continue
             
             if not switching_ratios:
                 print("[PLOT] No ratio data for comparison")
@@ -3727,9 +3855,10 @@ class SampleAnalysisOrchestrator:
                 mask = [dt == dtype for dt in device_types]
                 switch_subset = [s for s, m in zip(switching_ratios, mask) if m]
                 onoff_subset = [o for o, m in zip(on_off_ratios, mask) if m]
+                dtype_label = dtype.replace('_', ' ').title() if dtype is not None else 'Unknown'
                 ax1.scatter(switch_subset, onoff_subset, c=type_colors.get(dtype, 'gray'),
                            alpha=0.6, s=50, edgecolors='black', linewidth=0.5,
-                           label=dtype.replace('_', ' ').title())
+                           label=dtype_label)
             
             # Add 1:1 line
             max_val = max(max(switching_ratios), max(on_off_ratios))
@@ -3908,6 +4037,133 @@ class SampleAnalysisOrchestrator:
             import traceback
             traceback.print_exc()
     
+    def plot_onoff_ratio_evolution(self) -> None:
+        """
+        Plot on/off ratio evolution over time for devices with multiple measurements.
+        
+        Tracks how the on/off ratio changes across multiple measurement cycles,
+        showing device stability, degradation, or improvement trends.
+        """
+        try:
+            # Load device tracking data to get measurement history
+            device_evolution_data = []
+            
+            if not os.path.exists(self.tracking_dir):
+                print("[PLOT] No tracking directory found for on/off ratio evolution")
+                return
+            
+            tracking_files = [f for f in os.listdir(self.tracking_dir) if f.endswith('_history.json')]
+            
+            for file in tracking_files:
+                try:
+                    file_path = os.path.join(self.tracking_dir, file)
+                    with open(file_path, 'r') as f:
+                        history_data = json.load(f)
+                    
+                    device_id = history_data.get('device_id', file.replace('_history.json', ''))
+                    measurements = history_data.get('measurements', [])
+                    
+                    # Filter by code_name if specified
+                    if self.code_name_filter:
+                        # Check if any measurement matches code_name
+                        matching_measurements = []
+                        for m in measurements:
+                            # Try to find code_name in measurement metadata
+                            # This is a simplified check - adjust based on actual data structure
+                            matching_measurements.append(m)
+                        if not matching_measurements:
+                            continue
+                        measurements = matching_measurements
+                    
+                    if len(measurements) < 2:
+                        continue  # Need at least 2 measurements
+                    
+                    # Extract on/off ratios and cycle numbers
+                    ratios = []
+                    cycle_nums = []
+                    timestamps = []
+                    
+                    for idx, m in enumerate(measurements, 1):
+                        resistance = m.get('resistance', {})
+                        on_off_ratio = resistance.get('on_off_ratio')
+                        
+                        if on_off_ratio is not None and on_off_ratio > 0:
+                            ratios.append(float(on_off_ratio))
+                            cycle_nums.append(idx)
+                            # Try to get timestamp
+                            timestamp = m.get('timestamp', '')
+                            timestamps.append(timestamp)
+                    
+                    if len(ratios) >= 2:
+                        device_evolution_data.append({
+                            'device_id': device_id,
+                            'ratios': ratios,
+                            'cycle_nums': cycle_nums,
+                            'timestamps': timestamps
+                        })
+                
+                except Exception as e:
+                    continue
+            
+            if not device_evolution_data:
+                print("[PLOT] No multi-measurement data for on/off ratio evolution")
+                return
+            
+            # Create plot
+            fig, ax = plt.subplots(figsize=(14, 8))
+            
+            devices_plotted = 0
+            for dev_data in device_evolution_data:
+                ratios = dev_data['ratios']
+                cycle_nums = dev_data['cycle_nums']
+                device_id = dev_data['device_id']
+                
+                # Determine trend
+                if len(ratios) > 1:
+                    improvement = ratios[-1] - ratios[0]
+                    relative_change = improvement / ratios[0] if ratios[0] > 0 else 0
+                    
+                    if relative_change > 0.2:  # 20% improvement
+                        color = 'green'
+                        label_suffix = ' (Improving)'
+                    elif relative_change < -0.2:  # 20% degradation
+                        color = 'red'
+                        label_suffix = ' (Degrading)'
+                    else:
+                        color = 'blue'
+                        label_suffix = ' (Stable)'
+                else:
+                    color = 'gray'
+                    label_suffix = ''
+                
+                ax.plot(cycle_nums, ratios, 'o-', color=color, alpha=0.6,
+                       linewidth=1.5, markersize=4, label=f"{device_id}{label_suffix}")
+                devices_plotted += 1
+            
+            if devices_plotted == 0:
+                print("[PLOT] No valid data for on/off ratio evolution")
+                return
+            
+            ax.set_xlabel('Measurement Number', fontsize=12, fontweight='bold')
+            ax.set_ylabel('On/Off Ratio', fontsize=12, fontweight='bold')
+            ax.set_title(f'On/Off Ratio Evolution Over Time - {self.sample_name}',
+                        fontsize=14, fontweight='bold')
+            ax.set_yscale('log')  # Log scale for ratio
+            ax.grid(True, alpha=0.3, which='both')
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8, ncol=2)
+            
+            plt.tight_layout()
+            output_file = os.path.join(self.plots_dir, '26_onoff_ratio_evolution.png')
+            plt.savefig(output_file, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"[PLOT] Saved: 26_onoff_ratio_evolution.png")
+            
+        except Exception as e:
+            print(f"[PLOT ERROR] On/off ratio evolution failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
     def _export_spatial_gradient_data(self, sections=None, metrics=None) -> None:
         """Export spatial gradient data."""
         if sections is None:
@@ -4055,6 +4311,8 @@ Sample: {self.sample_name}
         with open(readme_file, 'w', encoding='utf-8') as f:
             f.write(readme.strip())
         print(f"[ORIGIN] Created: README_ORIGIN_IMPORT.txt")
+
+
 
 
 

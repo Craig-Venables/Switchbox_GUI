@@ -74,6 +74,21 @@ def _manual_endurance_worker(gui: Any) -> None:
                     # Schedule on main GUI thread
                     gui.master.after(0, lambda: gui.plot_panels.update_endurance_plot(gui.endurance_ratios))
         
+        # Get read pulse width and inter cycle delay from GUI if available
+        read_pulse_ms = getattr(gui, 'end_read_pulse_ms', None)
+        if read_pulse_ms is not None and hasattr(read_pulse_ms, 'get'):
+            read_pulse_width_s = max(0.002, read_pulse_ms.get() / 1000.0)
+        else:
+            read_pulse_width_s = 0.002  # Default fallback
+        
+        inter_cycle_delay_s_var = getattr(gui, 'end_inter_cycle_delay_s', None)
+        if inter_cycle_delay_s_var is not None and hasattr(inter_cycle_delay_s_var, 'get'):
+            inter_cycle_delay_s = max(0.0, inter_cycle_delay_s_var.get())
+        else:
+            inter_cycle_delay_s = 0.0  # Default fallback
+        
+        print(f"Endurance (background_worker): inter_cycle_delay_s={inter_cycle_delay_s}, read_pulse_width_s={read_pulse_width_s}")
+        
         # Use unified API if available
         if hasattr(gui.keithley, 'do_endurance_measurement'):
             # Define on_point callback to track ON/OFF ratios incrementally
@@ -102,12 +117,13 @@ def _manual_endurance_worker(gui: Any) -> None:
                 pulse_width_s=float(width_s),
                 num_cycles=int(cycles),
                 read_voltage=float(read_v),
-                inter_cycle_delay_s=0.0,
+                inter_cycle_delay_s=inter_cycle_delay_s,
                 icc=float(icc),
                 psu=None,
                 optical=None,
                 should_stop=lambda: getattr(gui, "stop_measurement_flag", False),
                 on_point=_on_point,
+                read_pulse_width_s=read_pulse_width_s,
             )
             
             # Extract ON/OFF ratios from measurements (fallback if on_point didn't work)
@@ -241,18 +257,26 @@ def _manual_retention_worker(gui: Any) -> None:
                 # Schedule plot update on main thread
                 _schedule_plot_update()
             
+            # Get read pulse width from GUI if available
+            read_pulse_ms = getattr(gui, 'ret_read_pulse_ms', None)
+            if read_pulse_ms is not None and hasattr(read_pulse_ms, 'get'):
+                read_pulse_width_s = max(0.1, read_pulse_ms.get() / 1000.0)
+            else:
+                read_pulse_width_s = 0.1  # Default 100ms fallback
+            
             # Run retention measurement using unified API
             v_arr, c_arr, t_arr = gui.keithley.do_retention_measurement(
                 set_voltage=float(set_v),
                 set_time_s=float(set_ms),
                 read_voltage=float(read_v),
-                num_reads=int(num_reads),
-                read_delay_s=float(read_delay_s),
+                repeat_delay_s=float(read_delay_s),
+                number=int(num_reads),
                 icc=float(icc),
                 psu=None,
                 optical=None,
                 should_stop=lambda: getattr(gui, "stop_measurement_flag", False),
                 on_point=_on_point,
+                read_pulse_width_s=read_pulse_width_s,
             )
             
             # Final plot update (ensure we have all data)

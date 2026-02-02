@@ -1,6 +1,6 @@
 {
   "quick_test": {
-    "custom_sweep_name": "",
+    "custom_sweep_name": "Standard test V2-(2.8v)",
     "timeout_s": 300
   },
   "thresholds": {
@@ -13,10 +13,10 @@
   "include_memcapacitive": true,
   "tests": {
     "basic_memristive": {
-      "custom_sweep_name": ""
+      "custom_sweep_name": "Endurance_Combined_1.5V"
     },
     "high_quality": {
-      "custom_sweep_name": ""
+      "custom_sweep_name": "Simple_test_2.5v)"
     }
   },
   "final_test": {

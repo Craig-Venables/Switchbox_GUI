@@ -371,7 +371,9 @@ class SampleGUI:
             font=("Segoe UI", 9, "bold"),
             fg="#888888",
             relief=tk.SUNKEN,
-            padx=10
+            padx=10,
+            width=15,  # Limit width to prevent expansion
+            anchor="w"  # Left-align text so start of name is visible
         )
         self.device_name_label.pack(side="left", padx=(0, 10))
         
@@ -381,7 +383,7 @@ class SampleGUI:
         self.section_dropdown = ttk.Combobox(
             control_bar,
             textvariable=self.section_var,
-            width=10,
+            width=4,  # Reduced from 10 to 4 for max 3 characters
             state="readonly"
         )
         self.section_dropdown.pack(side="left", padx=(0, 10))
@@ -393,7 +395,7 @@ class SampleGUI:
         self.device_dropdown = ttk.Combobox(
             control_bar,
             textvariable=self.device_var,
-            width=10,
+            width=4,  # Reduced from 10 to 4 for max 3 characters
             state="readonly"
         )
         self.device_dropdown.pack(side="left", padx=(0, 20))

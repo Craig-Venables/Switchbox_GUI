@@ -2575,7 +2575,7 @@ class TSPTestingGUI(tk.Toplevel):
         # Refresh canvas for real-time updates
         self.canvas.draw()
         
-        # Use log scale only if all values are positive, otherwise use linear or symlog
+        # Use log scale only if all values are positive, otherwise use symlog or linear
         if valid_resistances:
             min_r = min(valid_resistances)
             max_r = max(valid_resistances)
@@ -2583,10 +2583,11 @@ class TSPTestingGUI(tk.Toplevel):
                 # All positive - use log scale
                 self.ax.set_yscale('log')
             elif max_r < 0:
-                # All negative - use log scale on absolute values
-                self.ax.set_yscale('log')
+                # All negative - use symlog to handle negative values properly
+                # symlog can handle negative values with a linear threshold near zero
+                self.ax.set_yscale('symlog', linthresh=abs(max_r) * 1e-3 if abs(max_r) > 0 else 1e-6)
             else:
-                # Mixed positive/negative - use symlog (symmetrical log) or linear
+                # Mixed positive/negative - use symlog (symmetrical log)
                 self.ax.set_yscale('symlog', linthresh=1e-6)
     
     def _plot_range_finder(self):

@@ -68,12 +68,12 @@ class OscilloscopePulseLayout:
         left_panel = ttk.Frame(content_frame, padding=3)
         left_panel.grid(row=0, column=0, sticky="nsew")
         
-        self._build_connection_frame(left_panel)
-        self._build_scope_frame(left_panel)
-        self._build_pulse_frame(left_panel)
-        self._build_measurement_frame(left_panel)
-        self._build_calculator_frame(left_panel)
-        self._build_save_options_frame(left_panel)
+        self._build_collapsible_connection_frame(left_panel)
+        self._build_collapsible_scope_frame(left_panel)
+        self._build_collapsible_pulse_frame(left_panel)
+        self._build_collapsible_measurement_frame(left_panel)
+        self._build_collapsible_calculator_frame(left_panel)
+        self._build_collapsible_save_options_frame(left_panel)
         self._build_action_buttons(left_panel)
         self._build_status_bar(left_panel)
 
@@ -273,11 +273,73 @@ class OscilloscopePulseLayout:
         tk.Label(scrollable_frame, text=resistor_txt, justify="left", bg="#f0f0f0", font=("Consolas", 9)).pack(**pad)
 
 
-    def _build_connection_frame(self, parent):
-        """Build connection settings frame"""
-        frame = ttk.Labelframe(parent, text="Connections", padding=5)
-        frame.pack(fill="x", pady=2)
+    def _create_collapsible_frame(self, parent, title, build_content_func, default_expanded=True):
+        """Helper to create a collapsible frame with expand/collapse button"""
+        # Container frame
+        container = ttk.Frame(parent)
+        container.pack(fill="x", pady=2)
         
+        # Create a variable to track expansion state
+        var_name = f"{title.lower().replace(' ', '_').replace('1️⃣', '').replace('📐', '').replace('💾', '').strip()}_expanded"
+        self.vars[var_name] = tk.BooleanVar(value=default_expanded)
+        
+        # Header with expand/collapse button
+        header_frame = ttk.Frame(container)
+        header_frame.pack(fill="x")
+        
+        # Store title for button text updates
+        container._title = title
+        
+        # Expand/collapse button
+        expand_btn = ttk.Button(header_frame, text=f"▼ {title}" if default_expanded else f"▶ {title}",
+                               command=lambda: self._toggle_collapsible_frame(container, expand_btn, var_name, build_content_func),
+                               style="Small.TButton")
+        expand_btn.pack(side="left")
+        container._expand_btn = expand_btn
+        
+        # Content frame (initially shown or hidden based on default_expanded)
+        content_frame = ttk.Labelframe(container, text=title, padding=5)
+        self.widgets[f"{title.lower().replace(' ', '_').replace('1️⃣', '').replace('📐', '').replace('💾', '').strip()}_content"] = content_frame
+        container._content_frame = content_frame
+        
+        if default_expanded:
+            content_frame.pack(fill="x", pady=(2, 0))
+            build_content_func(content_frame)
+            content_frame._content_built = True
+        else:
+            # Store the build function to call when expanded
+            content_frame._build_func = build_content_func
+        
+        return container
+    
+    def _toggle_collapsible_frame(self, container, button, var_name, build_content_func):
+        """Toggle collapsible frame expand/collapse"""
+        content_frame = container._content_frame
+        title = container._title
+        
+        expanded = self.vars[var_name].get()
+        
+        if expanded:
+            # Collapse
+            content_frame.pack_forget()
+            button.config(text=f"▶ {title}")
+            self.vars[var_name].set(False)
+        else:
+            # Expand - build content if not already built
+            if not hasattr(content_frame, '_content_built'):
+                build_content_func(content_frame)
+                content_frame._content_built = True
+            
+            content_frame.pack(fill="x", pady=(2, 0))
+            button.config(text=f"▼ {title}")
+            self.vars[var_name].set(True)
+    
+    def _build_collapsible_connection_frame(self, parent):
+        """Build collapsible connection settings frame"""
+        self._create_collapsible_frame(parent, "Connections", self._build_connection_content, default_expanded=True)
+    
+    def _build_connection_content(self, frame):
+        """Build connection settings content"""
         # SMU Address
         smu_frame = ttk.Frame(frame)
         smu_frame.pack(fill="x", pady=2)
@@ -321,11 +383,12 @@ class OscilloscopePulseLayout:
         smu_status_label.pack(side="left", padx=10)
         self.widgets['smu_status_label'] = smu_status_label
 
-    def _build_pulse_frame(self, parent):
-        """Build pulse parameters frame"""
-        frame = ttk.Labelframe(parent, text="Pulse Parameters", padding=5)
-        frame.pack(fill="x", pady=2)
-        
+    def _build_collapsible_pulse_frame(self, parent):
+        """Build collapsible pulse parameters frame"""
+        self._create_collapsible_frame(parent, "Pulse Parameters", self._build_pulse_content, default_expanded=True)
+    
+    def _build_pulse_content(self, frame):
+        """Build pulse parameters content"""
         self._add_param(frame, "Pulse Voltage (V):", "pulse_voltage", "1.0", 
                        ToolTipText="Amplitude of the pulse")
         self._add_param(frame, "Pulse Duration (s):", "pulse_duration", "0.001",
@@ -337,11 +400,12 @@ class OscilloscopePulseLayout:
         self._add_param(frame, "Post-Bias Time (s):", "post_bias_time", "1.0",
                        ToolTipText="Time at bias voltage after the pulse")
 
-    def _build_scope_frame(self, parent):
-        """Build oscilloscope settings frame - simplified for manual setup"""
-        frame = ttk.Labelframe(parent, text="1️⃣ Oscilloscope Setup (Manual)", padding=5)
-        frame.pack(fill="x", pady=2)
-        
+    def _build_collapsible_scope_frame(self, parent):
+        """Build collapsible oscilloscope settings frame"""
+        self._create_collapsible_frame(parent, "1️⃣ Oscilloscope Setup (Manual)", self._build_scope_content, default_expanded=True)
+    
+    def _build_scope_content(self, frame):
+        """Build oscilloscope settings content"""
         # Instructions
         instructions = (
             "Set up your oscilloscope MANUALLY:\n"
@@ -359,21 +423,24 @@ class OscilloscopePulseLayout:
                        options=["CH1", "CH2", "CH3", "CH4"],
                        ToolTipText="Which channel to read from")
 
-    def _build_measurement_frame(self, parent):
-        """Build measurement settings frame"""
-        frame = ttk.Labelframe(parent, text="Analysis Parameters (Critical!)", padding=10)
-        frame.pack(fill="x", pady=5)
-        
+    def _build_collapsible_measurement_frame(self, parent):
+        """Build collapsible measurement settings frame"""
+        self._create_collapsible_frame(parent, "Analysis Parameters (Critical!)", self._build_measurement_content, default_expanded=True)
+    
+    def _build_measurement_content(self, frame):
+        """Build measurement settings content"""
         tk.Label(frame, text="⚠️ R_shunt must match your actual resistor for correct current calculation!", 
                 bg="#f0f0f0", fg="#d32f2f", font=("Segoe UI", 8, "bold")).pack(fill="x", pady=(0, 5))
         
         self._add_param(frame, "R_shunt (Ω):", "r_shunt", "100000",
                        ToolTipText="Actual value of your shunt resistor - measure with DMM if unsure!")
     
-    def _build_calculator_frame(self, parent):
-        """Build shunt resistor calculator frame"""
-        frame = ttk.Labelframe(parent, text="📐 Shunt Resistor Calculator", padding=5)
-        frame.pack(fill="x", pady=2)
+    def _build_collapsible_calculator_frame(self, parent):
+        """Build collapsible shunt resistor calculator frame"""
+        self._create_collapsible_frame(parent, "📐 Shunt Resistor Calculator", self._build_calculator_content, default_expanded=False)
+    
+    def _build_calculator_content(self, frame):
+        """Build shunt resistor calculator content"""
         
         # Input row
         input_row = ttk.Frame(frame)
@@ -926,11 +993,12 @@ class OscilloscopePulseLayout:
         self.alignment_applied = False
         self.set_status("Alignment reset to original")
     
-    def _build_save_options_frame(self, parent):
-        """Build save options frame"""
-        frame = ttk.Labelframe(parent, text="💾 Save Options", padding=5)
-        frame.pack(fill="x", pady=2)
-        
+    def _build_collapsible_save_options_frame(self, parent):
+        """Build collapsible save options frame"""
+        self._create_collapsible_frame(parent, "💾 Save Options", self._build_save_options_content, default_expanded=False)
+    
+    def _build_save_options_content(self, frame):
+        """Build save options content"""
         # Auto-save checkbox
         self.vars['auto_save'] = tk.BooleanVar(value=self.config.get("auto_save", True))
         auto_save_check = ttk.Checkbutton(

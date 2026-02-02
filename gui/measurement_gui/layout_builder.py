@@ -689,6 +689,7 @@ class MeasurementGUILayoutBuilder:
         # Build collapsible sections in LEFT panel (add to scrollable_frame)
         self._build_mode_selection_modern(left_panel)
         self._build_sweep_parameters_collapsible(left_panel)
+        self._build_pulse_parameters_collapsible(left_panel)
         self._build_sequential_controls_collapsible(left_panel)
         self._build_custom_measurement_quick_select(left_panel)
         self._build_conditional_testing_quick_select(left_panel)
@@ -919,6 +920,44 @@ class MeasurementGUILayoutBuilder:
         
         self.widgets["sweep_parameters_collapsible"] = container
     
+    def _build_pulse_parameters_collapsible(self, parent: tk.Misc) -> None:
+        """Pulse parameters in a collapsible frame"""
+        gui = self.gui
+        
+        container = tk.Frame(parent, bg=self.COLOR_BG)
+        container.pack(fill='x', padx=5, pady=5)
+        
+        # Header with consistent theme
+        header_frame = tk.Frame(container, bg='#e3f2fd', relief='raised', borderwidth=1, cursor='hand2')
+        header_frame.pack(fill='x')
+        
+        is_expanded = tk.BooleanVar(value=False)  # Collapsed by default
+        arrow_label = tk.Label(header_frame, text="►", bg='#e3f2fd', font=self.FONT_HEADING, fg='#1976d2')
+        arrow_label.pack(side='left', padx=8)
+        
+        tk.Label(header_frame, text="⚡ Pulse Parameters", font=self.FONT_HEADING, bg='#e3f2fd', fg='#1565c0').pack(side='left', pady=8)
+        
+        # Content
+        content_frame = tk.Frame(container, bg=self.COLOR_BG, relief='solid', borderwidth=1, padx=10, pady=10)
+        
+        def toggle_collapse():
+            if is_expanded.get():
+                content_frame.pack_forget()
+                arrow_label.config(text="►")
+                is_expanded.set(False)
+            else:
+                content_frame.pack(fill='x')
+                arrow_label.config(text="▼")
+                is_expanded.set(True)
+        
+        header_frame.bind("<Button-1>", lambda e: toggle_collapse())
+        arrow_label.bind("<Button-1>", lambda e: toggle_collapse())
+        
+        # Build pulse parameters content
+        self._populate_pulse_parameters_controls(content_frame)
+        
+        self.widgets["pulse_parameters_collapsible"] = container
+    
     def _build_sequential_controls_collapsible(self, parent: tk.Misc) -> None:
         """Sequential measurements in a collapsible frame"""
         gui = self.gui
@@ -1043,6 +1082,176 @@ class MeasurementGUILayoutBuilder:
             command=self.callbacks.get("stop_sequential_measurement")
         )
         stop_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
+        
+        parent.columnconfigure(1, weight=1)
+    
+    def _populate_pulse_parameters_controls(self, parent: tk.Frame) -> None:
+        """Populate pulse parameters controls"""
+        gui = self.gui
+        
+        # Configure grid
+        parent.columnconfigure(1, weight=1)
+        
+        # Single Pulse Section
+        single_pulse_label = tk.Label(parent, text="Single Pulse", font=("Segoe UI", 10, "bold"), bg=self.COLOR_BG)
+        single_pulse_label.grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 5))
+        
+        # Voltage
+        tk.Label(parent, text="Voltage (V):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=1, column=0, sticky='w', pady=2)
+        gui.pulse_single_voltage = tk.DoubleVar(value=5.0)
+        tk.Entry(parent, textvariable=gui.pulse_single_voltage, font=self.FONT_MAIN, width=18).grid(row=1, column=1, sticky='w', pady=2)
+        
+        # Pulse Time
+        tk.Label(parent, text="Pulse Time (s):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=2, column=0, sticky='w', pady=2)
+        gui.pulse_single_time = tk.DoubleVar(value=1.0)
+        tk.Entry(parent, textvariable=gui.pulse_single_time, font=self.FONT_MAIN, width=18).grid(row=2, column=1, sticky='w', pady=2)
+        
+        # Read Voltage
+        tk.Label(parent, text="Read Voltage (V):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=3, column=0, sticky='w', pady=2)
+        gui.pulse_single_read_voltage = tk.DoubleVar(value=0.1)
+        tk.Entry(parent, textvariable=gui.pulse_single_read_voltage, font=self.FONT_MAIN, width=18).grid(row=3, column=1, sticky='w', pady=2)
+        
+        # Current Limit
+        tk.Label(parent, text="Current Limit (A):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=4, column=0, sticky='w', pady=2)
+        gui.pulse_single_icc = tk.DoubleVar(value=1e-3)
+        tk.Entry(parent, textvariable=gui.pulse_single_icc, font=self.FONT_MAIN, width=18).grid(row=4, column=1, sticky='w', pady=2)
+        
+        # Button frame for two buttons
+        btn_frame = tk.Frame(parent, bg=self.COLOR_BG)
+        btn_frame.grid(row=5, column=0, columnspan=2, sticky='ew', pady=5)
+        btn_frame.columnconfigure(0, weight=1)
+        btn_frame.columnconfigure(1, weight=1)
+        
+        # Single Pulse Button
+        single_pulse_btn = tk.Button(
+            btn_frame,
+            text="Send Single Pulse",
+            font=("Segoe UI", 9, "bold"),
+            bg='#2196F3',
+            fg='white',
+            activebackground='#1976D2',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=5,
+            command=self.callbacks.get("run_single_pulse")
+        )
+        single_pulse_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
+        
+        # Read Pulse Button
+        read_pulse_btn = tk.Button(
+            btn_frame,
+            text="Send Read Pulse",
+            font=("Segoe UI", 9, "bold"),
+            bg='#4CAF50',
+            fg='white',
+            activebackground='#388e3c',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=5,
+            command=self.callbacks.get("run_read_pulse")
+        )
+        read_pulse_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
+        
+        # Result display
+        gui.pulse_single_result = tk.StringVar(value="")
+        result_label = tk.Label(parent, textvariable=gui.pulse_single_result, font=self.FONT_MAIN, bg=self.COLOR_BG, fg='#1976D2')
+        result_label.grid(row=6, column=0, columnspan=2, sticky='w', pady=2)
+        
+        # Separator
+        separator = tk.Frame(parent, height=2, bg='#cccccc')
+        separator.grid(row=7, column=0, columnspan=2, sticky='ew', pady=10)
+        
+        # Forming Section
+        forming_label = tk.Label(parent, text="Memristor Forming", font=("Segoe UI", 10, "bold"), bg=self.COLOR_BG)
+        forming_label.grid(row=8, column=0, columnspan=2, sticky='w', pady=(0, 5))
+        
+        # Start Voltage
+        tk.Label(parent, text="Start Voltage (V):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=9, column=0, sticky='w', pady=2)
+        gui.forming_start_voltage = tk.DoubleVar(value=5.0)
+        tk.Entry(parent, textvariable=gui.forming_start_voltage, font=self.FONT_MAIN, width=18).grid(row=9, column=1, sticky='w', pady=2)
+        
+        # Start Time
+        tk.Label(parent, text="Start Time (s):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=10, column=0, sticky='w', pady=2)
+        gui.forming_start_time = tk.DoubleVar(value=1.0)
+        tk.Entry(parent, textvariable=gui.forming_start_time, font=self.FONT_MAIN, width=18).grid(row=10, column=1, sticky='w', pady=2)
+        
+        # Pulses per Step
+        tk.Label(parent, text="Pulses per Step:", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=11, column=0, sticky='w', pady=2)
+        gui.forming_pulses_per_step = tk.IntVar(value=10)
+        tk.Entry(parent, textvariable=gui.forming_pulses_per_step, font=self.FONT_MAIN, width=18).grid(row=11, column=1, sticky='w', pady=2)
+        
+        # Time Increment
+        tk.Label(parent, text="Time Increment (s):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=12, column=0, sticky='w', pady=2)
+        gui.forming_time_increment = tk.DoubleVar(value=1.0)
+        tk.Entry(parent, textvariable=gui.forming_time_increment, font=self.FONT_MAIN, width=18).grid(row=12, column=1, sticky='w', pady=2)
+        
+        # Max Time
+        tk.Label(parent, text="Max Time (s):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=13, column=0, sticky='w', pady=2)
+        gui.forming_max_time = tk.DoubleVar(value=10.0)
+        tk.Entry(parent, textvariable=gui.forming_max_time, font=self.FONT_MAIN, width=18).grid(row=13, column=1, sticky='w', pady=2)
+        
+        # Max Voltage
+        tk.Label(parent, text="Max Voltage (V):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=14, column=0, sticky='w', pady=2)
+        gui.forming_max_voltage = tk.DoubleVar(value=10.0)
+        tk.Entry(parent, textvariable=gui.forming_max_voltage, font=self.FONT_MAIN, width=18).grid(row=14, column=1, sticky='w', pady=2)
+        
+        # Current Limit
+        tk.Label(parent, text="Current Limit (A):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=15, column=0, sticky='w', pady=2)
+        gui.forming_current_limit = tk.DoubleVar(value=1e-3)
+        tk.Entry(parent, textvariable=gui.forming_current_limit, font=self.FONT_MAIN, width=18).grid(row=15, column=1, sticky='w', pady=2)
+        
+        # Target Current
+        tk.Label(parent, text="Target Current (A):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=16, column=0, sticky='w', pady=2)
+        gui.forming_target_current = tk.DoubleVar(value=1e-4)
+        tk.Entry(parent, textvariable=gui.forming_target_current, font=self.FONT_MAIN, width=18).grid(row=16, column=1, sticky='w', pady=2)
+        
+        # Read Voltage
+        tk.Label(parent, text="Read Voltage (V):", font=self.FONT_MAIN, bg=self.COLOR_BG).grid(row=17, column=0, sticky='w', pady=2)
+        gui.forming_read_voltage = tk.DoubleVar(value=0.1)
+        tk.Entry(parent, textvariable=gui.forming_read_voltage, font=self.FONT_MAIN, width=18).grid(row=17, column=1, sticky='w', pady=2)
+        
+        # Forming Buttons
+        forming_btn_frame = tk.Frame(parent, bg=self.COLOR_BG)
+        forming_btn_frame.grid(row=18, column=0, columnspan=2, sticky='ew', pady=5)
+        forming_btn_frame.columnconfigure(0, weight=1)
+        forming_btn_frame.columnconfigure(1, weight=1)
+        
+        start_forming_btn = tk.Button(
+            forming_btn_frame,
+            text="Start Forming",
+            font=("Segoe UI", 9, "bold"),
+            bg='#4CAF50',
+            fg='white',
+            activebackground='#388e3c',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=5,
+            command=self.callbacks.get("start_forming_measurement")
+        )
+        start_forming_btn.grid(row=0, column=0, sticky='ew', padx=(0, 3))
+        
+        stop_forming_btn = tk.Button(
+            forming_btn_frame,
+            text="Stop",
+            font=("Segoe UI", 9, "bold"),
+            bg='#f44336',
+            fg='white',
+            activebackground='#d32f2f',
+            activeforeground='white',
+            relief='raised',
+            cursor='hand2',
+            pady=5,
+            command=self.callbacks.get("stop_forming_measurement")
+        )
+        stop_forming_btn.grid(row=0, column=1, sticky='ew', padx=(3, 0))
+        
+        # Status display
+        gui.forming_status = tk.StringVar(value="")
+        status_label = tk.Label(parent, textvariable=gui.forming_status, font=self.FONT_MAIN, bg=self.COLOR_BG, fg='#1976D2', wraplength=300)
+        status_label.grid(row=19, column=0, columnspan=2, sticky='w', pady=5)
         
         parent.columnconfigure(1, weight=1)
     
@@ -2520,11 +2729,14 @@ class MeasurementGUILayoutBuilder:
         device_combo = ttk.Combobox(
             selector_frame,
             textvariable=gui.stats_device_var,
-            width=30,
+            width=50,  # Increased width to show full device names
             state="readonly"
         )
         device_combo.pack(side=tk.LEFT, padx=5)
         device_combo.bind('<<ComboboxSelected>>', lambda e: gui.update_stats_display())
+        
+        # Store reference for later access
+        gui.stats_device_combo = device_combo
         
         refresh_btn = tk.Button(
             selector_frame,
@@ -2586,7 +2798,7 @@ class MeasurementGUILayoutBuilder:
         
         # Store references
         self.widgets["stats_tab"] = tab
-        gui.stats_device_combo = device_combo
+        # Note: stats_device_combo is already stored earlier in the function
         
         # Initial load
         try:
@@ -4607,10 +4819,10 @@ Output location: {sample_dir}/sample_analysis/
         tk.Entry(end_frame, textvariable=gui.end_reset_v, width=8).grid(row=2, column=1, sticky="w")
 
         tk.Label(end_frame, text="Pulse (ms)").grid(row=3, column=0, sticky="w")
-        end_pulse_default = getattr(gui, "end_pulse_ms", 10)
+        end_pulse_default = getattr(gui, "end_pulse_ms", 1000)
         if hasattr(end_pulse_default, "get"):
             end_pulse_default = end_pulse_default.get()
-        gui.end_pulse_ms = tk.DoubleVar(value=end_pulse_default or 10)
+        gui.end_pulse_ms = tk.DoubleVar(value=end_pulse_default or 1000)
         tk.Entry(end_frame, textvariable=gui.end_pulse_ms, width=8).grid(row=3, column=1, sticky="w")
 
         tk.Label(end_frame, text="Cycles").grid(row=4, column=0, sticky="w")
@@ -4627,13 +4839,29 @@ Output location: {sample_dir}/sample_analysis/
         gui.end_read_v = tk.DoubleVar(value=end_read_default or 0.2)
         tk.Entry(end_frame, textvariable=gui.end_read_v, width=8).grid(row=5, column=1, sticky="w")
 
+        # Read pulse width (ms)
+        tk.Label(end_frame, text="Read Pulse (ms)").grid(row=6, column=0, sticky="w")
+        end_read_pulse_default = getattr(gui, "end_read_pulse_ms", 100.0)
+        if hasattr(end_read_pulse_default, "get"):
+            end_read_pulse_default = end_read_pulse_default.get()
+        gui.end_read_pulse_ms = tk.DoubleVar(value=end_read_pulse_default or 100.0)
+        tk.Entry(end_frame, textvariable=gui.end_read_pulse_ms, width=8).grid(row=6, column=1, sticky="w")
+
+        # Inter cycle delay (s)
+        tk.Label(end_frame, text="Cycle Delay (s)").grid(row=7, column=0, sticky="w")
+        end_inter_cycle_default = getattr(gui, "end_inter_cycle_delay_s", 0.0)
+        if hasattr(end_inter_cycle_default, "get"):
+            end_inter_cycle_default = end_inter_cycle_default.get()
+        gui.end_inter_cycle_delay_s = tk.DoubleVar(value=end_inter_cycle_default or 0.0)
+        tk.Entry(end_frame, textvariable=gui.end_inter_cycle_delay_s, width=8).grid(row=7, column=1, sticky="w")
+
         start_endurance_cb = self.callbacks.get("start_manual_endurance") or getattr(gui, "start_manual_endurance", None)
         tk.Button(
             end_frame,
             text="Start Endurance",
             command=start_endurance_cb,
             state=tk.NORMAL if start_endurance_cb else tk.DISABLED,
-        ).grid(row=6, column=0, columnspan=2, pady=(4, 0), sticky="w")
+        ).grid(row=8, column=0, columnspan=2, pady=(4, 0), sticky="w")
 
         tk.Label(ret_frame, text="Retention").grid(row=0, column=0, columnspan=2, sticky="w")
         tk.Label(ret_frame, text="SET V").grid(row=1, column=0, sticky="w")
@@ -4657,19 +4885,26 @@ Output location: {sample_dir}/sample_analysis/
         gui.ret_read_v = tk.DoubleVar(value=ret_read_default or 0.2)
         tk.Entry(ret_frame, textvariable=gui.ret_read_v, width=8).grid(row=3, column=1, sticky="w")
 
-        tk.Label(ret_frame, text="Every (s)").grid(row=4, column=0, sticky="w")
+        tk.Label(ret_frame, text="Read Pulse (ms)").grid(row=4, column=0, sticky="w")
+        ret_read_pulse_default = getattr(gui, "ret_read_pulse_ms", 100.0)
+        if hasattr(ret_read_pulse_default, "get"):
+            ret_read_pulse_default = ret_read_pulse_default.get()
+        gui.ret_read_pulse_ms = tk.DoubleVar(value=ret_read_pulse_default or 100.0)
+        tk.Entry(ret_frame, textvariable=gui.ret_read_pulse_ms, width=8).grid(row=4, column=1, sticky="w")
+
+        tk.Label(ret_frame, text="# Reads").grid(row=5, column=0, sticky="w")
+        ret_number_reads_default = getattr(gui, "ret_number_reads", 30)
+        if hasattr(ret_number_reads_default, "get"):
+            ret_number_reads_default = ret_number_reads_default.get()
+        gui.ret_number_reads = tk.IntVar(value=ret_number_reads_default or 30)
+        tk.Entry(ret_frame, textvariable=gui.ret_number_reads, width=8).grid(row=5, column=1, sticky="w")
+
+        tk.Label(ret_frame, text="Delay (s)").grid(row=6, column=0, sticky="w")
         ret_every_default = getattr(gui, "ret_every_s", 10.0)
         if hasattr(ret_every_default, "get"):
             ret_every_default = ret_every_default.get()
         gui.ret_every_s = tk.DoubleVar(value=ret_every_default or 10.0)
-        tk.Entry(ret_frame, textvariable=gui.ret_every_s, width=8).grid(row=4, column=1, sticky="w")
-
-        tk.Label(ret_frame, text="# Points").grid(row=5, column=0, sticky="w")
-        ret_points_default = getattr(gui, "ret_points", 30)
-        if hasattr(ret_points_default, "get"):
-            ret_points_default = ret_points_default.get()
-        gui.ret_points = tk.IntVar(value=ret_points_default or 30)
-        tk.Entry(ret_frame, textvariable=gui.ret_points, width=8).grid(row=5, column=1, sticky="w")
+        tk.Entry(ret_frame, textvariable=gui.ret_every_s, width=8).grid(row=6, column=1, sticky="w")
 
         ret_estimate_default = getattr(gui, "ret_estimate_var", "Total: ~300 s")
         if hasattr(ret_estimate_default, "get"):
