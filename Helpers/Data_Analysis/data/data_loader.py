@@ -108,13 +108,24 @@ class DataLoader:
         device.raw_data_files = raw_files
         
         # Load measurements from raw files
+        loaded_count = 0
+        failed_count = 0
         for raw_file in raw_files[:10]:  # Limit to first 10 files to avoid overload
             try:
                 measurement = DataLoader.load_measurement_from_txt(raw_file)
                 if measurement:
                     device.measurements.append(measurement)
+                    loaded_count += 1
+                else:
+                    failed_count += 1
+                    logger.debug(f"Failed to load measurement {raw_file.name}: No valid data")
             except Exception as e:
-                logger.debug(f"Error loading measurement {raw_file.name}: {e}")
+                failed_count += 1
+                logger.warning(f"Error loading measurement {raw_file.name}: {e}")
+        
+        if failed_count > 0:
+            logger.info(f"Device {device_id}: Loaded {loaded_count} measurements, "
+                       f"{failed_count} failed (check logs for details)")
         
         # Load research JSON files
         research_files = DataDiscovery.find_research_files(device_path)
@@ -237,50 +248,76 @@ class DataLoader:
             return {}
     
     @staticmethod
-    def load_raw_measurement(txt_path: Path) -> Tuple[np.ndarray, np.ndarray]:
+    def load_raw_measurement(txt_path: Path) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """
-        Parse raw measurement TXT file to extract voltage and current arrays.
+        Parse raw measurement TXT file to extract voltage, current, and optionally time arrays.
         
         Handles multiple formats:
         - Tab-delimited or space-delimited
         - With or without headers
-        - 2 columns (voltage, current) or 3+ columns (time, voltage, current)
+        - 2 columns (voltage, current) or 3+ columns (voltage, current, time)
+        
+        The standard format is: Voltage Current [Time]
+        This matches the format used throughout the codebase.
         
         Args:
             txt_path: Path to measurement TXT file
             
         Returns:
-            Tuple of (voltage_array, current_array)
+            Tuple of (voltage_array, current_array, time_array_or_None)
         """
         try:
-            # Try to load data with skiprows=1 to handle header
+            # Try to detect header and column order
+            header_line = None
             try:
-                data = np.loadtxt(txt_path, skiprows=1)
+                with open(txt_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    first_line = f.readline().strip()
+                    # Check if first line looks like a header
+                    if any(keyword in first_line.lower() for keyword in ['voltage', 'current', 'time', 'v', 'i', 't']):
+                        header_line = first_line
+                        skip_rows = 1
+                    else:
+                        skip_rows = 0
+            except Exception:
+                skip_rows = 0
+            
+            # Try to load data
+            try:
+                data = np.loadtxt(txt_path, skiprows=skip_rows)
             except (ValueError, IndexError):
                 # If that fails, try without skipping
-                data = np.loadtxt(txt_path, skiprows=0)
+                try:
+                    data = np.loadtxt(txt_path, skiprows=0)
+                except Exception:
+                    logger.warning(f"Could not parse {txt_path.name} as numeric data")
+                    return np.array([]), np.array([]), None
             
             # Handle different column formats
             if data.ndim == 1:
                 # Single column - not useful for I-V
                 logger.debug(f"Single column data in {txt_path.name}")
-                return np.array([]), np.array([])
+                return np.array([]), np.array([]), None
             
-            if data.shape[1] == 2:
+            num_cols = data.shape[1]
+            
+            if num_cols == 2:
                 # Two columns: voltage, current
                 voltage = data[:, 0]
                 current = data[:, 1]
-            elif data.shape[1] >= 3:
-                # Three+ columns: likely time, voltage, current
-                voltage = data[:, 1]
-                current = data[:, 2]
+                time = None
+            elif num_cols >= 3:
+                # Three+ columns: voltage, current, time (standard format)
+                # Based on codebase analysis, format is: Voltage Current Time
+                voltage = data[:, 0]
+                current = data[:, 1]
+                time = data[:, 2] if num_cols >= 3 else None
             else:
-                logger.debug(f"Unexpected column count in {txt_path.name}: {data.shape[1]}")
-                return np.array([]), np.array([])
+                logger.debug(f"Unexpected column count in {txt_path.name}: {num_cols}")
+                return np.array([]), np.array([]), None
             
             # Validate data
             if len(voltage) == 0 or len(current) == 0:
-                return np.array([]), np.array([])
+                return np.array([]), np.array([]), None
             
             # Check for invalid values
             if not np.all(np.isfinite(voltage)) or not np.all(np.isfinite(current)):
@@ -288,13 +325,49 @@ class DataLoader:
                 valid_mask = np.isfinite(voltage) & np.isfinite(current)
                 voltage = voltage[valid_mask]
                 current = current[valid_mask]
+                if time is not None:
+                    time = time[valid_mask]
             
-            logger.debug(f"Successfully loaded {len(voltage)} points from {txt_path.name}")
-            return voltage, current
+            # Additional validation: check if data makes sense
+            # Voltage should typically be in reasonable range (e.g., -10V to +10V for memristors)
+            # Current should be in reasonable range (e.g., 1e-12 to 1e-3 A)
+            if len(voltage) > 0:
+                v_range = np.max(voltage) - np.min(voltage)
+                v_max = np.max(np.abs(voltage))
+                i_max = np.max(np.abs(current))
+                i_min = np.min(np.abs(current[np.abs(current) > 0])) if np.any(current != 0) else 0
+                i_range = i_max - i_min if i_min > 0 else i_max
+                
+                # Warn if data looks suspicious
+                warnings = []
+                if v_range < 1e-6:
+                    warnings.append(f"Very small voltage range: {v_range:.2e} V")
+                if v_max > 100:
+                    warnings.append(f"Unusually high voltage: {v_max:.2f} V")
+                if i_range < 1e-15 and i_max > 0:
+                    warnings.append(f"Very small current range: {i_range:.2e} A")
+                if i_max > 1:
+                    warnings.append(f"Unusually high current: {i_max:.2e} A")
+                
+                if warnings:
+                    logger.warning(f"Data validation warnings for {txt_path.name}: {'; '.join(warnings)}")
             
+            logger.debug(f"Successfully loaded {len(voltage)} points from {txt_path.name} "
+                        f"(V: {np.min(voltage):.3f} to {np.max(voltage):.3f} V, "
+                        f"I: {np.min(current):.2e} to {np.max(current):.2e} A)")
+            return voltage, current, time
+            
+        except UnicodeDecodeError as e:
+            logger.error(f"Encoding error loading {txt_path.name}: {e}. "
+                        f"File may not be a text file or has unsupported encoding.")
+            return np.array([]), np.array([]), None
+        except ValueError as e:
+            logger.error(f"Data format error in {txt_path.name}: {e}. "
+                        f"File may have inconsistent column counts or non-numeric data.")
+            return np.array([]), np.array([]), None
         except Exception as e:
-            logger.warning(f"Error loading raw measurement {txt_path.name}: {e}")
-            return np.array([]), np.array([])
+            logger.error(f"Unexpected error loading raw measurement {txt_path.name}: {type(e).__name__}: {e}")
+            return np.array([]), np.array([]), None
     
     @staticmethod
     def load_measurement_from_txt(txt_path: Path) -> Optional[MeasurementData]:
@@ -307,7 +380,7 @@ class DataLoader:
         Returns:
             MeasurementData object or None if loading fails
         """
-        voltage, current = DataLoader.load_raw_measurement(txt_path)
+        voltage, current, time = DataLoader.load_raw_measurement(txt_path)
         
         if len(voltage) == 0 or len(current) == 0:
             return None
@@ -328,6 +401,7 @@ class DataLoader:
             measurement_type=meas_type,
             voltage=voltage.tolist(),
             current=current.tolist(),
+            time=time.tolist() if time is not None else None,
             cycles=1  # TODO: detect cycles
         )
         

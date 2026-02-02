@@ -64,6 +64,9 @@ class DeviceListPanelWidget(QWidget):
         self.list_widget.setAlternatingRowColors(True)
         self.list_widget.itemClicked.connect(self._on_item_clicked)
         self.list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+        
+        # Enable keyboard navigation
+        self.list_widget.setFocusPolicy(Qt.StrongFocus)
         self.list_widget.setStyleSheet("""
             QListWidget {
                 border: 1px solid #ccc;
@@ -178,6 +181,24 @@ class DeviceListPanelWidget(QWidget):
         if device:
             logger.debug(f"Device double-clicked: {device.device_id}")
             self.device_double_clicked.emit(device)
+    
+    def keyPressEvent(self, event):
+        """
+        Handle key press events for quick navigation.
+        
+        Args:
+            event: Key event
+        """
+        # Handle Enter key to select current item
+        if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+            current_item = self.list_widget.currentItem()
+            if current_item:
+                self._on_item_clicked(current_item)
+            event.accept()
+            return
+        
+        # Let QListWidget handle other keys (arrow keys, page up/down, etc.)
+        super().keyPressEvent(event)
     
     def select_device(self, device_id: str):
         """

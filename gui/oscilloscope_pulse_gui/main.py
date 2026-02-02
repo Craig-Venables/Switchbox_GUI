@@ -175,53 +175,153 @@ class OscilloscopePulseGUI(tk.Toplevel):
             self.system_configs = {}
             return ["No systems available"]
     
+    def _resolve_default_save_root(self) -> Path:
+        """
+        Determine the default base directory for measurement data.
+        
+        Preference order:
+        1. OneDrive commercial root (environment-provided) → Documents → Data_folder
+        2. Explicit %USERPROFILE%/OneDrive - The University of Nottingham/Documents/Data_folder
+        3. Local %USERPROFILE%/Documents/Data_folder
+        
+        The folder is created on demand. If none of the OneDrive locations
+        exist, the method falls back to the local Documents directory.
+        """
+        home = Path.home()
+        candidates = []
+        
+        for env_key in ("OneDriveCommercial", "OneDrive"):
+            env_path = os.environ.get(env_key)
+            if env_path:
+                root = Path(env_path)
+                candidates.append(root / "Documents")
+        
+        candidates.append(home / "OneDrive - The University of Nottingham" / "Documents")
+        candidates.append(home / "Documents")
+        
+        for documents_path in candidates:
+            try:
+                root_exists = documents_path.parent.exists()
+                if not root_exists:
+                    continue
+                documents_path.mkdir(parents=True, exist_ok=True)
+                target = documents_path / "Data_folder"
+                target.mkdir(parents=True, exist_ok=True)
+                return target
+            except Exception:
+                continue
+        
+        fallback = home / "Documents" / "Data_folder"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+    
+    def _get_base_save_path(self) -> str:
+        """Get base save path (from provider if available, otherwise default root)."""
+        try:
+            if self.provider and hasattr(self.provider, '_get_base_save_path'):
+                return self.provider._get_base_save_path()
+        except:
+            pass
+        return str(self._resolve_default_save_root())
+    
+    def _extract_device_letter_and_number(self, device_label: str):
+        """
+        Extract device letter and number from device label.
+        Handles formats like "B9", "device_19", "B_9", etc.
+        """
+        if not device_label or device_label == "Stand-alone":
+            return "X", "0"
+        
+        # PRIORITY 1: Try to get from provider if available (matches measurement GUI logic)
+        # This is the most reliable source - directly from measurement GUI
+        if self.provider and hasattr(self.provider, 'final_device_letter') and hasattr(self.provider, 'final_device_number'):
+            letter = getattr(self.provider, 'final_device_letter', 'X')
+            number = str(getattr(self.provider, 'final_device_number', '0'))
+            if letter and number and letter != "X" and number != "0":
+                return letter, number
+        
+        # PRIORITY 2: Try device_section_and_number from provider (e.g., "B9")
+        if self.provider and hasattr(self.provider, 'device_section_and_number'):
+            device_section = str(self.provider.device_section_and_number)
+            if device_section and device_section != "Stand-alone":
+                # Extract letter and number from device_section_and_number (same logic as measurement GUI _update_device_identifiers)
+                letter = "".join(ch for ch in device_section if ch.isalpha()) or "X"
+                number = "".join(ch for ch in device_section if ch.isdigit()) or "0"
+                if letter and number and letter != "X" and number != "0":
+                    return letter, number
+        
+        # PRIORITY 3: Extract letter and number from device_label (fallback)
+        letter = "".join(ch for ch in str(device_label) if ch.isalpha()) or "X"
+        number = "".join(ch for ch in str(device_label) if ch.isdigit()) or "0"
+        
+        return letter, number
+    
+    def _get_sample_name(self) -> str:
+        """Get sample name from provider or context, matching measurement GUI logic."""
+        # Try to get from provider first (measurement GUI) - prioritize sample_name_var
+        if self.provider and hasattr(self.provider, 'sample_name_var'):
+            try:
+                sample_name = self.provider.sample_name_var.get().strip()
+                if sample_name:
+                    return sample_name
+            except:
+                pass
+        
+        # Try provider's sample_gui.current_device_name (this is the device name like "D108-0.1mgml-ITO-PMMA 2.0(2%)-Gold-s5")
+        if self.provider and hasattr(self.provider, 'sample_gui'):
+            if hasattr(self.provider.sample_gui, 'current_device_name') and self.provider.sample_gui.current_device_name:
+                sample_name = self.provider.sample_gui.current_device_name
+                if sample_name and sample_name != "Unknown":
+                    return sample_name
+        
+        # Fall back to context
+        sample_name = self.context.get('sample_name', 'Test')
+        if sample_name and sample_name != "Unknown" and sample_name != "Test":
+            return sample_name
+        
+        return "Test"
+    
     def _populate_context_defaults(self):
         """Ensure context has necessary keys, auto-discovering if standalone."""
-        if 'device_label' not in self.context: self.context['device_label'] = "Stand-alone"
-        if 'sample_name' not in self.context: self.context['sample_name'] = "Test"
+        # Get device_label - prioritize provider, then context
+        if 'device_label' not in self.context or self.context.get('device_label') == "Stand-alone": 
+            # Try to get from provider first (most reliable)
+            if self.provider and hasattr(self.provider, 'device_section_and_number'):
+                self.context['device_label'] = self.provider.device_section_and_number
+            elif self.provider and hasattr(self.provider, 'current_device'):
+                self.context['device_label'] = self.provider.current_device
+            else:
+                self.context['device_label'] = self.context.get('device_label', "Stand-alone")
+        
+        # Get sample name using proper method
+        sample_name = self._get_sample_name()
+        self.context['sample_name'] = sample_name
         
         # Calculate structured save directory (like IV sweep)
         try:
-            sample_name = self.context.get('sample_name', 'Test')
             device_label = self.context.get('device_label', 'Stand-alone')
             
-            base_path = None
-            try:
-                if self.provider and hasattr(self.provider, '_get_base_save_path'):
-                    base_path = self.provider._get_base_save_path()
-            except:
-                pass
+            # Get base path using same method as main measurement GUI
+            base_path_str = self._get_base_save_path()
+            base_path = Path(base_path_str)  # Convert to Path object
             
-            try:
-                from Measurments.data_formats import FileNamer
-                namer = FileNamer(base_dir=base_path)
-                structured_dir = namer.get_device_folder(
-                    sample_name=sample_name,
-                    device=device_label,
-                    subfolder="osillascope_test"
-                )
-                self.context['save_directory'] = str(structured_dir)
-            except ImportError:
-                # Fallback to simple structure
-                # Extract letter and number from device label
-                if len(device_label) >= 2:
-                    letter = device_label[0]
-                    number = device_label[1:]
-                else:
-                    letter = "X"
-                    number = "0"
-                
-                if base_path:
-                    structured_dir = Path(base_path) / sample_name / letter / number / "osillascope_test"
-                else:
-                    structured_dir = Path.home() / "Documents" / "PulseData" / sample_name / letter / number / "osillascope_test"
-                self.context['save_directory'] = str(structured_dir)
+            # Extract letter and number properly
+            letter, number = self._extract_device_letter_and_number(device_label)
+            
+            # Build path with sample_name included: {base}/{sample}/{letter}/{number}/osillascope_test
+            structured_dir = base_path / sample_name / letter / number / "osillascope_test"
+            self.context['save_directory'] = str(structured_dir)
             
             os.makedirs(self.context['save_directory'], exist_ok=True)
             
+            # Update top bar display if layout is already created
+            if hasattr(self, 'layout') and 'save_dir' in self.layout.vars:
+                self.layout.vars['save_dir'].set(str(structured_dir))
+            
         except Exception as e:
             # Ultimate fallback
-            self.context['save_directory'] = str(Path.home() / "Documents" / "PulseData")
+            default_root = self._resolve_default_save_root()
+            self.context['save_directory'] = str(default_root / "PulseData")
             os.makedirs(self.context['save_directory'], exist_ok=True)
             
         # Load systems from JSON file (same method as measurement GUI)
@@ -440,56 +540,33 @@ class OscilloscopePulseGUI(tk.Toplevel):
         t, v, i, meta = self.last_data
         
         try:
-            # Get sample name and device label from context
-            sample_name = self.context.get('sample_name', 'UnknownSample')
-            device_label = self.context.get('device_label', 'UnknownDevice')
+            # Get sample name and device label using proper methods
+            sample_name = self._get_sample_name()
+            device_label = self.context.get('device_label', 'Stand-alone')
             
-            # Try to get base save path from context or use FileNamer
-            base_path = None
-            try:
-                # Check if context has a provider with _get_base_save_path
-                if hasattr(self, 'provider') and self.provider:
-                    base_path = self.provider._get_base_save_path()
-            except:
-                pass
+            # Get base save path using same method as main measurement GUI
+            base_path_str = self._get_base_save_path()
+            base_path = Path(base_path_str)  # Convert to Path object
             
-            # Use FileNamer for structured saving (matches IV sweep structure)
+            # Extract letter and number properly
+            letter, number = self._extract_device_letter_and_number(device_label)
+            
+            # Build path with sample_name included: {base}/{sample}/{letter}/{number}/osillascope_test
+            save_dir = base_path / sample_name / letter / number / "osillascope_test"
+            save_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Get next index for sequential numbering
             try:
                 from Measurments.data_formats import FileNamer
                 namer = FileNamer(base_dir=base_path)
-                
-                # Get device folder with subfolder for oscilloscope pulse measurements
-                # Structure: {base}/{sample}/{letter}/{number}/osillascope_test/
-                # Note: using "osillascope_test" to match existing folder naming
-                save_dir = namer.get_device_folder(
-                    sample_name=sample_name,
-                    device=device_label,
-                    subfolder="osillascope_test"
-                )
-                save_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Get next index for sequential numbering
                 index = namer.get_next_index(save_dir)
-                
             except ImportError:
-                # Fallback: use simple structure if FileNamer not available
-                # Extract letter and number from device label (e.g., "A1" -> "A", "1")
-                if len(device_label) >= 2:
-                    letter = device_label[0]
-                    number = device_label[1:]
-                else:
-                    letter = "X"
-                    number = "0"
-                
-                if base_path:
-                    save_dir = Path(base_path) / sample_name / letter / number / "osillascope_test"
-                else:
-                    save_dir = Path(self.context.get('save_directory', Path.home() / "Documents" / "PulseData"))
-                save_dir.mkdir(parents=True, exist_ok=True)
-                
                 # Simple index: count existing files
                 existing_files = list(save_dir.glob("*.txt"))
                 index = len(existing_files) + 1
+            
+            # Print save location to console
+            print(f"[AUTO-SAVE] Saving to: {save_dir}")
             
             # Create filename with timestamp and index
             import datetime
@@ -508,8 +585,16 @@ class OscilloscopePulseGUI(tk.Toplevel):
             fname = f"{index}-{abs(pulse_voltage):.2f}v-{pulse_duration:.3f}s-{ts}.txt"
             save_path = save_dir / fname
             
+            # Save data file
             self._write_file(str(save_path), t, v, i, meta)
-            self.layout.set_status(f"Auto-saved: {save_path.name}")
+            
+            # Save voltage plot alongside data file (with error handling)
+            try:
+                self._save_voltage_plot(str(save_path), t, v, i, meta)
+                self.layout.set_status(f"Auto-saved: {save_path.name} (+ plot)")
+            except Exception as plot_error:
+                print(f"Warning: Could not save voltage plot: {plot_error}")
+                self.layout.set_status(f"Auto-saved: {save_path.name} (plot failed)")
             
             # Store save path for potential overwrite after alignment
             self.last_save_path = str(save_path)
@@ -517,6 +602,11 @@ class OscilloscopePulseGUI(tk.Toplevel):
             # Update save directory display
             if 'save_dir_display' in self.layout.vars:
                 self.layout.vars['save_dir_display'].set(str(save_dir))
+            
+            # Update context save_directory for display and top bar
+            self.context['save_directory'] = str(save_dir)
+            if 'save_dir' in self.layout.vars:
+                self.layout.vars['save_dir'].set(str(save_dir))
             
         except Exception as e:
             print(f"Auto-save failed: {e}")
@@ -546,37 +636,18 @@ class OscilloscopePulseGUI(tk.Toplevel):
         # Normal save dialog
         try:
             # Get structured save directory (same as auto-save)
-            sample_name = self.context.get('sample_name', 'UnknownSample')
-            device_label = self.context.get('device_label', 'UnknownDevice')
+            sample_name = self._get_sample_name()
+            device_label = self.context.get('device_label', 'Stand-alone')
             
-            base_path = None
-            try:
-                if hasattr(self, 'provider') and self.provider:
-                    base_path = self.provider._get_base_save_path()
-            except:
-                pass
+            # Get base save path using same method as main measurement GUI
+            base_path_str = self._get_base_save_path()
+            base_path = Path(base_path_str)  # Convert to Path object
             
-            try:
-                from Measurments.data_formats import FileNamer
-                namer = FileNamer(base_dir=base_path)
-                initial_dir = namer.get_device_folder(
-                    sample_name=sample_name,
-                    device=device_label,
-                    subfolder="osillascope_test"
-                )
-            except ImportError:
-                # Extract letter and number from device label
-                if len(device_label) >= 2:
-                    letter = device_label[0]
-                    number = device_label[1:]
-                else:
-                    letter = "X"
-                    number = "0"
-                
-                if base_path:
-                    initial_dir = Path(base_path) / sample_name / letter / number / "osillascope_test"
-                else:
-                    initial_dir = Path(self.context.get('save_directory', Path.home() / "Documents" / "PulseData"))
+            # Extract letter and number properly
+            letter, number = self._extract_device_letter_and_number(device_label)
+            
+            # Build path with sample_name included: {base}/{sample}/{letter}/{number}/osillascope_test
+            initial_dir = base_path / sample_name / letter / number / "osillascope_test"
             
             initial_dir.mkdir(parents=True, exist_ok=True)
             
@@ -759,9 +830,97 @@ class OscilloscopePulseGUI(tk.Toplevel):
                         power_memristor=p_memristor,
                         metadata=meta)
             
-            messagebox.showinfo("Success", f"Saved to {os.path.basename(filename)}")
+            # Save voltage plot alongside data file (only for .txt files to match auto-save behavior)
+            plot_saved = False
+            if filename.endswith('.txt'):
+                try:
+                    self._save_voltage_plot(filename, t, v, i, meta)
+                    plot_saved = True
+                except Exception as plot_error:
+                    print(f"Warning: Could not save voltage plot: {plot_error}")
+            
+            success_msg = f"Saved to {os.path.basename(filename)}"
+            if plot_saved:
+                success_msg += " (+ plot)"
+            messagebox.showinfo("Success", success_msg)
         except Exception as e:
             messagebox.showerror("Save Error", str(e))
+    
+    def _save_voltage_plot(self, data_filename, t, v, i, meta):
+        """
+        Create and save a simple voltage vs time plot alongside the data file.
+        
+        Args:
+            data_filename: Path to the data file (e.g., "path/to/data.txt")
+            t: Time array
+            v: Voltage array (shunt voltage)
+            i: Current array
+            meta: Metadata dictionary
+        """
+        try:
+            import matplotlib
+            matplotlib.use('Agg')  # Use non-interactive backend for saving
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Create figure
+            fig, ax = plt.subplots(figsize=(10, 6), dpi=150)
+            
+            # Normalize time to start at 0 (if not already)
+            if t is not None and len(t) > 0:
+                t_plot = (t - t[0]) / 1000.0 if np.max(t) > 100 else t  # Convert ms to s if needed
+            else:
+                return
+            
+            # Plot voltage over time
+            ax.plot(t_plot, v, 'b-', linewidth=1.5, label='Shunt Voltage')
+            
+            # Add pulse region shading if available
+            pulse_start_time = meta.get('pulse_start_time', 0.0)
+            pulse_duration = meta.get('pulse_duration', 0.001)
+            
+            if 'params' in meta:
+                params = meta['params']
+                pulse_start_time = float(params.get('pre_pulse_delay', pulse_start_time))
+                pulse_duration = float(params.get('pulse_duration', pulse_duration))
+            
+            pulse_end_time = pulse_start_time + pulse_duration
+            if pulse_start_time < np.max(t_plot) and pulse_end_time > np.min(t_plot):
+                ax.axvspan(pulse_start_time, pulse_end_time, alpha=0.2, color='orange', label='Pulse Region')
+            
+            # Formatting
+            ax.set_xlabel('Time (s)', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Voltage (V)', fontsize=12, fontweight='bold')
+            ax.set_title('Voltage vs Time', fontsize=14, fontweight='bold')
+            ax.grid(True, alpha=0.3, linestyle='--')
+            ax.legend(loc='best', fontsize=10)
+            
+            # Add metadata text box
+            device_label = self.context.get('device_label', 'Unknown')
+            sample_name = self.context.get('sample_name', 'Unknown')
+            pulse_voltage = meta.get('pulse_voltage', 0.0)
+            if 'params' in meta:
+                pulse_voltage = float(meta['params'].get('pulse_voltage', pulse_voltage))
+            
+            info_text = f"Device: {device_label}\nSample: {sample_name}\nPulse: {abs(pulse_voltage):.2f}V, {pulse_duration*1000:.1f}ms"
+            ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
+                   fontsize=9, verticalalignment='top', 
+                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+            # Generate plot filename (same as data file but with .png extension)
+            plot_filename = Path(data_filename).with_suffix('.png')
+            
+            # Save plot
+            plt.tight_layout()
+            plt.savefig(plot_filename, dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close(fig)  # Close to free memory
+            
+            print(f"[PLOT] Saved voltage plot to: {plot_filename}")
+            
+        except Exception as e:
+            print(f"Warning: Could not save voltage plot: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _browse_save_path(self):
         path = filedialog.askdirectory()

@@ -115,6 +115,19 @@
       "initialize": true,
       "log_messages": true,
       "enable_debug_output": true
+    },
+    "testa": {
+      "pulse_voltage": 3.0,
+      "pulse_duration": 4.0,
+      "read_voltage": 0.5,
+      "read_duration": 0.02,
+      "num_reads": 10,
+      "delay_between_reads": 1.0,
+      "i_range": 0.0001,
+      "i_compliance": 0.0,
+      "initialize": true,
+      "log_messages": false,
+      "enable_debug_output": false
     }
   },
   "\u26a0\ufe0f SMU Endurance": {
@@ -132,6 +145,18 @@
       "initialize": true,
       "log_messages": true,
       "enable_debug_output": true
+    }
+  },
+  "Pulse-Multi-Read": {
+    "simple": {
+      "pulse_voltage": -3.0,
+      "pulse_width": 1000.0,
+      "num_pulses": 1,
+      "delay_between_pulses": 1.0,
+      "read_voltage": 0.5,
+      "num_reads": 50,
+      "delay_between_reads": 1000.0,
+      "clim": 0.0001
     }
   }
 }

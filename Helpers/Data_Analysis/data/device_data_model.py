@@ -75,6 +75,7 @@ class MeasurementData:
         timestamp: Measurement timestamp
         voltage: Voltage data array
         current: Current data array
+        time: Time data array (optional)
         cycles: Number of measurement cycles
         analysis_results: Dict containing analysis results from sweep_analyzer
     """
@@ -83,6 +84,7 @@ class MeasurementData:
     timestamp: Optional[str] = None
     voltage: Optional[List[float]] = None
     current: Optional[List[float]] = None
+    time: Optional[List[float]] = None
     cycles: int = 1
     analysis_results: Dict[str, Any] = field(default_factory=dict)
 

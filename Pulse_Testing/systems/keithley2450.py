@@ -161,6 +161,19 @@ class Keithley2450System(BaseMeasurementSystem):
         """Pattern: Initial Read → Gradual SET → Gradual RESET"""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
+        
+        # Filter out unsupported parameters or map them to supported ones
+        # delay_between_cycles is not directly supported by the TSP script
+        # Map delay_between_cycles to delay_between if delay_between is not already set
+        # The GUI converts time params to seconds for 2450, so delay_between_cycles is already in seconds
+        if 'delay_between_cycles' in params:
+            if 'delay_between' not in params:
+                # Use delay_between_cycles as delay_between (already in seconds from GUI)
+                params['delay_between'] = params.pop('delay_between_cycles')
+            else:
+                # If both are provided, remove delay_between_cycles (delay_between takes precedence)
+                params.pop('delay_between_cycles')
+        
         return self.test_scripts.potentiation_depression_cycle(**params)
     
     def potentiation_only(self, **params) -> Dict[str, Any]:
