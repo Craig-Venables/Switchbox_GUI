@@ -40,7 +40,7 @@ Dependencies:
 - Equipment.SMU_AND_PMU.Keithley2450_TSP: 2450 TSP interface
 - Equipment.SMU_AND_PMU.keithley2450_tsp_scripts: 2450 test scripts
 - Equipment.SMU_AND_PMU.keithley4200_kxci_scripts: 4200A KXCI scripts
-- Measurments.data_formats: Data formatting and saving
+- Measurements.data_formats: Data formatting and saving
 
 Relationships:
 -------------
@@ -105,7 +105,7 @@ from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_addre
 from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
 from Pulse_Testing.pulse_pattern_visualizer import PulsePatternVisualizer
 
-from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
+from Measurements.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
 
 
 # Standalone utility function for independent operation
@@ -3372,12 +3372,12 @@ class TSPTestingGUI(tk.Toplevel):
         try:
             # Get the path to the analysis tool
             # TSP_Testing_GUI.py is in the root, so parent is the root directory
-            analysis_script = Path(__file__).parent / "Helpers" / "Data_Analysis_Pulse_2450" / "main.py"
+            analysis_script = Path(__file__).resolve().parents[2] / "tools" / "data_analysis_pulse_2450" / "main.py"
             
             if not analysis_script.exists():
                 messagebox.showerror("Analysis Tool Not Found", 
                     f"Could not find analysis tool at:\n{analysis_script}\n\n"
-                    "Please ensure the Data_Analysis_Pulse_2450 folder exists.")
+                    "Please ensure the tools/data_analysis_pulse_2450 folder exists.")
                 return
             
             # Launch the analysis tool in a separate process

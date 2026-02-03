@@ -34,7 +34,7 @@ if __name__ == "__main__":
     
     # Try to import connection manager for dropdowns if available
     try:
-        from Measurments.connection_manager import InstrumentConnectionManager
+        from Measurements.connection_manager import InstrumentConnectionManager
     except ImportError:
         InstrumentConnectionManager = None
 
@@ -49,7 +49,7 @@ else:
         detect_system_from_address = None
     # In integrated mode, manager usually passed or importable
     try:
-        from Measurments.connection_manager import InstrumentConnectionManager
+        from Measurements.connection_manager import InstrumentConnectionManager
     except ImportError:
         InstrumentConnectionManager = None
 
@@ -557,7 +557,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
             
             # Get next index for sequential numbering
             try:
-                from Measurments.data_formats import FileNamer
+                from Measurements.data_formats import FileNamer
                 namer = FileNamer(base_dir=base_path)
                 index = namer.get_next_index(save_dir)
             except ImportError:

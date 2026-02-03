@@ -105,7 +105,7 @@ Device maps tell the measurement system where each device is located on your sam
 ### Default File Paths
 
 - **Mapping JSON:** `Json_Files/mapping.json`
-- **Sample Images:** `Helpers/Sample_Infomation/`
+- **Sample Images:** `Helpers/Sample_Information/`
 
 ### Mapping File Structure
 

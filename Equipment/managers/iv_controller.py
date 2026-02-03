@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any, TYPE_CHECKING, Tuple, List, Callable, It
 
 # Import SourceMode for type hints
 try:
-    from Measurments.source_modes import SourceMode
+    from Measurements.source_modes import SourceMode
 except ImportError:
     SourceMode = None  # Will be imported when needed
 
@@ -802,7 +802,7 @@ class IVControllerManager:
             >>> if caps.supports_hardware_sweep:
             ...     # Use fast hardware sweep
         """
-        from Measurments.sweep_config import InstrumentCapabilities
+        from Measurements.sweep_config import InstrumentCapabilities
         
         if self.smu_type == 'Keithley 4200A':
             return InstrumentCapabilities(
@@ -884,8 +884,8 @@ class IVControllerManager:
             RuntimeError: If instrument-specific method is unavailable
             ValueError: If configuration violates instrument limits
         """
-        from Measurments.measurement_context import MeasurementContext
-        from Measurments.source_modes import SourceMode
+        from Measurements.measurement_context import MeasurementContext
+        from Measurements.source_modes import SourceMode
         
         context = MeasurementContext(
             led=config.led if hasattr(config, 'led') else False,
@@ -949,8 +949,8 @@ class IVControllerManager:
         Returns:
             Tuple of (voltages, currents, timestamps) arrays
         """
-        from Measurments.measurement_context import MeasurementContext
-        from Measurments.source_modes import SourceMode
+        from Measurements.measurement_context import MeasurementContext
+        from Measurements.source_modes import SourceMode
         
         # Check if LED is enabled (if sequence provided or implicit)
         led_enabled = sequence is not None or False
@@ -1031,8 +1031,8 @@ class IVControllerManager:
         Returns:
             Tuple of (voltages, currents, timestamps) arrays
         """
-        from Measurments.measurement_context import MeasurementContext
-        from Measurments.source_modes import SourceMode
+        from Measurements.measurement_context import MeasurementContext
+        from Measurements.source_modes import SourceMode
         
         context = MeasurementContext(
             led=led,
@@ -1106,8 +1106,8 @@ class IVControllerManager:
         Returns:
             Tuple of (voltages, currents, timestamps) arrays
         """
-        from Measurments.measurement_context import MeasurementContext
-        from Measurments.source_modes import SourceMode
+        from Measurements.measurement_context import MeasurementContext
+        from Measurements.source_modes import SourceMode
         
         context = MeasurementContext(
             led=led,
@@ -1175,8 +1175,8 @@ class IVControllerManager:
         Returns:
             Tuple of (voltages, currents, timestamps) arrays
         """
-        from Measurments.measurement_context import MeasurementContext
-        from Measurments.source_modes import SourceMode
+        from Measurements.measurement_context import MeasurementContext
+        from Measurements.source_modes import SourceMode
         
         context = MeasurementContext(
             led=config.led if hasattr(config, 'led') else False,
@@ -1219,11 +1219,11 @@ class IVControllerManager:
         optical
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point IV sweep for Keithley 2400."""
-        from Measurments.measurement_services_smu import MeasurementService
-        from Measurments.sweep_patterns import build_sweep_values
-        from Measurments.data_utils import normalize_measurement
-        from Measurments.source_modes import SourceMode, apply_source, measure_result
-        from Measurments.optical_controller import OpticalController
+        from Measurements.measurement_services_smu import MeasurementService
+        from Measurements.sweep_patterns import build_sweep_values
+        from Measurements.data_utils import normalize_measurement
+        from Measurements.source_modes import SourceMode, apply_source, measure_result
+        from Measurements.optical_controller import OpticalController
         
         # Build voltage list if not provided
         if config.voltage_list is None:
@@ -1350,8 +1350,8 @@ class IVControllerManager:
         return_to_zero_at_end: bool
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point pulse measurement for Keithley 2400."""
-        from Measurments.data_utils import safe_measure_current
-        from Measurments.optical_controller import OpticalController
+        from Measurements.data_utils import safe_measure_current
+        from Measurements.optical_controller import OpticalController
         
         v_arr: List[float] = []
         c_arr: List[float] = []
@@ -1474,8 +1474,8 @@ class IVControllerManager:
         2. SET pulse: set_voltage (set_time_s) → 0V (minimal delay)
         3. Repeat for 'number' reads: read_voltage (read_pulse_width_s) → measure → 0V (repeat_delay_s)
         """
-        from Measurments.data_utils import safe_measure_current
-        from Measurments.optical_controller import OpticalController
+        from Measurements.data_utils import safe_measure_current
+        from Measurements.optical_controller import OpticalController
         
         v_arr: List[float] = []
         c_arr: List[float] = []
@@ -1576,8 +1576,8 @@ class IVControllerManager:
         read_pulse_width_s: float = 0.1
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point endurance measurement for Keithley 2400."""
-        from Measurments.data_utils import safe_measure_current
-        from Measurments.optical_controller import OpticalController
+        from Measurements.data_utils import safe_measure_current
+        from Measurements.optical_controller import OpticalController
         
         v_arr: List[float] = []
         c_arr: List[float] = []
@@ -1703,7 +1703,7 @@ class IVControllerManager:
     ) -> Tuple[List[float], List[float], List[float]]:
         """Point-by-point pulsed IV sweep for Keithley 2400."""
         # Use the pulse measurement for each voltage point
-        from Measurments.sweep_patterns import build_sweep_values
+        from Measurements.sweep_patterns import build_sweep_values
         
         # Build amplitude list
         if config.voltage_list is None:
@@ -1858,10 +1858,10 @@ class IVControllerManager:
         Uses EX commands via kxci wrapper. Breaks into sub-sweeps for LED/pausing,
         retrieves data via GP commands, and calls on_point callbacks for live plotting.
         """
-        from Measurments.sweep_patterns import build_sweep_values
-        from Measurments.source_modes import SourceMode, apply_source
-        from Measurments.optical_controller import OpticalController
-        from Measurments.data_utils import normalize_measurement
+        from Measurements.sweep_patterns import build_sweep_values
+        from Measurements.source_modes import SourceMode, apply_source
+        from Measurements.optical_controller import OpticalController
+        from Measurements.data_utils import normalize_measurement
         
         # Check if we have the wrapper
         if not isinstance(self.instrument, _Keithley4200A_KXCI_Wrapper):
@@ -2227,8 +2227,8 @@ class IVControllerManager:
         Uses SMU_pulse_measure C module. For multiple pulses with LED sequences,
         loops through pulses with LED control between pulses.
         """
-        from Measurments.data_utils import safe_measure_current, normalize_measurement
-        from Measurments.optical_controller import OpticalController
+        from Measurements.data_utils import safe_measure_current, normalize_measurement
+        from Measurements.optical_controller import OpticalController
         
         # Check if we have the wrapper
         if not isinstance(self.instrument, _Keithley4200A_KXCI_Wrapper):
@@ -2461,7 +2461,7 @@ class IVControllerManager:
         
         Uses pulse measurement for each voltage point in the sweep.
         """
-        from Measurments.sweep_patterns import build_sweep_values
+        from Measurements.sweep_patterns import build_sweep_values
         
         # Build amplitude list
         if config.voltage_list is None:
@@ -2526,10 +2526,10 @@ class IVControllerManager:
         Uses TSP scripts when beneficial, streams output for live plotting.
         Falls back to point-by-point when LED/pausing needed.
         """
-        from Measurments.sweep_patterns import build_sweep_values
-        from Measurments.source_modes import SourceMode, apply_source
-        from Measurments.optical_controller import OpticalController
-        from Measurments.data_utils import normalize_measurement
+        from Measurements.sweep_patterns import build_sweep_values
+        from Measurements.source_modes import SourceMode, apply_source
+        from Measurements.optical_controller import OpticalController
+        from Measurements.data_utils import normalize_measurement
         import pyvisa
         
         # Check if LED sequence or pausing needed - fall back to point-by-point

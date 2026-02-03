@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
-from Measurments.measurement_services_smu import MeasurementService
+from Measurements.measurement_services_smu import MeasurementService
 
 from Equipment.SMU_AND_PMU.keithley2450.tsp_sim_controller import (
     Keithley2450_TSP_Sim,

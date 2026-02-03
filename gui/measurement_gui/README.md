@@ -88,10 +88,10 @@ Batch device testing workflows.
 - `numpy`: Numerical operations
 
 ### Project Dependencies
-- `Measurments.measurement_services_smu`: SMU measurement service
-- `Measurments.measurement_services_pmu`: PMU measurement service
-- `Measurments.connection_manager`: Instrument connection management
-- `Measurments.data_saver`: Data saving utilities
+- `Measurements.measurement_services_smu`: SMU measurement service
+- `Measurements.measurement_services_pmu`: PMU measurement service
+- `Measurements.connection_manager`: Instrument connection management
+- `Measurements.data_saver`: Data saving utilities
 - `Equipment.managers.*`: Hardware managers (IV controller, PSU, temperature)
 - `gui.measurement_gui.layout_builder`: UI layout construction
 - `gui.measurement_gui.plot_panels`: Plotting components
@@ -174,8 +174,8 @@ MeasurementGUI (this module)
     ├─> Launches: TSPTestingGUI (gui.pulse_testing_gui)
     ├─> Launches: CheckConnection (gui.connection_check_gui)
     ├─> Launches: MotorControlWindow (gui.motor_control_gui)
-    ├─> Uses: MeasurementService (Measurments.measurement_services_smu)
-    ├─> Uses: ConnectionManager (Measurments.connection_manager)
+    ├─> Uses: MeasurementService (Measurements.measurement_services_smu)
+    ├─> Uses: ConnectionManager (Measurements.connection_manager)
     └─> Uses: Equipment managers (Equipment.managers.*)
 ```
 

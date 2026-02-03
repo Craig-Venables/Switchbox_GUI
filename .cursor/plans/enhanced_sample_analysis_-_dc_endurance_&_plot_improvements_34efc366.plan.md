@@ -236,7 +236,7 @@ Add SCLC plot generation but keep it commented:
 ```python
 # NOTE: SCLC plots are available but commented out per user request
 # Uncomment when ready to use
-# from Helpers.plotting_core import SCLCFitPlotter
+# from plotting import SCLCFitPlotter
 # 
 # if device_is_memristive:
 #     sclc_plotter = SCLCFitPlotter(save_dir=images_dir)

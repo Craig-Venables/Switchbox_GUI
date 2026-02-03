@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 
-from Measurments.data_saver import MeasurementDataSaver, SummaryPlotData
-from Measurments.single_measurement_runner import find_largest_number_in_folder
+from Measurements.data_saver import MeasurementDataSaver, SummaryPlotData
+from Measurements.single_measurement_runner import find_largest_number_in_folder
 
 
 def test_save_summary_plots_creates_expected_files(tmp_path):

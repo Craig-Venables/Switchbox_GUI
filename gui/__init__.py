@@ -1,13 +1,26 @@
 """
-GUI package
-============
+GUI Package – User Interface Components
+========================================
 
-This package contains GUI modules organized by application:
-- `measurement_gui`: Main measurement interface and components
-- `pulse_testing_gui`: Pulse testing interface
-- `sample_gui`: Device selection and routing interface
+Top-level package for all graphical user interfaces in the Switchbox measurement system.
+Each submodule provides a self-contained GUI application or component.
 
-Each GUI module has its own components and utilities.
+Submodules:
+-----------
+- sample_gui:      Device selection, sample management, and multiplexer routing.
+                  Entry point when launching from main.py.
+
+- measurement_gui: Main IV/PMU/SMU measurement interface. Launched from sample_gui
+                  when the user starts a measurement. Handles instrument connections,
+                  sweep configuration, real-time plotting, and data saving.
+
+- pulse_testing_gui: Pulse testing interface for TSP-based pulse measurements.
+
+- motor_control_gui: XY stage motor control for laser positioning.
+
+- connection_check_gui: Electrical connection verification tool.
+
+- oscilloscope_pulse_gui: Oscilloscope pulse capture and waveform display.
 """
 
 __all__ = [

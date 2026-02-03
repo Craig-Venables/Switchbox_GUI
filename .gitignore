@@ -4,3 +4,6 @@
 # PyInstaller build outputs
 dist/
 build/
+
+# Telegram / messaging secrets (use messaging_data.local.json for real tokens)
+Json_Files/messaging_data.local.json

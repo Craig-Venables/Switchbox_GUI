@@ -3,7 +3,7 @@
 This module ensures that the project root is placed on ``sys.path`` before any
 tests execute.  Running ``pytest`` directly (instead of ``python -m pytest``)
 otherwise omits the repository root, leading to ``ModuleNotFoundError`` for
-project packages such as ``Measurments``.
+project packages such as ``Measurements``.
 """
 
 from __future__ import annotations

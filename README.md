@@ -26,6 +26,7 @@ The application starts with the Sample GUI, where you can select devices and lau
 ```
 Switchbox_GUI/
 ├── main.py                      # Main entry point
+├── TODO.md                      # Tracked feature requests and known issues
 ├── gui/                         # All GUI modules (modular structure)
 │   ├── sample_gui/              # Device selection and sample management
 │   ├── measurement_gui/         # Main measurement interface
@@ -40,7 +41,7 @@ Switchbox_GUI/
 │   │   ├── function_generator.py
 │   │   └── ...
 │   └── SMU_AND_PMU/             # SMU/PMU controllers
-├── Measurments/                 # Measurement services
+├── Measurements/                 # Measurement services
 │   ├── measurement_services_smu.py
 │   ├── measurement_services_pmu.py
 │   ├── connection_manager.py
@@ -55,7 +56,8 @@ Switchbox_GUI/
 │   ├── system_configs.json      # System configurations
 │   ├── mapping.json             # Device mappings
 │   └── ...
-└── Helpers/                     # Helper scripts and tools
+├── Helpers/                     # Helper scripts and tools
+└── archive/                     # Archived legacy code (see archive/README.md)
 ```
 
 ## GUI System
@@ -732,7 +734,7 @@ Waveform-accurate measurements using Keithley 4200A PMU channels.
 ### Key Files
 
 - **Controller**: `Equipment/SMU_AND_PMU/Keithley4200A.py` (`Keithley4200A_PMUDualChannel` low-level helper)
-- **Service**: `Measurments/measurement_services_pmu.py` (`MeasurementServicesPMU` high-level API)
+- **Service**: `Measurements/measurement_services_pmu.py` (`MeasurementServicesPMU` high-level API)
 - **GUI**: `PMU_Testing_GUI.py` (connect PMU + function generator, preview waveforms, run measurement, view results)
 
 ### Available Measurements
@@ -783,7 +785,7 @@ Waveform-accurate measurements using Keithley 4200A PMU channels.
 ```python
 from Equipment.SMU_AND_PMU.Keithley4200A import Keithley4200A_PMUDualChannel
 from Equipment.managers.function_generator import FunctionGeneratorManager
-from Measurments.measurement_services_pmu import MeasurementServicesPMU
+from Measurements.measurement_services_pmu import MeasurementServicesPMU
 
 pmu = Keithley4200A_PMUDualChannel("192.168.0.10:8888|PMU1")
 fg = FunctionGeneratorManager(fg_type="Siglent SDG1032X", address="USB0::...::INSTR", auto_connect=True)
@@ -849,7 +851,7 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
 
 ### Core Services
 
-- **SMU Measurements**: `Measurments/measurement_services_smu.py`
+- **SMU Measurements**: `Measurements/measurement_services_smu.py`
   - DC Triangle IV: `run_iv_sweep(...)`
   - SMU Pulsed IV: `run_pulse_measurement(...)`, `run_pulsed_iv_sweep(...)`
   - SMU Fast Hold: `run_dc_capture(...)`
@@ -857,10 +859,10 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
   - Pulse Width Sweep: `run_pulse_width_sweep(...)`
   - Threshold Search: `run_threshold_search(...)`
 
-- **PMU Measurements**: `Measurments/measurement_services_pmu.py`
+- **PMU Measurements**: `Measurements/measurement_services_pmu.py`
   - Single Laser Pulse: `Single_Laser_Pulse_with_read(...)`
 
-- **Connection Management**: `Measurments/connection_manager.py`
+- **Connection Management**: `Measurements/connection_manager.py`
   - Unified instrument connection management
   - Handles SMU, PSU, temperature controller connections
 
@@ -1010,7 +1012,7 @@ from Equipment.managers.iv_controller import IVControllerManager
 from Equipment.managers.camera import CameraManager
 
 # Import measurement services
-from Measurments.measurement_services_smu import MeasurementService
+from Measurements.measurement_services_smu import MeasurementService
 
 # Import notifications
 from Notifications import TelegramBot
@@ -1041,7 +1043,7 @@ Configuration files are located in `Json_Files/`:
 - **`Custom_Sweeps.json`**: Custom measurement sweep configurations (see Custom Sweeps section above for detailed examples)
 - **`test_configurations.json`**: Analysis and plotting configurations for each code_name (see Custom Sweeps section above for detailed examples)
 - **`classification_weights.json`**: Device classification scoring weights
-- **`messaging_data.json`**: Telegram bot configurations
+- **`messaging_data.json`**: Example Telegram bot config (use **`messaging_data.local.json`** for real tokens; see `Json_Files/MESSAGING_README.md`)
 - **`save_location_config.json`**: Data save location preferences
 
 ## Notes
