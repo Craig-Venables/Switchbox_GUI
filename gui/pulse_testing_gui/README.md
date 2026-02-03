@@ -53,7 +53,7 @@ pulse_gui = TSPTestingGUI(master, device_address=address)
 - `Equipment.SMU_AND_PMU.Keithley2450_TSP`: 2450 TSP interface
 - `Equipment.SMU_AND_PMU.keithley2450_tsp_scripts`: 2450 test scripts
 - `Equipment.SMU_AND_PMU.keithley4200_kxci_scripts`: 4200A KXCI scripts
-- `Measurments.data_formats`: Data formatting and saving
+- `Measurements.data_formats`: Data formatting and saving
 
 ## File Structure
 

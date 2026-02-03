@@ -15,7 +15,7 @@ IVControllerManager (Equipment/managers/iv_controller.py)
     Creates: Keithley4200A_KXCI instance
     Wraps it in: _Keithley4200A_KXCI_Wrapper
     ↓
-Measurement Service (Measurments/measurement_services_smu.py)
+Measurement Service (Measurements/measurement_services_smu.py)
     ↓
     Calls: keithley.do_iv_sweep(config, ...)
     ↓

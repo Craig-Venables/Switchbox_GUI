@@ -207,7 +207,7 @@ The Telegram bot is integrated into:
    - Sends data summary plots
    - Interactive measurement control
 
-3. **Telegram Coordinator** (`Measurments/telegram_coordinator.py`):
+3. **Telegram Coordinator** (`Measurements/telegram_coordinator.py`):
    - Wraps Telegram bot for measurement services
    - Provides convenient notification methods
 

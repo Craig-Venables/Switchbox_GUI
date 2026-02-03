@@ -153,7 +153,7 @@ root.mainloop()
 
 ### Project Dependencies
 - `Equipment.*`: Hardware control modules
-- `Measurments.*`: Measurement services and utilities
+- `Measurements.*`: Measurement services and utilities
 - `Json_Files/`: Configuration and mapping files
 
 ## Architecture Principles

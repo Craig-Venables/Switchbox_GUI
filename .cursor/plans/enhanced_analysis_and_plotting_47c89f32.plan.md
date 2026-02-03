@@ -755,7 +755,7 @@ def run_full_sample_analysis(self) -> None:
         print(f"[SAMPLE ANALYSIS] Starting analysis for: {sample_name}")
         
         # Import analyzer
-        from Helpers.Sample_Analysis.sample_analyzer import SampleAnalysisOrchestrator
+        from analysis.sample_analyzer import SampleAnalysisOrchestrator
         
         # Create orchestrator
         analyzer = SampleAnalysisOrchestrator(sample_dir)
