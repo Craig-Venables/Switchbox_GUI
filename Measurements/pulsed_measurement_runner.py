@@ -98,7 +98,7 @@ class PulsedMeasurementRunner:
                 pass
 
             try:
-                v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
+                v_out, i_out, t_out, _ = self.measurement_service.run_pulsed_iv_sweep(
                     keithley=self.keithley,
                     start_v=start_v,
                     stop_v=stop_v,
@@ -185,7 +185,7 @@ class PulsedMeasurementRunner:
                 pass
 
             try:
-                v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
+                v_out, i_out, t_out, _ = self.measurement_service.run_pulsed_iv_sweep(
                     keithley=self.keithley,
                     start_v=start_v,
                     stop_v=stop_v,
@@ -252,7 +252,7 @@ class PulsedMeasurementRunner:
             except Exception:
                 pass
 
-            v_out, i_out, t_out, dbg = self.measurement_service.run_pulsed_iv_sweep_debug(
+            v_out, i_out, t_out, dbg = self.measurement_service.run_pulsed_iv_sweep(
                 keithley=self.keithley,
                 start_v=start_v,
                 stop_v=stop_v,
@@ -266,6 +266,7 @@ class PulsedMeasurementRunner:
                 should_stop=lambda: getattr(self, "stop_measurement_flag", False),
                 on_point=None,
                 validate_timing=True,
+                collect_debug=True,
             )
 
             try:

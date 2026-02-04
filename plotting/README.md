@@ -1,6 +1,6 @@
 # Plotting – one stop shop for all graphs
 
-All graph generation for the app lives here. Change style in one place: [style.py](style.py). Find any plot: [CATALOG.md](CATALOG.md).
+All graph generation for the app lives here. Change style in one place: [core/style.py](core/style.py). Find any plot: [CATALOG.md](CATALOG.md).
 
 **Entry points:**
 - **Device-level (IV, conduction, SCLC, endurance, retention, forming):** `from plotting import UnifiedPlotter`
@@ -8,7 +8,7 @@ All graph generation for the app lives here. Change style in one place: [style.p
 - **DC endurance:** `from plotting.endurance_plots import plot_current_vs_cycle, plot_endurance_summary`
 - **Global style (dpi, figsize, fonts):** `from plotting import style` then `style.get_dpi()`, `style.get_figsize("heatmap")`, etc.
 
-**Modules:** [unified_plotter.py](unified_plotter.py), [sample_plots.py](sample_plots.py), [endurance_plots.py](endurance_plots.py), [style.py](style.py). Section-level and device-combined plots remain in analysis for now; see CATALOG for the full list and follow-up moves.
+**Package layout:** [core/](core/) (style, base, formatters), [device/](device/) (unified_plotter, iv_grid, conduction, sclc_fit, hdf5_style, device_combined_plots), [sample/](sample/) (sample_plots), [section/](section/) (section_plots), [endurance/](endurance/) (endurance_plots). See CATALOG for the full list.
 
 ## Features
 
@@ -25,20 +25,20 @@ See `INSTALL.md` for detailed installation instructions.
 ### Quick Install
 
 ```bash
-cd plotting_core
+cd plotting
 pip install -e .
 pip install -r requirements.txt
 ```
 
 ### Copy Folder
 
-Simply copy the `plotting_core` folder to your project and add to path:
+Simply copy the `plotting` folder to your project and add to path:
 
 ```python
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path("path/to/plotting_core").parent))
-from plotting_core import UnifiedPlotter
+sys.path.insert(0, str(Path("path/to/plotting").parent))
+from plotting import UnifiedPlotter
 ```
 
 ## Quick Start
@@ -46,7 +46,7 @@ from plotting_core import UnifiedPlotter
 ### Basic Usage - Generate All Plots
 
 ```python
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 import numpy as np
 
 # Initialize plotter with output directory
@@ -78,7 +78,7 @@ results = plotter.plot_all(
 For batch processing, you can plot basic IV for all devices, but only generate expensive analysis for memristive devices:
 
 ```python
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 
 plotter = UnifiedPlotter(save_dir="output/plots")
 
@@ -110,7 +110,7 @@ This approach:
 ### Individual Plot Types
 
 ```python
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 
 plotter = UnifiedPlotter(save_dir="plots")
 
@@ -127,7 +127,7 @@ plotter.plot_sclc_fit(voltage, current, device_name="Device_1")
 ### Advanced Configuration
 
 ```python
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 
 plotter = UnifiedPlotter(
     save_dir="output/plots",
@@ -151,7 +151,7 @@ results = plotter.plot_all(voltage, current, device_name="Device_1")
 ### Using Individual Plotters
 
 ```python
-from plotting_core import IVGridPlotter, ConductionPlotter, SCLCFitPlotter
+from plotting import IVGridPlotter, ConductionPlotter, SCLCFitPlotter
 
 # IV Dashboard
 iv_plotter = IVGridPlotter(save_dir="plots")
@@ -189,7 +189,7 @@ fig, ax = sclc_plotter.plot_sclc_fit(
 ### Interactive Mode (No Saving)
 
 ```python
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 
 plotter = UnifiedPlotter(save_dir=None)  # Don't save, just display
 

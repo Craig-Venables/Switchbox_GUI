@@ -82,9 +82,12 @@ This document tracks outstanding refactoring tasks for the Switchbox GUI project
 
 ### 5. Motor Control GUI
 
-**File:** `gui/motor_control_gui/main.py`
+**File:** `gui/motor_control_gui/main.py` (~1,500 lines after refactor)
 
-- Same approach as pulse testing GUI – extract if it becomes unwieldy.
+- **Completed:** Refactored to match sample_gui/measurement_gui structure:
+  - `config.py` – COLORS, PRESETS_FILE, FG_ADDRESSES, LASER_CONFIGS, defaults
+  - `ui/` – header, controls_panel, jog_controls, goto_controls, motor_settings, presets, scan_controls, fg_controls, laser_controls, canvas_camera, status_bar, widgets (CollapsibleFrame)
+- main.py now delegates UI construction to ui builders; event handlers remain in main.
 
 ---
 

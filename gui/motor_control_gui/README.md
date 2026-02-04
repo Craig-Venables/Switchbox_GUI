@@ -57,9 +57,26 @@ window = MotorControlWindow()
 
 ```
 motor_control_gui/
-├── README.md           # This file
 ├── __init__.py         # Package exports (MotorControlWindow)
-└── main.py             # MotorControlWindow class (~1532 lines)
+├── config.py           # GUI constants, colors, FG/laser configs
+├── main.py             # MotorControlWindow + event handlers (~1,500 lines)
+├── ui/
+│   ├── __init__.py     # UI builder exports
+│   ├── widgets.py      # CollapsibleFrame
+│   ├── header.py       # Header + connect buttons
+│   ├── controls_panel.py # Scrollable left panel
+│   ├── jog_controls.py
+│   ├── goto_controls.py
+│   ├── motor_settings.py
+│   ├── presets.py
+│   ├── scan_controls.py
+│   ├── fg_controls.py
+│   ├── laser_controls.py
+│   ├── canvas_camera.py
+│   └── status_bar.py
+├── README.md
+├── CAMERA_DISPLAY_ISSUES.md
+└── CHANGELOG.md
 ```
 
 ## Main Class

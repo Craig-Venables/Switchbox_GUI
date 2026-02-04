@@ -1,8 +1,23 @@
-"""Measurement services (SMU/PMU)
+"""Measurement services (SMU)
 
 Central engine for constructing voltage ranges and executing common
-measurement routines (IV sweeps, pulsed IV, retention, endurance, and PMU
-helpers). Designed to be UI-agnostic and callable from GUIs or scripts.
+measurement routines (IV sweeps, pulsed IV, retention, endurance).
+Designed to be UI-agnostic and callable from GUIs or scripts.
+
+Implementation map (all implementations in Equipment/managers/iv_controller.py):
+    | Measurement       | 4200A (KXCI)                 | 2450 (TSP)              | 2400 (SPCI)              |
+    |-------------------|------------------------------|-------------------------|--------------------------|
+    | IV sweep          | _do_iv_sweep_4200a           | _do_iv_sweep_2450       | _do_iv_sweep_2400        |
+    | Pulse measurement | _do_pulse_measurement_4200a  | _do_pulse_measurement_2450 | _do_pulse_measurement_2400 |
+    | Pulsed IV sweep   | _do_pulsed_iv_sweep_4200a    | _do_pulsed_iv_sweep_2450   | _do_pulsed_iv_sweep_2400  |
+    | Retention         | _do_retention_measurement_4200a | _do_retention_measurement_2450 | _do_retention_measurement_2400 |
+    | Endurance         | _do_endurance_measurement_4200a | _do_endurance_measurement_2450 | _do_endurance_measurement_2400 |
+
+This module delegates to keithley.do_*() which routes by smu_type.
+
+TODO: Test coverage for TSP, SPCI, KXCI - add tests that run measurement flows
+against each Keithley interface (TSP sim, KXCI, SPCI). Currently no tests
+parameterize over these. Fix later.
 """
 
 import time
@@ -13,102 +28,13 @@ from Measurements.optical_controller import OpticalController
 from Measurements.data_utils import safe_measure_current, safe_measure_voltage, normalize_measurement
 from Measurements.sweep_config import SweepConfig, SweepMethod, InstrumentCapabilities
 from Measurements.sweep_patterns import build_sweep_values, SweepType
+from Measurements.services.smu.limits import SMULimits, VoltageRangeMode
+from Measurements.services.smu.pulse import PulseMeasurementMixin, PulseSessionMixin
+from Measurements.services.smu.voltage import compute_voltage_range as _compute_voltage_range
+from Measurements.source_modes import SourceMode
 
 
-class VoltageRangeMode:
-    FIXED_STEP = "fixed_step"          # Default: use explicit step size
-    FIXED_SWEEP_RATE = "fixed_sweep_rate"  # Placeholder for future
-    FIXED_VOLTAGE_TIME = "fixed_voltage_time"  # Placeholder for future
-
-
-class SMULimits:
-    """Configuration for different SMU types and their timing limits."""
-
-    def __init__(self):
-        self.limits = {
-            "Keithley 2400": {
-                "min_timing_us": 200,
-                "max_update_rate": 2000,
-                "rise_fall_time_us": 50,
-                "min_pulse_width_ms": 1.0,
-                "voltage_range_V": (-200, 200),
-                "current_range_A": (-1, 1),
-                "compliance_resolution": 1e-6,
-                "defaults": {
-                    "read_v": 0.2,
-                    "vbase": 0.2,
-                    "pulse_ms": 1.0,
-                    "triangle": {"vmin": 0.0, "vmax": 1.0, "step": 0.05, "delay_s": 0.05}
-                }
-            },
-            "Keithley 2401": {
-                "min_timing_us": 250,
-                "max_update_rate": 2000,
-                "rise_fall_time_us": 30,
-                "min_pulse_width_ms": 1.0,
-                "voltage_range_V": (-20, 20),
-                "current_range_A": (-1, 1),
-                "compliance_resolution": 1e-6,
-                "defaults": {
-                    "read_v": 0.2,
-                    "vbase": 0.2,
-                    "pulse_ms": 1.0,
-                    "triangle": {"vmin": 0.0, "vmax": 1.0, "step": 0.05, "delay_s": 0.05}
-                }
-            },
-            "Keithley 4200A_smu": {
-                "min_timing_us": 100,
-                "max_update_rate": 5000,
-                "rise_fall_time_us": 20,
-                "min_pulse_width_ms": 0.5,
-                "voltage_range_V": (-210, 210),
-                "current_range_A": (-1, 1),
-                "compliance_resolution": 1e-9,
-                "defaults": {
-                    "read_v": 0.2,
-                    "vbase": 0.2,
-                    "pulse_ms": 0.5,
-                    "triangle": {"vmin": 0.0, "vmax": 1.0, "step": 0.05, "delay_s": 0.02}
-                }
-            },
-            "Keithley 4200A_pmu": {
-                "min_timing_us": 10,
-                "max_update_rate": 10000,
-                "rise_fall_time_us": 0.01,
-                "min_pulse_width_ms": 0.00005,  # 50 µs
-                "voltage_range_V": (-10, 10),
-                "current_range_A": (-0.1, 0.1),  # ±100 mA
-                "compliance_resolution": 1e-6,
-                "bandwidth_MHz": 5
-            },
-            "HP4140B": {
-                "min_timing_ms": 5,
-                "max_update_rate": 20,
-                "voltage_range_V": (-100, 100),
-                "current_range_A": (1e-14, 1e-2),
-                "pulse_capability": None,
-                "integration_modes": ["short", "medium", "long"]
-            }
-        }
-    
-
-    def get_limits(self, smu_type: str) -> dict:
-        """Get timing limits for the specified SMU type."""
-        return self.limits.get(smu_type, self.limits["Keithley 2401"])
-
-    def update_limits(self, smu_type: str, **kwargs):
-        """Update timing limits for a specific SMU type."""
-        if smu_type not in self.limits:
-            self.limits[smu_type] = {}
-        self.limits[smu_type].update(kwargs)
-
-    def get_defaults(self, smu_type: str) -> dict:
-        """Return sensible per-model defaults (read_v, vbase, pulse_ms, triangle)."""
-        lim = self.get_limits(smu_type)
-        return lim.get("defaults", self.limits["Keithley 2401"].get("defaults", {}))
-
-
-class MeasurementService:
+class MeasurementService(PulseSessionMixin, PulseMeasurementMixin):
     """
     Centralized measurement engine for IV, retention, pulse, and endurance flows.For SMU use only not PMU.
 
@@ -127,44 +53,8 @@ class MeasurementService:
         self.smu_limits = SMULimits()
 
     # --------------------------
-    # Pulse session helpers
+    # Voltage range helpers (delegates to services.smu.voltage)
     # --------------------------
-    def begin_pulse_session(self, keithley, icc: float, *, v_range: float = 20.0, ovp: float = 21.0,
-                            use_remote_sense: bool = False, autozero_off: bool = True) -> None:
-        """Prepare SMU once for a batch of pulses; caller should later call end_pulse_session."""
-        try:
-            keithley.prepare_for_pulses(Icc=float(icc), v_range=float(v_range), ovp=float(ovp),
-                                        use_remote_sense=bool(use_remote_sense), autozero_off=bool(autozero_off))
-        except Exception:
-            pass
-
-    def end_pulse_session(self, keithley, icc: float, *, restore_autozero: bool = True) -> None:
-        """Finish a pulse batch: return to 0 V, optionally restore autozero, disable output."""
-        try:
-            keithley.finish_pulses(Icc=float(icc), restore_autozero=bool(restore_autozero))
-        except Exception:
-            pass
-
-    # --------------------------
-    # Voltage range helpers
-    # --------------------------
-    def _frange(self, start: float, stop: float, step: float) -> List[float]:
-        """Simple float range with rounding to 3 decimals."""
-        values: List[float] = []
-        if step == 0:
-            return values
-        increasing = step > 0
-        v = start
-        if increasing:
-            while v <= stop:
-                values.append(round(v, 3))
-                v += step
-        else:
-            while v >= stop:
-                values.append(round(v, 3))
-                v += step
-        return values
-
     def compute_voltage_range(
         self,
         start_v: float,
@@ -178,73 +68,18 @@ class MeasurementService:
         step_delay_s: Optional[float] = None,
         num_steps: Optional[int] = None,
     ) -> List[float]:
-        """Build a voltage list for a sweep.
-
-        - sweep_type: "FS" (full), "PS" (positive-only), "NS" (negative-only)
-        - mode controls how step size or point count is derived
-        """
-        def travel_distance(v_start: float, v_stop_pos: float, kind: str, v_stop_neg_abs: Optional[float]) -> float:
-            if kind == "PS":
-                return abs(v_stop_pos - v_start) + abs(v_start - v_stop_pos)
-            if kind == "NS":
-                neg_target = -abs(v_stop_neg_abs if v_stop_neg_abs is not None else v_stop_pos)
-                return abs(neg_target - v_start) + abs(v_start - neg_target)
-            # FS
-            neg_target = -abs(v_stop_neg_abs if v_stop_neg_abs is not None else v_stop_pos)
-            return (
-                abs(v_stop_pos - v_start)
-                + abs(neg_target - v_stop_pos)
-                + abs(v_start - neg_target)
-            )
-
-        # Determine effective step size for non-fixed-step modes
-        effective_step_v = step_v
-        if mode == VoltageRangeMode.FIXED_SWEEP_RATE:
-            # Need sweep rate and step delay to determine step size
-            if sweep_rate_v_per_s is None or (step_delay_s is None or step_delay_s <= 0):
-                # Fallback to provided step_v if insufficient info
-                effective_step_v = step_v
-            else:
-                effective_step_v = max(1e-9, abs(sweep_rate_v_per_s) * float(step_delay_s))
-        elif mode == VoltageRangeMode.FIXED_VOLTAGE_TIME:
-            # Use total time and step delay to compute number of steps, then step size from path length
-            if voltage_time_s is not None and step_delay_s is not None and step_delay_s > 0:
-                steps_float = max(1.0, float(voltage_time_s) / float(step_delay_s))
-                # If explicit num_steps provided, prefer it
-                steps_float = float(num_steps) if num_steps and num_steps > 0 else steps_float
-                dist = travel_distance(start_v, stop_v, sweep_type, abs(neg_stop_v) if neg_stop_v is not None else None)
-                effective_step_v = max(1e-9, dist / steps_float)
-            else:
-                effective_step_v = step_v
-
-        step = effective_step_v if effective_step_v is not None else step_v
-
-        if sweep_type == "NS":
-            neg_target = -abs(neg_stop_v if neg_stop_v is not None else stop_v)
-            return (
-                self._frange(start_v, neg_target, -abs(step))
-                + self._frange(neg_target, start_v, abs(step))
-            )
-        if sweep_type == "PS":
-            return (
-                self._frange(start_v, stop_v, abs(step))
-                + self._frange(stop_v, start_v, -abs(step))
-            )
-        if sweep_type == "HS":
-            # Half sweep: start to midpoint between start and stop
-            midpoint = (start_v + stop_v) / 2.0
-            return self._frange(start_v, midpoint, abs(step))
-        # Default: Full sweep (FS) - triangle pattern (0 → +V → 0 → -V → 0)
-        # If neg_stop_v not provided, default to symmetric negative (-stop_v)
-        if neg_stop_v is None:
-            neg_target = -abs(stop_v)  # Default symmetric negative
-        else:
-            neg_target = -abs(neg_stop_v)
-        
-        return (
-            self._frange(start_v, stop_v, abs(step))
-            + self._frange(stop_v, neg_target, -abs(step))
-            + self._frange(neg_target, start_v, abs(step))
+        """Build a voltage list for a sweep (FS/PS/NS/HS)."""
+        return _compute_voltage_range(
+            start_v=start_v,
+            stop_v=stop_v,
+            step_v=step_v,
+            sweep_type=sweep_type,
+            mode=mode,
+            neg_stop_v=neg_stop_v,
+            sweep_rate_v_per_s=sweep_rate_v_per_s,
+            voltage_time_s=voltage_time_s,
+            step_delay_s=step_delay_s,
+            num_steps=num_steps,
         )
 
     # --------------------------
@@ -276,7 +111,7 @@ class MeasurementService:
         pause_s: float = 0.0,
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
-        source_mode: Optional['SourceMode'] = None,
+        source_mode: Optional[SourceMode] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         Execute IV sweeps using the unified API.
@@ -287,7 +122,6 @@ class MeasurementService:
         Notes: optional LED handling, pause-at-extrema, and stop hooks supported.
         Supports both voltage source (default) and current source modes.
         """
-        from Measurements.source_modes import SourceMode
         from Measurements.sweep_config import SweepConfig
         from Measurements.measurement_context import MeasurementContext
         
@@ -350,6 +184,9 @@ class MeasurementService:
             # Fallback for backwards compatibility (should not happen with IVControllerManager)
             raise RuntimeError("keithley object does not support unified API (do_iv_sweep). Expected IVControllerManager instance.")
 
+    # --------------------------
+    # Retention
+    # --------------------------
     def run_retention(
         self,
         *,
@@ -512,42 +349,27 @@ class MeasurementService:
         return_to_zero_at_end: bool = True,
         reset_should_stop: Optional[Callable[[], None]] = None,
     ) -> Tuple[List[float], List[float], List[float]]:
-        """
-        Run pulse measurement using the unified API.
-        
-        Delegates to keithley.do_pulse_measurement() which routes to
-        instrument-specific implementations automatically.
-        """
-        from Measurements.measurement_context import MeasurementContext
-        
-        # Convert sequence to list if provided
-        sequence_list = None
-        if sequence is not None:
-            try:
-                sequence_list = list(sequence)
-            except Exception:
-                sequence_list = None
-        
-        # Use unified API
-        if hasattr(keithley, 'do_pulse_measurement'):
-            return keithley.do_pulse_measurement(
-                pulse_voltage=float(pulse_voltage),
-                pulse_width_ms=float(pulse_width_ms),
-                num_pulses=int(num_pulses),
-                read_voltage=float(read_voltage),
-                read_delay_ms=float(inter_pulse_delay_s * 1000.0),
-                icc=float(icc),
-                psu=psu,
-                optical=optical,
-                led=led,
-                power=float(power),
-                sequence=sequence_list,
-                should_stop=should_stop,
-                on_point=on_point,
-                validate_timing=validate_timing,
-            )
-        else:
-            raise RuntimeError("keithley object does not support unified API (do_pulse_measurement). Expected IVControllerManager instance.")
+        return super().run_pulse_measurement(
+            keithley=keithley,
+            pulse_voltage=pulse_voltage,
+            pulse_width_ms=pulse_width_ms,
+            num_pulses=num_pulses,
+            read_voltage=read_voltage,
+            inter_pulse_delay_s=inter_pulse_delay_s,
+            icc=icc,
+            smu_type=smu_type,
+            psu=psu,
+            led=led,
+            power=power,
+            optical=optical,
+            sequence=sequence,
+            should_stop=should_stop,
+            on_point=on_point,
+            validate_timing=validate_timing,
+            start_at_zero=start_at_zero,
+            return_to_zero_at_end=return_to_zero_at_end,
+            reset_should_stop=reset_should_stop,
+        )
 
     def run_pulse_measurement_debug(
         self,
@@ -560,72 +382,15 @@ class MeasurementService:
         smu_type: str = "Keithley 2401",
         validate_timing: bool = True,
     ) -> dict:
-        """Fire one pulse; capture V/I near pulse end and at read voltage (debug info)."""
-        # Timing guard
-        if validate_timing:
-            limits = self.smu_limits.get_limits(smu_type)
-            min_pulse_width = limits.get("min_pulse_width_ms", 1.0)
-            if float(pulse_width_ms) < float(min_pulse_width):
-                raise ValueError(
-                    f"Pulse width {pulse_width_ms} ms is below minimum for {smu_type} ({min_pulse_width} ms)"
-                )
-
-        def _mv():
-            try:
-                v = keithley.measure_voltage()
-                if isinstance(v, (list, tuple)):
-                    return float(v[-1] if len(v) > 0 else float('nan'))
-                return float(v)
-            except Exception:
-                return float('nan')
-
-        def _mi():
-            try:
-                it = keithley.measure_current()
-                return float(it[1]) if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
-            except Exception:
-                return float('nan')
-
-        out = {
-            "pulse_v_cmd": float(pulse_voltage),
-            "pulse_v_meas": float('nan'),
-            "pulse_i_meas": float('nan'),
-            "read_v_meas": float('nan'),
-            "read_i_meas": float('nan'),
-            "pulse_width_ms": float(pulse_width_ms),
-        }
-
-        # Arm at 0 V to avoid spikes
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(0.0, icc)
-        except Exception:
-            pass
-
-        # Pulse
-        try:
-            keithley.set_voltage(float(pulse_voltage), float(icc))
-        except Exception:
-            pass
-        t0 = time.perf_counter()
-        # Hold for requested width
-        while (time.perf_counter() - t0) < (float(pulse_width_ms) / 1000.0):
-            time.sleep(0.0005)
-        # Sample V/I near end of pulse
-        out["pulse_v_meas"] = _mv()
-        out["pulse_i_meas"] = _mi()
-
-        # Return to read voltage and sample
-        try:
-            keithley.set_voltage(float(read_voltage), float(icc))
-        except Exception:
-            pass
-        time.sleep(0.002)
-        out["read_v_meas"] = _mv()
-        out["read_i_meas"] = _mi()
-
-        # Do not force output off here; caller manages lifecycle
-        return out
+        return super().run_pulse_measurement_debug(
+            keithley=keithley,
+            pulse_voltage=pulse_voltage,
+            pulse_width_ms=pulse_width_ms,
+            read_voltage=read_voltage,
+            icc=icc,
+            smu_type=smu_type,
+            validate_timing=validate_timing,
+        )
 
     def run_single_pulse_measurement(
         self,
@@ -637,69 +402,14 @@ class MeasurementService:
         icc: float = 1e-3,
         smu_type: str = "Keithley 2450",
     ) -> Tuple[float, float, float]:
-        """
-        Send a single pulse and return current measurements.
-        
-        Measures current both during the pulse and at read voltage.
-        
-        Args:
-            keithley: SMU controller instance
-            pulse_voltage: Voltage for pulse (V)
-            pulse_time_s: Pulse duration (s)
-            read_voltage: Voltage for read measurement (V)
-            icc: Current compliance (A)
-            smu_type: SMU type identifier
-            
-        Returns:
-            Tuple of (voltage_during_pulse, current_during_pulse, current_at_read_voltage)
-        """
-        def _mv():
-            try:
-                v = keithley.measure_voltage()
-                if isinstance(v, (list, tuple)):
-                    return float(v[-1] if len(v) > 0 else float('nan'))
-                return float(v)
-            except Exception:
-                return float('nan')
-
-        def _mi():
-            try:
-                it = keithley.measure_current()
-                return float(it[1]) if isinstance(it, (list, tuple)) and len(it) > 1 else float(it)
-            except Exception:
-                return float('nan')
-
-        # Start at 0V
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(0.0, icc)
-            time.sleep(0.01)
-        except Exception:
-            pass
-
-        # Apply pulse voltage
-        try:
-            keithley.set_voltage(float(pulse_voltage), float(icc))
-        except Exception:
-            pass
-        
-        # Hold for pulse duration and measure during pulse
-        t0 = time.perf_counter()
-        while (time.perf_counter() - t0) < float(pulse_time_s):
-            time.sleep(0.0005)
-        
-        voltage_during = _mv()
-        current_during = _mi()
-
-        # Return to read voltage and measure
-        try:
-            keithley.set_voltage(float(read_voltage), float(icc))
-        except Exception:
-            pass
-        time.sleep(0.002)
-        current_at_read = _mi()
-
-        return (voltage_during, current_during, current_at_read)
+        return super().run_single_pulse_measurement(
+            keithley=keithley,
+            pulse_voltage=pulse_voltage,
+            pulse_time_s=pulse_time_s,
+            read_voltage=read_voltage,
+            icc=icc,
+            smu_type=smu_type,
+        )
 
     def run_forming_measurement(
         self,
@@ -719,200 +429,22 @@ class MeasurementService:
         should_stop: Optional[Callable[[], bool]] = None,
         on_point: Optional[Callable[[float, float, float], None]] = None,
     ) -> Tuple[List[float], List[float], List[float], dict]:
-        """
-        Run adaptive forming algorithm for memristors.
-        
-        Algorithm:
-        1. Start with start_voltage and start_time_s
-        2. Send pulses_per_step pulses
-        3. Measure current both during pulse and at read_voltage
-        4. If current < target_current:
-           - Increase time by time_increment_s
-           - Repeat until max_time_s reached
-        5. If still not formed and max_voltage not reached, increase voltage
-        6. Stop if current_limit exceeded or should_stop callback returns True
-        
-        Args:
-            keithley: SMU controller instance
-            start_voltage: Initial pulse voltage (V)
-            start_time_s: Initial pulse time (s)
-            pulses_per_step: Number of pulses per step before checking
-            time_increment_s: Amount to increment time each step (s)
-            max_time_s: Maximum pulse time (s)
-            max_voltage: Maximum pulse voltage (V)
-            current_limit: Maximum allowed current (A) - safety limit
-            target_current: Target current for successful forming (A)
-            read_voltage: Voltage for read measurements (V)
-            icc: Current compliance (A)
-            smu_type: SMU type identifier
-            should_stop: Optional callback to check if measurement should stop
-            on_point: Optional callback for each measurement point (voltage, current, time)
-            
-        Returns:
-            Tuple of (voltages, currents, timestamps, metadata_dict)
-            metadata_dict contains: forming_successful, final_voltage, final_time, 
-            total_pulses, etc.
-        """
-        voltages = []
-        currents = []
-        timestamps = []
-        
-        current_voltage = float(start_voltage)
-        current_time = float(start_time_s)
-        total_pulses = 0
-        forming_successful = False
-        voltage_increment = 0.5  # Default voltage increment (V)
-        
-        # Initialize at 0V
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(0.0, icc)
-            time.sleep(0.01)
-        except Exception:
-            pass
-        
-        start_timestamp = time.perf_counter()
-        
-        while True:
-            # Check stop condition
-            if should_stop and should_stop():
-                break
-            
-            # Check voltage limit
-            if current_voltage > max_voltage:
-                break
-            
-            # Send pulses_per_step pulses at current settings
-            max_current_this_step = 0.0
-            for pulse_idx in range(pulses_per_step):
-                if should_stop and should_stop():
-                    break
-                
-                # Apply pulse voltage
-                try:
-                    keithley.set_voltage(current_voltage, icc)
-                except Exception:
-                    pass
-                
-                # Hold for pulse duration
-                t0 = time.perf_counter()
-                while (time.perf_counter() - t0) < current_time:
-                    time.sleep(0.0005)
-                
-                # Measure during pulse
-                try:
-                    v_pulse = keithley.measure_voltage()
-                    i_pulse = keithley.measure_current()
-                    if isinstance(v_pulse, (list, tuple)):
-                        v_pulse = v_pulse[-1] if len(v_pulse) > 0 else current_voltage
-                    if isinstance(i_pulse, (list, tuple)):
-                        i_pulse = i_pulse[1] if len(i_pulse) > 1 else i_pulse[0]
-                    v_pulse = float(v_pulse)
-                    i_pulse = float(i_pulse)
-                except Exception:
-                    v_pulse = current_voltage
-                    i_pulse = 0.0
-                
-                timestamp = time.perf_counter() - start_timestamp
-                voltages.append(v_pulse)
-                currents.append(i_pulse)
-                timestamps.append(timestamp)
-                
-                if on_point:
-                    try:
-                        on_point(v_pulse, i_pulse, timestamp)
-                    except Exception:
-                        pass
-                
-                # Check current limit
-                if abs(i_pulse) > current_limit:
-                    # Current limit exceeded - stop for safety
-                    metadata = {
-                        "forming_successful": False,
-                        "final_voltage": current_voltage,
-                        "final_time": current_time,
-                        "total_pulses": total_pulses + pulse_idx + 1,
-                        "reason": "current_limit_exceeded",
-                        "max_current": max(abs(i_pulse), max_current_this_step)
-                    }
-                    return (voltages, currents, timestamps, metadata)
-                
-                max_current_this_step = max(max_current_this_step, abs(i_pulse))
-                
-                # Return to read voltage and measure
-                try:
-                    keithley.set_voltage(read_voltage, icc)
-                except Exception:
-                    pass
-                time.sleep(0.002)
-                
-                try:
-                    i_read = keithley.measure_current()
-                    if isinstance(i_read, (list, tuple)):
-                        i_read = i_read[1] if len(i_read) > 1 else i_read[0]
-                    i_read = float(i_read)
-                except Exception:
-                    i_read = 0.0
-                
-                timestamp_read = time.perf_counter() - start_timestamp
-                voltages.append(read_voltage)
-                currents.append(i_read)
-                timestamps.append(timestamp_read)
-                
-                if on_point:
-                    try:
-                        on_point(read_voltage, i_read, timestamp_read)
-                    except Exception:
-                        pass
-                
-                # Check if forming successful (use max of pulse and read current)
-                max_current = max(abs(i_pulse), abs(i_read))
-                if max_current >= target_current:
-                    forming_successful = True
-                    metadata = {
-                        "forming_successful": True,
-                        "final_voltage": current_voltage,
-                        "final_time": current_time,
-                        "total_pulses": total_pulses + pulse_idx + 1,
-                        "reason": "target_current_reached",
-                        "final_current": max_current
-                    }
-                    return (voltages, currents, timestamps, metadata)
-                
-                max_current_this_step = max(max_current_this_step, abs(i_read))
-            
-            total_pulses += pulses_per_step
-            
-            # If not formed, increase time
-            current_time += time_increment_s
-            
-            # If time exceeds max, reset time and increase voltage
-            if current_time > max_time_s:
-                current_time = float(start_time_s)  # Reset to start time
-                current_voltage += voltage_increment
-                
-                # Check if voltage exceeds max
-                if current_voltage > max_voltage:
-                    metadata = {
-                        "forming_successful": False,
-                        "final_voltage": current_voltage - voltage_increment,  # Last valid voltage
-                        "final_time": max_time_s,
-                        "total_pulses": total_pulses,
-                        "reason": "max_voltage_reached",
-                        "max_current": max_current_this_step
-                    }
-                    return (voltages, currents, timestamps, metadata)
-        
-        # Loop ended without forming
-        metadata = {
-            "forming_successful": False,
-            "final_voltage": current_voltage,
-            "final_time": current_time,
-            "total_pulses": total_pulses,
-            "reason": "max_limits_reached",
-            "max_current": max_current_this_step if 'max_current_this_step' in locals() else 0.0
-        }
-        return (voltages, currents, timestamps, metadata)
+        return super().run_forming_measurement(
+            keithley=keithley,
+            start_voltage=start_voltage,
+            start_time_s=start_time_s,
+            pulses_per_step=pulses_per_step,
+            time_increment_s=time_increment_s,
+            max_time_s=max_time_s,
+            max_voltage=max_voltage,
+            current_limit=current_limit,
+            target_current=target_current,
+            read_voltage=read_voltage,
+            icc=icc,
+            smu_type=smu_type,
+            should_stop=should_stop,
+            on_point=on_point,
+        )
 
     def run_pulsed_iv_sweep(
         self,
@@ -934,215 +466,33 @@ class MeasurementService:
         neg_stop_v: Optional[float] = None,
         reset_should_stop: Optional[Callable[[], None]] = None,
         manage_session: bool = True,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """
-        Run pulsed IV sweep using the unified API.
-        
-        Delegates to keithley.do_pulsed_iv_sweep() which routes to
-        instrument-specific implementations automatically.
-        """
-        from Measurements.sweep_config import SweepConfig
-        
-        # Default pulse width if not provided
-        if pulse_width_ms is None:
-            try:
-                pulse_width_ms = float(self.smu_limits.get_limits(smu_type).get("min_pulse_width_ms", 1.0))
-            except Exception:
-                pulse_width_ms = 1.0
-        
-        # Build voltage range for sweep
-        if step_v is None and num_steps is None:
-            step_v = 0.1  # Default step
-        
-        voltage_range = self.compute_voltage_range(
-            float(start_v), float(stop_v), float(step_v) if step_v else 0.0,
-            sweep_type, VoltageRangeMode.FIXED_STEP,
-            neg_stop_v=neg_stop_v,
+        collect_debug: bool = False,
+    ) -> Tuple[List[float], List[float], List[float], Optional[List[dict]]]:
+        """Always returns (v, i, t, dbg) with dbg=None when collect_debug=False."""
+        return super().run_pulsed_iv_sweep(
+            keithley=keithley,
+            start_v=start_v,
+            stop_v=stop_v,
+            step_v=step_v,
             num_steps=num_steps,
-        )
-        
-        # Create SweepConfig
-        config = SweepConfig(
-            start_v=float(start_v),
-            stop_v=float(stop_v),
-            step_v=float(step_v) if step_v else 0.1,
-            neg_stop_v=float(neg_stop_v) if neg_stop_v is not None else None,
-            step_delay=float(inter_step_delay_s),
+            pulse_width_ms=pulse_width_ms,
+            vbase=vbase,
+            inter_step_delay_s=inter_step_delay_s,
+            icc=icc,
+            smu_type=smu_type,
+            should_stop=should_stop,
+            on_point=on_point,
+            validate_timing=validate_timing,
             sweep_type=sweep_type,
-            sweeps=1,
-            pause_s=0.0,
-            icc=float(icc),
-            voltage_list=list(voltage_range) if voltage_range is not None else None,
+            neg_stop_v=neg_stop_v,
+            reset_should_stop=reset_should_stop,
+            manage_session=manage_session,
+            collect_debug=collect_debug,
         )
-        
-        # Use unified API
-        if hasattr(keithley, 'do_pulsed_iv_sweep'):
-            return keithley.do_pulsed_iv_sweep(
-                config=config,
-                pulse_width_ms=float(pulse_width_ms),
-                read_delay_ms=0.0,  # Immediate read
-                psu=None,
-                optical=None,
-                should_stop=should_stop,
-                on_point=on_point,
-                validate_timing=validate_timing,
-            )
-        else:
-            # Fallback: use run_pulse_measurement in a loop (already updated to use unified API)
-            # This maintains backward compatibility
-            v_out: List[float] = []
-            i_out: List[float] = []
-            t_out: List[float] = []
-            t0 = time.perf_counter()
-            
-            for amp in voltage_range:
-                if should_stop and should_stop():
-                    break
-                _v, _i, _t = self.run_pulse_measurement(
-                    keithley=keithley,
-                    pulse_voltage=float(amp),
-                    pulse_width_ms=float(pulse_width_ms),
-                    num_pulses=1,
-                    read_voltage=float(vbase),
-                    inter_pulse_delay_s=0.0,
-                    icc=float(icc),
-                    smu_type=smu_type,
-                    should_stop=should_stop,
-                    validate_timing=validate_timing,
-                )
-                try:
-                    i_val = float(_i[-1]) if _i else float('nan')
-                except Exception:
-                    i_val = float('nan')
-                v_out.append(float(amp))
-                i_out.append(i_val)
-                t_out.append(time.time() - t0)
-                if on_point:
-                    try:
-                        on_point(float(amp), i_val, t_out[-1])
-                    except Exception:
-                        pass
-                if inter_step_delay_s and inter_step_delay_s > 0:
-                    time.sleep(max(0.0, float(inter_step_delay_s)))
-            
-            return v_out, i_out, t_out
 
-    def run_pulsed_iv_sweep_debug(
-        self,
-        *,
-        keithley,
-        start_v: float,
-        stop_v: float,
-        step_v: Optional[float] = None,
-        num_steps: Optional[int] = None,
-        pulse_width_ms: Optional[float] = None,
-        vbase: float = 0.2,
-        inter_step_delay_s: float = 0.0,
-        icc: float = 1e-4,
-        smu_type: str = "Keithley 2401",
-        should_stop: Optional[Callable[[], bool]] = None,
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-        validate_timing: bool = True,
-        sweep_type: str = "FS",
-        neg_stop_v: Optional[float] = None,
-    ) -> Tuple[List[float], List[float], List[float], List[dict]]:
-        """Pulsed IV sweep with extra debug records for V/I during pulse and at read."""
-        # Build amplitude list
-        amps: List[float] = []
-        sv = float(start_v); ev = float(stop_v)
-        def _linrange(v0: float, v1: float, step_opt: Optional[float], nsteps_opt: Optional[int]) -> List[float]:
-            out: List[float] = []
-            if step_opt is not None and float(step_opt) != 0.0:
-                s = float(step_opt) if v1 >= v0 else -abs(float(step_opt))
-                v = v0
-                if s > 0:
-                    while v <= v1 + 1e-12:
-                        out.append(round(v, 6)); v += s
-                else:
-                    while v >= v1 - 1e-12:
-                        out.append(round(v, 6)); v += s
-            elif nsteps_opt is not None and int(nsteps_opt) > 1:
-                n = int(nsteps_opt)
-                step = (v1 - v0) / float(n - 1)
-                out = [round(v0 + i * step, 6) for i in range(n)]
-            else:
-                out = [round(v0, 6)] if abs(v1 - v0) < 1e-15 else [round(v0, 6), round(v1, 6)]
-            return out
-        if sweep_type == "PS":
-            amps = _linrange(sv, ev, step_v, num_steps) + _linrange(ev, sv, step_v, num_steps)
-        elif sweep_type == "NS":
-            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
-            amps = _linrange(sv, nv, step_v, num_steps) + _linrange(nv, sv, step_v, num_steps)
-        elif sweep_type == "HS":
-            # Half sweep: start to midpoint between start and stop
-            midpoint = (sv + ev) / 2.0
-            amps = _linrange(sv, midpoint, step_v, num_steps)
-        else:
-            nv = -abs(neg_stop_v if neg_stop_v is not None else ev)
-            amps = (
-                _linrange(sv, ev, step_v, num_steps)
-                + _linrange(ev, nv, step_v, num_steps)
-                + _linrange(nv, sv, step_v, num_steps)
-            )
-
-        # Default pulse width
-        if pulse_width_ms is None:
-            try:
-                pulse_width_ms = float(self.smu_limits.get_limits(smu_type).get("min_pulse_width_ms", 1.0))
-            except Exception:
-                pulse_width_ms = 1.0
-
-        v_out: List[float] = []
-        i_out: List[float] = []
-        t_out: List[float] = []
-        dbg: List[dict] = []
-        t0 = time.perf_counter()
-
-        # Pre-enable output at base
-        try:
-            keithley.enable_output(True)
-            keithley.set_voltage(float(vbase), float(icc))
-        except Exception:
-            pass
-
-        for amp in amps:
-            if should_stop and should_stop():
-                break
-            rec = self.run_pulse_measurement_debug(
-                keithley=keithley,
-                pulse_voltage=float(amp),
-                pulse_width_ms=float(pulse_width_ms),
-                read_voltage=float(vbase),
-                icc=float(icc),
-                smu_type=smu_type,
-                validate_timing=validate_timing,
-            )
-            dbg.append(rec)
-            # Read-back current at read (immediate measurement)
-            i_val = float(rec.get("read_i_meas", float('nan')))
-            v_out.append(float(amp))
-            i_out.append(i_val)
-            t_out.append(time.time() - t0)
-            if on_point:
-                try:
-                    on_point(float(amp), i_val, t_out[-1])
-                except Exception:
-                    pass
-            if inter_step_delay_s and inter_step_delay_s > 0:
-                time.sleep(max(0.0, float(inter_step_delay_s)))
-
-        # Leave output at 0 V for safety
-        try:
-            keithley.set_voltage(0.0, float(icc))
-        except Exception:
-            pass
-        try:
-            keithley.enable_output(False)
-        except Exception:
-            pass
-
-        return v_out, i_out, t_out, dbg
-
+    # --------------------------
+    # Pulse-protocol measurements (ISPP, PPF, STDP, SRDP, etc.)
+    # --------------------------
     def run_ispp(
         self,
         *,
@@ -2052,372 +1402,16 @@ class MeasurementService:
         """Get per-model sensible defaults (used by GUIs as seeds)."""
         return self.smu_limits.get_defaults(smu_type)
 
-    # --------------------------
-    # PMU-dedicated routines
-    # --------------------------
-    def _validate_pmu_connected(self, pmu) -> None:
-        """Ensure a PMU controller is present and connected."""
-        try:
-            is_ok = pmu is not None and getattr(pmu, "is_connected", lambda: False)()
-        except Exception:
-            is_ok = False
-        if not is_ok:
-            raise RuntimeError("PMU is not connected. Connect a 4200A PMU before running PMU tests.")
+    # # --------------------------
+    # # PMU-dedicated routines (REMOVED - unused; PMU flows use measurement_services_pmu.py)
+    # # --------------------------
 
-    def _validate_pmu_timing(self,
-                              *,
-                              smu_type: str,
-                              width_s: float,
-                              period_s: float,
-                              rise_s: float,
-                              fall_s: float,
-                              amplitude_v: float,
-                              v_range: Optional[Tuple[float, float]] = None) -> None:
-        """Check timing and amplitude against configured limits for 4200A PMU."""
-        limits = self.smu_limits.get_limits(smu_type)
-        min_width_ms = limits.get("min_pulse_width_ms", 0.00005)
-        min_rise_us = limits.get("rise_fall_time_us", 1)
-        vmin, vmax = limits.get("voltage_range_V", (-10, 10))
-        if v_range is not None and len(v_range) == 2:
-            vmin, vmax = v_range
+    # Combined PMU + Generator routines (commented legacy code below)
 
-        if (width_s * 1000.0) < float(min_width_ms):
-            raise ValueError(f"Pulse width {width_s*1e3:.3f} ms below minimum for {smu_type} ({min_width_ms} ms)")
-        if amplitude_v < float(vmin) or amplitude_v > float(vmax):
-            raise ValueError(f"Pulse amplitude {amplitude_v} V exceeds range {vmin}..{vmax} V for {smu_type}")
-        # Earlier working behavior: period must exceed width only
-        if period_s <= width_s:
-            raise ValueError("Period must be greater than pulse width")
-        
-        if (rise_s * 1e6) < float(min_rise_us) or (fall_s * 1e6) < float(min_rise_us):
-            print((rise_s * 1e6), min_rise_us)
-            raise ValueError(f"Rise/Fall times must be >= {min_rise_us} us for {smu_type}")
-        
+    # (PMU methods removed - see measurement_services_pmu.py for PMU flows)
 
-    def run_pmu_pulse_train(
-        self,
-        *,
-        pmu,
-        amplitude_v: float,
-        base_v: float,
-        width_s: float,
-        period_s: float,
-        num_pulses: int,
-        smu_type: str = "Keithley 4200A_pmu",
-        psu=None,
-        led: bool = False,
-        should_stop: Optional[Callable[[], bool]] = None,
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Run a fixed-amplitude PMU pulse train; return (V, I, t)."""
-        self._validate_pmu_connected(pmu)
-        self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
-                                  rise_s=1e-7, fall_s=1e-7, amplitude_v=amplitude_v, v_range=None)
 
-        try:
-            if psu is not None and led:
-                psu.led_on_380(1.0)
-        except Exception:
-            pass
 
-        v_arr: List[float] = []
-        i_arr: List[float] = []
-        t_arr: List[float] = []
-        
-        try:
-            result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, int(num_pulses),
-                                                    width_s, period_s, as_dataframe=False)
-            v_arr, i_arr, t_arr = list(result[0]), list(result[1]), list(result[2])
-            if on_point:
-                for idx in range(len(v_arr)):
-                    if should_stop and should_stop():
-                        break
-                    try:
-                        on_point(float(v_arr[idx]), float(i_arr[idx]), float(t_arr[idx]))
-                    except Exception:
-                        pass
-        finally:
-            try:
-                if psu is not None and led:
-                    psu.led_off_380()
-            except Exception:
-                pass
-
-        return v_arr, i_arr, t_arr
-
-    def run_pmu_pulse_pattern(
-        self,
-        *,
-        pmu,
-        pattern: str,
-        amplitude_v: float,
-        base_v: float,
-        width_s: float,
-        period_s: float,
-        smu_type: str = "Keithley 4200A_pmu",
-        psu=None,
-        led_power: float = 1.0,
-        should_stop: Optional[Callable[[], bool]] = None,
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Run a bitstring pattern (e.g., '1011') and return concatenated (V, I, t)."""
-        self._validate_pmu_connected(pmu)
-        self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
-                                  rise_s=1e-7, fall_s=1e-7, amplitude_v=amplitude_v, v_range=None)
-
-        v_all: List[float] = []
-        i_all: List[float] = []
-        t_all: List[float] = []
-        base_time_offset = 0.0
-
-        for bit in str(pattern):
-            if should_stop and should_stop():
-                break
-            try:
-                if psu is not None:
-                    if bit == '1':
-                        psu.led_on_380(led_power)
-                    else:
-                        psu.led_off_380()
-            except Exception:
-                pass
-
-            result = pmu.run_fixed_amplitude_pulses(
-                amplitude_v if bit == '1' else base_v,
-                base_v,
-                1,
-                width_s,
-                period_s,
-                as_dataframe=False,
-            )
-            v, i, t = result[0], result[1], result[2]
-            if t:
-                t0 = t[0]
-                t_shifted = [base_time_offset + (tv - t0) for tv in t]
-                base_time_offset = t_shifted[-1] + period_s
-            else:
-                t_shifted = []
-            v_all.extend(v); i_all.extend(i); t_all.extend(t_shifted)
-            if on_point:
-                for k in range(len(v)):
-                    try:
-                        on_point(float(v[k]), float(i[k]), float(t_shifted[k]))
-                    except Exception:
-                        pass
-        try:
-            if psu is not None:
-                psu.led_off_380()
-        except Exception:
-            pass
-        return v_all, i_all, t_all
-
-    def run_pmu_transient_switching(
-        self,
-        *,
-        pmu,
-        amplitude_v: float,
-        base_v: float,
-        width_s: float,
-        period_s: float,
-        smu_type: str = "Keithley 4200A_pmu",
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Acquire a single transient (one pulse) waveform from PMU."""
-        self._validate_pmu_connected(pmu)
-        self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
-                                  rise_s=1e-7, fall_s=1e-7, amplitude_v=amplitude_v, v_range=None)
-        result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, 1, width_s, period_s,
-                                                as_dataframe=False)
-        return list(result[0]), list(result[1]), list(result[2])
-
-    def run_pmu_dc_measure(
-        self,
-        *,
-        pmu,
-        voltage_v: float,
-        capture_time_s: float,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Hold a constant voltage (single long pulse) and capture I(t); returns (V, I, t)."""
-        self._validate_pmu_connected(pmu)
-        width_s = float(capture_time_s)
-        period_s = float(capture_time_s) * 1.2 if float(capture_time_s) > 0 else 2e-4
-        # Timing guard using existing PMU limits
-        self._validate_pmu_timing(smu_type="Keithley 4200A_pmu", width_s=width_s, period_s=period_s,
-                                  rise_s=1e-7, fall_s=1e-7, amplitude_v=voltage_v, v_range=None)
-        result = pmu.run_fixed_amplitude_pulses(voltage_v, 0.0, 1, width_s, period_s, as_dataframe=False)
-        return list(result[0]), list(result[1]), list(result[2])
-
-    def run_pmu_endurance(
-        self,
-        *,
-        pmu,
-        set_voltage: float,
-        reset_voltage: float,
-        pulse_width_s: float,
-        num_cycles: int,
-        period_s: float,
-        smu_type: str = "Keithley 4200A_pmu",
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Alternate set/reset PMU pulses; report readback near pulse center."""
-        self._validate_pmu_connected(pmu)
-        v_out: List[float] = []
-        i_out: List[float] = []
-        t_out: List[float] = []
-        for _ in range(int(num_cycles)):
-            for level in (set_voltage, reset_voltage):
-                self._validate_pmu_timing(smu_type=smu_type, width_s=pulse_width_s, period_s=period_s,
-                                          rise_s=1e-7, fall_s=1e-7, amplitude_v=level, v_range=None)
-                result = pmu.run_fixed_amplitude_pulses(level, 0.0, 1, pulse_width_s, period_s,
-                                                        as_dataframe=False)
-                v, i, t = result[0], result[1], result[2]
-                if t:
-                    mid_idx = max(0, min(len(t) - 1, len(t) // 2))
-                    v_mid = float(v[mid_idx]); i_mid = float(i[mid_idx]); t_mid = float(t[mid_idx] if not t_out else t_out[-1] + period_s)
-                    v_out.append(v_mid); i_out.append(i_mid); t_out.append(t_mid)
-                    if on_point:
-                        try:
-                            on_point(v_mid, i_mid, t_mid)
-                        except Exception:
-                            pass
-        return v_out, i_out, t_out
-
-    def run_pmu_retention(
-        self,
-        *,
-        pmu,
-        keithley,
-        set_voltage: float,
-        set_width_s: float,
-        read_voltage: float,
-        repeat_delay_s: float,
-        number: int,
-        smu_type: str = "Keithley 4200A_pmu",
-        icc: float = 1e-4,
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """PMU set pulse followed by standard SMU retention sampling."""
-        self._validate_pmu_connected(pmu)
-        self._validate_pmu_timing(smu_type=smu_type, width_s=set_width_s, period_s=max(2*set_width_s, 1e-5),
-                                  rise_s=1e-7, fall_s=1e-7, amplitude_v=set_voltage, v_range=None)
-        pmu.run_fixed_amplitude_pulses(set_voltage, 0.0, 1, set_width_s, max(2*set_width_s, 1e-5), as_dataframe=False)
-        return self.run_retention(
-            keithley=keithley,
-            set_voltage=0.0,
-            set_time_s=0.0,
-            read_voltage=read_voltage,
-            repeat_delay_s=repeat_delay_s,
-            number=number,
-            icc=icc,
-            smu_type="Keithley 2400",
-            on_point=on_point,
-        )
-
-    def run_pmu_ispp(
-        self,
-        *,
-        pmu,
-        start_v: float,
-        stop_v: float,
-        step_v: float,
-        base_v: float,
-        width_s: float,
-        period_s: float,
-        target_current_a: float,
-        smu_type: str = "Keithley 4200A_pmu",
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """PMU ISPP until reaching target current magnitude."""
-        self._validate_pmu_connected(pmu)
-        direction = 1.0 if stop_v >= start_v else -1.0
-        v_all: List[float] = []
-        i_all: List[float] = []
-        t_all: List[float] = []
-        current_amp = start_v
-        while (direction > 0 and current_amp <= stop_v) or (direction < 0 and current_amp >= stop_v):
-            self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
-                                      rise_s=1e-7, fall_s=1e-7, amplitude_v=current_amp, v_range=None)
-            result = pmu.run_fixed_amplitude_pulses(current_amp, base_v, 1, width_s, period_s,
-                                                    as_dataframe=False)
-            v, i, t = result[0], result[1], result[2]
-            v_all.extend(v); i_all.extend(i); t_all.extend(t)
-            try:
-                mean_i = sum(i) / max(1, len(i))
-            except Exception:
-                mean_i = 0.0
-            if abs(mean_i) >= abs(target_current_a):
-                break
-            current_amp += step_v * direction
-        return v_all, i_all, t_all
-    
-    def run_pmu_amplitude_sweep(
-        self,
-        *,
-        pmu,
-        start_v: float,
-        stop_v: float,
-        step_v: float,
-        base_v: float,
-        width_s: float,
-        period_s: float,
-        smu_type: str = "Keithley 4200A_pmu",
-        should_stop: Optional[Callable[[], bool]] = None,
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Linear amplitude sweep using PMU; return concatenated arrays."""
-        self._validate_pmu_connected(pmu)
-        for amp in (start_v, stop_v):
-            self._validate_pmu_timing(smu_type=smu_type, width_s=width_s, period_s=period_s,
-                                      rise_s=1e-7, fall_s=1e-7, amplitude_v=amp, v_range=None)
-        result = pmu.run_amplitude_sweep(start_v, stop_v, step_v, base_v, width_s, period_s,
-                                         as_dataframe=False)
-        v, i, t = result[0], result[1], result[2]
-        if on_point:
-            for k in range(len(v)):
-                if should_stop and should_stop():
-                    break
-                try:
-                    on_point(float(v[k]), float(i[k]), float(t[k]))
-                except Exception:
-                    pass
-        return list(v), list(i), list(t)
-
-    def run_pmu_width_sweep(
-        self,
-        *,
-        pmu,
-        amplitude_v: float,
-        base_v: float,
-        widths_s: Iterable[float],
-        period_s: float,
-        smu_type: str = "Keithley 4200A_pmu",
-        should_stop: Optional[Callable[[], bool]] = None,
-        on_point: Optional[Callable[[float, float, float], None]] = None,
-    ) -> Tuple[List[float], List[float], List[float]]:
-        """Sweep pulse width on PMU; concatenate returned traces into arrays."""
-        self._validate_pmu_connected(pmu)
-        v_all: List[float] = []
-        i_all: List[float] = []
-        t_all: List[float] = []
-        t_offset = 0.0
-        for w in widths_s:
-            if should_stop and should_stop():
-                break
-            self._validate_pmu_timing(smu_type=smu_type, width_s=float(w), period_s=period_s,
-                                      rise_s=1e-7, fall_s=1e-7, amplitude_v=amplitude_v, v_range=None)
-            result = pmu.run_fixed_amplitude_pulses(amplitude_v, base_v, 1, float(w), period_s,
-                                                    as_dataframe=False)
-            v, i, t = result[0], result[1], result[2]
-            if t:
-                t0 = t[0]
-                t = [t_offset + (tv - t0) for tv in t]
-                t_offset = t[-1] + period_s
-            v_all.extend(v); i_all.extend(i); t_all.extend(t)
-            if on_point:
-                for k in range(len(v)):
-                    try:
-                        on_point(float(v[k]), float(i[k]), float(t[k]))
-                    except Exception:
-                        pass
-        return v_all, i_all, t_all
 
     # # --------------------------
     # # Combined PMU + Generator routines

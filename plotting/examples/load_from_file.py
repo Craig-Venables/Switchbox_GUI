@@ -1,7 +1,7 @@
 """
 Example: Loading data from a file and plotting.
 
-This shows how to integrate plotting_core with your data loading code.
+This shows how to integrate the plotting package with your data loading code.
 
 To run this example:
     1. Install the package: pip install -e .
@@ -18,7 +18,7 @@ if str(code_dir) not in sys.path:
     sys.path.insert(0, str(code_dir))
 
 import numpy as np
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 
 
 def load_iv_data(file_path: Path):
