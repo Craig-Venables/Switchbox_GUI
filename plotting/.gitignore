@@ -36,6 +36,9 @@ output/
 *.png
 *.pdf
 
+# Deprecation log (generated when old import paths are used)
+plotting_deprecation.log
+
 # Testing
 .pytest_cache/
 .coverage

@@ -1,5 +1,5 @@
 """
-Basic usage example for plotting_core package.
+Basic usage example for plotting package.
 
 This example demonstrates the simplest way to use the unified plotter.
 
@@ -17,7 +17,7 @@ if str(code_dir) not in sys.path:
     sys.path.insert(0, str(code_dir))
 
 import numpy as np
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 
 
 def main():

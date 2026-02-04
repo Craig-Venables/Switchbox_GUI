@@ -363,7 +363,7 @@ class Keithley2450_TSP_Sim_Scripts:
         reset_w = self._validate_pulse_width(reset_width)
         icc = self._validate_current_limit(clim)
 
-        v_out, i_out, t_out = self.measurement_service.run_pulsed_iv_sweep(
+        v_out, i_out, t_out, _ = self.measurement_service.run_pulsed_iv_sweep(
             keithley=self.tsp,
             start_v=start,
             stop_v=stop,

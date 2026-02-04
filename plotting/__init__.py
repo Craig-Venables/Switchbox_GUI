@@ -1,11 +1,11 @@
-from .base import PlotManager
-from .iv_grid import IVGridPlotter
-from .hdf5_style import HDF5StylePlotter
-from .conduction import ConductionPlotter
-from .sclc_fit import SCLCFitPlotter
-from .unified_plotter import UnifiedPlotter
+from .core.base import PlotManager
+from .core import style
+from .device.iv_grid import IVGridPlotter
+from .device.hdf5_style import HDF5StylePlotter
+from .device.conduction import ConductionPlotter
+from .device.sclc_fit import SCLCFitPlotter
+from .device.unified_plotter import UnifiedPlotter
 from .sample_plots import SamplePlots
-from . import style
 from . import endurance_plots
 
 __all__ = [

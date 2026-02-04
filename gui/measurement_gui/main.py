@@ -5852,7 +5852,7 @@ class MeasurementGUI:
                         vbase = float(params.get("vbase", 0.2))
                         inter_step = float(params.get("inter_delay", 0.0))
 
-                        v_arr, c_arr, timestamps = self.measurement_service.run_pulsed_iv_sweep(
+                        v_arr, c_arr, timestamps, _ = self.measurement_service.run_pulsed_iv_sweep(
                             keithley=self.keithley,
                             start_v=start_amp,
                             stop_v=stop_amp,

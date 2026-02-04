@@ -5,6 +5,11 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 import matplotlib.gridspec as gridspec
 import numpy as np
 
+from . import config as gui_config
+from .ui import create_top_bar, create_controls_panel, create_plots
+from .ui.widgets import ToolTip
+
+
 class OscilloscopePulseLayout:
     """
     Handles the creation and layout of GUI elements for the Oscilloscope Pulse Capture tool.
@@ -25,293 +30,45 @@ class OscilloscopePulseLayout:
 
     def _setup_styles(self):
         style = ttk.Style()
-        style.theme_use('clam')
-        
-        # Colors
-        bg_color = "#f0f0f0"
-        accent_color = "#e6f3ff" # Light blue hint
-        header_color = "#1565c0"
-        
-        # Frame Styles
-        style.configure("TFrame", background=bg_color)
-        style.configure("TLabelframe", background=bg_color)
-        style.configure("TLabelframe.Label", background=bg_color, font=("Segoe UI", 10, "bold"), foreground=header_color)
-        
-        # Label Styles
-        style.configure("TLabel", background=bg_color, font=("Segoe UI", 9))
-        style.configure("Header.TLabel", font=("Segoe UI", 11, "bold"), foreground=header_color, background=accent_color)
-        style.configure("Info.TLabel", font=("Segoe UI", 9), foreground="#555", background=accent_color)
-        style.configure("Status.TLabel", font=("Segoe UI", 9), foreground="#333333", background=bg_color)
-        
-        # Button Styles
-        style.configure("Action.TButton", font=("Segoe UI", 10, "bold"))
-        style.configure("Stop.TButton", font=("Segoe UI", 10, "bold"), foreground="red")
-        style.configure("Small.TButton", font=("Segoe UI", 8))
-        
-        # Checkbutton
-        style.configure("TCheckbutton", background=bg_color, font=("Segoe UI", 9))
-        
-        self.parent.configure(bg=bg_color)
+        style.theme_use(gui_config.THEME)
+
+        bg = gui_config.COLORS["bg"]
+        accent = gui_config.COLORS["accent"]
+        header = gui_config.COLORS["header"]
+
+        style.configure("TFrame", background=bg)
+        style.configure("TLabelframe", background=bg)
+        style.configure("TLabelframe.Label", background=bg, font=(gui_config.FONT_FAMILY, 10, "bold"), foreground=header)
+
+        style.configure("TLabel", background=bg, font=(gui_config.FONT_FAMILY, gui_config.FONT_SIZE))
+        style.configure("Header.TLabel", font=(gui_config.FONT_FAMILY, gui_config.FONT_HEADER_SIZE, "bold"), foreground=header, background=accent)
+        style.configure("Info.TLabel", font=(gui_config.FONT_FAMILY, gui_config.FONT_SIZE), foreground=gui_config.COLORS["fg_secondary"], background=accent)
+        style.configure("Status.TLabel", font=(gui_config.FONT_FAMILY, gui_config.FONT_SIZE), foreground=gui_config.COLORS["fg_status"], background=bg)
+
+        style.configure("Action.TButton", font=(gui_config.FONT_FAMILY, 10, "bold"))
+        style.configure("Stop.TButton", font=(gui_config.FONT_FAMILY, 10, "bold"), foreground="red")
+        style.configure("Small.TButton", font=(gui_config.FONT_FAMILY, gui_config.FONT_SMALL))
+
+        style.configure("TCheckbutton", background=bg, font=(gui_config.FONT_FAMILY, gui_config.FONT_SIZE))
+
+        self.parent.configure(bg=bg)
 
     def _build_layout(self):
-        # Top Control Bar (New)
-        self._build_top_bar(self.parent)
-        
-        # Main Content Grid (compact spacing)
+        create_top_bar(self, self.parent)
+
         content_frame = ttk.Frame(self.parent)
         content_frame.pack(fill="both", expand=True, padx=5, pady=3)
-        
         content_frame.columnconfigure(1, weight=1)
         content_frame.rowconfigure(0, weight=1)
-        
-        # --- LEFT PANEL (Controls) ---
+
         left_panel = ttk.Frame(content_frame, padding=3)
         left_panel.grid(row=0, column=0, sticky="nsew")
-        
-        self._build_collapsible_connection_frame(left_panel)
-        self._build_collapsible_scope_frame(left_panel)
-        self._build_collapsible_pulse_frame(left_panel)
-        self._build_collapsible_measurement_frame(left_panel)
-        self._build_collapsible_calculator_frame(left_panel)
-        self._build_collapsible_save_options_frame(left_panel)
-        self._build_action_buttons(left_panel)
-        self._build_status_bar(left_panel)
+        create_controls_panel(self, left_panel)
 
-        # --- RIGHT PANEL (Visualization) ---
         right_panel = ttk.Frame(content_frame)
         right_panel.grid(row=0, column=1, sticky="nsew", padx=10, pady=5)
-        self._build_plots(right_panel)
+        create_plots(self, right_panel)
 
-    def _build_top_bar(self, parent):
-        """Top banner with System selection, Save path, and Identity info."""
-        bar_frame = tk.Frame(parent, bg="#e6f3ff", pady=8, padx=10, relief="raised", bd=1)
-        bar_frame.pack(fill="x", side="top")
-        
-        # Left: Identity
-        id_text = f"Device: {self.context.get('device_label', 'Unknown')} | Sample: {self.context.get('sample_name', 'Unknown')}"
-        ttk.Label(bar_frame, text=id_text, style="Header.TLabel").pack(side="left", padx=(0, 20))
-        
-        # Middle: System Selector
-        tk.Label(bar_frame, text="System:", bg="#e6f3ff").pack(side="left")
-        self.vars['system'] = tk.StringVar(value=self.config.get("system", "keithley4200a"))
-        sys_combo = ttk.Combobox(bar_frame, textvariable=self.vars['system'], 
-                                values=self.context.get('known_systems', ["keithley4200a", "keithley2450", "keithley2400"]), 
-                                width=15, state="readonly")
-        sys_combo.pack(side="left", padx=5)
-        sys_combo.bind("<<ComboboxSelected>>", lambda e: self.callbacks.get('on_system_change', lambda: None)())
-        
-        # Simulation Mode (moved to top bar)
-        self.vars['simulation_mode'] = tk.BooleanVar(value=self.config.get("simulation_mode", False))
-        sim_check = ttk.Checkbutton(bar_frame, text="🔧 Simulation Mode", 
-                                    variable=self.vars['simulation_mode'])
-        sim_check.pack(side="left", padx=(10, 0))
-        ToolTip(sim_check, "Test without oscilloscope - generates simulated data")
-        
-        # Right: Help & Save
-        tk.Button(bar_frame, text="Help / Guide", command=self._show_help, bg="#1565c0", fg="white", font=("Segoe UI", 9, "bold")).pack(side="right", padx=10)
-        
-        tk.Button(bar_frame, text="Save Location...", command=self.callbacks['browse_save'], font=("Segoe UI", 8)).pack(side="right", padx=5)
-        self.vars['save_dir'] = tk.StringVar(value=self.context.get('save_directory', "Default"))
-        tk.Label(bar_frame, textvariable=self.vars['save_dir'], bg="#e6f3ff", fg="#555", width=30, anchor="e").pack(side="right")
-
-    def _show_help(self):
-        """Display a help window with setup instructions."""
-        help_win = tk.Toplevel(self.parent)
-        help_win.title("Setup Guide & Instructions")
-        help_win.geometry("800x700")
-        help_win.configure(bg="#f0f0f0")
-        
-        # Scrollable Content
-        canvas = tk.Canvas(help_win, bg="#f0f0f0")
-        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # --- CONTENT ---
-        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}  # Changed sticky to anchor for pack()
-        
-        # Title
-        tk.Label(scrollable_frame, text="Oscilloscope Pulse Capture Guide", font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
-        
-        # 1. Overview
-        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame, text="This tool generates a voltage pulse using the SMU and captures the transient current response using an Oscilloscope.\nIt is designed for capturing fast transients that standard SMUs cannot resolve.", justify="left", bg="#f0f0f0").pack(**pad)
-        
-        # 2. Measurement Methods
-        tk.Label(scrollable_frame, text="2. Setup & Wiring Modes", font=("Segoe UI", 12, "bold"), bg="#f0f0f0").pack(**pad)
-        
-        # Method A: Shunt
-        f_shunt = tk.LabelFrame(scrollable_frame, text="Method A: Shunt Resistor (Recommended for Fast Pulses)", bg="#f0f0f0", font=("Segoe UI", 10, "bold"))
-        f_shunt.pack(fill="x", **pad)
-        
-        shunt_txt = (
-            "• Best for: Fast switching (<1ms), high bandwidth.\n"
-            "• How it works: Measures voltage drop across a known resistor.\n\n"
-            "WIRING:\n"
-            "   [SMU Hi] ----> [Shunt Resistor] ----+---- [DUT] ----> [SMU Lo]\n"
-            "                                       |\n"
-            "   [Scope CH1] ------------------------+\n"
-            "   [Scope GND] ------------------------+ (at Shunt-DUT junction? No, across Shunt!)\n\n"
-            "   CORRECT WIRING (Shunt on Low Side is safer for Scope GND):\n"
-            "   [SMU Hi] -----------------> [DUT] ----+---- [Shunt] ----> [SMU Lo]\n"
-            "                                        |\n"
-            "   [Scope CH1] -------------------------+\n"
-            "   [Scope GND] --------------------------------------------+ (SMU Lo)\n\n"
-            "   * Ensure Scope Ground is shared with SMU Lo/Ground."
-        )
-        tk.Label(f_shunt, text=shunt_txt, justify="left", bg="#f0f0f0", font=("Consolas", 9)).pack(padx=10, pady=5)
-        
-        # Method B: SMU
-        f_smu = tk.LabelFrame(scrollable_frame, text="Method B: SMU Current (Slower)", bg="#f0f0f0", font=("Segoe UI", 10, "bold"))
-        f_smu.pack(fill="x", **pad)
-        
-        smu_txt = (
-            "• Best for: Slow pulses (>10ms), DC accuracy.\n"
-            "• How it works: Uses the SMU's internal measurement.\n"
-            "• Wiring: Standard direct connection. Scope is NOT used for current, only Voltage monitoring if attached."
-        )
-        tk.Label(f_smu, text=smu_txt, justify="left", bg="#f0f0f0").pack(padx=10, pady=5)
-        
-        # 3. Parameters
-        tk.Label(scrollable_frame, text="3. Parameters Explained", font=("Segoe UI", 12, "bold"), bg="#f0f0f0").pack(**pad)
-        
-        params_txt = (
-            "• Pulse Voltage: Amplitude of the pulse.\n"
-            "• Duration: Width of the pulse.\n"
-            "• Compliance: Current limit for the SMU (safety).\n"
-            "• Pre-Pulse Delay: Time to wait at 0V before pulsing (to arm scope).\n"
-            "• R_shunt: Value of shunt resistor used in Method A. Crucial for accurate Current calc (I = V_scope / R)."
-        )
-        tk.Label(scrollable_frame, text=params_txt, justify="left", bg="#f0f0f0").pack(**pad)
-        
-        # 4. Low Current Measurements (nA/µA)
-        tk.Label(scrollable_frame, text="4. Low Current Measurements (nA/µA Range)", font=("Segoe UI", 12, "bold"), bg="#f0f0f0", fg="#d32f2f").pack(**pad)
-        
-        f_lowcurrent = tk.LabelFrame(scrollable_frame, text="⚠️ IMPORTANT: Shunt Method NOT Suitable for nA/µA", bg="#fff3cd", font=("Segoe UI", 10, "bold"), fg="#d32f2f")
-        f_lowcurrent.pack(fill="x", **pad)
-        
-        lowcurrent_txt = (
-            "Problem: For 1 µA through 10Ω shunt → only 10 µV signal (too small for scope!)\n"
-            "         For 1 nA through 1kΩ shunt → only 1 µV signal (impossible to measure)\n\n"
-            "SOLUTION: Use a Transimpedance Amplifier (TIA)\n\n"
-            "What is a TIA?\n"
-            "• Converts tiny currents (nA/µA) into measurable voltages (mV/V)\n"
-            "• Has high bandwidth (MHz range) - perfect for fast measurements\n"
-            "• Gain = R_feedback (typically 10kΩ to 10MΩ)\n\n"
-            "Example: 1 µA × 1MΩ TIA = 1V output (easily measured by scope!)"
-        )
-        tk.Label(f_lowcurrent, text=lowcurrent_txt, justify="left", bg="#fff3cd", font=("Segoe UI", 9)).pack(padx=10, pady=5)
-        
-        # TIA Options
-        tk.Label(scrollable_frame, text="TIA Options for Low-Current Fast Measurements:", font=("Segoe UI", 11, "bold"), bg="#f0f0f0").pack(**pad)
-        
-        # Option 1: Commercial
-        f_commercial = tk.LabelFrame(scrollable_frame, text="Option 1: Commercial TIA (Easiest)", bg="#f0f0f0", font=("Segoe UI", 10, "bold"))
-        f_commercial.pack(fill="x", **pad)
-        commercial_txt = (
-            "• FEMTO DLPCA-200: 10 MHz bandwidth, 10³ to 10⁹ V/A gain\n"
-            "• FEMTO HCA series: High-speed current amplifiers\n"
-            "• Cost: $1000-$3000\n"
-            "✅ Plug-and-play, calibrated, professional"
-        )
-        tk.Label(f_commercial, text=commercial_txt, justify="left", bg="#f0f0f0").pack(padx=10, pady=5)
-        
-        # Option 2: DIY
-        f_diy = tk.LabelFrame(scrollable_frame, text="Option 2: DIY TIA (Budget)", bg="#f0f0f0", font=("Segoe UI", 10, "bold"))
-        f_diy.pack(fill="x", **pad)
-        diy_txt = (
-            "• Build with op-amp (OPA657, AD8015)\n"
-            "• Feedback resistor: 100kΩ to 10MΩ\n"
-            "• Example: 1 µA × 1MΩ = 1V (easily measured!)\n"
-            "• Cost: $20-50 in parts\n"
-            "⚠️ Requires PCB design, careful layout for low noise\n\n"
-            "Basic Circuit:\n"
-            "   Device → [Op-Amp +Input]\n"
-            "            [R_feedback between - and output]\n"
-            "            [Output] → Scope\n"
-            "   Ground → [Op-Amp -Input]"
-        )
-        tk.Label(f_diy, text=diy_txt, justify="left", bg="#f0f0f0", font=("Consolas", 8)).pack(padx=10, pady=5)
-        
-        # Option 3: PMU
-        f_pmu = tk.LabelFrame(scrollable_frame, text="Option 3: Keithley 4200A PMU Module", bg="#f0f0f0", font=("Segoe UI", 10, "bold"))
-        f_pmu.pack(fill="x", **pad)
-        pmu_txt = (
-            "• 4225-PMU module has built-in fast current measurement\n"
-            "• Bandwidth: 200 MHz\n"
-            "• Range: 100 pA to 1 A\n"
-            "✅ Best of both worlds (fast + sensitive)\n"
-            "❌ Expensive module (~$15k)"
-        )
-        tk.Label(f_pmu, text=pmu_txt, justify="left", bg="#f0f0f0").pack(padx=10, pady=5)
-        
-        # Recommended Resistor Values
-        tk.Label(scrollable_frame, text="5. Choosing Shunt Resistor (for mA+ currents)", font=("Segoe UI", 12, "bold"), bg="#f0f0f0").pack(**pad)
-        
-        resistor_txt = (
-            "For mA-range currents (where shunt method works):\n\n"
-            "Current Range → Recommended R_shunt → Voltage Drop\n"
-            "• 1 mA:  10Ω to 100Ω  → 10mV to 100mV\n"
-            "• 10 mA: 1Ω to 10Ω    → 10mV to 100mV\n"
-            "• 100 mA: 0.1Ω to 1Ω  → 10mV to 100mV\n\n"
-            "Tips:\n"
-            "• Use 1% tolerance or better (metal film)\n"
-            "• Power rating: P = I² × R (use 0.5W or 1W for safety)\n"
-            "• Measure actual resistance with multimeter for accuracy\n"
-            "• General purpose: 10Ω, 1%, 0.5W is a good starting point"
-        )
-        tk.Label(scrollable_frame, text=resistor_txt, justify="left", bg="#f0f0f0", font=("Consolas", 9)).pack(**pad)
-
-
-    def _create_collapsible_frame(self, parent, title, build_content_func, default_expanded=True):
-        """Helper to create a collapsible frame with expand/collapse button"""
-        # Container frame
-        container = ttk.Frame(parent)
-        container.pack(fill="x", pady=2)
-        
-        # Create a variable to track expansion state
-        var_name = f"{title.lower().replace(' ', '_').replace('1️⃣', '').replace('📐', '').replace('💾', '').strip()}_expanded"
-        self.vars[var_name] = tk.BooleanVar(value=default_expanded)
-        
-        # Header with expand/collapse button
-        header_frame = ttk.Frame(container)
-        header_frame.pack(fill="x")
-        
-        # Store title for button text updates
-        container._title = title
-        
-        # Expand/collapse button
-        expand_btn = ttk.Button(header_frame, text=f"▼ {title}" if default_expanded else f"▶ {title}",
-                               command=lambda: self._toggle_collapsible_frame(container, expand_btn, var_name, build_content_func),
-                               style="Small.TButton")
-        expand_btn.pack(side="left")
-        container._expand_btn = expand_btn
-        
-        # Content frame (initially shown or hidden based on default_expanded)
-        content_frame = ttk.Labelframe(container, text=title, padding=5)
-        self.widgets[f"{title.lower().replace(' ', '_').replace('1️⃣', '').replace('📐', '').replace('💾', '').strip()}_content"] = content_frame
-        container._content_frame = content_frame
-        
-        if default_expanded:
-            content_frame.pack(fill="x", pady=(2, 0))
-            build_content_func(content_frame)
-            content_frame._content_built = True
-        else:
-            # Store the build function to call when expanded
-            content_frame._build_func = build_content_func
-        
-        return container
-    
     def _toggle_collapsible_frame(self, container, button, var_name, build_content_func):
         """Toggle collapsible frame expand/collapse"""
         content_frame = container._content_frame
@@ -333,158 +90,7 @@ class OscilloscopePulseLayout:
             content_frame.pack(fill="x", pady=(2, 0))
             button.config(text=f"▼ {title}")
             self.vars[var_name].set(True)
-    
-    def _build_collapsible_connection_frame(self, parent):
-        """Build collapsible connection settings frame"""
-        self._create_collapsible_frame(parent, "Connections", self._build_connection_content, default_expanded=True)
-    
-    def _build_connection_content(self, frame):
-        """Build connection settings content"""
-        # SMU Address
-        smu_frame = ttk.Frame(frame)
-        smu_frame.pack(fill="x", pady=2)
-        ttk.Label(smu_frame, text="SMU Address:").pack(side="left")
-        self.vars['smu_address'] = tk.StringVar(value=self.config.get("smu_address", "GPIB0::17::INSTR"))
-        smu_combo = ttk.Combobox(smu_frame, textvariable=self.vars['smu_address'], 
-                                values=self.context.get('smu_ports', ["GPIB0::17::INSTR"]), 
-                                width=20)
-        smu_combo.pack(side="right")
-        self.widgets['smu_address'] = smu_combo  # Store reference for updates
-        self.widgets['smu_combo'] = smu_combo
-        
-        # Scope Address
-        scope_frame = ttk.Frame(frame)
-        scope_frame.pack(fill="x", pady=2)
-        ttk.Label(scope_frame, text="Scope Address:").pack(side="left")
-        self.vars['scope_address'] = tk.StringVar(value=self.config.get("scope_address", ""))
-        scope_combo = ttk.Combobox(scope_frame, textvariable=self.vars['scope_address'], 
-                                   values=self.context.get('scope_ports', []), 
-                                   width=20)
-        scope_combo.pack(side="right")
-        refresh_btn = ttk.Button(scope_frame, text="Refresh", 
-                                command=self.callbacks.get('refresh_scopes', lambda: None),
-                                style="Small.TButton")
-        refresh_btn.pack(side="right", padx=5)
-        self.widgets['scope_combo'] = scope_combo
-        
-        # Connection buttons and status
-        conn_btn_frame = ttk.Frame(frame)
-        conn_btn_frame.pack(fill="x", pady=(10, 0))
-        
-        self.widgets['connect_smu_btn'] = ttk.Button(conn_btn_frame, text="🔌 Connect SMU", 
-                                                     command=self.callbacks.get('connect_smu', lambda: None),
-                                                     style="Action.TButton")
-        self.widgets['connect_smu_btn'].pack(side="left", padx=5)
-        
-        # SMU Connection status
-        self.vars['smu_status'] = tk.StringVar(value="SMU: Not Connected")
-        smu_status_label = ttk.Label(conn_btn_frame, textvariable=self.vars['smu_status'], 
-                                     style="Status.TLabel", foreground="red")
-        smu_status_label.pack(side="left", padx=10)
-        self.widgets['smu_status_label'] = smu_status_label
 
-    def _build_collapsible_pulse_frame(self, parent):
-        """Build collapsible pulse parameters frame"""
-        self._create_collapsible_frame(parent, "Pulse Parameters", self._build_pulse_content, default_expanded=True)
-    
-    def _build_pulse_content(self, frame):
-        """Build pulse parameters content"""
-        self._add_param(frame, "Pulse Voltage (V):", "pulse_voltage", "1.0", 
-                       ToolTipText="Amplitude of the pulse")
-        self._add_param(frame, "Pulse Duration (s):", "pulse_duration", "0.001",
-                       ToolTipText="Width of the pulse")
-        self._add_param(frame, "Bias Voltage (V):", "bias_voltage", "0.2",
-                       ToolTipText="Bias level applied before and after the pulse")
-        self._add_param(frame, "Pre-Bias Time (s):", "pre_bias_time", "0.1",
-                       ToolTipText="Time at bias voltage before the pulse")
-        self._add_param(frame, "Post-Bias Time (s):", "post_bias_time", "1.0",
-                       ToolTipText="Time at bias voltage after the pulse")
-
-    def _build_collapsible_scope_frame(self, parent):
-        """Build collapsible oscilloscope settings frame"""
-        self._create_collapsible_frame(parent, "1️⃣ Oscilloscope Setup (Manual)", self._build_scope_content, default_expanded=True)
-    
-    def _build_scope_content(self, frame):
-        """Build oscilloscope settings content"""
-        # Instructions
-        instructions = (
-            "Set up your oscilloscope MANUALLY:\n"
-            "• Timebase: to capture full pulse (e.g., 500 ms/div for 1s pulse)\n"
-            "• V/div: appropriate for signal level (e.g., 200 mV/div)\n"
-            "• Trigger: set to capture pulse start\n"
-            "• Channel: use CH1 (or set below)"
-        )
-        instr_label = tk.Label(frame, text=instructions, justify="left", bg="#fff3cd", 
-                              font=("Segoe UI", 8), fg="#856404", relief=tk.SOLID, bd=1, padx=5, pady=5)
-        instr_label.pack(fill="x", pady=(0, 10))
-        
-        # Just the essentials for reading
-        self._add_param(frame, "Scope Channel:", "scope_channel", "CH1", 
-                       options=["CH1", "CH2", "CH3", "CH4"],
-                       ToolTipText="Which channel to read from")
-
-    def _build_collapsible_measurement_frame(self, parent):
-        """Build collapsible measurement settings frame"""
-        self._create_collapsible_frame(parent, "Analysis Parameters (Critical!)", self._build_measurement_content, default_expanded=True)
-    
-    def _build_measurement_content(self, frame):
-        """Build measurement settings content"""
-        tk.Label(frame, text="⚠️ R_shunt must match your actual resistor for correct current calculation!", 
-                bg="#f0f0f0", fg="#d32f2f", font=("Segoe UI", 8, "bold")).pack(fill="x", pady=(0, 5))
-        
-        self._add_param(frame, "R_shunt (Ω):", "r_shunt", "100000",
-                       ToolTipText="Actual value of your shunt resistor - measure with DMM if unsure!")
-    
-    def _build_collapsible_calculator_frame(self, parent):
-        """Build collapsible shunt resistor calculator frame"""
-        self._create_collapsible_frame(parent, "📐 Shunt Resistor Calculator", self._build_calculator_content, default_expanded=False)
-    
-    def _build_calculator_content(self, frame):
-        """Build shunt resistor calculator content"""
-        
-        # Input row
-        input_row = ttk.Frame(frame)
-        input_row.pack(fill="x", pady=2)
-        
-        ttk.Label(input_row, text="Test Voltage (V):").pack(side="left")
-        self.vars['calc_voltage'] = tk.StringVar(value="2.0")
-        calc_v_entry = ttk.Entry(input_row, textvariable=self.vars['calc_voltage'], width=8)
-        calc_v_entry.pack(side="left", padx=5)
-        
-        ttk.Label(input_row, text="Expected Current (A):").pack(side="left", padx=(10, 0))
-        self.vars['calc_current'] = tk.StringVar(value="0.000001")
-        calc_i_entry = ttk.Entry(input_row, textvariable=self.vars['calc_current'], width=12)
-        calc_i_entry.pack(side="left", padx=5)
-        
-        # Rule selection (1% or 10%)
-        ttk.Label(input_row, text="Rule:").pack(side="left", padx=(10, 0))
-        self.vars['calc_rule'] = tk.StringVar(value="10")
-        rule_combo = ttk.Combobox(input_row, textvariable=self.vars['calc_rule'], 
-                                 values=["1", "10"], width=5, state="readonly")
-        rule_combo.pack(side="left", padx=5)
-        ttk.Label(input_row, text="%").pack(side="left")
-        
-        tk.Button(input_row, text="Calculate", command=self._calculate_shunt,
-                 bg="#4caf50", fg="white", font=("Segoe UI", 8, "bold"), 
-                 relief=tk.FLAT, padx=10, pady=2).pack(side="left", padx=5)
-        
-        # Auto-calculate on Enter key
-        calc_v_entry.bind("<Return>", lambda e: self._calculate_shunt())
-        calc_i_entry.bind("<Return>", lambda e: self._calculate_shunt())
-        
-        # Results display
-        results_frame = ttk.Frame(frame)
-        results_frame.pack(fill="x", pady=(5, 0))
-        
-        self.vars['calc_result'] = tk.StringVar(value="Enter values and click Calculate")
-        result_label = tk.Label(results_frame, textvariable=self.vars['calc_result'], 
-                               bg="#f0f0f0", fg="#1b5e20", font=("Consolas", 8), 
-                               justify="left", anchor="w", wraplength=400, relief=tk.SUNKEN, bd=1, padx=5, pady=5)
-        result_label.pack(fill="x")
-        
-        # Quick Test Section (Expandable)
-        self._build_quick_test_section(frame)
-    
     def _build_quick_test_section(self, parent):
         """Build expandable quick test section"""
         # Container frame
@@ -992,81 +598,6 @@ class OscilloscopePulseLayout:
         
         self.alignment_applied = False
         self.set_status("Alignment reset to original")
-    
-    def _build_collapsible_save_options_frame(self, parent):
-        """Build collapsible save options frame"""
-        self._create_collapsible_frame(parent, "💾 Save Options", self._build_save_options_content, default_expanded=False)
-    
-    def _build_save_options_content(self, frame):
-        """Build save options content"""
-        # Auto-save checkbox
-        self.vars['auto_save'] = tk.BooleanVar(value=self.config.get("auto_save", True))
-        auto_save_check = ttk.Checkbutton(
-            frame, 
-            text="Auto-save after 'Read & Analyze'",
-            variable=self.vars['auto_save']
-        )
-        auto_save_check.pack(side="left", padx=5)
-        ToolTip(auto_save_check, "Automatically save data to save directory after reading scope (filename: Pulse_Sample_Device_timestamp.txt)")
-        
-        # Save directory display
-        save_dir_frame = ttk.Frame(frame)
-        save_dir_frame.pack(fill="x", pady=(5, 0))
-        ttk.Label(save_dir_frame, text="Save to:", font=("Segoe UI", 8)).pack(side="left")
-        self.vars['save_dir_display'] = tk.StringVar(value=self.context.get('save_directory', "Not set"))
-        save_dir_label = tk.Label(save_dir_frame, textvariable=self.vars['save_dir_display'], 
-                                 bg="#f0f0f0", fg="#555", font=("Segoe UI", 8), 
-                                 relief=tk.SUNKEN, bd=1, padx=5, pady=2)
-        save_dir_label.pack(side="left", fill="x", expand=True, padx=(5, 0))
-    
-    def _build_action_buttons(self, parent):
-        """Build action buttons frame - simplified workflow"""
-        frame = ttk.LabelFrame(parent, text="📋 Measurement Workflow", padding=5)
-        frame.pack(fill="x", pady=2)
-        
-        # Workflow instructions (compact)
-        instructions = (
-            "1️⃣ Set scope | 2️⃣ Send Pulse | 3️⃣ Verify | 4️⃣ Read & Analyze"
-        )
-        instr_label = tk.Label(frame, text=instructions, justify="left", bg="#f0f0f0", 
-                              font=("Segoe UI", 8), fg="#1565c0")
-        instr_label.pack(fill="x", pady=(0, 4))
-        
-        # Main workflow buttons
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(fill="x", pady=2)
-        
-        self.widgets['pulse_only_btn'] = ttk.Button(btn_frame, text="2️⃣ Send Pulse", 
-                                                     command=self.callbacks.get('pulse_only', lambda: None),
-                                                     style="Action.TButton")
-        self.widgets['pulse_only_btn'].pack(side="left", padx=2, fill="x", expand=True)
-        
-        self.widgets['grab_scope_btn'] = ttk.Button(btn_frame, text="4️⃣ Read & Analyze", 
-                                                     command=self.callbacks.get('grab_scope', lambda: None),
-                                                     style="Action.TButton")
-        self.widgets['grab_scope_btn'].pack(side="left", padx=2, fill="x", expand=True)
-        
-        # Secondary actions
-        btn_frame2 = ttk.Frame(frame)
-        btn_frame2.pack(fill="x", pady=(5, 0))
-        
-        save_btn = ttk.Button(btn_frame2, text="💾 Save Data", 
-                             command=self.callbacks.get('save', lambda: None))
-        save_btn.pack(side="left", padx=2, fill="x", expand=True)
-        
-        self.widgets['stop_btn'] = ttk.Button(btn_frame2, text="⏹ Stop", 
-                                             command=self.callbacks.get('stop', lambda: None),
-                                             style="Stop.TButton", state="disabled")
-        self.widgets['stop_btn'].pack(side="left", padx=2, fill="x", expand=True)
-
-    def _build_status_bar(self, parent):
-        """Build status bar"""
-        frame = ttk.Frame(parent, padding=3)
-        frame.pack(fill="x", pady=2)
-        
-        self.vars['status'] = tk.StringVar(value="Ready")
-        status_label = ttk.Label(frame, textvariable=self.vars['status'], style="Status.TLabel")
-        status_label.pack(side="left")
 
     def _build_plots(self, parent):
         """Build matplotlib plots - simplified to show only voltage overlay"""
@@ -2574,56 +2105,3 @@ class OscilloscopePulseLayout:
             if key not in ['status', 'save_dir']: # Exclude status/display vars
                 params[key] = var.get()
         return params
-            
-class ToolTip(object):
-    """
-    create a tooltip for a given widget
-    """
-    def __init__(self, widget, text='widget info'):
-        self.waittime = 500     #miliseconds
-        self.wraplength = 180   #pixels
-        self.widget = widget
-        self.text = text
-        self.widget.bind("<Enter>", self.enter)
-        self.widget.bind("<Leave>", self.leave)
-        self.widget.bind("<ButtonPress>", self.leave)
-        self.id = None
-        self.tw = None
-
-    def enter(self, event=None):
-        self.schedule()
-
-    def leave(self, event=None):
-        self.unschedule()
-        self.hidetip()
-
-    def schedule(self):
-        self.unschedule()
-        self.id = self.widget.after(self.waittime, self.showtip)
-
-    def unschedule(self):
-        id = self.id
-        self.id = None
-        if id:
-            self.widget.after_cancel(id)
-
-    def showtip(self, event=None):
-        x = y = 0
-        x, y, cx, cy = self.widget.bbox("insert")
-        x += self.widget.winfo_rootx() + 25
-        y += self.widget.winfo_rooty() + 20
-        # creates a toplevel window
-        self.tw = tk.Toplevel(self.widget)
-        # Leaves only the label and removes the app window
-        self.tw.wm_overrideredirect(True)
-        self.tw.wm_geometry("+%d+%d" % (x, y))
-        label = tk.Label(self.tw, text=self.text, justify='left',
-                       background="#ffffe0", relief='solid', borderwidth=1,
-                       wraplength = self.wraplength)
-        label.pack(ipadx=1)
-
-    def hidetip(self):
-        tw = self.tw
-        self.tw= None
-        if tw:
-            tw.destroy()
