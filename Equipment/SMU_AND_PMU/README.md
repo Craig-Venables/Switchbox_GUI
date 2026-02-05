@@ -1,6 +1,6 @@
 # SMU_AND_PMU Package
 
-This package contains all SMU (Source Measure Unit) and PMU (Pulse Measurement Unit) controllers and scripts, organized by instrument model.
+This package contains all SMU (Source Measure Unit) and PMU (Pulse Measurement Unit) controllers and scripts, organized by instrument model. **Pulse Testing** uses these modules via adapters in `Pulse_Testing/systems/`; see **Pulse_Testing/README.md** for the unified layout (adapter → script/controller paths per system).
 
 ## Package Structure
 
@@ -11,7 +11,9 @@ Equipment/SMU_AND_PMU/
 │
 ├── keithley2400/                    # Keithley 2400/2401
 │   ├── __init__.py
-│   └── controller.py                # Keithley2400Controller
+│   ├── controller.py                # Keithley2400Controller
+│   ├── scpi_scripts.py               # Keithley2400_SCPI_Scripts (pulse tests)
+│   └── simulation_2400.py           # Simulation2400
 │
 ├── keithley2450/                    # Keithley 2450 (all modes)
 │   ├── __init__.py

@@ -156,8 +156,8 @@ class TestTypeRegistry:
             },
             "⚠️ SMU Endurance": {
                 "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse → Read → RESET pulse → Read) × N cycles\nUse for endurance cycling with slow pulses (milliseconds to seconds)",
-                "plot_type": "time_series",
-                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)"],
+                "plot_type": "endurance",
+                "expected_columns": ["Measurement_Number", "Timestamp(s)", "Voltage(V)", "Current(A)", "Resistance(Ohm)", "Cycle Number"],
                 "key_parameters": ["set_voltage", "reset_voltage", "set_duration", "reset_duration", "num_cycles"]
             },
             "⚠️ SMU Retention": {

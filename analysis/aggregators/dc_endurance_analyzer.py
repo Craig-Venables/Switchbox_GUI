@@ -179,15 +179,15 @@ class DCEnduranceAnalyzer:
         return dfs
     
     def plot_current_vs_cycle(self, voltage: float, df: pd.DataFrame) -> None:
-        """Plot current vs cycle for a specific voltage (delegates to plotting.endurance_plots)."""
-        from plotting.endurance_plots import plot_current_vs_cycle as _plot
+        """Plot current vs cycle for a specific voltage (delegates to plotting.endurance)."""
+        from plotting.endurance import plot_current_vs_cycle as _plot
         _plot(voltage, df, self.endurance_dir, self.file_name)
     
     def plot_endurance_summary(self) -> None:
-        """Create comprehensive summary plot (delegates to plotting.endurance_plots)."""
+        """Create comprehensive summary plot (delegates to plotting.endurance)."""
         if not self.extracted_data:
             return
-        from plotting.endurance_plots import plot_endurance_summary as _plot
+        from plotting.endurance import plot_endurance_summary as _plot
         _plot(self.voltages, self.extracted_data, self.endurance_dir, self.file_name)
     
     def export_to_csv(self) -> None:

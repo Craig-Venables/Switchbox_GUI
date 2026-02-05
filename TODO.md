@@ -7,6 +7,17 @@ larger refactoring plans.
 
 ## Feature Requests
 
+### QOL FIXES
+
+pulse testing should work nicer, currently non  stop issues with the 4200 system. we need to work out what works and remove everything else. 
+maybe some note on 4200_smu with only the smu based pulsing and the same for 4200_pmu  for pmu based pulsing 
+note the limits to each system aswell 
+
+Osillascope testing gui needs taking back to basics its too complaicaed and messy, still want the features but needs redesigning 
+
+
+
+
 ### Laser & Device Positioning
 
 - **Laser GUI:** Build specific laser GUI that homes the laser, then lets user select a

@@ -2,6 +2,10 @@
 Keithley 2400 SCPI-based Pulse Testing Scripts
 ===============================================
 
+Script location: Equipment/SMU_AND_PMU/keithley2400/scpi_scripts.py (this file).
+Controller: Equipment/SMU_AND_PMU/keithley2400/controller.py.
+Pulse Testing adapter: Pulse_Testing/systems/keithley2400.py (imports this module).
+
 SCPI command-based implementation of pulse testing patterns for Keithley 2400.
 Uses direct SCPI commands for voltage-based pulsing (0V → pulse → 0V) without
 toggling output on/off to avoid current spikes.
@@ -11,7 +15,7 @@ All results returned as: {'timestamps': [...], 'voltages': [...], 'currents': [.
 
 import time
 from typing import Dict, List, Any, Optional
-from Equipment.SMU_AND_PMU.keithley2400.controller import Keithley2400Controller
+from .controller import Keithley2400Controller
 
 
 class Keithley2400_SCPI_Scripts:

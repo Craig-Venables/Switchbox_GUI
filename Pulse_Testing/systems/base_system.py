@@ -2,8 +2,10 @@
 Base Measurement System Interface
 =================================
 
-Abstract base class defining the standard interface for all measurement systems.
-All systems must implement these methods and return standardized data format.
+Abstract base class for all measurement systems. Implementations (adapters) live in
+Pulse_Testing/systems/ (keithley2400.py, keithley2450.py, keithley4200a.py); each
+delegates to script modules in Equipment/SMU_AND_PMU/<instrument>/.
+See Pulse_Testing/README.md and Equipment/SMU_AND_PMU/README.md for unified layout.
 """
 
 from abc import ABC, abstractmethod

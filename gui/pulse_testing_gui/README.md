@@ -49,7 +49,8 @@ pulse_gui = TSPTestingGUI(master, device_address=address)
 
 ### Project Dependencies
 - `Pulse_Testing.system_wrapper`: System detection and routing
-- `Pulse_Testing.test_capabilities`: Test availability checking
+- `Pulse_Testing.test_capabilities`: Which system supports which test (single source of truth)
+- `Pulse_Testing.test_definitions`: Test display names, params, descriptions, plot types (GUI metadata)
 - `Equipment.SMU_AND_PMU.Keithley2450_TSP`: 2450 TSP interface
 - `Equipment.SMU_AND_PMU.keithley2450_tsp_scripts`: 2450 test scripts
 - `Equipment.SMU_AND_PMU.keithley4200_kxci_scripts`: 4200A KXCI scripts
@@ -61,9 +62,34 @@ pulse_gui = TSPTestingGUI(master, device_address=address)
 pulse_testing_gui/
 ├── README.md           # This file
 ├── __init__.py         # Package exports (TSPTestingGUI)
-├── main.py             # TSPTestingGUI class (~3465 lines)
-└── pulse_testing/      # Pulse testing utilities
+├── config.py           # Paths, config file names, window geometry
+├── logic.py            # get_available_devices(), run_test_worker() for device scan and test run
+├── main.py             # TSPTestingGUI: layout wiring, callbacks, save; delegates to ui/ and plot_handlers
+├── plot_handlers.py    # plot_by_type() + all _plot_* result-plot implementations
+├── ui/
+│   ├── __init__.py     # Exports build_* and PulseDiagramHelper
+│   ├── connection.py       # build_connection_section, toggle_connection_section
+│   ├── test_selection.py   # build_test_selection_section
+│   ├── diagram_section.py  # build_pulse_diagram_section
+│   ├── parameters.py       # build_parameters_section
+│   ├── status_section.py   # build_status_section
+│   ├── plot_section.py     # build_plot_section
+│   ├── pulse_diagram.py    # PulseDiagramHelper (pulse pattern preview _draw_*)
+│   └── tabs_optical.py         # Optical tab (Oxxius laser pulsing)
+└── (Pulse_Testing/    # Backend: test_definitions, test_capabilities, system_wrapper, systems/)
 ```
+
+Tabs: **Manual Testing** | **Automated Testing** | **Optical** (Oxxius laser ms-scale pulsing).
+
+## Refactor summary
+
+- **Backend**: Test list and params in `Pulse_Testing/test_definitions.py`; per-system support in `test_capabilities.py`. Adding a test or system is documented in `Pulse_Testing/README.md`.
+- **GUI**: `config.py` for paths/geometry; `logic.py` for device scan and `run_test_worker()`; `plot_handlers` holds `plot_by_type()` and all `_plot_*` implementations; `ui/` holds section builders (connection, test_selection, diagram_section, parameters, status_section, plot_section) and `PulseDiagramHelper` in `ui/pulse_diagram.py`; `ui/tabs_optical` is the Optical tab (Oxxius laser pulsing). Main wires layout (calls build_*), handles callbacks, save, and run flow.
+
+## Adding a new test or system
+
+- **New test**: Add it in the **Pulse_Testing** backend (see `Pulse_Testing/README.md`): `test_capabilities.py`, `test_definitions.py`, and the system implementations. The GUI will show it automatically for systems that support it.
+- **New system**: Add a new system class in `Pulse_Testing/systems/`, register it in `system_wrapper.py`, and add a row in `test_capabilities.SYSTEM_CAPABILITIES`. The GUI filters the test list by current system, so only supported tests appear.
 
 ## Main Class
 

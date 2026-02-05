@@ -223,6 +223,68 @@ def parse_tsp_file(filepath: Path) -> Optional[TSPData]:
         return None
 
 
+def _build_endurance_set_reset_from_cycle_and_pulse_type(data: TSPData) -> None:
+    """
+    For endurance data with a single Voltage/Current/Resistance but Cycle Number and
+    Pulse Type columns: build Resistance (Set) and Resistance (Reset) by grouping
+    by cycle and splitting by pulse type (READ_AFTER_SET vs READ_AFTER_RESET).
+    Ensures older or alternate file formats plot as two lines (SET vs RESET) instead
+    of one continuous line.
+    """
+    if not data.additional_data or len(data.resistances) == 0:
+        return
+    if 'Resistance (Set)' in data.additional_data and 'Resistance (Reset)' in data.additional_data:
+        return
+    if 'endurance' not in data.test_name.lower():
+        return
+
+    cycle_key = None
+    pulse_type_key = None
+    for key in data.additional_data.keys():
+        k = key.lower().strip()
+        if 'cycle' in k:
+            if cycle_key is None or key.strip() == 'Cycle Number':
+                cycle_key = key
+        if 'pulse' in k and 'type' in k:
+            pulse_type_key = key
+    if cycle_key is None or pulse_type_key is None:
+        return
+
+    cycles_raw = data.additional_data[cycle_key]
+    try:
+        cycles = np.asarray(cycles_raw, dtype=float).astype(int)
+    except (ValueError, TypeError):
+        return
+    pulse_types = data.additional_data[pulse_type_key]
+    resistances = np.asarray(data.resistances, dtype=float)
+
+    if len(cycles) != len(resistances) or len(cycles) != len(pulse_types):
+        return
+
+    unique_cycles = np.array(sorted(set(cycles)))
+    r_set_list = []
+    r_reset_list = []
+
+    for c in unique_cycles:
+        mask = cycles == c
+        pts = np.atleast_1d(pulse_types[mask])
+        ress = resistances[mask]
+        for i in range(len(pts)):
+            pt = str(pts[i]).upper()
+            # Check RESET before SET so "READ_AFTER_RESET" is not matched by "SET"
+            if 'RESET' in pt:
+                r_reset_list.append(ress[i])
+            elif 'SET' in pt:
+                r_set_list.append(ress[i])
+
+    if not r_set_list or not r_reset_list or len(r_set_list) != len(r_reset_list):
+        return
+
+    data.additional_data['Resistance (Set)'] = np.array(r_set_list, dtype=float)
+    data.additional_data['Resistance (Reset)'] = np.array(r_reset_list, dtype=float)
+    data.additional_data['Cycle Number'] = unique_cycles.astype(int)
+
+
 def parse_tsp_format(data: TSPData, lines: List[str]) -> Optional[TSPData]:
     """Parse standard TSP format with metadata headers"""
     try:
@@ -365,6 +427,9 @@ def parse_tsp_format(data: TSPData, lines: List[str]) -> Optional[TSPData]:
                 except (ValueError, TypeError):
                     # Keep as object array (strings)
                     data.additional_data[col_name] = np.array(col_data, dtype=object)
+        
+        # Endurance with single V/I/R but Cycle + Pulse Type: build Resistance (Set) and (Reset)
+        _build_endurance_set_reset_from_cycle_and_pulse_type(data)
         
         return data
     except Exception as e:

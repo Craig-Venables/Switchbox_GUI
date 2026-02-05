@@ -1,9 +1,13 @@
 """
-Keithley 4200A Measurement System Implementation
-==================================================
+Keithley 4200A Measurement System Adapter
+==========================================
 
-Implementation for Keithley 4200A measurement system using KXCI scripts.
-Integrates with keithley4200_kxci_scripts.py for all test functions.
+Script location: Equipment/SMU_AND_PMU/keithley4200/kxci_scripts.py.
+Controller / KXCI: Equipment/SMU_AND_PMU/keithley4200/kxci_controller.py.
+C programs (e.g. pmu_pulse_read_interleaved): Equipment/SMU_AND_PMU/4200A/C_Code_with_python_scripts/.
+This file: Pulse_Testing/systems/keithley4200a.py (adapter only; delegates to Equipment).
+
+Implements BaseMeasurementSystem for Keithley 4200A using KXCI scripts.
 """
 
 import time
