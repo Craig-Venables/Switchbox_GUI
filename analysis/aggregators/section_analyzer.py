@@ -78,7 +78,7 @@ try:
 except ImportError:
     AnalyzeSingleFile = None
 
-from plotting.section_plots import (
+from plotting.section import (
     plot_customization as section_plot_customization,
     plot_sweeps_by_type as section_plot_sweeps_by_type,
     plot_sweeps_by_voltage as section_plot_sweeps_by_voltage,

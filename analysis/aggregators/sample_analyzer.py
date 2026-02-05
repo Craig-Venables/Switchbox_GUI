@@ -110,7 +110,7 @@ from typing import Dict, List, Tuple, Optional, Callable
 from datetime import datetime
 import warnings
 
-from plotting.sample_plots import SamplePlots
+from plotting.sample import SamplePlots
 
 # Suppress matplotlib warnings
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -408,53 +408,53 @@ class SampleAnalysisOrchestrator:
             code_name_filter=self.code_name_filter,
         )
         
-        # Plot 1: Memristivity Score Heatmap (plotting.sample_plots)
+        # Plot 1: Memristivity Score Heatmap (plotting.sample)
         plot_num += 1
         self._log(f"Plot {plot_num}/13: {plot_names[0]}")
         plotter.plot_memristivity_heatmap()
         self._export_memristivity_heatmap_data()
         
-        # Plot 2: Conduction Mechanism Distribution (plotting.sample_plots)
+        # Plot 2: Conduction Mechanism Distribution (plotting.sample)
         plot_num += 1
         self._log(f"Plot {plot_num}/13: {plot_names[1]}")
         plotter.plot_conduction_mechanisms()
         self._export_conduction_mechanism_data()
         
-        # Plot 3: Memory Window Quality Distribution (plotting.sample_plots)
+        # Plot 3: Memory Window Quality Distribution (plotting.sample)
         plot_num += 1
         self._log(f"Plot {plot_num}/13: {plot_names[2]}")
         plotter.plot_memory_window_quality()
         self._export_memory_window_data()
         
-        # Plot 4: Hysteresis Shape Radar (memristive only, plotting.sample_plots)
+        # Plot 4: Hysteresis Shape Radar (memristive only, plotting.sample)
         if self.memristive_devices:
             plot_num += 1
             self._log(f"Plot {plot_num}/13: {plot_names[3]}")
             plotter.plot_hysteresis_radar()
         
-        # Plot 5: Enhanced Classification Scatter (plotting.sample_plots)
+        # Plot 5: Enhanced Classification Scatter (plotting.sample)
         plot_num += 1
         self._log(f"Plot {plot_num}/13: {plot_names[4]}")
         plotter.plot_classification_scatter()
         self._export_classification_scatter_data()
         
-        # Plot 6: Forming Progress Tracking (plotting.sample_plots)
+        # Plot 6: Forming Progress Tracking (plotting.sample)
         plot_num += 1
         self._log(f"Plot {plot_num}/13: {plot_names[5]}")
         plotter.plot_forming_progress()
         
-        # Plot 7: Warning Flag Summary (plotting.sample_plots)
+        # Plot 7: Warning Flag Summary (plotting.sample)
         plot_num += 1
         self._log(f"Plot {plot_num}/13: {plot_names[6]}")
         plotter.plot_warning_summary()
         
-        # Plot 8: Research Diagnostics Scatter Matrix (plotting.sample_plots)
+        # Plot 8: Research Diagnostics Scatter Matrix (plotting.sample)
         if self.memristive_devices and len(self.research_data) > 0:
             plot_num += 1
             self._log(f"Plot {plot_num}/13: {plot_names[7]}")
             plotter.plot_research_diagnostics()
         
-        # Plot 9: Power & Energy Efficiency (plotting.sample_plots)
+        # Plot 9: Power & Energy Efficiency (plotting.sample)
         if len(self.research_data) > 0:
             plot_num += 1
             self._log(f"Plot {plot_num}/13: {plot_names[8]}")

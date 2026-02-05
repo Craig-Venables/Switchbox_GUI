@@ -2,13 +2,17 @@
 Keithley 2400 Measurement System Adapter
 =========================================
 
-Wraps Keithley2400_SCPI_Scripts to provide standardized interface
-for the Pulse Testing architecture.
+Script location: Equipment/SMU_AND_PMU/keithley2400/scpi_scripts.py.
+Controller: Equipment/SMU_AND_PMU/keithley2400/controller.py.
+This file: Pulse_Testing/systems/keithley2400.py (adapter only; delegates to Equipment).
+
+Wraps Keithley2400_SCPI_Scripts to provide standardized BaseMeasurementSystem
+interface for the Pulse Testing architecture.
 """
 
 from typing import Dict, List, Any, Optional
 from .base_system import BaseMeasurementSystem
-from .keithley2400_scpi_scripts import Keithley2400_SCPI_Scripts
+from Equipment.SMU_AND_PMU.keithley2400.scpi_scripts import Keithley2400_SCPI_Scripts
 from Equipment.SMU_AND_PMU.keithley2400.controller import Keithley2400Controller
 
 

@@ -2,7 +2,11 @@
 System Wrapper - Test Routing and System Detection
 ==================================================
 
-Main wrapper class that:
+Routes test calls to the correct system adapter. Adapters and script locations:
+- keithley2400: Pulse_Testing/systems/keithley2400.py -> Equipment/SMU_AND_PMU/keithley2400/scpi_scripts.py
+- keithley2450: Pulse_Testing/systems/keithley2450.py -> Equipment/SMU_AND_PMU/keithley2450/tsp_scripts.py
+- keithley4200a: Pulse_Testing/systems/keithley4200a.py -> Equipment/SMU_AND_PMU/keithley4200/kxci_scripts.py
+
 1. Detects measurement system from device address
 2. Routes test function calls to appropriate system implementation
 3. Normalizes return data to standard format

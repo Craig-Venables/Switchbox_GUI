@@ -32,12 +32,67 @@ class OxxiusLaser:
         return self.send_command("?ID")
 
     def emission_on(self):
-        """Turn emission on (DL 1 or EM 1 depending on firmware)."""
+        """
+        Turn emission on (DL 1 or EM 1 depending on firmware).
+        Note: Switching speed via serial is limited (~10–50 Hz). For faster modulation use TTL input.
+        """
         return self.send_command("DL 1")
 
     def emission_off(self):
-        """Turn emission off (DL 0 or EM 0)."""
+        """
+        Turn emission off (DL 0 or EM 0).
+        Note: Switching speed via serial is limited (~10–50 Hz). For faster modulation use TTL input.
+        """
         return self.send_command("DL 0")
+
+    # =======================
+    # Ms-scale pulsing (serial; TTL can be added later for faster)
+    # =======================
+
+    def pulse_on_ms(self, duration_ms):
+        """
+        Turn emission on for the given duration (ms), then off.
+        Uses serial commands; suitable for ms-scale pulses (~10–50 Hz max).
+        For faster repetition use the laser TTL input with external hardware.
+
+        Args:
+            duration_ms: Time to keep emission on, in milliseconds (float or int).
+
+        Returns:
+            str: Reply from the final emission_off command.
+        """
+        self.emission_on()
+        time.sleep(duration_ms / 1000.0)
+        return self.emission_off()
+
+    def pulse_train(self, n_pulses, on_ms, off_ms, power_mw=None):
+        """
+        Run a train of n_pulses: each pulse is on for on_ms and off for off_ms (between pulses).
+        Uses serial on/off; suitable for ms-scale timing. Optional power set once before train.
+
+        Args:
+            n_pulses: Number of pulses (int, >= 1).
+            on_ms: Emission on time per pulse, in milliseconds.
+            off_ms: Time between pulses (emission off), in milliseconds.
+            power_mw: If set, set power to this value (mW) once before the train.
+
+        Returns:
+            list: Replies from emission_off for each pulse (for debugging).
+        """
+        if n_pulses < 1:
+            return []
+        if power_mw is not None:
+            self.set_power(power_mw)
+            time.sleep(0.05)
+        replies = []
+        for i in range(n_pulses):
+            self.emission_on()
+            time.sleep(on_ms / 1000.0)
+            r = self.emission_off()
+            replies.append(r)
+            if i < n_pulses - 1:
+                time.sleep(off_ms / 1000.0)
+        return replies
 
     def set_power(self, value):
         """

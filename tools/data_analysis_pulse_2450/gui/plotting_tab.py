@@ -245,6 +245,18 @@ class PlottingTab(QWidget):
         self.show_difference_check.stateChanged.connect(self.update_plot)
         settings_layout.addWidget(self.show_difference_check)
         
+        # Endurance: which state uses one fixed colour (the other varies per dataset)
+        endurance_color_layout = QHBoxLayout()
+        endurance_color_layout.addWidget(QLabel("Same colour for:"))
+        self.endurance_fixed_combo = QComboBox()
+        self.endurance_fixed_combo.addItems(["HRS (RESET)", "LRS (SET)"])
+        self.endurance_fixed_combo.setToolTip(
+            "HRS (RESET): all high-resistance lines same colour; LRS varies per dataset.\n"
+            "LRS (SET): all low-resistance lines same colour; HRS varies per dataset.")
+        self.endurance_fixed_combo.currentTextChanged.connect(self.update_plot)
+        endurance_color_layout.addWidget(self.endurance_fixed_combo)
+        settings_layout.addLayout(endurance_color_layout)
+        
         settings_group.setLayout(settings_layout)
         control_layout.addWidget(settings_group)
         
@@ -1537,8 +1549,9 @@ class PlottingTab(QWidget):
         elif 'cycle' in axis_name_lower and 'number' in axis_name_lower:
             if 'Cycle Number' in data.additional_data:
                 return data.additional_data['Cycle Number'], "Cycle Number"
-            else:
-                return data.measurement_numbers, "Measurement Number"
+            if 'Cycle Numbers' in data.additional_data:
+                return np.asarray(data.additional_data['Cycle Numbers'], dtype=float), "Cycle Number"
+            return data.measurement_numbers, "Measurement Number"
         else:
             # Try to find in additional_data
             for key, value in data.additional_data.items():
@@ -1568,9 +1581,13 @@ class PlottingTab(QWidget):
         import numpy as np
         
         # Special handling for endurance tests: use plot_single to get SET/RESET separation
-        if data.test_name == "Endurance Test" and 'Resistance (Reset)' in data.additional_data and 'Resistance (Set)' in data.additional_data:
+        if ('endurance' in data.test_name.lower() and
+                'Resistance (Reset)' in data.additional_data and
+                'Resistance (Set)' in data.additional_data):
             show_difference = self.show_difference_check.isChecked()
-            self.plot_generator.plot_single(data, fig, ax, color, label, show_difference=show_difference)
+            fixed_state = 'lrs' if self.endurance_fixed_combo.currentText() == "LRS (SET)" else 'hrs'
+            self.plot_generator.plot_single(data, fig, ax, color, label, show_difference=show_difference,
+                                           endurance_fixed_state=fixed_state)
             return
         
         # Get X-axis data

@@ -95,12 +95,13 @@ class PlotGenerator:
         self.style.apply_to_axes(ax)
         return fig, ax
     
-    def plot_single(self, data: TSPData, fig: Optional[Figure] = None, 
+    def plot_single(self, data: TSPData, fig: Optional[Figure] = None,
                    ax: Optional[Axes] = None, color: Optional[str] = None,
-                   label: Optional[str] = None, show_difference: bool = False) -> Tuple[Figure, Axes]:
+                   label: Optional[str] = None, show_difference: bool = False,
+                   endurance_fixed_state: str = 'hrs') -> Tuple[Figure, Axes]:
         """
         Plot a single TSP dataset.
-        
+
         Args:
             data: TSPData object
             fig: Existing figure (optional)
@@ -108,7 +109,10 @@ class PlotGenerator:
             color: Line color (optional)
             label: Legend label (optional)
             show_difference: For endurance tests, show R_off - R_on difference (optional)
-        
+            endurance_fixed_state: For endurance, which state uses one fixed colour.
+                'hrs' = HRS (RESET) same colour for all, LRS (SET) varies per dataset.
+                'lrs' = LRS (SET) same colour for all, HRS (RESET) varies per dataset.
+
         Returns:
             Figure and Axes objects
         """
@@ -134,7 +138,8 @@ class PlotGenerator:
         elif plot_type == 'pot_dep_cycle':
             self._plot_potentiation_depression(ax, data, color, label)
         elif plot_type == 'endurance':
-            self._plot_endurance(ax, data, color, label, show_difference=show_difference)
+            self._plot_endurance(ax, data, color, label, show_difference=show_difference,
+                                endurance_fixed_state=endurance_fixed_state)
         elif plot_type == 'relaxation_reads':
             self._plot_relaxation_reads(ax, data, color, label)
         elif plot_type == 'relaxation_all':
@@ -268,39 +273,63 @@ class PlotGenerator:
         ax.set_ylabel('Resistance (Ω)')
         ax.set_title('Potentiation-Depression Cycle')
     
-    def _plot_endurance(self, ax: Axes, data: TSPData, color: str, label: str, show_difference: bool = False):
+    def _plot_endurance(self, ax: Axes, data: TSPData, color: str, label: str, show_difference: bool = False,
+                        endurance_fixed_state: str = 'hrs'):
         """Plot endurance test (Cycle Number vs Resistance)
-        
+
         Args:
             ax: Matplotlib axes
             data: TSPData object
-            color: Base color for plotting
+            color: Dataset colour (used for the state that varies per dataset)
             label: Dataset label
             show_difference: If True, also plot R_off - R_on difference
+            endurance_fixed_state: 'hrs' = HRS same colour for all, LRS uses color.
+                'lrs' = LRS same colour for all, HRS uses color.
         """
         # Check if we have both SET and RESET resistances
         if 'Resistance (Reset)' in data.additional_data and 'Resistance (Set)' in data.additional_data:
             r_reset = data.additional_data['Resistance (Reset)']
             r_set = data.additional_data['Resistance (Set)']
-            
-            # Get cycle numbers (use measurement_numbers if Cycle Number not available)
-            if 'Cycle Number' in data.additional_data:
-                cycle_numbers = data.additional_data['Cycle Number']
+
+            # Get cycle numbers (support Cycle Number, Cycle Numbers, or any cycle-like key)
+            cycle_numbers = None
+            for key in ('Cycle Number', 'Cycle Numbers'):
+                if key in data.additional_data:
+                    arr = data.additional_data[key]
+                    if len(arr) == len(r_set) and len(arr) == len(r_reset):
+                        cycle_numbers = np.asarray(arr, dtype=float)
+                        break
+            if cycle_numbers is None:
+                for key, arr in data.additional_data.items():
+                    if 'cycle' in key.lower() and hasattr(arr, '__len__'):
+                        try:
+                            arr = np.asarray(arr, dtype=float)
+                            if len(arr) == len(r_set) and len(arr) == len(r_reset):
+                                cycle_numbers = arr
+                                break
+                        except (ValueError, TypeError):
+                            pass
+            if cycle_numbers is None:
+                cycle_numbers = np.arange(len(r_set), dtype=float)
+
+            # One state fixed colour, the other uses dataset color (so multiple datasets are easy to tell apart)
+            fixed_hrs_color = self.style.COLORS[3]   # Red for RESET (HRS)
+            fixed_lrs_color = self.style.COLORS[2]   # Green for SET (LRS)
+            if endurance_fixed_state.lower() == 'lrs':
+                hrs_color = color
+                lrs_color = fixed_lrs_color
             else:
-                cycle_numbers = data.measurement_numbers
-            
-            # Plot RESET (HRS) - typically higher resistance
-            reset_color = self.style.COLORS[3] if color == self.style.COLORS[0] else color  # Red for HRS
+                hrs_color = fixed_hrs_color
+                lrs_color = color
+            # Plot RESET (HRS)
             ax.plot(cycle_numbers, r_reset,
-                   color=reset_color, linewidth=self.style.line_width,
+                   color=hrs_color, linewidth=self.style.line_width,
                    marker='s', markersize=self.style.marker_size,
-                   label=f'{label} - RESET (HRS)', 
+                   label=f'{label} - RESET (HRS)',
                    markevery=max(1, len(cycle_numbers)//50))
-            
-            # Plot SET (LRS) - typically lower resistance
-            set_color = self.style.COLORS[2] if color == self.style.COLORS[0] else self.style.COLORS[1]  # Green for LRS
+            # Plot SET (LRS)
             ax.plot(cycle_numbers, r_set,
-                   color=set_color, linewidth=self.style.line_width,
+                   color=lrs_color, linewidth=self.style.line_width,
                    marker='o', markersize=self.style.marker_size,
                    label=f'{label} - SET (LRS)',
                    markevery=max(1, len(cycle_numbers)//50))
@@ -320,20 +349,32 @@ class PlotGenerator:
             ax.set_ylabel('Resistance (Ω)')
             ax.set_title('Endurance Test - SET vs RESET')
             ax.set_yscale('log')
-        elif 'Cycle Number' in data.additional_data:
-            # Fallback: plot only primary resistance if SET/RESET not available
-            cycle_numbers = data.additional_data['Cycle Number']
-            ax.plot(cycle_numbers, data.resistances,
-                   color=color, linewidth=self.style.line_width,
-                   marker='o', markersize=self.style.marker_size,
-                   label=label, markevery=max(1, len(cycle_numbers)//50))
-            
-            ax.set_xlabel('Cycle Number')
-            ax.set_ylabel('Resistance (Ω)')
-            ax.set_title('Endurance Test')
-            ax.set_yscale('log')
         else:
-            self._plot_time_series(ax, data, color, label)
+            # Fallback: plot only primary resistance if SET/RESET not available
+            cycle_numbers = (data.additional_data.get('Cycle Number') or
+                             data.additional_data.get('Cycle Numbers'))
+            if cycle_numbers is None:
+                for key, arr in data.additional_data.items():
+                    if 'cycle' in key.lower():
+                        try:
+                            cycle_numbers = np.asarray(arr, dtype=float)
+                            break
+                        except (ValueError, TypeError):
+                            pass
+            if cycle_numbers is not None:
+                cycle_numbers = np.asarray(cycle_numbers, dtype=float)
+                if len(cycle_numbers) != len(data.resistances):
+                    cycle_numbers = data.measurement_numbers
+                ax.plot(cycle_numbers, data.resistances,
+                       color=color, linewidth=self.style.line_width,
+                       marker='o', markersize=self.style.marker_size,
+                       label=label, markevery=max(1, len(cycle_numbers)//50))
+                ax.set_xlabel('Cycle Number')
+                ax.set_ylabel('Resistance (Ω)')
+                ax.set_title('Endurance Test')
+                ax.set_yscale('log')
+            else:
+                self._plot_time_series(ax, data, color, label)
     
     def _plot_relaxation_reads(self, ax: Axes, data: TSPData, color: str, label: str):
         """Plot relaxation after multi-pulse (only reads)"""

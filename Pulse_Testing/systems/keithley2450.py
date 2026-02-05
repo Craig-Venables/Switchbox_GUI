@@ -2,8 +2,12 @@
 Keithley 2450 Measurement System Adapter
 =========================================
 
-Wraps Keithley2450_TSP_Scripts to provide standardized interface
-for the Pulse Testing architecture.
+Script location: Equipment/SMU_AND_PMU/keithley2450/tsp_scripts.py (and tsp_sim_scripts.py).
+Controller: Equipment/SMU_AND_PMU/keithley2450/tsp_controller.py.
+This file: Pulse_Testing/systems/keithley2450.py (adapter only; delegates to Equipment).
+
+Wraps Keithley2450_TSP_Scripts to provide standardized BaseMeasurementSystem
+interface for the Pulse Testing architecture.
 """
 
 from typing import Dict, List, Any, Optional
