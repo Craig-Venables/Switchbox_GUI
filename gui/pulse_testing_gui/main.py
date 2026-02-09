@@ -787,7 +787,17 @@ class TSPTestingGUI(tk.Toplevel):
         self._context_poll_job = self.after(500, self._poll_context)
 
     def destroy(self):
-        """Ensure scheduled context polling stops when window closes."""
+        """On close: set laser to 0 mW and restore manual (front-panel) control so the dial still works."""
+        laser = getattr(self, "laser", None)
+        if laser is not None:
+            try:
+                # 0 mW, analog mode so front-panel dial still works; leave emission ON
+                laser.set_to_analog_modulation_mode(power_mw=0)
+                laser.emission_on()
+                laser.close(restore_to_manual_control=False)  # already in manual mode at 0 mW
+            except Exception:
+                pass
+            self.laser = None
         job = getattr(self, "_context_poll_job", None)
         if job:
             try:
@@ -1404,10 +1414,34 @@ class TSPTestingGUI(tk.Toplevel):
             tk.Label(self.params_frame, text=label, anchor="w").grid(
                 row=current_row, column=0, sticky="w", padx=5, pady=2)
             
-            # Entry
+            # Entry (for optical_laser_power_mw add True power + Curve button to the right)
             var = tk.StringVar(value=str(default_value))
-            entry = tk.Entry(self.params_frame, textvariable=var, width=20)
-            entry.grid(row=current_row, column=1, sticky="ew", padx=5, pady=2)
+            if param_name == "optical_laser_power_mw":
+                cell = tk.Frame(self.params_frame)
+                cell.grid(row=current_row, column=1, sticky="ew", padx=5, pady=2)
+                entry = tk.Entry(cell, textvariable=var, width=8)
+                entry.pack(side=tk.LEFT, padx=(0, 6))
+                true_var = tk.StringVar(value="")
+                def _update_optical_true():
+                    try:
+                        set_mw = float(var.get().strip())
+                        from Equipment.Laser_Power_Meter.laser_power_calibration import (
+                            load_calibration,
+                            get_actual_mw,
+                            format_true_power_display,
+                        )
+                        cal = load_calibration()
+                        true_mw = get_actual_mw(cal, set_mw)
+                        true_var.set("True: " + format_true_power_display(true_mw))
+                    except (FileNotFoundError, ValueError, Exception):
+                        true_var.set("")
+                tk.Label(cell, textvariable=true_var, fg="gray", font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=(0, 6))
+                tk.Button(cell, text="Curve", font=("TkDefaultFont", 7), command=self._show_calibration_curve_from_params).pack(side=tk.LEFT)
+                _update_optical_true()
+                var.trace_add("write", lambda *a: _update_optical_true())
+            else:
+                entry = tk.Entry(self.params_frame, textvariable=var, width=20)
+                entry.grid(row=current_row, column=1, sticky="ew", padx=5, pady=2)
             
             # Bind entry to update diagram when changed
             var.trace_add("write", lambda *args: self.update_pulse_diagram())
@@ -1637,7 +1671,7 @@ class TSPTestingGUI(tk.Toplevel):
 
         self.log(f"Executing {func_name} on {self.current_system_name}...")
         start_time = time.time()
-        if func_name in ("optical_read_pulsed_light", "optical_pulse_train_read"):
+        if func_name in ("optical_read_pulsed_light", "optical_pulse_train_read", "optical_pulse_train_pattern_read"):
             from gui.pulse_testing_gui import optical_runner
             results, err = optical_runner.run_optical_test(self, func_name, params)
         else:
@@ -1909,6 +1943,23 @@ class TSPTestingGUI(tk.Toplevel):
                 'test_index': index,
                 'notes': notes,
             }
+            # Optical tests: add laser power (setpoint) and calibrated true power to metadata
+            if 'optical_laser_power_mw' in params:
+                try:
+                    metadata['laser_power_mw'] = float(params['optical_laser_power_mw'])
+                except (TypeError, ValueError):
+                    pass
+            if params.get('optical_laser_power_true_mw') is not None:
+                try:
+                    metadata['laser_power_true_mw'] = float(params['optical_laser_power_true_mw'])
+                except (TypeError, ValueError):
+                    pass
+            # Note: below 10 mW the laser front-panel display does not match actual output
+            if 'optical_laser_power_mw' in params or params.get('optical_laser_power_true_mw') is not None:
+                metadata['laser_power_note'] = (
+                    "Below 10 mW the laser front-panel display does not match actual output; "
+                    "laser_power_true_mw is the calibrated value at the device/sample."
+                )
             
             # Add hardware limits from system wrapper if available
             if self.system_wrapper.is_connected():
@@ -2180,6 +2231,14 @@ class TSPTestingGUI(tk.Toplevel):
         """
         details = []
         
+        # Optical tests: include laser power (mW) in filename
+        if 'optical_laser_power_mw' in params:
+            try:
+                pw = float(params['optical_laser_power_mw'])
+                details.append(f"{pw:.2f}mW".rstrip('0').rstrip('.') if pw < 10 else f"{pw:.0f}mW")
+            except (TypeError, ValueError):
+                pass
+        
         # Voltage (if present)
         if 'pulse_voltage' in params:
             v = params['pulse_voltage']
@@ -2315,6 +2374,24 @@ class TSPTestingGUI(tk.Toplevel):
         self.status_text.insert(tk.END, f"[{timestamp}] {message}\n")
         self.status_text.see(tk.END)
         self.status_text.update_idletasks()
+
+    def _show_calibration_curve_from_params(self):
+        """Open laser power calibration curve plot in a separate process (from Test Parameters)."""
+        try:
+            import subprocess
+            import sys
+            from pathlib import Path
+            from Equipment.Laser_Power_Meter import plot_laser_calibration
+            script = Path(plot_laser_calibration.__file__).resolve()
+            repo_root = script.parent.parent.parent
+            subprocess.Popen(
+                [sys.executable, str(script)],
+                cwd=str(repo_root),
+                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+            )
+        except Exception as e:
+            self.log(f"Could not open calibration curve: {e}")
+            messagebox.showerror("Calibration curve", f"Could not open plot.\n{e}")
 
     # ===== PRESET MANAGEMENT =====
     

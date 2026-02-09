@@ -6,3 +6,9 @@
 2026-02-04T00:01:28 | plotting.section_plots -> plotting.section or from plotting.section.section_plots | <string>:5
 2026-02-04T00:05:38 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | <unknown>:0
 2026-02-04T00:05:38 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | <unknown>:0
+2026-02-09T15:33:47 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-09T15:33:47 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-09T15:33:47 | plotting.device_combined_plots -> plotting.device or from plotting.device.device_combined_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\comprehensive_analyzer.py:72
+2026-02-09T16:33:31 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-09T16:33:31 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-09T16:33:31 | plotting.device_combined_plots -> plotting.device or from plotting.device.device_combined_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\comprehensive_analyzer.py:72

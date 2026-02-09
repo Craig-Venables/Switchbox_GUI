@@ -1,0 +1,215 @@
+{
+  "timestamp_iso": "2026-02-09T14:01:36.405314",
+  "timestamp_filename": "20260209_140136",
+  "wavelength_nm": null,
+  "laser_port": "COM4",
+  "laser_idn": "????",
+  "pm_idn": "Thorlabs,PM100D,P0031757,2.8.1",
+  "description": "Apparent (set_mw) = laser setpoint. measured_mw = actual power at sensor/sample. Use load_calibration() and get_setpoint_for_actual_mw() / get_actual_mw() in code.",
+  "calibration": [
+    {
+      "set_mw": 0.1,
+      "measured_mw": 7.632262689e-06
+    },
+    {
+      "set_mw": 0.25,
+      "measured_mw": 7.267798895999999e-06
+    },
+    {
+      "set_mw": 0.5,
+      "measured_mw": 7.220936783000001e-06
+    },
+    {
+      "set_mw": 0.75,
+      "measured_mw": 7.200105534e-06
+    },
+    {
+      "set_mw": 0.8,
+      "measured_mw": 7.1324233619999995e-06
+    },
+    {
+      "set_mw": 0.85,
+      "measured_mw": 7.075154815999999e-06
+    },
+    {
+      "set_mw": 0.9,
+      "measured_mw": 7.2625919049999995e-06
+    },
+    {
+      "set_mw": 0.95,
+      "measured_mw": 6.494694308999999e-05
+    },
+    {
+      "set_mw": 0.96,
+      "measured_mw": 6.695670649e-05
+    },
+    {
+      "set_mw": 0.97,
+      "measured_mw": 0.00019257209080000002
+    },
+    {
+      "set_mw": 0.98,
+      "measured_mw": 0.0001912860469
+    },
+    {
+      "set_mw": 0.99,
+      "measured_mw": 0.000188438014
+    },
+    {
+      "set_mw": 1.0,
+      "measured_mw": 0.0003816043319
+    },
+    {
+      "set_mw": 1.1,
+      "measured_mw": 0.001092596927
+    },
+    {
+      "set_mw": 1.2,
+      "measured_mw": 0.003098287515
+    },
+    {
+      "set_mw": 1.3,
+      "measured_mw": 0.004822745403999999
+    },
+    {
+      "set_mw": 1.4,
+      "measured_mw": 0.006737255762000001
+    },
+    {
+      "set_mw": 1.5,
+      "measured_mw": 0.012734361199999997
+    },
+    {
+      "set_mw": 1.6,
+      "measured_mw": 0.01795701538
+    },
+    {
+      "set_mw": 1.7,
+      "measured_mw": 0.026003851789999997
+    },
+    {
+      "set_mw": 1.8,
+      "measured_mw": 0.04113511605
+    },
+    {
+      "set_mw": 1.9,
+      "measured_mw": 0.04753960202
+    },
+    {
+      "set_mw": 2.0,
+      "measured_mw": 0.05468471791
+    },
+    {
+      "set_mw": 2.1,
+      "measured_mw": 0.07677056056
+    },
+    {
+      "set_mw": 2.2,
+      "measured_mw": 0.09503440525000001
+    },
+    {
+      "set_mw": 2.3,
+      "measured_mw": 0.1186558134
+    },
+    {
+      "set_mw": 2.4,
+      "measured_mw": 0.18106879290000003
+    },
+    {
+      "set_mw": 2.5,
+      "measured_mw": 0.22886535010000003
+    },
+    {
+      "set_mw": 2.6,
+      "measured_mw": 0.2696199256
+    },
+    {
+      "set_mw": 2.7,
+      "measured_mw": 0.3520918515000001
+    },
+    {
+      "set_mw": 2.8,
+      "measured_mw": 0.39445451690000005
+    },
+    {
+      "set_mw": 2.9,
+      "measured_mw": 0.4522934234
+    },
+    {
+      "set_mw": 3.0,
+      "measured_mw": 0.5178192920999999
+    },
+    {
+      "set_mw": 3.25,
+      "measured_mw": 0.6269522477
+    },
+    {
+      "set_mw": 3.5,
+      "measured_mw": 0.7951020147000001
+    },
+    {
+      "set_mw": 3.75,
+      "measured_mw": 0.9405391289999999
+    },
+    {
+      "set_mw": 4.0,
+      "measured_mw": 1.093519874
+    },
+    {
+      "set_mw": 4.25,
+      "measured_mw": 1.2463520869999998
+    },
+    {
+      "set_mw": 4.5,
+      "measured_mw": 1.408335938
+    },
+    {
+      "set_mw": 4.75,
+      "measured_mw": 1.523486315
+    },
+    {
+      "set_mw": 5.0,
+      "measured_mw": 1.671816978
+    },
+    {
+      "set_mw": 6.0,
+      "measured_mw": 2.292291588
+    },
+    {
+      "set_mw": 7.0,
+      "measured_mw": 2.8908634089999996
+    },
+    {
+      "set_mw": 8.0,
+      "measured_mw": 3.462389298
+    },
+    {
+      "set_mw": 9.0,
+      "measured_mw": 4.0935586200000005
+    },
+    {
+      "set_mw": 10.0,
+      "measured_mw": 4.684388637
+    },
+    {
+      "set_mw": 12.0,
+      "measured_mw": 5.875266995
+    },
+    {
+      "set_mw": 15.0,
+      "measured_mw": 7.655753520999999
+    },
+    {
+      "set_mw": 18.0,
+      "measured_mw": 9.084033593
+    },
+    {
+      "set_mw": 20.0,
+      "measured_mw": 10.02477717
+    },
+    {
+      "set_mw": 20,
+      "measured_mw": 10.02370772
+    }
+  ]
+}

@@ -13,11 +13,11 @@ from gui.motor_control_gui import config
 from gui.motor_control_gui.ui.widgets import CollapsibleFrame
 
 
-def create_scan_controls(gui: Any, parent: tk.Frame) -> None:
+def create_scan_controls(gui: Any, parent: tk.Frame, start_expanded: bool = True) -> None:
     """Build scanning/raster controls."""
     c = config.COLORS
     collapsible = CollapsibleFrame(
-        parent, "🔍 Raster Scan", bg_color=c["bg_dark"], fg_color=c["fg_primary"]
+        parent, "🔍 Raster Scan", bg_color=c["bg_dark"], fg_color=c["fg_primary"], start_expanded=start_expanded
     )
     collapsible.pack(fill=tk.X, pady=3)
     gui.collapsible_sections.append(collapsible)

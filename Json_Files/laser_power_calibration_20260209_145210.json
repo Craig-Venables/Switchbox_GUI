@@ -1,0 +1,495 @@
+{
+  "timestamp_iso": "2026-02-09T14:52:10.778766",
+  "timestamp_filename": "20260209_145210",
+  "wavelength_nm": null,
+  "laser_port": "COM4",
+  "laser_idn": "????",
+  "pm_idn": "Thorlabs,PM100D,P0031757,2.8.1",
+  "description": "Apparent (set_mw) = laser setpoint. measured_mw = actual power at sensor/sample. Use load_calibration() and get_setpoint_for_actual_mw() / get_actual_mw() in code.",
+  "calibration": [
+    {
+      "set_mw": 0.1,
+      "measured_mw": 9.527474454000002e-06
+    },
+    {
+      "set_mw": 0.2,
+      "measured_mw": 9.350454991e-06
+    },
+    {
+      "set_mw": 0.3,
+      "measured_mw": 9.194252115e-06
+    },
+    {
+      "set_mw": 0.4,
+      "measured_mw": 8.819374654e-06
+    },
+    {
+      "set_mw": 0.5,
+      "measured_mw": 8.918305205e-06
+    },
+    {
+      "set_mw": 0.6,
+      "measured_mw": 8.751688442000001e-06
+    },
+    {
+      "set_mw": 0.7,
+      "measured_mw": 8.168546373e-06
+    },
+    {
+      "set_mw": 0.8,
+      "measured_mw": 7.913419919e-06
+    },
+    {
+      "set_mw": 0.9,
+      "measured_mw": 7.8873855e-06
+    },
+    {
+      "set_mw": 1.0,
+      "measured_mw": 0.00039587052360000004
+    },
+    {
+      "set_mw": 1.1,
+      "measured_mw": 0.001104619037
+    },
+    {
+      "set_mw": 1.2,
+      "measured_mw": 0.00311047952
+    },
+    {
+      "set_mw": 1.3,
+      "measured_mw": 0.0048241285170000005
+    },
+    {
+      "set_mw": 1.4,
+      "measured_mw": 0.006746015515999999
+    },
+    {
+      "set_mw": 1.5,
+      "measured_mw": 0.01275474944
+    },
+    {
+      "set_mw": 1.6,
+      "measured_mw": 0.018016849209999998
+    },
+    {
+      "set_mw": 1.7,
+      "measured_mw": 0.02620207143
+    },
+    {
+      "set_mw": 1.8,
+      "measured_mw": 0.04108287321
+    },
+    {
+      "set_mw": 1.9,
+      "measured_mw": 0.047619502939999996
+    },
+    {
+      "set_mw": 2.0,
+      "measured_mw": 0.054663718779999995
+    },
+    {
+      "set_mw": 2.1,
+      "measured_mw": 0.07679002520000001
+    },
+    {
+      "set_mw": 2.2,
+      "measured_mw": 0.09521572502
+    },
+    {
+      "set_mw": 2.3,
+      "measured_mw": 0.11900154290000002
+    },
+    {
+      "set_mw": 2.4,
+      "measured_mw": 0.1801068894
+    },
+    {
+      "set_mw": 2.5,
+      "measured_mw": 0.2273904511
+    },
+    {
+      "set_mw": 2.6,
+      "measured_mw": 0.26930753960000003
+    },
+    {
+      "set_mw": 2.7,
+      "measured_mw": 0.351226385
+    },
+    {
+      "set_mw": 2.8,
+      "measured_mw": 0.39379386290000007
+    },
+    {
+      "set_mw": 2.9,
+      "measured_mw": 0.4512845509000001
+    },
+    {
+      "set_mw": 3.0,
+      "measured_mw": 0.5165543580999999
+    },
+    {
+      "set_mw": 3.1,
+      "measured_mw": 0.5734970618
+    },
+    {
+      "set_mw": 3.2,
+      "measured_mw": 0.6153731956999999
+    },
+    {
+      "set_mw": 3.3,
+      "measured_mw": 0.6875822435000001
+    },
+    {
+      "set_mw": 3.4,
+      "measured_mw": 0.7338882016
+    },
+    {
+      "set_mw": 3.5,
+      "measured_mw": 0.7925823621999999
+    },
+    {
+      "set_mw": 3.6,
+      "measured_mw": 0.8587227495
+    },
+    {
+      "set_mw": 3.7,
+      "measured_mw": 0.9200338215999999
+    },
+    {
+      "set_mw": 3.8,
+      "measured_mw": 0.9657508575000001
+    },
+    {
+      "set_mw": 3.9,
+      "measured_mw": 1.051792269
+    },
+    {
+      "set_mw": 4.0,
+      "measured_mw": 1.088613751
+    },
+    {
+      "set_mw": 4.1,
+      "measured_mw": 1.13883235
+    },
+    {
+      "set_mw": 4.2,
+      "measured_mw": 1.2267685840000002
+    },
+    {
+      "set_mw": 4.3,
+      "measured_mw": 1.268066035
+    },
+    {
+      "set_mw": 4.4,
+      "measured_mw": 1.312328642
+    },
+    {
+      "set_mw": 4.5,
+      "measured_mw": 1.401115011
+    },
+    {
+      "set_mw": 4.6,
+      "measured_mw": 1.439897959
+    },
+    {
+      "set_mw": 4.7,
+      "measured_mw": 1.4878017
+    },
+    {
+      "set_mw": 4.8,
+      "measured_mw": 1.571600044
+    },
+    {
+      "set_mw": 4.9,
+      "measured_mw": 1.615826819
+    },
+    {
+      "set_mw": 5.0,
+      "measured_mw": 1.662778064
+    },
+    {
+      "set_mw": 5.1,
+      "measured_mw": 1.7518870999999998
+    },
+    {
+      "set_mw": 5.2,
+      "measured_mw": 1.7894050349999997
+    },
+    {
+      "set_mw": 5.3,
+      "measured_mw": 1.852728776
+    },
+    {
+      "set_mw": 5.4,
+      "measured_mw": 1.927708391
+    },
+    {
+      "set_mw": 5.5,
+      "measured_mw": 1.9688317309999999
+    },
+    {
+      "set_mw": 5.6,
+      "measured_mw": 2.023131912
+    },
+    {
+      "set_mw": 5.7,
+      "measured_mw": 2.104215976
+    },
+    {
+      "set_mw": 5.8,
+      "measured_mw": 2.1433368790000005
+    },
+    {
+      "set_mw": 5.9,
+      "measured_mw": 2.203828633
+    },
+    {
+      "set_mw": 6.0,
+      "measured_mw": 2.281187987
+    },
+    {
+      "set_mw": 6.1,
+      "measured_mw": 2.3409332129999996
+    },
+    {
+      "set_mw": 6.2,
+      "measured_mw": 2.3794899459999996
+    },
+    {
+      "set_mw": 6.3,
+      "measured_mw": 2.4551772290000002
+    },
+    {
+      "set_mw": 6.4,
+      "measured_mw": 2.5160938980000003
+    },
+    {
+      "set_mw": 6.5,
+      "measured_mw": 2.560660803
+    },
+    {
+      "set_mw": 6.6,
+      "measured_mw": 2.638028958
+    },
+    {
+      "set_mw": 6.7,
+      "measured_mw": 2.699913154
+    },
+    {
+      "set_mw": 6.8,
+      "measured_mw": 2.7394887050000003
+    },
+    {
+      "set_mw": 6.9,
+      "measured_mw": 2.834072431
+    },
+    {
+      "set_mw": 7.0,
+      "measured_mw": 2.876958505
+    },
+    {
+      "set_mw": 7.1,
+      "measured_mw": 2.9198446300000005
+    },
+    {
+      "set_mw": 7.2,
+      "measured_mw": 3.0089274509999995
+    },
+    {
+      "set_mw": 7.3,
+      "measured_mw": 3.055378981
+    },
+    {
+      "set_mw": 7.4,
+      "measured_mw": 3.097297206
+    },
+    {
+      "set_mw": 7.5,
+      "measured_mw": 3.187398893
+    },
+    {
+      "set_mw": 7.6,
+      "measured_mw": 3.232424054
+    },
+    {
+      "set_mw": 7.7,
+      "measured_mw": 3.2771947799999994
+    },
+    {
+      "set_mw": 7.8,
+      "measured_mw": 3.364749605
+    },
+    {
+      "set_mw": 7.9,
+      "measured_mw": 3.4096730400000004
+    },
+    {
+      "set_mw": 8.0,
+      "measured_mw": 3.448026116
+    },
+    {
+      "set_mw": 8.1,
+      "measured_mw": 3.5445452189999997
+    },
+    {
+      "set_mw": 8.2,
+      "measured_mw": 3.589010422
+    },
+    {
+      "set_mw": 8.3,
+      "measured_mw": 3.649875987
+    },
+    {
+      "set_mw": 8.4,
+      "measured_mw": 3.7231693979999996
+    },
+    {
+      "set_mw": 8.5,
+      "measured_mw": 3.770079372
+    },
+    {
+      "set_mw": 8.6,
+      "measured_mw": 3.826819266
+    },
+    {
+      "set_mw": 8.7,
+      "measured_mw": 3.9004184989999997
+    },
+    {
+      "set_mw": 8.8,
+      "measured_mw": 3.943304484
+    },
+    {
+      "set_mw": 8.9,
+      "measured_mw": 4.006818496999999
+    },
+    {
+      "set_mw": 9.0,
+      "measured_mw": 4.078023832999999
+    },
+    {
+      "set_mw": 9.1,
+      "measured_mw": 4.136495524999999
+    },
+    {
+      "set_mw": 9.2,
+      "measured_mw": 4.1820304010000005
+    },
+    {
+      "set_mw": 9.3,
+      "measured_mw": 4.252980838000001
+    },
+    {
+      "set_mw": 9.4,
+      "measured_mw": 4.312471112999999
+    },
+    {
+      "set_mw": 9.5,
+      "measured_mw": 4.3559686740000005
+    },
+    {
+      "set_mw": 9.6,
+      "measured_mw": 4.429109164000001
+    },
+    {
+      "set_mw": 9.7,
+      "measured_mw": 4.4906371290000004
+    },
+    {
+      "set_mw": 9.8,
+      "measured_mw": 4.53708861
+    },
+    {
+      "set_mw": 9.9,
+      "measured_mw": 4.626171151
+    },
+    {
+      "set_mw": 10.0,
+      "measured_mw": 4.668446165
+    },
+    {
+      "set_mw": 10.5,
+      "measured_mw": 4.9787847329999995
+    },
+    {
+      "set_mw": 11.0,
+      "measured_mw": 5.25525245
+    },
+    {
+      "set_mw": 12.0,
+      "measured_mw": 5.855148471000001
+    },
+    {
+      "set_mw": 13.0,
+      "measured_mw": 6.438491168999998
+    },
+    {
+      "set_mw": 14.0,
+      "measured_mw": 7.028556849
+    },
+    {
+      "set_mw": 15.0,
+      "measured_mw": 7.625651732
+    },
+    {
+      "set_mw": 16.0,
+      "measured_mw": 8.104172906999999
+    },
+    {
+      "set_mw": 17.0,
+      "measured_mw": 8.576683701000002
+    },
+    {
+      "set_mw": 18.0,
+      "measured_mw": 9.042879285999998
+    },
+    {
+      "set_mw": 19.0,
+      "measured_mw": 9.514269790999998
+    },
+    {
+      "set_mw": 20.0,
+      "measured_mw": 9.977409057
+    },
+    {
+      "set_mw": 22.5,
+      "measured_mw": 11.16543562
+    },
+    {
+      "set_mw": 25.0,
+      "measured_mw": 12.346738760000001
+    },
+    {
+      "set_mw": 27.5,
+      "measured_mw": 13.51444227
+    },
+    {
+      "set_mw": 30.0,
+      "measured_mw": 14.67909023
+    },
+    {
+      "set_mw": 32.5,
+      "measured_mw": 15.85076693
+    },
+    {
+      "set_mw": 35.0,
+      "measured_mw": 17.02239291
+    },
+    {
+      "set_mw": 37.5,
+      "measured_mw": 18.18092839
+    },
+    {
+      "set_mw": 40.0,
+      "measured_mw": 19.34384443
+    },
+    {
+      "set_mw": 45.0,
+      "measured_mw": 21.656382440000005
+    },
+    {
+      "set_mw": 50.0,
+      "measured_mw": 23.975493560000004
+    }
+  ]
+}

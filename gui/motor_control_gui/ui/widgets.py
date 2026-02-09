@@ -19,19 +19,20 @@ class CollapsibleFrame(tk.Frame):
         title: str,
         bg_color: str = "#e8e8e8",
         fg_color: str = "#000000",
+        start_expanded: bool = True,
         **kwargs,
     ) -> None:
         super().__init__(parent, bg=bg_color, **kwargs)
         self.bg_color = bg_color
         self.fg_color = fg_color
-        self.is_expanded = True
+        self.is_expanded = start_expanded
 
         self.header = tk.Frame(self, bg=bg_color)
         self.header.pack(fill=tk.X, padx=2, pady=2)
 
         self.toggle_btn = tk.Button(
             self.header,
-            text="▼",
+            text="▼" if start_expanded else "▶",
             command=self.toggle,
             bg=bg_color,
             fg=fg_color,
@@ -56,10 +57,11 @@ class CollapsibleFrame(tk.Frame):
         self.title_label.bind("<Button-1>", lambda e: self.toggle())
 
         self.content_frame = tk.Frame(self, bg="#d0d0d0", relief=tk.FLAT, borderwidth=1)
-        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
-
         self.inner_frame = tk.Frame(self.content_frame, bg="#f0f0f0")
         self.inner_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        if start_expanded:
+            self.content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
+        # else: content_frame not packed, so section starts collapsed
 
     def toggle(self) -> None:
         if self.is_expanded:

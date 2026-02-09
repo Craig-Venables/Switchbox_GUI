@@ -128,9 +128,9 @@ class SampleGUI:
         self.root.rowconfigure(2, weight=0)  # Status bar
 
         # Defaults
-        self.multiplexer_type: str = "Pyswitchbox"
+        self.multiplexer_type: str = "Manual"
         self.current_device_map: str = "Cross_bar"
-        self.pyswitchbox: bool = True
+        self.pyswitchbox: bool = False
         self.Electronic_Mpx: bool = False
 
         # Device label mappings
@@ -251,7 +251,7 @@ class SampleGUI:
         self.tk_img = None
         
         # Set default values WITHOUT triggering callbacks yet
-        self.Multiplexer_type_var.set("Pyswitchbox")
+        self.Multiplexer_type_var.set("Manual")
         self.sample_type_var.set("Cross_bar")
         
         # Now manually trigger initialization in the correct order
