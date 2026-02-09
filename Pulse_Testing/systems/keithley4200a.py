@@ -670,6 +670,45 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             num_points=num_points,
         )
 
+    def run_bias_timed_read_synced(
+        self,
+        vforce: float,
+        duration_s: float,
+        sample_interval_s: float,
+        ilimit: float,
+        sync_ready_event: "threading.Event",
+        num_points: Optional[int] = None,
+    ) -> tuple:
+        """Run two-phase SMU bias timed read; sync_ready_event is set when 4200 has applied bias and is ready.
+
+        Returns (thread, result_holder, exc_holder). Wait for sync_ready_event, set t0, run laser,
+        then thread.join() and read result_holder[0]. Requires SMU_BiasTimedRead_Start and
+        SMU_BiasTimedRead_Collect C modules to be loaded on the 4200.
+        """
+        try:
+            import threading as _threading
+            import importlib
+            mod = importlib.import_module(
+                'Equipment.SMU_AND_PMU.4200A.C_Code_with_python_scripts.SMU_BiasTimedRead.run_smu_bias_timed_read'
+            )
+            run_synced = mod.run_bias_timed_read_synced
+        except (ImportError, AttributeError) as e:
+            raise RuntimeError(
+                f"SMU Bias Timed Read (synced) module not available: {e}. "
+                "Ensure run_smu_bias_timed_read.run_bias_timed_read_synced exists."
+            ) from e
+        gpib_address = self._address if self._address else self.DEFAULT_ADDRESS
+        return run_synced(
+            gpib_address=gpib_address,
+            timeout=self._timeout,
+            vforce=vforce,
+            duration_s=duration_s,
+            sample_interval_s=sample_interval_s,
+            ilimit=ilimit,
+            sync_ready_event=sync_ready_event,
+            num_points=num_points,
+        )
+
     def cyclical_iv_sweep(self, **params) -> Dict[str, Any]:
         """Cyclical IV sweep: (0V → +Vpos → Vneg → 0V) × N cycles
         

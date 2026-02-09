@@ -12,11 +12,11 @@ from gui.motor_control_gui import config
 from gui.motor_control_gui.ui.widgets import CollapsibleFrame
 
 
-def create_presets(gui: Any, parent: tk.Frame) -> None:
+def create_presets(gui: Any, parent: tk.Frame, start_expanded: bool = True) -> None:
     """Build position presets section."""
     c = config.COLORS
     collapsible = CollapsibleFrame(
-        parent, "⭐ Position Presets", bg_color=c["bg_dark"], fg_color=c["fg_primary"]
+        parent, "⭐ Position Presets", bg_color=c["bg_dark"], fg_color=c["fg_primary"], start_expanded=start_expanded
     )
     collapsible.pack(fill=tk.X, pady=3)
     gui.collapsible_sections.append(collapsible)

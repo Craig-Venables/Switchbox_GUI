@@ -287,7 +287,7 @@ class MotorControlWindow:
             # Add coordinate labels
             if i > 0:
                 world_x = (i * spacing / size) * self.world_range
-                world_y = self.world_range - (i * spacing / size) * self.world_range
+                world_y = (i * spacing / size) * self.world_range
                 
                 # X-axis labels (bottom)
                 c.create_text(
@@ -299,7 +299,7 @@ class MotorControlWindow:
                     tags="grid"
                 )
                 
-                # Y-axis labels (left)
+                # Y-axis labels (left): Y=0 at top, increases downward on canvas
                 c.create_text(
                     5, pos,
                     text=f"{world_y:.0f}",
@@ -309,14 +309,14 @@ class MotorControlWindow:
                     tags="grid"
                 )
 
-        # Draw axes (heavier lines at origin)
-        origin_y = size  # Y=0 is at bottom
+        # Draw axes (heavier lines at origin): Y=0 at top of canvas
+        origin_y = 0
         c.create_line(0, origin_y, size, origin_y, fill=self.COLORS['accent_blue'], width=2, tags="axes")
         c.create_line(0, 0, 0, size, fill=self.COLORS['accent_green'], width=2, tags="axes")
 
-        # Origin label
+        # Origin label (top-left)
         c.create_text(
-            15, size - 15,
+            15, 15,
             text="(0,0)",
             fill=self.COLORS['accent_yellow'],
             font=("Arial", 9, "bold"),
@@ -373,17 +373,17 @@ class MotorControlWindow:
         )
 
     def _world_to_canvas(self, wx: float, wy: float) -> Tuple[int, int]:
-        """Convert world coordinates to canvas pixel coordinates."""
+        """Convert world coordinates to canvas pixel coordinates. Y=0 at top of canvas."""
         size = self.canvas_size
         cx = int((wx / self.world_range) * size)
-        cy = int(size - (wy / self.world_range) * size)  # Flip Y (canvas Y=0 is top)
+        cy = int((wy / self.world_range) * size)  # Y up on canvas = world Y up
         return (cx, cy)
 
     def _canvas_to_world(self, px: int, py: int) -> Tuple[float, float]:
         """Convert canvas pixel coordinates to world coordinates."""
         size = self.canvas_size
         wx = (px / float(size)) * self.world_range
-        wy = self.world_range - (py / float(size)) * self.world_range  # Flip Y back
+        wy = (py / float(size)) * self.world_range
         return (wx, wy)
 
     # ---------- Event Handlers ----------
@@ -509,8 +509,8 @@ class MotorControlWindow:
         # Start the homing thread
         threading.Thread(target=home_thread, daemon=True).start()
 
-    def _validate_step(self, event=None) -> None:
-        """Validate and correct step size entry."""
+    def _validate_step(self, event=None, silent: bool = False) -> None:
+        """Validate and correct step size entry. If silent=True, do not show warning (e.g. when called from jog)."""
         try:
             value = float(self.var_step.get())
             if value <= 0:
@@ -520,14 +520,19 @@ class MotorControlWindow:
         except ValueError:
             # Invalid value, reset to default
             self.var_step.set("1.0")
-            messagebox.showwarning("Invalid Step", "Step size must be a positive number. Reset to 1.0 mm.")
+            if not silent:
+                messagebox.showwarning("Invalid Step", "Step size must be a positive number. Reset to 1.0 mm.")
 
     def _on_jog(self, axis: str, sign: int) -> None:
         """Jog motor by step amount."""
         if not self._is_connected():
             messagebox.showwarning("Not Connected", "Please connect to motors first.")
             return
-        
+        # Read step directly from Entry (StringVar can lag until focus leaves)
+        if getattr(self, "step_entry", None) and self.step_entry.winfo_exists():
+            self.var_step.set(self.step_entry.get().strip() or "1.0")
+        self.root.update_idletasks()
+        self._validate_step(silent=True)
         try:
             step = float(self.var_step.get()) * float(sign)
         except ValueError:

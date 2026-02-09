@@ -39,6 +39,34 @@ def run_optical_test(gui, func_name: str, params: dict) -> Tuple[Optional[Dict[s
     laser = getattr(gui, 'laser', None)
     if laser is None:
         return (None, RuntimeError("Laser not connected. Connect Oxxius laser in the Optical tab first."))
+    # Laser power: use test param optical_laser_power_mw if set, else GUI "Set (mW)" value
+    power_mw = None
+    try:
+        p = params.get('optical_laser_power_mw')
+        if p is not None:
+            power_mw = float(p)
+    except (TypeError, ValueError):
+        pass
+    if power_mw is None:
+        use_software_power = getattr(gui, 'laser_power_use_software_var', None)
+        if use_software_power is not None and use_software_power.get():
+            try:
+                pvar = getattr(gui, 'laser_power_var', None)
+                power_mw = float(pvar.get().strip()) if pvar is not None else 1.0
+            except (ValueError, AttributeError):
+                power_mw = 1.0
+    if power_mw is not None:
+        try:
+            laser.set_to_digital_power_control(power_mw)
+        except Exception:
+            pass
+        # Store calibrated true power in params for save file / metadata
+        try:
+            from Equipment.Laser_Power_Meter.laser_power_calibration import load_calibration, get_actual_mw
+            cal = load_calibration()
+            params["optical_laser_power_true_mw"] = get_actual_mw(cal, power_mw)
+        except (FileNotFoundError, Exception):
+            params["optical_laser_power_true_mw"] = None
 
     if not getattr(gui, 'system_wrapper', None) or not gui.system_wrapper.is_connected():
         return (None, RuntimeError("SMU not connected. Connect the instrument in the Connection tab first."))
@@ -77,12 +105,10 @@ def run_optical_test(gui, func_name: str, params: dict) -> Tuple[Optional[Dict[s
 def _run_optical_4200(
     system, laser, func_name: str, params: dict
 ) -> Dict[str, Any]:
-    """4200A path: run SMU_BiasTimedRead in a thread; main thread runs laser after delay."""
+    """4200A path: run SMU bias timed read (single EX, same as script). Laser starts after laser_delay_s."""
     read_voltage = float(params.get('read_voltage', 0.2))
     sample_interval_s = float(params.get('sample_interval_s', 0.02))
     clim = float(params.get('clim', 100e-6))
-    # Use laser_delay_s from params if provided, else default to 1.0s
-    optical_start_delay_s = float(params.get('laser_delay_s', DEFAULT_OPTICAL_START_DELAY_S))
 
     if func_name == 'optical_read_pulsed_light':
         total_time_s = float(params.get('total_time_s', 10.0))
@@ -93,6 +119,10 @@ def _run_optical_4200(
     num_points = max(1, int(duration_s / sample_interval_s))
     result_holder: List[Optional[Dict[str, Any]]] = [None]
     exc_holder: List[Optional[Exception]] = [None]
+
+    # Use single EX call (SMU_BiasTimedRead) - same as run_smu_bias_timed_read.py script.
+    # Avoids Start+Collect two-phase path which can return -6 from the GUI.
+    optical_start_delay_s = float(params.get('laser_delay_s', DEFAULT_OPTICAL_START_DELAY_S))
 
     def run_measurement() -> None:
         try:
@@ -109,9 +139,9 @@ def _run_optical_4200(
     thread = threading.Thread(target=run_measurement, daemon=False)
     thread.start()
     time.sleep(optical_start_delay_s)
+    t0 = time.perf_counter()
 
     laser_on_intervals: List[Tuple[float, float]] = []
-    t0 = time.perf_counter()
 
     if func_name == 'optical_read_pulsed_light':
         optical_pulse_duration_s = float(params.get('optical_pulse_duration_s', 0.2))
@@ -129,7 +159,7 @@ def _run_optical_4200(
             time.sleep(max(0, min(0.05, optical_pulse_period_s * 0.25)))
     elif func_name in ('optical_pulse_train_read', 'optical_pulse_train_pattern_read'):
         optical_on_ms = float(params.get('optical_on_ms', 100.0))
-        optical_off_ms = float(params.get('optical_off_ms', 200.0))
+        optical_off_ms = float(params.get('optical_off_ms', 100.0))
         laser_delay_s = float(params.get('laser_delay_s', 0.0))
         
         # Wait for laser delay before starting pulses
@@ -239,7 +269,7 @@ def _run_optical_pulse_train_read(system, laser, params: dict) -> Dict[str, Any]
     """Read at V for duration_s while running one optical pulse train (n pulses, on_ms, off_ms) after laser_delay_s."""
     read_voltage = float(params.get('read_voltage', 0.2))
     optical_on_ms = float(params.get('optical_on_ms', 100.0))
-    optical_off_ms = float(params.get('optical_off_ms', 200.0))
+    optical_off_ms = float(params.get('optical_off_ms', 100.0))
     n_optical_pulses = int(params.get('n_optical_pulses', 5))
     duration_s = float(params.get('duration_s', 5.0))
     sample_interval_s = float(params.get('sample_interval_s', 0.02))
@@ -307,7 +337,7 @@ def _run_optical_pulse_train_pattern_read(system, laser, params: dict) -> Dict[s
     """Read at V for duration_s while firing laser pulses per binary pattern (1=on, 0=off) after laser_delay_s."""
     read_voltage = float(params.get('read_voltage', 0.2))
     optical_on_ms = float(params.get('optical_on_ms', 100.0))
-    optical_off_ms = float(params.get('optical_off_ms', 200.0))
+    optical_off_ms = float(params.get('optical_off_ms', 100.0))
     pattern_raw = str(params.get('laser_pattern', '11111')).strip()
     duration_s = float(params.get('duration_s', 5.0))
     sample_interval_s = float(params.get('sample_interval_s', 0.02))

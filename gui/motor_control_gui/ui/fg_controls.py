@@ -18,14 +18,13 @@ except ModuleNotFoundError:
     FunctionGeneratorManager = None  # type: ignore[misc, assignment]
 
 
-def create_fg_controls(gui: Any, parent: tk.Frame) -> None:
+def create_fg_controls(gui: Any, parent: tk.Frame, start_expanded: bool = True) -> None:
     """Build function generator controls."""
     c = config.COLORS
     collapsible = CollapsibleFrame(
-        parent, "⚡ Function Generator", bg_color=c["bg_dark"], fg_color=c["fg_primary"]
+        parent, "⚡ Function Generator", bg_color=c["bg_dark"], fg_color=c["fg_primary"], start_expanded=start_expanded
     )
     collapsible.pack(fill=tk.X, pady=3)
-    collapsible.collapse()
     gui.collapsible_sections.append(collapsible)
 
     fg_frame = collapsible.get_content_frame()

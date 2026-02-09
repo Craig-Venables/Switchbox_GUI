@@ -5959,8 +5959,10 @@ class MeasurementGUI:
                     except Exception as e:
                         print(f"[SAVE ERROR] Failed to save file: {e}")
 
-                    # show graphs on main display
-                    self.graphs_show(v_arr, c_arr, key, stop_v)
+                    # show graphs on main display (must run on main thread for reliable redraw)
+                    v_list = list(v_arr)
+                    c_list = list(c_arr)
+                    self.master.after(0, lambda: self.graphs_show(v_list, c_list, key, stop_v))
                     
                     # === PER-SWEEP ANALYSIS FOR CUSTOM SEQUENCES ===
                     try:

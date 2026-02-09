@@ -1,0 +1,83 @@
+{
+  "timestamp_iso": "2026-02-09T12:45:33.749781",
+  "timestamp_filename": "20260209_124533",
+  "wavelength_nm": null,
+  "laser_port": "COM4",
+  "laser_idn": "????",
+  "pm_idn": "Thorlabs,PM100D,P0031757,2.8.1",
+  "description": "Apparent (set_mw) = laser setpoint. measured_mw = actual power at sensor/sample. Use load_calibration() and get_setpoint_for_actual_mw() / get_actual_mw() in code.",
+  "calibration": [
+    {
+      "set_mw": 0.1,
+      "measured_mw": 6.419116348e-06
+    },
+    {
+      "set_mw": 0.2,
+      "measured_mw": 6.137951748000001e-06
+    },
+    {
+      "set_mw": 0.25,
+      "measured_mw": 6.804404062e-06
+    },
+    {
+      "set_mw": 0.5,
+      "measured_mw": 6.0858974739999996e-06
+    },
+    {
+      "set_mw": 0.75,
+      "measured_mw": 6.86687951e-06
+    },
+    {
+      "set_mw": 1.0,
+      "measured_mw": 0.0003922518998
+    },
+    {
+      "set_mw": 1.25,
+      "measured_mw": 0.00375609475
+    },
+    {
+      "set_mw": 1.5,
+      "measured_mw": 0.01294060166
+    },
+    {
+      "set_mw": 2.0,
+      "measured_mw": 0.05530447234
+    },
+    {
+      "set_mw": 2.5,
+      "measured_mw": 0.2327318682
+    },
+    {
+      "set_mw": 3.0,
+      "measured_mw": 0.5303662618
+    },
+    {
+      "set_mw": 3.5,
+      "measured_mw": 0.809216022
+    },
+    {
+      "set_mw": 4.0,
+      "measured_mw": 1.10551885
+    },
+    {
+      "set_mw": 4.5,
+      "measured_mw": 1.415864122
+    },
+    {
+      "set_mw": 5.0,
+      "measured_mw": 1.672078134
+    },
+    {
+      "set_mw": 10,
+      "measured_mw": 4.613335896
+    },
+    {
+      "set_mw": 15,
+      "measured_mw": 7.60487076
+    },
+    {
+      "set_mw": 20,
+      "measured_mw": 10.002621266
+    }
+  ]
+}

@@ -1295,7 +1295,7 @@ class PulseDiagramHelper:
         read_voltage = params.get('read_voltage', 0.2)
         duration_s = max(params.get('duration_s', 5.0), 0.1)
         optical_on_ms = params.get('optical_on_ms', 100.0)
-        optical_off_ms = params.get('optical_off_ms', 200.0)
+        optical_off_ms = params.get('optical_off_ms', 100.0)
         n_optical_pulses = min(int(params.get('n_optical_pulses', 5)), 50)
         on_s = optical_on_ms / 1000.0
         off_s = optical_off_ms / 1000.0
@@ -1341,7 +1341,7 @@ class PulseDiagramHelper:
         read_voltage = params.get('read_voltage', 0.2)
         duration_s = max(params.get('duration_s', 5.0), 0.1)
         optical_on_ms = params.get('optical_on_ms', 100.0)
-        optical_off_ms = params.get('optical_off_ms', 200.0)
+        optical_off_ms = params.get('optical_off_ms', 100.0)
         pattern_raw = str(params.get('laser_pattern', '11111')).strip()
         laser_delay_s = params.get('laser_delay_s', 0.0)
         

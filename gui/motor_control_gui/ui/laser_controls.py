@@ -18,14 +18,13 @@ except ModuleNotFoundError:
     LaserManager = None  # type: ignore[misc, assignment]
 
 
-def create_laser_controls(gui: Any, parent: tk.Frame) -> None:
+def create_laser_controls(gui: Any, parent: tk.Frame, start_expanded: bool = True) -> None:
     """Build laser controller controls."""
     c = config.COLORS
     collapsible = CollapsibleFrame(
-        parent, "🔴 Laser Control", bg_color=c["bg_dark"], fg_color=c["fg_primary"]
+        parent, "🔴 Laser Control", bg_color=c["bg_dark"], fg_color=c["fg_primary"], start_expanded=start_expanded
     )
     collapsible.pack(fill=tk.X, pady=3)
-    collapsible.collapse()
     gui.collapsible_sections.append(collapsible)
 
     laser_frame = collapsible.get_content_frame()

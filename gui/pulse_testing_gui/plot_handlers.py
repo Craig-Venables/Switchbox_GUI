@@ -37,6 +37,53 @@ def plot_by_type(gui: Any, plot_type: str) -> None:
     fn(gui)
 
 
+# Default confidence margin (s) each side of nominal laser-on for optical tests (timing not exact)
+LASER_CONFIDENCE_MARGIN_S = 0.05
+LASER_CONFIDENCE_FRACTION = 0.10  # 10% of pulse width each side
+LASER_CONFIDENCE_MIN_S = 0.02
+
+
+def _draw_laser_on_intervals(ax, laser_on_intervals, zorder=0):
+    """Draw vertical bars + confidence bands for laser-on intervals (optical tests).
+    laser_on_intervals: list of (start_s, end_s). Draws nominal bar + shaded confidence band each side.
+    """
+    if not laser_on_intervals:
+        return
+    # So bands sit behind the data
+    nominal_color = "gold"
+    confidence_color = "orange"
+    nominal_alpha = 0.35
+    confidence_alpha = 0.15
+    labeled_nominal = False
+    labeled_confidence = False
+    for (start, end) in laser_on_intervals:
+        width = max(1e-9, end - start)
+        margin = max(LASER_CONFIDENCE_MIN_S, LASER_CONFIDENCE_MARGIN_S, LASER_CONFIDENCE_FRACTION * width)
+        # Confidence band (lighter, wider)
+        lo_c, hi_c = start - margin, end + margin
+        ax.axvspan(
+            lo_c, hi_c,
+            facecolor=confidence_color,
+            alpha=confidence_alpha,
+            zorder=zorder,
+            label="Laser on (confidence)" if not labeled_confidence else None,
+        )
+        if not labeled_confidence:
+            labeled_confidence = True
+        # Nominal laser-on bar (darker, exact interval)
+        ax.axvspan(
+            start, end,
+            facecolor=nominal_color,
+            alpha=nominal_alpha,
+            zorder=zorder + 0.1,
+            label="Laser on (nominal)" if not labeled_nominal else None,
+        )
+        if not labeled_nominal:
+            labeled_nominal = True
+    if (labeled_nominal or labeled_confidence) and ax.get_legend() is None:
+        ax.legend(loc="best", fontsize=8)
+
+
 def _plot_time_series(gui):
     """Plot resistance vs time - raw data, no filtering"""
     test_name = gui.last_results['test_name']
@@ -231,6 +278,11 @@ def _plot_time_series(gui):
     else:
         # Default plotting for other tests
         gui.ax.plot(valid_times, valid_resistances, 'o-', markersize=3)
+
+    # Optical tests: show where laser was on (nominal bar + confidence band)
+    laser_on_intervals = gui.last_results.get("laser_on_intervals", [])
+    if laser_on_intervals:
+        _draw_laser_on_intervals(gui.ax, laser_on_intervals, zorder=0)
     
     # Add red dotted line for potentiation/depression tests with post-reads
     if test_name in ["Potentiation Only", "Depression Only"]:

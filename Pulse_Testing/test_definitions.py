@@ -342,6 +342,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "description": "🔬 SMU reads at constant voltage while Oxxius laser pulses periodically.\nPattern: SMU starts reading → (wait laser_delay) → Fire laser for duration every period → Continue reading.\nRequires: SMU connected (Connection) and Oxxius laser connected (Laser Control).",
         "params": {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float"},
             "total_time_s": {"default": 10.0, "label": "Total Time (s)", "type": "float"},
             "laser_delay_s": {"default": 1.0, "label": "Laser Start Delay (s)", "type": "float"},
             "optical_pulse_duration_s": {"default": 0.2, "label": "Optical Pulse Duration (s)", "type": "float"},
@@ -356,9 +357,10 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "description": "🔬 SMU reads at constant voltage while Oxxius laser fires a train of N pulses.\nPattern: SMU starts reading → (wait laser_delay) → Fire N laser pulses (on_ms/off_ms) → Continue reading.\nRequires: SMU connected (Connection) and Oxxius laser connected (Laser Control).",
         "params": {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float"},
             "laser_delay_s": {"default": 1.0, "label": "Laser Start Delay (s)", "type": "float"},
             "optical_on_ms": {"default": 100.0, "label": "Optical On (ms)", "type": "float"},
-            "optical_off_ms": {"default": 200.0, "label": "Optical Off (ms)", "type": "float"},
+            "optical_off_ms": {"default": 100.0, "label": "Optical Off (ms)", "type": "float"},
             "n_optical_pulses": {"default": 5, "label": "Number of Optical Pulses", "type": "int"},
             "duration_s": {"default": 5.0, "label": "Duration (s)", "type": "float"},
             "sample_interval_s": {"default": 0.02, "label": "Sample Interval (s)", "type": "float"},
@@ -371,10 +373,11 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "description": "🔬 SMU reads continuously at constant voltage while Oxxius laser fires pulses based on binary pattern.\n✅ THIS IS WHAT YOU WANT: SMU reads at fixed voltage (e.g. 0.2V), laser fires per pattern (1=fire, 0=skip).\n\nPattern examples:\n  • 11111 = 5 slots, all fire\n  • 10101 = 5 slots, fire slots 1,3,5 (skip 2,4)\n  • 10000 = 5 slots, fire first only\n  • 111 = 3 slots, all fire\n\nNumber of slots is automatically calculated from pattern length.\nWorkflow: SMU starts reading → (wait laser_delay) → Fire laser per pattern → Continue reading.\nRequires: SMU connected (Connection) and Oxxius laser connected (Laser Control).",
         "params": {
             "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float"},
             "laser_pattern": {"default": "11111", "label": "Laser Pattern (1=fire, 0=skip, e.g. 11010)", "type": "str"},
             "laser_delay_s": {"default": 1.0, "label": "Laser Start Delay (s)", "type": "float"},
             "optical_on_ms": {"default": 100.0, "label": "Optical On when 1 (ms)", "type": "float"},
-            "optical_off_ms": {"default": 200.0, "label": "Optical Off / Between (ms)", "type": "float"},
+            "optical_off_ms": {"default": 100.0, "label": "Optical Off / Between (ms)", "type": "float"},
             "duration_s": {"default": 5.0, "label": "Total Duration (s)", "type": "float"},
             "sample_interval_s": {"default": 0.02, "label": "Sample Interval (s)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},

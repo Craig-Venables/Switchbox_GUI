@@ -2,10 +2,16 @@ import serial
 import time
 
 class OxxiusLaser:
-    def __init__(self, port="COM3", baud=38400, timeout=1.0):
+    def __init__(self, port="COM3", baud=38400, timeout=1.0, safe_power_mw=10):
         """
         Initialise connection to Oxxius laser.
         Adjust 'port' and 'baud' depending on your hardware.
+
+        After power loss, many Oxxius units restore or default to maximum power
+        (e.g. 320 mW). To avoid the laser coming on at full power when the
+        system is turned back on, we set a safe power level as soon as we
+        connect. Pass safe_power_mw=10 (default) to set 10 mW on connect, or
+        None to leave the hardware power unchanged.
         """
         self.ser = serial.Serial(
             port=port,
@@ -16,6 +22,13 @@ class OxxiusLaser:
             timeout=timeout
         )
         time.sleep(0.2)  # settle interface
+        if safe_power_mw is not None:
+            try:
+                self.emission_off()
+                time.sleep(0.05)
+                self.set_power(safe_power_mw)
+            except Exception:
+                pass  # don't fail init if laser doesn't respond yet
 
     def send_command(self, cmd):
         """Send a command string and return the reply as text."""
@@ -157,6 +170,35 @@ class OxxiusLaser:
     # =======================
     # Housekeeping
     # =======================
+
+    def set_to_digital_power_control(self, power_mw):
+        """
+        Set laser to digital/software power control so set_power() is used.
+        Use this when you want to control power in mW from software (e.g. for pulses).
+        When done, call set_to_analog_modulation_mode() or close(restore_to_manual_control=True)
+        to return to manual front-panel control.
+
+        Emission is turned OFF first and power is set before switching to digital mode
+        to avoid a brief power spike when AM 0 is applied.
+
+        Args:
+            power_mw: Power level in mW.
+
+        Returns:
+            dict: Results of each command.
+        """
+        results = {}
+        results['emission_off'] = self.emission_off()
+        time.sleep(0.05)
+        results['power'] = self.set_power(power_mw)
+        time.sleep(0.1)
+        results['APC'] = self.send_command("APC 1")
+        time.sleep(0.1)
+        results['AM'] = self.send_command("AM 0")
+        time.sleep(0.1)
+        results['DM'] = self.send_command("DM 0")
+        time.sleep(0.1)
+        return results
 
     def set_to_analog_modulation_mode(self, power_mw=100):
         """
@@ -415,6 +457,32 @@ COMMAND REFERENCE
 - DM 0: Disable digital modulation
 - PM <value>: Set power in mW
 - ?P: Query current power setting
+
+SERIAL PULSE TIMING (MINIMUM PULSE WIDTH)
+------------------------------------------
+Pulsing via serial (DL 1 / DL 0) is limited by command round-trip time, not by
+the laser hardware. Measured on this system (COM4, 19200 baud):
+
+  - Serial overhead (one on + one off with no delay): ~10 ms per cycle.
+  - Shortest full cycle (on then off) is therefore ~10 ms.
+  - For reliable pulse length (requested on-time is accurate), use on-time >= 20 ms.
+  - Example: at 20 ms requested, total elapsed ≈ 25 ms (overhead ≈ 5 ms).
+
+Typical requested vs total elapsed:
+  Requested on-time (ms)  |  Total elapsed (ms)  |  Overhead (ms)
+  -----------------------|---------------------|------------------
+  50                     |  ~71                 |  ~21
+  20                     |  ~25                 |  ~5
+  10                     |  ~25                 |  ~15
+  5, 2, 1                |  ~15–25              |  overhead dominates
+
+Recommendation:
+  - Use pulse_on_ms() and pulse_train() with on_time >= 20 ms for predictable pulses.
+  - For shorter pulses (sub-millisecond or high repetition), use the laser TTL
+    modulation input with external hardware; serial cannot achieve those rates.
+
+To re-measure on your setup, run:
+  python test_oxxius_pulse.py --timing [COM_PORT] [BAUD] [POWER_MW]
 
 CONNECTION SETTINGS
 -------------------

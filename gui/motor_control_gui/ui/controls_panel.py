@@ -80,10 +80,11 @@ def create_controls_panel(gui: Any) -> None:
 
     gui.collapsible_sections = []
 
-    jog_controls.create_jog_controls(gui, scrollable_frame)
-    goto_controls.create_goto_controls(gui, scrollable_frame)
-    motor_settings.create_motor_settings(gui, scrollable_frame)
-    presets.create_presets(gui, scrollable_frame)
-    scan_controls.create_scan_controls(gui, scrollable_frame)
-    fg_controls.create_fg_controls(gui, scrollable_frame)
-    laser_controls.create_laser_controls(gui, scrollable_frame)
+    # Only Jog starts expanded; all other sections start collapsed
+    jog_controls.create_jog_controls(gui, scrollable_frame, start_expanded=True)
+    goto_controls.create_goto_controls(gui, scrollable_frame, start_expanded=False)
+    motor_settings.create_motor_settings(gui, scrollable_frame, start_expanded=False)
+    presets.create_presets(gui, scrollable_frame, start_expanded=False)
+    scan_controls.create_scan_controls(gui, scrollable_frame, start_expanded=False)
+    fg_controls.create_fg_controls(gui, scrollable_frame, start_expanded=False)
+    laser_controls.create_laser_controls(gui, scrollable_frame, start_expanded=False)
