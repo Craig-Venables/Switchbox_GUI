@@ -52,7 +52,13 @@ class PulseDiagramHelper:
             self._draw_threshold(params)
         elif "Multilevel Programming" in test_name:
             self._draw_multilevel(params)
-        elif "Pulse Train" in test_name:
+        elif "Optical Read (Pulsed Light)" in test_name:
+            self._draw_optical_read_pulsed_light(params)
+        elif "Optical: Laser Pattern + Continuous Read" in test_name:
+            self._draw_optical_laser_pattern_read(params)
+        elif "Optical Pulse Train + Read" in test_name:
+            self._draw_optical_pulse_train_read(params)
+        elif "Electrical Pulse Train" in test_name or "Pulse Train" in test_name:
             self._draw_pulse_train(params)
         elif "Laser and Read" in test_name:
             self._draw_laser_and_read(params)
@@ -1048,13 +1054,20 @@ class PulseDiagramHelper:
         self._set_preview_ylim(voltages + [reset_v, pulse_v, r_v, 0])
     
     def _draw_pulse_train(self, params):
-        """Draw: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
+        """Draw: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N. Supports binary pattern (1=on, 0=off)."""
         t = 0
         times, voltages = [], []
         read_times = []
-        pulse_voltages = params.get('pulse_voltages', [1.0, 1.5, 2.0, -1.0, -1.5, -2.0])
-        if isinstance(pulse_voltages, str):
-            pulse_voltages = [float(x.strip()) for x in pulse_voltages.split(",")]
+        # Support pulse_pattern (1=on, 0=off) or legacy pulse_voltages list
+        pulse_pattern = params.get('pulse_pattern')
+        if pulse_pattern is not None:
+            pattern = ''.join(c for c in str(pulse_pattern).strip() if c in '01')
+            p_v = params.get('pulse_voltage', 1.5)
+            pulse_voltages = [p_v if c == '1' else 0.0 for c in pattern] if pattern else [p_v]
+        else:
+            pulse_voltages = params.get('pulse_voltages', [1.0, 1.5, 2.0, -1.0, -1.5, -2.0])
+            if isinstance(pulse_voltages, str):
+                pulse_voltages = [float(x.strip()) for x in pulse_voltages.split(",")]
         r_v = params.get('read_voltage', 0.2)
         p_w = params.get('pulse_width', 1e-3)
         delay = params.get('delay_between', 10e-3)
@@ -1067,11 +1080,13 @@ class PulseDiagramHelper:
         # Pulse train pattern
         for repeat in range(num_repeats):
             for pulse_v in pulse_voltages:
-                times.append(t)
-                voltages.append(pulse_v)
+                # Vertical rising edge: t → pulse_v (duplicate time for vertical line)
+                times.extend([t, t])
+                voltages.extend([0, pulse_v])
                 t += p_w
-                times.append(t)
-                voltages.append(0)
+                # Vertical falling edge: t+width → 0 (duplicate time for vertical line)
+                times.extend([t, t])
+                voltages.extend([pulse_v, 0])
                 t += 0.00001
                 read_times.append(t)
                 t += 0.001
@@ -1230,6 +1245,179 @@ class PulseDiagramHelper:
                                ha='center', va='center', fontsize=9)
             self.ax.set_xlim(0, 1)
             self.ax.set_ylim(0, 1)
+
+    def _draw_optical_read_pulsed_light(self, params):
+        """Draw: Read voltage constant; optical pulse rectangles every period (twin axes, time in s).
+        Draw each laser pulse as a rectangular axvspan so they render as clear rectangles, not triangles.
+        """
+        read_voltage = params.get('read_voltage', 0.2)
+        total_time_s = max(params.get('total_time_s', 10.0), 0.1)
+        optical_pulse_duration_s = params.get('optical_pulse_duration_s', 0.2)
+        optical_pulse_period_s = max(params.get('optical_pulse_period_s', 1.0), 1e-6)
+        # Build rectangular spans: one (t_start, t_end) per pulse
+        pulse_spans = []
+        t = 0.0
+        while t < total_time_s:
+            pulse_spans.append((t, t + optical_pulse_duration_s))
+            t += optical_pulse_period_s
+        volt_t = np.array([0, total_time_s])
+        volt_v = np.array([read_voltage, read_voltage])
+        self.ax.clear()
+        for ax in self.fig.get_axes():
+            if ax != self.ax:
+                try:
+                    self.fig.delaxes(ax)
+                except Exception:
+                    pass
+        ax_voltage = self.ax
+        ax_optical = ax_voltage.twinx()
+        ax_voltage.plot(volt_t, volt_v, 'b-', linewidth=2, label='Read voltage (V)')
+        ax_voltage.fill_between(volt_t, 0, volt_v, alpha=0.3, color='blue')
+        ax_voltage.set_ylabel('Read Voltage (V)', color='blue', fontsize=9)
+        ax_voltage.tick_params(axis='y', labelcolor='blue')
+        # Draw each optical pulse as a rectangle (axvspan) so they look like blocks, not triangles
+        for t_start, t_end in pulse_spans:
+            ax_optical.axvspan(t_start, t_end, ymin=0, ymax=1, alpha=0.3, color='red')
+        ax_optical.set_ylabel('Laser (on/off)', color='red', fontsize=9)
+        ax_optical.tick_params(axis='y', labelcolor='red')
+        ax_optical.set_ylim(-0.1, 1.2)
+        ax_optical.set_xlim(0, total_time_s)
+        ax_voltage.set_xlabel('Time (s)', fontsize=9)
+        ax_voltage.set_title('Optical Read (Pulsed Light): Read V + optical pulses', fontsize=10)
+        ax_voltage.set_xlim(0, total_time_s)
+        ax_voltage.grid(True, alpha=0.3)
+        self._set_preview_ylim([read_voltage, 0])
+
+    def _draw_optical_pulse_train_read(self, params):
+        """Draw: Read voltage constant; one optical pulse train (N pulses, on_ms, off_ms). Time in s.
+        Draw each laser pulse as a rectangular axvspan so they render as clear rectangles, not triangles.
+        """
+        read_voltage = params.get('read_voltage', 0.2)
+        duration_s = max(params.get('duration_s', 5.0), 0.1)
+        optical_on_ms = params.get('optical_on_ms', 100.0)
+        optical_off_ms = params.get('optical_off_ms', 200.0)
+        n_optical_pulses = min(int(params.get('n_optical_pulses', 5)), 50)
+        on_s = optical_on_ms / 1000.0
+        off_s = optical_off_ms / 1000.0
+        period_s = on_s + off_s
+        # Build rectangular spans: one (t_start, t_end) per pulse
+        pulse_spans = []
+        t = 0.0
+        for _ in range(n_optical_pulses):
+            pulse_spans.append((t, t + on_s))
+            t += period_s
+        volt_t = np.array([0, duration_s])
+        volt_v = np.array([read_voltage, read_voltage])
+        self.ax.clear()
+        for ax in self.fig.get_axes():
+            if ax != self.ax:
+                try:
+                    self.fig.delaxes(ax)
+                except Exception:
+                    pass
+        ax_voltage = self.ax
+        ax_optical = ax_voltage.twinx()
+        ax_voltage.plot(volt_t, volt_v, 'b-', linewidth=2, label='Read voltage (V)')
+        ax_voltage.fill_between(volt_t, 0, volt_v, alpha=0.3, color='blue')
+        ax_voltage.set_ylabel('Read Voltage (V)', color='blue', fontsize=9)
+        ax_voltage.tick_params(axis='y', labelcolor='blue')
+        # Draw each optical pulse as a rectangle (axvspan) so they look like blocks, not triangles
+        for t_start, t_end in pulse_spans:
+            ax_optical.axvspan(t_start, t_end, ymin=0, ymax=1, alpha=0.3, color='red')
+        ax_optical.set_ylabel('Laser (on/off)', color='red', fontsize=9)
+        ax_optical.tick_params(axis='y', labelcolor='red')
+        ax_optical.set_ylim(-0.1, 1.2)
+        ax_optical.set_xlim(0, duration_s)
+        ax_voltage.set_xlabel('Time (s)', fontsize=9)
+        ax_voltage.set_title(f'Optical Pulse Train + Read: {n_optical_pulses} pulses (on {optical_on_ms}ms / off {optical_off_ms}ms)', fontsize=9)
+        ax_voltage.set_xlim(0, duration_s)
+        ax_voltage.grid(True, alpha=0.3)
+        self._set_preview_ylim([read_voltage, 0])
+    
+    def _draw_optical_laser_pattern_read(self, params):
+        """Draw: SMU reads continuously at constant voltage while laser fires per binary pattern (1=on, 0=off).
+        Shows continuous SMU read voltage + laser pulses firing only for '1' slots.
+        """
+        read_voltage = params.get('read_voltage', 0.2)
+        duration_s = max(params.get('duration_s', 5.0), 0.1)
+        optical_on_ms = params.get('optical_on_ms', 100.0)
+        optical_off_ms = params.get('optical_off_ms', 200.0)
+        pattern_raw = str(params.get('laser_pattern', '11111')).strip()
+        laser_delay_s = params.get('laser_delay_s', 0.0)
+        
+        # Parse pattern - number of slots is determined by pattern length
+        pattern = ''.join(c for c in pattern_raw if c in '01')
+        if not pattern:
+            pattern = '11111'  # Default if empty
+        # Limit display to first 15 slots for clarity
+        pattern_display = pattern[:min(len(pattern), 15)]
+        
+        on_s = optical_on_ms / 1000.0
+        off_s = optical_off_ms / 1000.0
+        period_s = on_s + off_s
+        
+        # Build rectangular spans: only for '1' bits in pattern
+        pulse_spans = []
+        t = laser_delay_s
+        for bit in pattern_display:
+            if bit == '1':
+                pulse_spans.append((t, t + on_s))
+            t += period_s
+        
+        # SMU voltage (constant read throughout entire duration)
+        volt_t = np.array([0, duration_s])
+        volt_v = np.array([read_voltage, read_voltage])
+        
+        # Clear existing axes
+        self.ax.clear()
+        for ax in self.fig.get_axes():
+            if ax != self.ax:
+                try:
+                    self.fig.delaxes(ax)
+                except Exception:
+                    pass
+        
+        # Create two y-axes
+        ax_voltage = self.ax
+        ax_optical = ax_voltage.twinx()
+        
+        # Plot SMU continuous read (blue line)
+        ax_voltage.plot(volt_t, volt_v, 'b-', linewidth=2.5, label='SMU Read (continuous)')
+        ax_voltage.fill_between(volt_t, 0, volt_v, alpha=0.3, color='blue')
+        ax_voltage.set_ylabel('SMU Read Voltage (V)', color='blue', fontsize=9, fontweight='bold')
+        ax_voltage.tick_params(axis='y', labelcolor='blue')
+        
+        # Draw laser pulses as rectangles (only where pattern has '1')
+        for t_start, t_end in pulse_spans:
+            ax_optical.axvspan(t_start, t_end, ymin=0, ymax=1, alpha=0.35, color='red')
+        
+        # Draw faint vertical lines at each slot boundary to show skipped slots
+        t_slot = laser_delay_s
+        for idx, bit in enumerate(pattern_display):
+            if bit == '0':
+                # Draw thin dashed line for skipped slot
+                ax_optical.axvline(t_slot + on_s/2, color='gray', linestyle=':', alpha=0.4, linewidth=1)
+            t_slot += period_s
+        
+        ax_optical.set_ylabel('Laser (ON/OFF)', color='red', fontsize=9, fontweight='bold')
+        ax_optical.tick_params(axis='y', labelcolor='red')
+        ax_optical.set_ylim(-0.1, 1.2)
+        ax_optical.set_xlim(0, duration_s)
+        
+        # Format pattern for title
+        pattern_str = pattern_display if len(pattern) <= 15 else f"{pattern_display}..."
+        ones_count = pattern_display.count('1')
+        zeros_count = pattern_display.count('0')
+        delay_str = f", delay {laser_delay_s:.1f}s" if laser_delay_s > 0 else ""
+        
+        ax_voltage.set_xlabel('Time (s)', fontsize=9, fontweight='bold')
+        ax_voltage.set_title(
+            f'🔬 Optical Pattern: "{pattern_str}" ({ones_count} fire, {zeros_count} skip{delay_str})',
+            fontsize=9, fontweight='bold'
+        )
+        ax_voltage.set_xlim(0, duration_s)
+        ax_voltage.grid(True, alpha=0.3)
+        self._set_preview_ylim([read_voltage, 0])
     
     def _draw_generic_pattern(self):
         """Generic pattern for unknown tests"""

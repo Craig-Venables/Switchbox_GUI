@@ -99,10 +99,9 @@ This document tracks outstanding refactoring tasks for the Switchbox GUI project
 
 ---
 
-### 7. Plotting – One-stop shop (in progress)
+### 7. Plotting – One-stop shop (completed)
 
-- **Done:** `plotting/style.py` (central dpi/figsize/fonts), `plotting/CATALOG.md`, `plotting/sample_plots.py` (plots 1–8 for Run Full Sample Analysis), `plotting/endurance_plots.py` (DC endurance). Single entry point: `from plotting import UnifiedPlotter, SamplePlots, style, endurance_plots`. See `plotting/README.md` and `plotting/CATALOG.md`.
-- **Remaining:** Move sample plots 9–26 from `analysis/aggregators/sample_analyzer.py` into `plotting/sample_plots.py`; move section-level plots into `plotting/section_plots.py`; move device combined sweeps into `plotting/device_combined_plots.py`.
+- **Done:** `plotting/style.py` (central dpi/figsize/fonts), `plotting/CATALOG.md`, `plotting/sample/sample_plots.py` (plots 1–26 + size-comparison overlays for Run Full Sample Analysis), `plotting/section/section_plots.py` (section-level stacked sweeps and statistical comparisons), `plotting/device/device_combined_plots.py` (device combined sweeps), `plotting/endurance_plots.py` (DC endurance). Single entry point: `from plotting import UnifiedPlotter, SamplePlots, style, endurance_plots`. Analysis aggregators (`sample_analyzer`, `section_analyzer`, `comprehensive_analyzer`, `dc_endurance_analyzer`) delegate all plotting to these modules. See `plotting/README.md` and `plotting/CATALOG.md`.
 
 ### 8. Optional / Low Priority
 

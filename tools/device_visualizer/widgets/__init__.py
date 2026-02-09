@@ -3,7 +3,7 @@ Widgets module for Device Analysis Visualizer.
 
 This module provides Qt5 widgets for the device analysis visualizer application.
 It includes navigation widgets (sample selector, filter panel, device list) and
-visualization tabs (overview, plots, metrics, classification).
+visualization tabs (overview, plots, metrics, classification, gallery, overlay).
 """
 
 from .main_window import MainWindow
@@ -15,6 +15,8 @@ from .overview_tab import OverviewTab
 from .plots_tab import PlotsTab
 from .metrics_tab import MetricsTab
 from .classification_tab import ClassificationTab
+from .gallery_tab import GalleryTab
+from .overlay_tab import OverlayTab
 
 __all__ = [
     'MainWindow',
@@ -25,5 +27,7 @@ __all__ = [
     'OverviewTab',
     'PlotsTab',
     'MetricsTab',
-    'ClassificationTab'
+    'ClassificationTab',
+    'GalleryTab',
+    'OverlayTab'
 ]

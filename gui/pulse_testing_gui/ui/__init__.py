@@ -13,6 +13,7 @@ from .parameters import build_parameters_section
 from .status_section import build_status_section
 from .plot_section import build_plot_section
 from .tabs_optical import build_optical_tab
+from .laser_section import build_laser_section
 from .pulse_diagram import PulseDiagramHelper
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "build_status_section",
     "build_plot_section",
     "build_optical_tab",
+    "build_laser_section",
     "PulseDiagramHelper",
 ]

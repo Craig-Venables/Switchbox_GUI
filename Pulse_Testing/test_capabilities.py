@@ -49,6 +49,9 @@ ALL_TEST_FUNCTIONS = [
     'smu_endurance',  # SMU-based endurance: (SET pulse → Read → RESET pulse → Read) × N cycles
     'smu_retention',  # SMU-based retention: Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time)
     'smu_retention_with_pulse_measurement',  # SMU-based retention with measurements during SET/RESET pulses
+    'optical_read_pulsed_light',  # Optical: read at V while laser pulses periodically (2450/2400 only)
+    'optical_pulse_train_read',   # Optical: read at V while one laser pulse train (2450/2400 only)
+    'optical_pulse_train_pattern_read',  # Optical: read at V while laser fires pattern (11010 etc., 2450/2400 only)
 ]
 
 # System capability matrix
@@ -76,6 +79,9 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'switching_threshold_test': True,
         'multilevel_programming': True,
         'pulse_train_varying_amplitudes': True,
+        'optical_read_pulsed_light': True,
+        'optical_pulse_train_read': True,
+        'optical_pulse_train_pattern_read': True,
     },
     'keithley4200a': {
         # Tests implemented using pmu_pulse_read_interleaved.c and pmu_potentiation_depression.c
@@ -109,6 +115,9 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'smu_endurance': True,  # ⚠️ Uses SMU (not PMU) - (SET pulse → Read → RESET pulse → Read) × N cycles, supports pulse widths up to 480 seconds
         'smu_retention': True,  # ⚠️ Uses SMU (not PMU) - Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time), supports pulse widths up to 480 seconds
         'smu_retention_with_pulse_measurement': True,  # ⚠️ Uses SMU (not PMU) - measures resistance DURING SET/RESET pulses, supports pulse widths up to 480 seconds
+        'optical_read_pulsed_light': True,   # Uses SMU_BiasTimedRead + laser from Python (thread + optical_start_delay_s)
+        'optical_pulse_train_read': True,
+        'optical_pulse_train_pattern_read': True,
     },
     'keithley2400': {
         # Tests implemented using direct SCPI commands via Keithley2400Controller
@@ -135,6 +144,9 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'switching_threshold_test': True,  # ✅ SCPI-based: Try increasing voltages, find minimum that causes switching
         'multilevel_programming': True,  # ✅ SCPI-based: For each level: Reset → Program with pulses → Read
         'pulse_train_varying_amplitudes': True,  # ✅ SCPI-based: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
+        'optical_read_pulsed_light': True,
+        'optical_pulse_train_read': True,
+        'optical_pulse_train_pattern_read': True,
     },
 }
 

@@ -10,7 +10,8 @@ Wraps Keithley2400_SCPI_Scripts to provide standardized BaseMeasurementSystem
 interface for the Pulse Testing architecture.
 """
 
-from typing import Dict, List, Any, Optional
+import time
+from typing import Dict, List, Any, Optional, Tuple
 from .base_system import BaseMeasurementSystem
 from Equipment.SMU_AND_PMU.keithley2400.scpi_scripts import Keithley2400_SCPI_Scripts
 from Equipment.SMU_AND_PMU.keithley2400.controller import Keithley2400Controller
@@ -243,8 +244,29 @@ class Keithley2400System(BaseMeasurementSystem):
             raise RuntimeError("Not connected to device")
         return self.test_scripts.pulse_train_varying_amplitudes(**params)
 
+    # ----- Optical-test API: source V + measure I in a loop (for laser+SMU hybrid tests) -----
 
+    def source_voltage_for_optical(self, voltage: float, current_limit: float) -> None:
+        """Configure DC voltage source and turn output on for optical+read tests."""
+        if not self.controller:
+            raise RuntimeError("Not connected to device")
+        self.controller.set_voltage(voltage, current_limit)
 
+    def measure_current_once(self) -> Tuple[float, float]:
+        """Take one current reading. Returns (timestamp_sec, current_A)."""
+        if not self.controller:
+            raise RuntimeError("Not connected to device")
+        t = time.perf_counter()
+        i = self.controller.measure_current()
+        return (t, i if i is not None else 0.0)
+
+    def source_output_off(self) -> None:
+        """Turn SMU output off (e.g. after optical test)."""
+        if self.controller:
+            try:
+                self.controller.enable_output(False)
+            except Exception:
+                pass
 
 
 

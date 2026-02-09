@@ -145,6 +145,7 @@ from gui.measurement_gui.analysis_handlers import (
     run_analysis_sync as _run_analysis_sync_fn,
 )
 from gui.measurement_gui.plot_handlers import (
+    browse_impedance_folder as _browse_impedance_folder,
     browse_sample_folder_for_analysis as _browse_sample_folder_for_analysis,
     clear_sample_folder_selection as _clear_sample_folder_selection,
     clear_stats_plots as _clear_stats_plots,
@@ -154,6 +155,7 @@ from gui.measurement_gui.plot_handlers import (
     plot_measurement_in_background as _plot_measurement_in_background,
     refresh_stats_list as _refresh_stats_list,
     run_full_sample_analysis as _run_full_sample_analysis,
+    run_impedance_visualisation as _run_impedance_visualisation,
     update_classification_display as _update_classification_display,
     update_stats_display as _update_stats_display,
     update_stats_plots as _update_stats_plots,
@@ -1941,6 +1943,14 @@ class MeasurementGUI:
     def clear_sample_folder_selection(self) -> None:
         """Clear the selected sample folder (use current sample instead)."""
         _clear_sample_folder_selection(self)
+
+    def browse_impedance_folder(self) -> None:
+        """Browse for a folder containing impedance CSV or .dat files."""
+        _browse_impedance_folder(self)
+
+    def run_impedance_visualisation(self) -> None:
+        """Run Impedance Analyzer visualisation on the selected folder."""
+        _run_impedance_visualisation(self)
 
     def plot_all_device_graphs(self) -> None:
         """Plot all graphs for all measurement files in the currently selected device."""

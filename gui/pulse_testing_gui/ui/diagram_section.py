@@ -15,9 +15,9 @@ def build_pulse_diagram_section(parent, gui):
     frame = tk.LabelFrame(parent, text="📊 Pulse Pattern Preview", padx=5, pady=5)
     frame.pack(fill=tk.X, padx=5, pady=5)
 
-    gui.diagram_fig = Figure(figsize=(6, 1.8), dpi=100)
+    gui.diagram_fig = Figure(figsize=(7, 1.5), dpi=100)  # Wider, shorter for compact display
     gui.diagram_ax = gui.diagram_fig.add_subplot(111)
-    gui.diagram_fig.tight_layout(pad=2.0)
+    gui.diagram_fig.tight_layout(pad=1.5)  # Reduced padding
 
     gui.diagram_canvas = FigureCanvasTkAgg(gui.diagram_fig, master=frame)
     gui.diagram_canvas.draw()

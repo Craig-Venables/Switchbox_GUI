@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -123,6 +125,64 @@ def browse_sample_folder_for_analysis(gui: Any) -> None:
         print(f"[ANALYSIS] Error browsing folder: {e}")
         import traceback
 
+        traceback.print_exc()
+
+
+def browse_impedance_folder(gui: Any) -> None:
+    """Browse for a folder containing SMaRT impedance CSV or .dat files."""
+    try:
+        initial_dir = None
+        if hasattr(gui, "impedance_folder_var") and gui.impedance_folder_var.get():
+            p = Path(gui.impedance_folder_var.get())
+            if p.exists() and p.is_dir():
+                initial_dir = str(p)
+        if not initial_dir and hasattr(gui, "data_saver") and hasattr(gui.data_saver, "base_directory"):
+            try:
+                initial_dir = gui.data_saver.base_directory
+            except Exception:
+                pass
+        folder = filedialog.askdirectory(
+            title="Select folder with impedance CSV or .dat files",
+            initialdir=initial_dir,
+        )
+        if folder and hasattr(gui, "impedance_folder_var"):
+            gui.impedance_folder_var.set(folder)
+            print(f"[IMPEDANCE] Selected folder: {folder}")
+    except Exception as e:
+        print(f"[IMPEDANCE] Error browsing folder: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def run_impedance_visualisation(gui: Any) -> None:
+    """Run the Impedance Analyzer visualisation (CSV) on the selected folder."""
+    folder = getattr(gui, "impedance_folder_var", None) and gui.impedance_folder_var.get()
+    if not folder or not Path(folder).exists():
+        messagebox.showwarning(
+            "No folder selected",
+            "Please select a folder containing impedance CSV (or .dat) files using Browse.",
+        )
+        return
+    try:
+        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "Impedence Analyzer"
+        script = tools_dir / "visualise_csv.py"
+        if not script.exists():
+            script = tools_dir / "visualise_dat.py"
+        if not script.exists():
+            messagebox.showerror(
+                "Impedance tool not found",
+                f"Expected visualise_csv.py or visualise_dat.py in:\n{tools_dir}",
+            )
+            return
+        subprocess.Popen(
+            [sys.executable, str(script), folder],
+            cwd=str(tools_dir),
+            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+        )
+        print(f"[IMPEDANCE] Launched visualisation for: {folder}")
+    except Exception as e:
+        messagebox.showerror("Impedance visualisation", str(e))
+        import traceback
         traceback.print_exc()
 
 
