@@ -111,6 +111,7 @@ from .ui import (
     build_status_section,
     build_plot_section,
     build_optical_tab,
+    build_laser_section,
 )
 from .ui.pulse_diagram import PulseDiagramHelper
 from Measurements.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
@@ -229,9 +230,13 @@ class TSPTestingGUI(tk.Toplevel):
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Left panel: Controls with scrollbar
-        left_container = tk.Frame(main_frame, width=500)  # Increased width slightly
-        left_container.pack(side=tk.LEFT, fill=tk.BOTH, padx=(0, 5))
+        # Create PanedWindow for adjustable 35/65 split
+        paned = tk.PanedWindow(main_frame, orient=tk.HORIZONTAL, sashwidth=5, 
+                               sashrelief=tk.RAISED, bg="#d0d0d0")
+        paned.pack(fill=tk.BOTH, expand=True)
+        
+        # Left panel: Controls with scrollbar (35% width target)
+        left_container = tk.Frame(paned, width=420)  # 35% of typical 1200px screen
         left_container.pack_propagate(False)
         
         # Create scrollable canvas for left panel
@@ -265,9 +270,12 @@ class TSPTestingGUI(tk.Toplevel):
         # Also bind to the frame for better responsiveness
         left_panel.bind("<MouseWheel>", lambda e: left_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         
-        # Right panel: Visualizations
-        right_panel = tk.Frame(main_frame)
-        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Right panel: Visualizations (65% width target)
+        right_panel = tk.Frame(paned)
+        
+        # Add panels to PanedWindow with size constraints
+        paned.add(left_container, minsize=350, width=420)
+        paned.add(right_panel, minsize=400)
         
         # Top bar with help button
         top_bar = tk.Frame(left_panel, bg="#e6f3ff", pady=5, padx=10)
@@ -297,6 +305,9 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Connection section at top (always visible)
         self.create_connection_section(left_panel)
+        
+        # Laser control section (collapsible, integrated for optical testing)
+        self.create_laser_section(left_panel)
         
         # Create tabbed notebook for different testing modes
         self.notebook = ttk.Notebook(left_panel)
@@ -628,6 +639,10 @@ class TSPTestingGUI(tk.Toplevel):
     def create_test_selection_section(self, parent):
         """Test type selection (built by ui.test_selection)."""
         build_test_selection_section(parent, self)
+
+    def create_laser_section(self, parent):
+        """Laser control section (built by ui.laser_section)."""
+        build_laser_section(parent, self)
 
     def create_pulse_diagram_section(self, parent):
         """Pulse pattern diagram (built by ui.diagram_section)."""
@@ -1523,6 +1538,8 @@ class TSPTestingGUI(tk.Toplevel):
                         params[param_name] = value
                 elif param_type == "list":
                     params[param_name] = [float(x.strip()) for x in var.get().split(",")]
+                elif param_type == "str":
+                    params[param_name] = var.get().strip()
                 else:
                     params[param_name] = var.get()
             except Exception as e:
@@ -1559,6 +1576,34 @@ class TSPTestingGUI(tk.Toplevel):
             messagebox.showerror("Parameter Error", str(e))
             return
         
+        # Pulse Train: validate pattern length vs num_pulses and build pulse_voltages
+        if test_function == "pulse_train_varying_amplitudes":
+            num_pulses = params.get("num_pulses", 5)
+            pattern_raw = (params.get("pulse_pattern") or "").strip()
+            pattern = "".join(c for c in pattern_raw if c in "01")
+            pulse_voltage = params.get("pulse_voltage", 1.5)
+            n_pattern = len(pattern)
+            if n_pattern != num_pulses:
+                diff = n_pattern - num_pulses
+                if diff > 0:
+                    messagebox.showerror(
+                        "Pulse Train: Pattern Mismatch",
+                        f"Pattern has {n_pattern} digit(s) but Number of pulses is {num_pulses}.\n"
+                        f"Remove {diff} digit(s) from the pattern, or increase Number of pulses to {n_pattern}."
+                    )
+                else:
+                    messagebox.showerror(
+                        "Pulse Train: Pattern Mismatch",
+                        f"Pattern has {n_pattern} digit(s) but Number of pulses is {num_pulses}.\n"
+                        f"Add {-diff} digit(s) to the pattern (use 1 for pulse on, 0 for off), or set Number of pulses to {n_pattern}."
+                    )
+                return
+            if not pattern:
+                messagebox.showerror("Pulse Train: Invalid Pattern", "Pattern must contain at least one '1' or '0' (e.g. 11111 or 10001).")
+                return
+            params = dict(params)
+            params["pulse_voltages"] = [pulse_voltage if c == "1" else 0.0 for c in pattern]
+        
         # Clear previous results so failures don't re-use stale data
         self.last_results = None
         
@@ -1592,12 +1637,16 @@ class TSPTestingGUI(tk.Toplevel):
 
         self.log(f"Executing {func_name} on {self.current_system_name}...")
         start_time = time.time()
-        results, err = logic.run_test_worker(
-            self.system_wrapper, func_name, params,
-            progress_callback=progress_callback if func_name in (
-                "smu_endurance", "smu_retention", "smu_retention_with_pulse_measurement"
-            ) else None,
-        )
+        if func_name in ("optical_read_pulsed_light", "optical_pulse_train_read"):
+            from gui.pulse_testing_gui import optical_runner
+            results, err = optical_runner.run_optical_test(self, func_name, params)
+        else:
+            results, err = logic.run_test_worker(
+                self.system_wrapper, func_name, params,
+                progress_callback=progress_callback if func_name in (
+                    "smu_endurance", "smu_retention", "smu_retention_with_pulse_measurement"
+                ) else None,
+            )
 
         if err is not None:
             self.last_results = None
@@ -2201,6 +2250,9 @@ class TSPTestingGUI(tk.Toplevel):
                           'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
                           'post_read_interval', 'reset_width', 'delay_between_voltages', 
                           'delay_between_levels']
+            # Optical tests: user enters these in seconds (no unit selector conversion)
+            params_already_seconds = ['total_time_s', 'optical_pulse_duration_s', 'optical_pulse_period_s', 
+                                      'sample_interval_s', 'duration_s']
             read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
             laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
             if hasattr(self, 'time_unit_var'):
@@ -2228,6 +2280,8 @@ class TSPTestingGUI(tk.Toplevel):
                                 params[key] = (value * 1e6) * 1e-6
                             else:
                                 params[key] = value * 1e-6
+                        elif key in params_already_seconds:
+                            params[key] = value  # already in seconds
                         elif key in laser_params or is_time_param or key in time_params:
                             params[key] = value * conversion_factor
                         else:

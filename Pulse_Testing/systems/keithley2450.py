@@ -10,7 +10,8 @@ Wraps Keithley2450_TSP_Scripts to provide standardized BaseMeasurementSystem
 interface for the Pulse Testing architecture.
 """
 
-from typing import Dict, List, Any, Optional
+import time
+from typing import Dict, List, Any, Optional, Tuple
 from .base_system import BaseMeasurementSystem
 
 # Import the actual implementation - use backward-compatible imports
@@ -265,6 +266,38 @@ class Keithley2450System(BaseMeasurementSystem):
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
         return self.test_scripts.pulse_train_varying_amplitudes(**params)
+
+    # ----- Optical-test API: source V + measure I in a loop (for laser+SMU hybrid tests) -----
+
+    def source_voltage_for_optical(self, voltage: float, current_limit: float) -> None:
+        """Configure DC voltage source and turn output on for optical+read tests. Measure func set to current."""
+        if not self.tsp_controller:
+            raise RuntimeError("Not connected to device")
+        self.tsp_controller.set_voltage(voltage, current_limit)
+        # Ensure measure function is current (for subsequent measure_current_once)
+        try:
+            self.tsp_controller.device.write("smu.measure.func = smu.FUNC_DC_CURRENT")
+            self.tsp_controller.device.write("smu.measure.nplc = 0.01")
+            self.tsp_controller.device.write("smu.measure.autozero.enable = smu.OFF")
+            time.sleep(0.02)
+        except Exception:
+            pass
+
+    def measure_current_once(self) -> Tuple[float, float]:
+        """Take one current reading. Returns (timestamp_sec, current_A)."""
+        if not self.tsp_controller:
+            raise RuntimeError("Not connected to device")
+        t = time.perf_counter()
+        i = self.tsp_controller.measure_current()
+        return (t, i if i is not None else 0.0)
+
+    def source_output_off(self) -> None:
+        """Turn SMU output off (e.g. after optical test)."""
+        if self.tsp_controller:
+            try:
+                self.tsp_controller.enable_output(False)
+            except Exception:
+                pass
 
 
 class Keithley2450SimSystem(Keithley2450System):

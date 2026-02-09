@@ -614,7 +614,62 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         # The GUI will send them in seconds, so no conversion needed
         # i_range and i_compliance are already in Amperes, no conversion needed
         return self._scripts.smu_retention_with_pulse_measurement(**params)
-    
+
+    # ----- Optical-test API: source V + measure I in a loop (for laser+SMU hybrid tests) -----
+    # 4200A uses KXCI/C modules; no simple Python source/measure-one API yet. Stub for interface parity.
+
+    def source_voltage_for_optical(self, voltage: float, current_limit: float) -> None:
+        """Configure DC voltage source for optical+read tests. Not implemented for 4200A; use 2450 or 2400."""
+        raise NotImplementedError(
+            "Optical+read tests (source V, measure I in loop) are not yet implemented for Keithley 4200A. "
+            "Use Keithley 2450 or 2400 for optical pulse tests."
+        )
+
+    def measure_current_once(self) -> None:
+        """Take one current reading. Not implemented for 4200A."""
+        raise NotImplementedError(
+            "measure_current_once is not implemented for Keithley 4200A. Use 2450 or 2400 for optical tests."
+        )
+
+    def source_output_off(self) -> None:
+        """Turn SMU output off. Not implemented for 4200A."""
+        raise NotImplementedError("source_output_off is not implemented for Keithley 4200A.")
+
+    def run_bias_timed_read(
+        self,
+        vforce: float,
+        duration_s: float,
+        sample_interval_s: float,
+        ilimit: float,
+        num_points: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Run SMU_BiasTimedRead: apply voltage for duration_s, sample current at sample_interval_s.
+
+        Used by optical+read tests (laser coordinated from Python while instrument collects data).
+        Returns dict with timestamps, voltages, currents, resistances.
+        """
+        try:
+            import importlib
+            mod = importlib.import_module(
+                'Equipment.SMU_AND_PMU.4200A.C_Code_with_python_scripts.SMU_BiasTimedRead.run_smu_bias_timed_read'
+            )
+            run_bias_timed_read = mod.run_bias_timed_read
+        except (ImportError, AttributeError) as e:
+            raise RuntimeError(
+                f"SMU Bias Timed Read module not available: {e}. "
+                "Ensure Equipment/.../SMU_BiasTimedRead/run_smu_bias_timed_read.py exists."
+            ) from e
+        gpib_address = self._address if self._address else self.DEFAULT_ADDRESS
+        return run_bias_timed_read(
+            gpib_address=gpib_address,
+            timeout=self._timeout,
+            vforce=vforce,
+            duration_s=duration_s,
+            sample_interval_s=sample_interval_s,
+            ilimit=ilimit,
+            num_points=num_points,
+        )
+
     def cyclical_iv_sweep(self, **params) -> Dict[str, Any]:
         """Cyclical IV sweep: (0V → +Vpos → Vneg → 0V) × N cycles
         

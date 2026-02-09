@@ -8,14 +8,42 @@ import tkinter as tk
 from tkinter import ttk
 
 
+def toggle_parameters_section(gui):
+    """Toggle collapse/expand of parameters section."""
+    if gui.params_collapsed.get():
+        gui.params_content_frame.pack(fill=tk.BOTH, expand=True)
+        gui.params_collapse_btn.config(text="▼")
+        gui.params_collapsed.set(False)
+    else:
+        gui.params_content_frame.pack_forget()
+        gui.params_collapse_btn.config(text="▶")
+        gui.params_collapsed.set(True)
+
+
 def build_parameters_section(parent, gui):
     """Build Test Parameters (presets, unit, params_frame, param_vars, populate). Sets gui.preset_var, gui.params_frame, gui.param_vars, gui.presets, etc."""
-    frame = tk.LabelFrame(parent, text="Test Parameters", padx=5, pady=5)
-    frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+    frame = tk.LabelFrame(parent, text="Test Parameters", padx=3, pady=3)
+    frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(3, 5))
 
-    preset_frame = tk.Frame(frame)
-    preset_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
-    tk.Label(preset_frame, text="Presets:", font=("TkDefaultFont", 9, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+    # Header with collapse button
+    header_frame = tk.Frame(frame)
+    header_frame.pack(fill=tk.X, pady=(0, 3))
+    
+    gui.params_collapsed = tk.BooleanVar(value=False)  # Start expanded (needs to be visible)
+    gui.params_collapse_btn = tk.Button(header_frame, text="▼", width=3,
+                                        command=lambda: toggle_parameters_section(gui),
+                                        font=("TkDefaultFont", 8), relief=tk.FLAT)
+    gui.params_collapse_btn.pack(side=tk.LEFT, padx=(0, 5))
+    
+    tk.Label(header_frame, text="Configure Test", font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT, anchor="w")
+    
+    # Content frame for collapsible content
+    gui.params_content_frame = tk.Frame(frame)
+    gui.params_content_frame.pack(fill=tk.BOTH, expand=True)
+
+    preset_frame = tk.Frame(gui.params_content_frame)
+    preset_frame.pack(fill=tk.X, padx=3, pady=(0, 3))
+    tk.Label(preset_frame, text="Presets:", font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT, padx=(0, 5))
 
     gui.preset_var = tk.StringVar()
     gui.preset_dropdown = ttk.Combobox(preset_frame, textvariable=gui.preset_var, state="readonly", width=20)
@@ -33,8 +61,8 @@ def build_parameters_section(parent, gui):
     unit_combo.pack(side=tk.RIGHT, padx=(5, 0))
     unit_combo.bind("<<ComboboxSelected>>", lambda e: gui._on_unit_changed())
 
-    canvas = tk.Canvas(frame, height=450)
-    scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+    canvas = tk.Canvas(gui.params_content_frame, height=300)  # Reduced from 450 to 300
+    scrollbar = ttk.Scrollbar(gui.params_content_frame, orient="vertical", command=canvas.yview)
     gui.params_frame = tk.Frame(canvas)
 
     def update_canvas_window_width(event=None):

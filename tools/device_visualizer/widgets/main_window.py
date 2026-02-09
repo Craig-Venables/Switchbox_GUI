@@ -24,6 +24,8 @@ from .overview_tab import OverviewTab
 from .plots_tab import PlotsTab
 from .metrics_tab import MetricsTab
 from .classification_tab import ClassificationTab
+from .gallery_tab import GalleryTab
+from .overlay_tab import OverlayTab
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +125,16 @@ class MainWindow(QMainWindow):
         self.plots_tab = PlotsTab()
         self.metrics_tab = MetricsTab()
         self.classification_tab = ClassificationTab()
+        self.gallery_tab = GalleryTab()
+        self.overlay_tab = OverlayTab()
         
         # Add tabs
         self.tab_widget.addTab(self.overview_tab, "📊 Overview")
         self.tab_widget.addTab(self.plots_tab, "📈 Plots")
         self.tab_widget.addTab(self.metrics_tab, "📉 Metrics")
         self.tab_widget.addTab(self.classification_tab, "🔬 Classification")
+        self.tab_widget.addTab(self.gallery_tab, "🖼️ Gallery")
+        self.tab_widget.addTab(self.overlay_tab, "📚 Overlay")
         
         center_layout.addWidget(self.tab_widget)
         center_panel.setLayout(center_layout)
@@ -200,6 +206,16 @@ class MainWindow(QMainWindow):
         classification_action.setShortcut("Ctrl+4")
         classification_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(3))
         view_menu.addAction(classification_action)
+        
+        gallery_action = QAction("&Gallery Tab", self)
+        gallery_action.setShortcut("Ctrl+5")
+        gallery_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(4))
+        view_menu.addAction(gallery_action)
+        
+        overlay_action = QAction("&Overlay Tab", self)
+        overlay_action.setShortcut("Ctrl+6")
+        overlay_action.triggered.connect(lambda: self.tab_widget.setCurrentIndex(5))
+        view_menu.addAction(overlay_action)
         
         # Help menu
         help_menu = menubar.addMenu("&Help")
@@ -347,6 +363,8 @@ class MainWindow(QMainWindow):
         self.plots_tab.update_device(device)
         self.metrics_tab.update_device(device)
         self.classification_tab.update_device(device)
+        self.gallery_tab.update_device(device)
+        self.overlay_tab.update_device(device)
         
         # Update status bar
         self.status_bar.showMessage(
@@ -411,6 +429,8 @@ class MainWindow(QMainWindow):
             "<li><b>Ctrl+2</b> - Plots tab</li>"
             "<li><b>Ctrl+3</b> - Metrics tab</li>"
             "<li><b>Ctrl+4</b> - Classification tab</li>"
+            "<li><b>Ctrl+5</b> - Gallery tab</li>"
+            "<li><b>Ctrl+6</b> - Overlay tab</li>"
             "<li><b>Ctrl+Tab</b> - Cycle through tabs</li>"
             "</ul>"
             "<p><b>File Operations:</b></p>"

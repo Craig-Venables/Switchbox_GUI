@@ -2,30 +2,63 @@
 
 ## Overview
 
-The `Helpers/Analysis/` module provides comprehensive analysis tools for IV sweep data and sample-level analysis. All analysis functionality has been unified into this single module with a clear hierarchical structure.
+The **analysis** package is the IV-sweep and device/sample analysis layer for the Switchbox GUI. It:
+
+1. **Classifies devices** from I–V (and related) data: memristive, ohmic, capacitive, etc., with scores and confidence.
+2. **Computes metrics** from sweeps: Ron, Roff, switching ratio, hysteresis, conduction mechanism, quality scores, warnings.
+3. **Aggregates across scale**: single sweep → device → section (letter folder) → whole sample, and drives the "Run Full Sample Analysis" workflow.
+
+All analysis functionality lives in this module with a clear three-layer structure: **core** (one-sweep engine), **aggregators** (multi-device/section/sample), and **api** (convenience entry points such as `quick_analyze` and `ComprehensiveAnalyzer`).
+
+---
+
+## When Does Classification Run?
+
+**Classification is not always performed.**
+
+| Condition | Classification runs? |
+|-----------|----------------------|
+| `analysis_level='basic'` | **No** — only core metrics (Ron, Roff, areas, etc.) are computed. |
+| `analysis_level='classification'`, `'full'`, or `'research'` | **Yes** (for IV sweep, endurance, and retention paths). |
+| Measurement type **pulse** (with time array) | **No** — only pulse-specific metrics; `_classify_device()` is not called. |
+| IV sweep, endurance, or retention (or pulse without time) | **Yes** when `analysis_level` is not `'basic'`. |
+
+So: use `analysis_level='basic'` when you only need metrics and want to skip classification; use `'full'` (default) or `'classification'` when you need a device type.
+
+---
+
+## What Data Classification Uses
+
+When classification **does** run, it is **always based on I–V sweep data**:
+
+- Voltage and current arrays (and loop structure: forward/backward sweeps).
+- Derived features: hysteresis presence, pinched loop, switching behavior (on/off ratio), I–V linearity, polarity dependence, etc.
+- All of this is computed in `SweepAnalyzer._extract_classification_features()` from the same voltage/current (and optional time) you pass in. Endurance and retention paths still process the data as I–V loops and classify from that.
+
+Classification does **not** use a separate data source; it uses only the sweep (and loop-split) data.
 
 ---
 
 ## Module Structure
 
 ```
-Helpers/Analysis/
-├── core/                          # Fundamental analysis (no aggregation)
-│   ├── sweep_analyzer.py         # Analyzes ONE sweep file (class: SweepAnalyzer)
+analysis/
+├── core/                          # Fundamental analysis (one sweep, no aggregation)
+│   ├── sweep_analyzer.py         # Analyzes ONE sweep (class: SweepAnalyzer)
 │   └── __init__.py
 ├── aggregators/                   # Multi-level aggregators
 │   ├── device_analyzer.py        # Aggregates sweeps for ONE device (placeholder)
 │   ├── section_analyzer.py       # Aggregates devices in a section
 │   ├── sample_analyzer.py        # Aggregates devices in a sample
-│   ├── comprehensive_analyzer.py # Orchestrates all aggregators
+│   ├── comprehensive_analyzer.py # Orchestrates all aggregators (Run Full Sample Analysis)
 │   └── __init__.py
-├── api/                           # Public API wrappers (most commonly used)
-│   ├── iv_sweep_analyzer.py      # Convenience wrapper (quick_analyze, analyze_sweep)
+├── api/                           # Public API (most commonly used)
+│   ├── iv_sweep_analyzer.py      # quick_analyze, analyze_sweep, IVSweepAnalyzer
 │   ├── iv_sweep_llm_analyzer.py  # Optional LLM analysis
 │   └── __init__.py
 ├── utils/                         # Utility scripts
 │   └── migrate_folder_structure.py
-└── docs/                          # Documentation files
+└── docs/                          # Documentation
     ├── README.md (detailed usage)
     ├── ENHANCED_CLASSIFICATION_README.md
     └── IMPLEMENTATION_SUMMARY.md
@@ -36,6 +69,8 @@ Helpers/Analysis/
 ## Quick Start
 
 ### Most Common Usage - Quick Analysis
+
+By default, `quick_analyze` uses `analysis_level='full'`, so **classification runs** and you get `device_type`, `memristivity_score`, etc. Use `analysis_level='basic'` to get only metrics and skip classification.
 
 ```python
 from analysis import quick_analyze
@@ -355,10 +390,12 @@ for section, device_num, device_dir in device_dirs:
 
 The `analysis_level` parameter controls how much analysis is performed:
 
-- **`'basic'`**: Fast, core metrics only (Ron, Roff, areas)
-- **`'classification'`**: Adds device classification (memristive, ohmic, etc.)
-- **`'full'`**: Adds conduction models and advanced metrics (default)
-- **`'research'`**: Maximum detail with extra diagnostics
+- **`'basic'`**: Fast, core metrics only (Ron, Roff, areas). **Classification is not run** — no `device_type`, `memristivity_score`, or classification keys in the result.
+- **`'classification'`**: Core metrics **plus** device classification (memristive, ohmic, capacitive, etc.).
+- **`'full'`**: Classification plus conduction models and advanced metrics (default).
+- **`'research'`**: Maximum detail with extra diagnostics.
+
+See **When Does Classification Run?** and **What Data Classification Uses** above for when classification runs and what data it uses.
 
 ---
 

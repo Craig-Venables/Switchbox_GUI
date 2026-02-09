@@ -34,8 +34,15 @@ def build_graphing_tab(builder: Any, notebook: ttk.Notebook) -> None:
     main_panel = builder._create_scrollable_panel(tab)
     main_panel._container.grid(row=0, column=0, sticky="nsew", padx=20, pady=10)
 
+    # Two columns: left = main analysis, right = Impedance Analyzer
+    content_row = tk.Frame(main_panel, bg=COLOR_BG)
+    content_row.pack(fill='both', expand=True)
+
+    left_col = tk.Frame(content_row, bg=COLOR_BG)
+    left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
     # Title Section
-    title_frame = tk.Frame(main_panel, bg=COLOR_BG)
+    title_frame = tk.Frame(left_col, bg=COLOR_BG)
     title_frame.pack(fill='x', pady=(0, 20))
     tk.Label(title_frame, text="Sample Analysis and Plotting", font=("Segoe UI", 16, "bold"), bg=COLOR_BG).pack()
     tk.Label(
@@ -48,7 +55,7 @@ def build_graphing_tab(builder: Any, notebook: ttk.Notebook) -> None:
 
     # 1. Data Selection Section
     selection_frame = tk.LabelFrame(
-        main_panel,
+        left_col,
         text="1. Data Selection",
         font=("Segoe UI", 11, "bold"),
         bg=COLOR_BG,
@@ -120,7 +127,7 @@ def build_graphing_tab(builder: Any, notebook: ttk.Notebook) -> None:
 
     # 2. Actions Section
     actions_frame = tk.LabelFrame(
-        main_panel,
+        left_col,
         text="2. Actions",
         font=("Segoe UI", 11, "bold"),
         bg=COLOR_BG,
@@ -203,7 +210,7 @@ def build_graphing_tab(builder: Any, notebook: ttk.Notebook) -> None:
     ).pack(pady=(15, 0))
 
     # Status Section
-    status_frame = tk.Frame(main_panel, bg=COLOR_BG)
+    status_frame = tk.Frame(left_col, bg=COLOR_BG)
     status_frame.pack(fill='x', pady=(0, 20))
     tk.Label(status_frame, text="Status:", font=("Segoe UI", 10, "bold"), bg=COLOR_BG).pack(anchor="w")
     gui.analysis_status_label = tk.Label(
@@ -222,7 +229,7 @@ def build_graphing_tab(builder: Any, notebook: ttk.Notebook) -> None:
 
     # Information Section
     info_frame = tk.LabelFrame(
-        main_panel,
+        left_col,
         text="Information",
         font=("Segoe UI", 10, "bold"),
         bg=COLOR_BG,
@@ -250,6 +257,69 @@ Output location: {sample_dir}/sample_analysis/
         justify=tk.LEFT,
         anchor="w"
     ).pack(fill='x')
+
+    # Right column: Impedance Analyzer
+    right_col = tk.Frame(content_row, bg=COLOR_BG, width=320)
+    right_col.pack(side=tk.RIGHT, fill=tk.Y, padx=(20, 0))
+    right_col.pack_propagate(False)
+
+    impedance_frame = tk.LabelFrame(
+        right_col,
+        text="Impedance Analyzer",
+        font=("Segoe UI", 11, "bold"),
+        bg=COLOR_BG,
+        padx=12,
+        pady=12,
+    )
+    impedance_frame.pack(fill='x', pady=(0, 10))
+
+    imp_text = (
+        "Plot SMaRT impedance CSV or .dat files: |Z| vs f, Nyquist, phase, capacitance. "
+        "Data above 1 MHz is filtered. Outputs go to graphs/ and origin_data/ in the selected folder."
+    )
+    tk.Label(
+        impedance_frame,
+        text=imp_text,
+        font=("Segoe UI", 9),
+        bg=COLOR_BG,
+        fg="#444",
+        wraplength=280,
+        justify=tk.LEFT,
+    ).pack(fill='x', pady=(0, 12))
+
+    tk.Label(impedance_frame, text="Folder:", font=("Segoe UI", 9), bg=COLOR_BG).pack(anchor="w")
+    gui.impedance_folder_var = tk.StringVar(value="")
+    tk.Entry(
+        impedance_frame,
+        textvariable=gui.impedance_folder_var,
+        font=("Segoe UI", 9),
+        state="readonly",
+    ).pack(fill='x', pady=(2, 8))
+
+    imp_btn_frame = tk.Frame(impedance_frame, bg=COLOR_BG)
+    imp_btn_frame.pack(fill='x')
+    tk.Button(
+        imp_btn_frame,
+        text="Browse...",
+        command=lambda: gui.browse_impedance_folder(),
+        font=("Segoe UI", 9),
+        bg="#2196F3",
+        fg="white",
+        padx=12,
+        pady=4,
+        cursor="hand2",
+    ).pack(side="left", padx=(0, 6))
+    tk.Button(
+        imp_btn_frame,
+        text="Run CSV visualisation",
+        command=lambda: gui.run_impedance_visualisation(),
+        font=("Segoe UI", 9),
+        bg="#4CAF50",
+        fg="white",
+        padx=12,
+        pady=4,
+        cursor="hand2",
+    ).pack(side="left")
 
     builder.widgets["graphing_tab"] = tab
     gui.graphing_tab = tab

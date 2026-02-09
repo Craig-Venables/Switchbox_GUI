@@ -13,7 +13,7 @@ def build_plot_section(parent, gui):
     frame = tk.LabelFrame(parent, text="Live Plot", padx=5, pady=5)
     frame.pack(fill=tk.BOTH, expand=True)
 
-    gui.fig = Figure(figsize=(8, 4), dpi=100)
+    gui.fig = Figure(figsize=(8, 6), dpi=100)  # Taller plot for better visibility
     gui.ax = gui.fig.add_subplot(111)
     gui.ax.set_title("No data yet")
     gui.ax.set_xlabel("Time (s)")
