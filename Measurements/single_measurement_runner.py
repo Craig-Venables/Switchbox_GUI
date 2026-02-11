@@ -411,6 +411,21 @@ class SingleMeasurementRunner:
                 abs_path = os.path.abspath(file_path)
                 print(f"[SAVE] File saved to: {abs_path}")
                 self.log_terminal(f"File saved: {abs_path}")
+                try:
+                    saver = getattr(self._gui, "data_saver", None)
+                    if saver is not None:
+                        saver.log_measurement_event(
+                            save_dir,
+                            filename=f"{name}.txt",
+                            file_path=file_path,
+                            measurement_type="IV Sweep",
+                            status="saved",
+                            sample_name=self.sample_name_var.get(),
+                            section=self.final_device_letter,
+                            device_number=self.final_device_number,
+                        )
+                except Exception:
+                    pass
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 

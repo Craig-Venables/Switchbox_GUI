@@ -54,13 +54,12 @@ def build_ex_command(
     sample_interval_s: float,
     ilimit: float,
     num_points: int,
+    current_range_a: float = 0.0,
 ) -> str:
     """Build EX command for SMU_BiasTimedRead.
 
-    Signature: int SMU_BiasTimedRead(double Vforce, double Duration_s,
-        double SampleInterval_s, double Ilimit, double *Imeas, int NumPoints)
-    Parameters 1-4: inputs, 5: Imeas (output, "" in EX), 6: NumPoints.
-    Retrieve Imeas via GP 5 after execution.
+    Signature: int SMU_BiasTimedRead(..., double *Timestamps, int NumPointsTimestamps, double Irange_A)
+    current_range_a: 0 = auto range, >0 = fixed measurement range in A (e.g. 1e-6 for 1 uA).
     """
     params = [
         format_param(vforce),
@@ -68,7 +67,10 @@ def build_ex_command(
         format_param(sample_interval_s),
         format_param(ilimit),
         "",  # 5: Imeas output (empty string)
-        format_param(num_points),
+        format_param(num_points),  # 6: NumPoints (size for Imeas)
+        "",  # 7: Timestamps output (empty string)
+        format_param(num_points),  # 8: NumPointsTimestamps (size for Timestamps)
+        format_param(current_range_a),  # 9: Irange_A (0=auto, >0=fixed range in A)
     ]
     return f"EX A_SMU_BiasTimedRead SMU_BiasTimedRead({','.join(params)})"
 
@@ -84,13 +86,16 @@ def build_ex_command_collect(
     num_points: int,
 ) -> str:
     """Build EX command for SMU_BiasTimedRead_Collect (Phase 2: sample loop, then ramp down).
-    Imeas is output param 3 (empty string in EX).
+    Imeas is output param 3 (empty string in EX), NumPoints is param 4, 
+    Timestamps is output param 5, NumPointsTimestamps is param 6.
     """
     params = [
         format_param(duration_s),
         format_param(sample_interval_s),
         "",  # 3: Imeas output
-        format_param(num_points),
+        format_param(num_points),  # 4: NumPoints (size for Imeas)
+        "",  # 5: Timestamps output
+        format_param(num_points),  # 6: NumPointsTimestamps (size for Timestamps)
     ]
     return f"EX A_SMU_BiasTimedRead_Start SMU_BiasTimedRead_Collect({','.join(params)})"
 
@@ -99,6 +104,9 @@ def build_ex_command_collect(
 # combined numbering (Start 1,2 + Collect 3,4,5,6) so Imeas is param 5.
 GP_PARAM_IMEAS_COLLECT = 3
 GP_PARAM_IMEAS_COLLECT_ALT = 5  # fallback when both functions in same module
+# Timestamps in Collect: 5th param of Collect (when Start+Collect share module, may be param 7)
+GP_PARAM_TIMESTAMPS_COLLECT = 5
+GP_PARAM_TIMESTAMPS_COLLECT_ALT = 7  # fallback when both functions in same module
 
 
 class KXCIClient:
@@ -247,6 +255,8 @@ class KXCIClient:
 
 # Imeas is the 5th parameter (1-based) in SMU_BiasTimedRead(...)
 GP_PARAM_IMEAS = 5
+# Timestamps is the 7th parameter (1-based) in SMU_BiasTimedRead(...)
+GP_PARAM_TIMESTAMPS = 7
 
 
 def run_bias_timed_read_synced(
@@ -325,6 +335,24 @@ def run_bias_timed_read_synced(
                         currents = alt
                 except Exception:
                     pass
+            
+            # Try to get real timestamps from 4200A (GP 5 for Collect)
+            timestamps = None
+            n_actual = len(currents) if currents else 0
+            if n_actual > 0:
+                try:
+                    timestamps = client._query_gp(GP_PARAM_TIMESTAMPS_COLLECT, n_actual)
+                    if not timestamps or len(timestamps) != n_actual:
+                        # Try alternate parameter position
+                        timestamps = client._query_gp(GP_PARAM_TIMESTAMPS_COLLECT_ALT, n_actual)
+                        if not timestamps or len(timestamps) != n_actual:
+                            timestamps = None
+                except Exception:
+                    timestamps = None
+            
+            # Fallback to synthetic timestamps if real ones not available
+            if timestamps is None or len(timestamps) != n_actual:
+                timestamps = [i * sample_interval_s for i in range(n_actual)]
         except Exception as e:
             exc_holder[0] = e
         finally:
@@ -334,9 +362,7 @@ def run_bias_timed_read_synced(
                 pass
             client.disconnect()
 
-        if exc_holder[0] is None and currents:
-            n_actual = len(currents)
-            timestamps = [i * sample_interval_s for i in range(n_actual)]
+        if exc_holder[0] is None and currents and n_actual > 0:
             voltages = [vforce] * n_actual
             resistances = [
                 (vforce / i if i and abs(i) > 1e-18 else float("nan"))
@@ -362,14 +388,16 @@ def run_bias_timed_read(
     sample_interval_s: float,
     ilimit: float,
     num_points: Optional[int] = None,
+    current_range_a: float = 0.0,
 ) -> Dict[str, Any]:
     """Execute SMU_BiasTimedRead and return timestamps, voltages, currents, resistances.
 
     If num_points is None, it is set to max(1, int(duration_s / sample_interval_s)).
+    current_range_a: 0 = auto range, >0 = fixed measurement range in A (e.g. 1e-6 for 1 uA).
     """
     if num_points is None:
         num_points = max(1, int(duration_s / sample_interval_s))
-    command = build_ex_command(vforce, duration_s, sample_interval_s, ilimit, num_points)
+    command = build_ex_command(vforce, duration_s, sample_interval_s, ilimit, num_points, current_range_a)
     wait_seconds = duration_s + 2.0
 
     client = KXCIClient(gpib_address=gpib_address, timeout=timeout)
@@ -393,6 +421,16 @@ def run_bias_timed_read(
             raise RuntimeError(f"SMU_BiasTimedRead returned {return_value}: {msg}")
         time.sleep(0.05)
         currents = client._query_gp(GP_PARAM_IMEAS, num_points)
+        
+        # Try to get real timestamps from 4200A (GP 7 for single-phase)
+        timestamps = None
+        if currents and len(currents) > 0:
+            try:
+                timestamps = client._query_gp(GP_PARAM_TIMESTAMPS, len(currents))
+                if not timestamps or len(timestamps) != len(currents):
+                    timestamps = None
+            except Exception:
+                timestamps = None
     finally:
         try:
             client._exit_ul_mode()
@@ -400,11 +438,18 @@ def run_bias_timed_read(
             pass
         client.disconnect()
 
-    # Build timestamps (relative to start of measurement); use len(currents) in case GP returned fewer points
+    # Use real timestamps if available, otherwise fallback to synthetic timestamps
     n_actual = len(currents)
     if n_actual < num_points and n_actual > 0:
         print(f"[WARN] GP returned {n_actual} points (requested {num_points})", file=sys.stderr)
-    timestamps = [i * sample_interval_s for i in range(n_actual)]
+    
+    if timestamps is None or len(timestamps) != n_actual:
+        # Fallback to synthetic timestamps (for backward compatibility or if GP fails)
+        timestamps = [i * sample_interval_s for i in range(n_actual)]
+        print(f"[INFO] Using synthetic timestamps (4200A timestamps not available)", file=sys.stderr)
+    else:
+        print(f"[INFO] Using real timestamps from 4200A", file=sys.stderr)
+    
     voltages = [vforce] * n_actual
     resistances = [
         (vforce / i if i and abs(i) > 1e-18 else float('nan'))
@@ -431,6 +476,7 @@ def main() -> None:
     parser.add_argument("--sample-interval", type=float, default=0.01, help="Sample interval (s)")
     parser.add_argument("--ilimit", type=float, default=0.0001, help="Current limit (A)")
     parser.add_argument("--num-points", type=int, default=None, help="Number of samples (default: duration/sample_interval)")
+    parser.add_argument("--current-range", type=float, default=0.0, help="Current measurement range (A). 0=auto, e.g. 1e-6=1uA for fixed range")
     parser.add_argument("--dry-run", action="store_true", help="Print EX command only (no instrument)")
     args = parser.parse_args()
 
@@ -439,7 +485,7 @@ def main() -> None:
         num_points = max(1, int(args.duration / args.sample_interval))
 
     if args.dry_run:
-        print(build_ex_command(args.vforce, args.duration, args.sample_interval, args.ilimit, num_points))
+        print(build_ex_command(args.vforce, args.duration, args.sample_interval, args.ilimit, num_points, args.current_range))
         return
 
     result = run_bias_timed_read(
@@ -450,6 +496,7 @@ def main() -> None:
         sample_interval_s=args.sample_interval,
         ilimit=args.ilimit,
         num_points=num_points,
+        current_range_a=args.current_range,
     )
     n = len(result["timestamps"])
     print(f"[OK] Got {n} points")

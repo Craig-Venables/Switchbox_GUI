@@ -17,8 +17,9 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
+import csv
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -344,6 +345,165 @@ class MeasurementDataSaver:
                 handle.write(f"{timestamp - start_time:.1f}\t{temp:.2f}\n")
         return target
 
+    # ------------------------------------------------------------------
+    # Measurement timeline log (single CSV line per measurement)
+    # ------------------------------------------------------------------
+    LOG_HEADER = "entry#,datetime,filename,location,measurement_type,status"
+
+    def _parse_device_folder(self, device_folder: Path) -> Tuple[str, str, str]:
+        """Get sample_name, section, device_number from device folder path (base/sample/letter/number)."""
+        parts = Path(device_folder).parts
+        if len(parts) >= 3:
+            return (parts[-3], parts[-2], parts[-1])
+        if len(parts) == 2:
+            return ("", parts[-2], parts[-1])
+        if len(parts) == 1 and parts[0]:
+            return ("", "", parts[0])
+        return ("", "", "")
+
+    def _ensure_log_header(
+        self,
+        log_path: Path,
+        sample_name: str,
+        section: str,
+        device_number: str,
+    ) -> None:
+        """Write sample/section/device header at top of log file if file is new or empty."""
+        if log_path.exists() and log_path.stat().st_size > 0:
+            with open(log_path, "r", encoding="utf-8") as f:
+                first = f.readline()
+            if first.strip().startswith("Sample:"):
+                return
+        folder = log_path.parent
+        folder.mkdir(parents=True, exist_ok=True)
+        header = f"Sample: {sample_name}, Section: {section}, Device: {device_number}\n"
+        if log_path.exists():
+            existing = log_path.read_text(encoding="utf-8")
+            log_path.write_text(header + self.LOG_HEADER + "\n" + existing, encoding="utf-8")
+        else:
+            log_path.write_text(header + self.LOG_HEADER + "\n", encoding="utf-8")
+        # Mirror to log.csv so it opens in Excel when double-clicked
+        csv_path = folder / "log.csv"
+        csv_path.write_text(log_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def _get_next_entry_number(self, log_path: Path) -> int:
+        """Return next sequential entry number for this device log (1-based)."""
+        if not log_path.exists():
+            return 1
+        max_num = 0
+        with open(log_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("Sample:") or line == self.LOG_HEADER:
+                    continue
+                if "," in line:
+                    try:
+                        entry_num = int(line.split(",", 1)[0])
+                        if entry_num > max_num:
+                            max_num = entry_num
+                    except ValueError:
+                        pass
+        return max_num + 1
+
+    def _calculate_relative_path(self, log_dir: Path, measurement_path: Optional[Path]) -> str:
+        """Return path of measurement file relative to log file directory, or 'unsaved'."""
+        if measurement_path is None:
+            return "unsaved"
+        try:
+            log_dir = log_dir.resolve()
+            meas = Path(measurement_path).resolve()
+            if not meas.is_absolute():
+                return "unsaved"
+            try:
+                rel = meas.relative_to(log_dir)
+                return str(rel).replace("\\", "/")
+            except ValueError:
+                return "unsaved"
+        except Exception:
+            return "unsaved"
+
+    def log_measurement_event(
+        self,
+        device_folder: Path | str,
+        filename: str,
+        file_path: Optional[Path | str],
+        measurement_type: str,
+        status: str,
+        sample_name: Optional[str] = None,
+        section: Optional[str] = None,
+        device_number: Optional[str] = None,
+    ) -> Optional[Path]:
+        """
+        Append one CSV line to log.txt in the device folder for measurement timeline tracking.
+        Uses readable datetime format: 2026-01-09 19:19:28.
+        Returns path to log file, or None on error.
+        """
+        folder = Path(device_folder)
+        folder.mkdir(parents=True, exist_ok=True)
+        log_path = folder / "log.txt"
+        sn, sec, dev = (sample_name, section, device_number) if (sample_name is not None and section is not None and device_number is not None) else self._parse_device_folder(folder)
+        self._ensure_log_header(log_path, sn or "?", sec or "?", dev or "?")
+        entry_num = self._get_next_entry_number(log_path)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        location = self._calculate_relative_path(folder, Path(file_path) if file_path else None)
+        row = [str(entry_num), now, filename, location, measurement_type, status]
+        with open(log_path, "a", encoding="utf-8") as handle:
+            writer = csv.writer(handle, lineterminator="\n")
+            writer.writerow(row)
+        # Append same row to log.csv for Excel
+        csv_path = folder / "log.csv"
+        if csv_path.exists():
+            with open(csv_path, "a", encoding="utf-8") as handle:
+                csv.writer(handle, lineterminator="\n").writerow(row)
+        else:
+            # First data row: ensure header exists in csv (e.g. if log.txt was created before csv was added)
+            header = f"Sample: {sn or '?'}, Section: {sec or '?'}, Device: {dev or '?'}\n"
+            csv_path.write_text(header + self.LOG_HEADER + "\n", encoding="utf-8")
+            with open(csv_path, "a", encoding="utf-8") as handle:
+                csv.writer(handle, lineterminator="\n").writerow(row)
+        return log_path
+
+    def log_unsaved_measurement(
+        self,
+        device_folder: Path | str,
+        measurement_type: str,
+        params: Optional[Dict[str, Any]] = None,
+        sample_name: Optional[str] = None,
+        section: Optional[str] = None,
+        device_number: Optional[str] = None,
+    ) -> Optional[Path]:
+        """Log an unsaved measurement with key parameters in filename field."""
+        parts = [measurement_type]
+        if params:
+            for k in ("pulse_voltage", "voltage", "V", "v", "bias_voltage"):
+                if k in params and params[k] is not None:
+                    v = params[k]
+                    parts.append(f"{v}v" if isinstance(v, (int, float)) else str(v))
+                    break
+            for k in ("pulse_duration", "duration", "duration_s", "width_ms"):
+                if k in params and params[k] is not None:
+                    v = params[k]
+                    if isinstance(v, (int, float)):
+                        parts.append(f"{v}s" if v >= 1 else f"{v*1000}ms")
+                    else:
+                        parts.append(str(v))
+                    break
+            for k in ("loops", "n_loops", "sweeps", "num_measurements"):
+                if k in params and params[k] is not None:
+                    parts.append(f"{params[k]}loops")
+                    break
+        filename = "unsaved(" + ",".join(parts) + ")"
+        return self.log_measurement_event(
+            device_folder,
+            filename=filename,
+            file_path=None,
+            measurement_type=measurement_type,
+            status="unsaved",
+            sample_name=sample_name,
+            section=section,
+            device_number=device_number,
+        )
+
     def create_log_file(
         self,
         save_dir: Path | str,
@@ -352,6 +512,7 @@ class MeasurementDataSaver:
     ) -> Path:
         """
         Append an entry to `log.txt` inside ``save_dir`` documenting the run.
+        Prefer log_measurement_event() for new timeline format.
         """
         folder = Path(save_dir)
         folder.mkdir(parents=True, exist_ok=True)

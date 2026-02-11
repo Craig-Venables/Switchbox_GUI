@@ -1342,27 +1342,34 @@ class PulseDiagramHelper:
         duration_s = max(params.get('duration_s', 5.0), 0.1)
         optical_on_ms = params.get('optical_on_ms', 100.0)
         optical_off_ms = params.get('optical_off_ms', 100.0)
-        pattern_raw = str(params.get('laser_pattern', '11111')).strip()
+        pattern_raw = str(params.get('laser_pattern', '1011')).strip()
         laser_delay_s = params.get('laser_delay_s', 0.0)
+        pattern_repeats = max(1, int(params.get('pattern_repeats', 1)))
+        time_between_patterns_s = params.get('time_between_patterns_s', 0.0)
         
         # Parse pattern - number of slots is determined by pattern length
         pattern = ''.join(c for c in pattern_raw if c in '01')
         if not pattern:
-            pattern = '11111'  # Default if empty
-        # Limit display to first 15 slots for clarity
+            pattern = '1011'  # Default if empty
+        # Limit display to first 15 slots for clarity (per repeat)
         pattern_display = pattern[:min(len(pattern), 15)]
         
         on_s = optical_on_ms / 1000.0
         off_s = optical_off_ms / 1000.0
         period_s = on_s + off_s
+        pattern_duration_s = len(pattern_display) * period_s
+        # If time_between_patterns_s is 0, use one period as default; otherwise use specified time
+        wait_between_repeats_s = time_between_patterns_s if time_between_patterns_s > 0 else period_s
         
-        # Build rectangular spans: only for '1' bits in pattern
+        # Build rectangular spans: only for '1' bits in pattern, repeated pattern_repeats times
         pulse_spans = []
-        t = laser_delay_s
-        for bit in pattern_display:
-            if bit == '1':
-                pulse_spans.append((t, t + on_s))
-            t += period_s
+        for repeat in range(pattern_repeats):
+            repeat_start = laser_delay_s + repeat * (pattern_duration_s + wait_between_repeats_s)
+            t = repeat_start
+            for bit in pattern_display:
+                if bit == '1':
+                    pulse_spans.append((t, t + on_s))
+                t += period_s
         
         # SMU voltage (constant read throughout entire duration)
         volt_t = np.array([0, duration_s])
@@ -1391,11 +1398,10 @@ class PulseDiagramHelper:
         for t_start, t_end in pulse_spans:
             ax_optical.axvspan(t_start, t_end, ymin=0, ymax=1, alpha=0.35, color='red')
         
-        # Draw faint vertical lines at each slot boundary to show skipped slots
+        # Draw faint vertical lines at each slot boundary to show skipped slots (first repeat only for clarity)
         t_slot = laser_delay_s
         for idx, bit in enumerate(pattern_display):
             if bit == '0':
-                # Draw thin dashed line for skipped slot
                 ax_optical.axvline(t_slot + on_s/2, color='gray', linestyle=':', alpha=0.4, linewidth=1)
             t_slot += period_s
         
@@ -1409,10 +1415,11 @@ class PulseDiagramHelper:
         ones_count = pattern_display.count('1')
         zeros_count = pattern_display.count('0')
         delay_str = f", delay {laser_delay_s:.1f}s" if laser_delay_s > 0 else ""
+        repeat_str = f" ×{pattern_repeats}" if pattern_repeats > 1 else ""
         
         ax_voltage.set_xlabel('Time (s)', fontsize=9, fontweight='bold')
         ax_voltage.set_title(
-            f'🔬 Optical Pattern: "{pattern_str}" ({ones_count} fire, {zeros_count} skip{delay_str})',
+            f'🔬 Optical Pattern: "{pattern_str}" ({ones_count} fire, {zeros_count} skip{delay_str}{repeat_str})',
             fontsize=9, fontweight='bold'
         )
         ax_voltage.set_xlim(0, duration_s)

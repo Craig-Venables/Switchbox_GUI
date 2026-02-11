@@ -158,5 +158,22 @@
       "delay_between_reads": 1000.0,
       "clim": 0.0001
     }
+  },
+  "\ud83d\udd2c Optical: Laser Pattern + Continuous Read": {
+    "testing_led": {
+      "read_voltage": 0.5,
+      "duration_s": 15.0,
+      "sample_interval_s": 0.02,
+      "current_range_a": 1e-08,
+      "clim": 0.0001,
+      "optical_laser_power_mw": 3.0,
+      "laser_pattern": "10111",
+      "laser_delay_s": 1.0,
+      "optical_on_ms": 500.0,
+      "optical_off_ms": 100.0,
+      "pattern_repeats": 3,
+      "laser_sync_offset_s": 0.0,
+      "measurement_init_time_s": 0.6
+    }
   }
 }
