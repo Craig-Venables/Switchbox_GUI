@@ -4,6 +4,7 @@ from typing import Optional, Sequence, Tuple
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.gridspec import GridSpec
 from matplotlib.ticker import FuncFormatter, ScalarFormatter
 
 # Disable LaTeX/math text globally for this module
@@ -22,17 +23,17 @@ class ConductionPlotter:
     """
     Create conduction mechanism panels (SCLC, Schottky, Poole–Frenkel) alongside standard IV.
 
-    Grid layout (2x2):
-    - (0, 0) Linear IV
-    - (0, 1) Log-Log IV (SCLC style)
-    - (1, 0) Schottky: ln(I) vs sqrt(V)
-    - (1, 1) Poole–Frenkel: ln(I/V) vs sqrt(V)
+    Grid layout: 4 rows x 2 cols; each panel has full cell space and fittings.
+    - Row 0: Linear IV (left) | Log IV (right)
+    - Row 1: Log-Log (SCLC) V>0 | V<0
+    - Row 2: Schottky V>0 | V<0
+    - Row 3: Poole–Frenkel V>0 | V<0
     """
 
     def __init__(
         self,
         save_dir: Optional[Path] = None,
-        figsize: Tuple[int, int] = (12, 9),
+        figsize: Tuple[int, int] = (14, 16),
         target_slopes: Tuple[float, ...] = (1.0, 2.0, 3.0),
         high_slope_min: Optional[float] = 4.0,
         min_points: int = 8,
@@ -69,20 +70,16 @@ class ConductionPlotter:
         plt.rcParams['text.usetex'] = False
         plt.rcParams['mathtext.default'] = 'regular'
         plt.rcParams['axes.formatter.use_mathtext'] = False
-        
+
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
 
-        fig, axes = plt.subplots(2, 2, figsize=self.figsize)
-        # Explicitly disable math text parsing on all axes
-        for ax in axes.flat:
-            ax.xaxis.get_major_formatter().set_useMathText(False)
-            ax.yaxis.get_major_formatter().set_useMathText(False)
-        if title:
-            fig.suptitle(title)
+        # 4 rows x 2 cols: row 0 = IV left, Log IV right; rows 1–3 = pos | neg conduction panels
+        fig = plt.figure(figsize=self.figsize)
+        gs = GridSpec(4, 2, figure=fig)
 
-        # Linear IV
-        ax_lin = axes[0, 0]
+        # Row 0: Linear IV (left) | Log IV (right)
+        ax_lin = fig.add_subplot(gs[0, 0])
         ax_lin.plot(v, i, "o-", markersize=2, label=device_label or "IV")
         ax_lin.set_xlabel("Voltage (V)")
         ax_lin.set_ylabel("Current (A)")
@@ -90,134 +87,116 @@ class ConductionPlotter:
             ax_lin.legend()
         ax_lin.grid(True, alpha=0.3)
 
-        # Log-Log (SCLC friendly) with optional slope windows
-        ax_loglog = axes[0, 1]
-        self._plot_loglog_with_windows(ax_loglog, v, i, device_label)
-        ax_loglog.set_xlabel("|Voltage| (V)")
-        ax_loglog.set_ylabel("|Current| (A)")
-        # Force plain text formatters for log scales - use custom formatter to avoid math text parsing errors
-        # Create formatters that explicitly disable math text
-        x_formatter = FuncFormatter(plain_log_formatter)
-        y_formatter = FuncFormatter(plain_log_formatter)
-        ax_loglog.xaxis.set_major_formatter(x_formatter)
-        ax_loglog.yaxis.set_major_formatter(y_formatter)
-        # Ensure math text is disabled on these axes
-        if hasattr(x_formatter, 'set_useMathText'):
-            x_formatter.set_useMathText(False)
-        if hasattr(y_formatter, 'set_useMathText'):
-            y_formatter.set_useMathText(False)
-        ax_loglog.grid(True, which="both", alpha=0.3)
+        ax_log = fig.add_subplot(gs[0, 1])
+        ax_log.plot(v, np.abs(i), "o-", markersize=2, label=device_label or "IV |log|")
+        ax_log.set_yscale("log")
+        ax_log.set_xlabel("Voltage (V)")
+        ax_log.set_ylabel("|Current| (A)")
+        ax_log.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+        if device_label:
+            ax_log.legend()
+        ax_log.grid(True, which="both", alpha=0.3)
 
-        # Schottky: ln(I) vs sqrt(V)
-        ax_schottky = axes[1, 0]
-        pos_mask = v > 0
-        if np.any(pos_mask):
-            sqrt_v = np.sqrt(v[pos_mask])
-            i_pos = np.abs(i[pos_mask])
-            ax_schottky.semilogy(sqrt_v, i_pos, "ko", markersize=3)
-            # Force plain text formatter for log scale - use custom formatter to avoid math text parsing errors
-            y_formatter = FuncFormatter(plain_log_formatter)
-            ax_schottky.yaxis.set_major_formatter(y_formatter)
-            # Ensure math text is disabled
-            if hasattr(y_formatter, 'set_useMathText'):
-                y_formatter.set_useMathText(False)
-            if self.enable_schottky_overlays:
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    log_i = np.log(np.maximum(i_pos, 1e-300))
-                self._overlay_linear_windows(
-                    ax_schottky,
-                    sqrt_v,
-                    log_i,
-                    targets=self.target_slopes_schottky,
-                    label_prefix="Schottky",
-                    slope_bounds=self.schottky_slope_bounds,
-                )
-        ax_schottky.set_xlabel("sqrt(V) (V^0.5)")
-        ax_schottky.set_ylabel("|I| (A)")
-        ax_schottky.set_title("Schottky plot")
-        ax_schottky.grid(True, alpha=0.3)
+        # Row 1: Log-Log (SCLC) V>0 | V<0 — full cells
+        ax_logpos = fig.add_subplot(gs[1, 0])
+        ax_logneg = fig.add_subplot(gs[1, 1])
+        self._plot_loglog_one_polarity(ax_logpos, v, i, positive=True, device_label=device_label)
+        self._plot_loglog_one_polarity(ax_logneg, v, i, positive=False, device_label=device_label)
+        ax_logpos.set_title("Log-Log (SCLC) V>0")
+        ax_logneg.set_title("Log-Log (SCLC) V<0")
+        for ax in (ax_logpos, ax_logneg):
+            ax.set_xlabel("|V| (V)")
+            ax.set_ylabel("|I| (A)")
+            ax.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            ax.grid(True, which="both", alpha=0.3)
 
-        # Poole–Frenkel: ln(I/V) vs sqrt(V)
-        ax_pf = axes[1, 1]
-        if np.any(pos_mask):
-            safe_v = v[pos_mask]
-            safe_i = i[pos_mask]
-            with np.errstate(divide="ignore", invalid="ignore"):
-                pf_y = np.abs(safe_i / safe_v)
-            sqrt_v = np.sqrt(safe_v)
-            ax_pf.semilogy(sqrt_v, pf_y, "ko", markersize=3)
-            # Force plain text formatter for log scale - use custom formatter to avoid math text parsing errors
-            y_formatter = FuncFormatter(plain_log_formatter)
-            ax_pf.yaxis.set_major_formatter(y_formatter)
-            # Ensure math text is disabled
-            if hasattr(y_formatter, 'set_useMathText'):
-                y_formatter.set_useMathText(False)
-            if self.enable_pf_overlays:
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    log_pf_y = np.log(np.maximum(pf_y, 1e-300))
-                self._overlay_linear_windows(
-                    ax_pf,
-                    sqrt_v,
-                    log_pf_y,
-                    targets=self.target_slopes_pf,
-                    label_prefix="PF",
-                    slope_bounds=self.pf_slope_bounds,
-                )
-        ax_pf.set_xlabel("sqrt(V) (V^0.5)")
-        ax_pf.set_ylabel("|I/V| (A/V)")
-        ax_pf.set_title("Poole-Frenkel plot")
-        ax_pf.grid(True, alpha=0.3)
+        # Row 2: Schottky V>0 | V<0 — full cells
+        ax_schpos = fig.add_subplot(gs[2, 0])
+        ax_schneg = fig.add_subplot(gs[2, 1])
+        self._plot_schottky_one_polarity(ax_schpos, v, i, positive=True)
+        self._plot_schottky_one_polarity(ax_schneg, v, i, positive=False)
+        ax_schpos.set_title("Schottky V>0")
+        ax_schneg.set_title("Schottky V<0")
+        for ax in (ax_schpos, ax_schneg):
+            ax.set_xlabel("sqrt(|V|) (V^0.5)")
+            ax.set_ylabel("|I| (A)")
+            ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            ax.grid(True, alpha=0.3)
 
-        # Before saving, ensure all axes have math text disabled
+        # Row 3: Poole-Frenkel V>0 | V<0 — full cells
+        ax_pfpos = fig.add_subplot(gs[3, 0])
+        ax_pfneg = fig.add_subplot(gs[3, 1])
+        self._plot_pf_one_polarity(ax_pfpos, v, i, positive=True)
+        self._plot_pf_one_polarity(ax_pfneg, v, i, positive=False)
+        ax_pfpos.set_title("Poole-Frenkel V>0")
+        ax_pfneg.set_title("Poole-Frenkel V<0")
+        for ax in (ax_pfpos, ax_pfneg):
+            ax.set_xlabel("sqrt(|V|) (V^0.5)")
+            ax.set_ylabel("|I/V| (A/V)")
+            ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            ax.grid(True, alpha=0.3)
+
+        if title:
+            fig.suptitle(title)
+
+        # Collect all axes for formatter cleanup and return (flat array for backward compatibility)
+        axes = np.array([ax_lin, ax_log, ax_logpos, ax_logneg, ax_schpos, ax_schneg, ax_pfpos, ax_pfneg])
+
         for ax in axes.flat:
             for axis in [ax.xaxis, ax.yaxis]:
                 formatter = axis.get_major_formatter()
                 if hasattr(formatter, 'set_useMathText'):
                     formatter.set_useMathText(False)
-                # Also disable on minor formatter
                 minor_formatter = axis.get_minor_formatter()
                 if hasattr(minor_formatter, 'set_useMathText'):
                     minor_formatter.set_useMathText(False)
-        
-        # Disable math text globally before tight_layout and save
+
         plt.rcParams['axes.formatter.use_mathtext'] = False
         plt.rcParams['text.usetex'] = False
-        
-        # Use tight_layout to improve spacing, but don't let it crash or spam long parse errors
         try:
             fig.tight_layout()
         except Exception:
-            # Keep plotting robust; just continue with default layout.
             print("[CONDUCTION PLOT] Warning: tight_layout failed, continuing without it.")
-        
+
         if save_name:
             if self.manager.save_dir is None:
                 raise ValueError("save_dir must be set to save figures")
             try:
                 self.manager.save(fig, save_name)
             except (ValueError, Exception) as e:
-                # If save fails due to math text parsing, try saving with explicit math text disabled
                 if 'ParseException' in str(type(e)) or 'mathtext' in str(e).lower():
-                    # Force disable math text one more time
                     for ax in axes.flat:
                         for axis in [ax.xaxis, ax.yaxis]:
                             formatter = axis.get_major_formatter()
                             if hasattr(formatter, 'set_useMathText'):
                                 formatter.set_useMathText(False)
-                    # Try saving again
                     self.manager.save(fig, save_name)
                 else:
                     raise
         return fig, axes
 
-    def _plot_loglog_with_windows(self, ax, v: np.ndarray, i: np.ndarray, device_label: str):
-        v_abs = np.abs(v)
-        i_abs = np.abs(i)
-        # Filter: voltage >= 0.1V (user requirement: don't show data below 0.1V or -0.2V)
-        mask = (v_abs >= 0.1) & (i_abs > 0) & np.isfinite(v_abs) & np.isfinite(i_abs)
-        v_plot = v_abs[mask]
-        i_plot = i_abs[mask]
-        ax.loglog(v_plot, i_plot, "ko", markersize=3, label=device_label or "Log-Log IV")
+    def _plot_loglog_one_polarity(
+        self,
+        ax,
+        v: np.ndarray,
+        i: np.ndarray,
+        positive: bool,
+        device_label: str = "",
+    ):
+        """Plot log-log (SCLC) for one polarity only; fit that branch."""
+        if positive:
+            mask = (v >= 0.1) & (np.abs(i) > 0) & np.isfinite(v) & np.isfinite(i)
+        else:
+            mask = (v <= -0.1) & (np.abs(i) > 0) & np.isfinite(v) & np.isfinite(i)
+        v_plot = np.abs(v[mask])
+        i_plot = np.abs(i[mask])
+        if len(v_plot) == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            ax.loglog([1e-2, 1], [1e-12, 1e-12], "w")  # avoid empty log axis
+            return
+        lbl = (device_label or "Log-Log") + (" V>0" if positive else " V<0")
+        ax.loglog(v_plot, i_plot, "ko", markersize=3, label=lbl)
 
         if self.enable_loglog_overlays and len(v_plot) >= self.min_points:
             log_v = np.log10(v_plot)
@@ -236,21 +215,76 @@ class ConductionPlotter:
                         i_fit,
                         f"{colors[idx % len(colors)]}-",
                         alpha=0.8,
-                        label=f"~m={target:g} fit m={slope_t:.2f}, R²={r2_t:.2f}",
+                        label=f"~m={target:g} m={slope_t:.2f} R²={r2_t:.2f}",
                     )
-
             if self.high_slope_min is not None:
-                hi = self._best_window(log_v, log_i, target=None, min_points=self.min_points, min_slope=self.high_slope_min)
+                hi = self._best_window(
+                    log_v, log_i, target=None, min_points=self.min_points, min_slope=self.high_slope_min
+                )
                 if hi:
                     s_idx, e_idx, slope_h, r2_h = hi
                     v_seg = v_plot[s_idx:e_idx]
                     i_seg = i_plot[s_idx:e_idx]
                     v_fit = np.logspace(np.log10(v_seg.min()), np.log10(v_seg.max()), 100)
                     i_fit = i_seg[0] * (v_fit / v_seg[0]) ** slope_h
-                    ax.loglog(v_fit, i_fit, "y-", alpha=0.8, label=f"high m={slope_h:.2f}, R²={r2_h:.2f}")
+                    ax.loglog(v_fit, i_fit, "y-", alpha=0.8, label=f"high m={slope_h:.2f} R²={r2_h:.2f}")
+        ax.legend(loc="best", fontsize=7)
 
-        if device_label:
-            ax.legend()
+    def _plot_schottky_one_polarity(self, ax, v: np.ndarray, i: np.ndarray, positive: bool):
+        """Plot Schottky ln(I) vs sqrt(V) for one polarity; fit that branch."""
+        if positive:
+            mask = v > 0
+        else:
+            mask = v < 0
+        if not np.any(mask):
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            return
+        v_b = v[mask]
+        i_b = np.abs(i[mask])
+        sqrt_v = np.sqrt(np.abs(v_b))
+        ax.semilogy(sqrt_v, i_b, "ko", markersize=3)
+        if self.enable_schottky_overlays and len(sqrt_v) >= self.min_points:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_i = np.log(np.maximum(i_b, 1e-300))
+            self._overlay_linear_windows(
+                ax,
+                sqrt_v,
+                log_i,
+                targets=self.target_slopes_schottky,
+                label_prefix="Sch",
+                slope_bounds=self.schottky_slope_bounds,
+            )
+        else:
+            ax.legend(loc="best", fontsize=7)
+
+    def _plot_pf_one_polarity(self, ax, v: np.ndarray, i: np.ndarray, positive: bool):
+        """Plot Poole-Frenkel ln(I/V) vs sqrt(V) for one polarity; fit that branch."""
+        if positive:
+            mask = v > 0
+        else:
+            mask = v < 0
+        if not np.any(mask):
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            return
+        v_b = v[mask]
+        i_b = i[mask]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pf_y = np.abs(i_b / v_b)
+        sqrt_v = np.sqrt(np.abs(v_b))
+        ax.semilogy(sqrt_v, pf_y, "ko", markersize=3)
+        if self.enable_pf_overlays and len(sqrt_v) >= self.min_points:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_pf_y = np.log(np.maximum(pf_y, 1e-300))
+            self._overlay_linear_windows(
+                ax,
+                sqrt_v,
+                log_pf_y,
+                targets=self.target_slopes_pf,
+                label_prefix="PF",
+                slope_bounds=self.pf_slope_bounds,
+            )
+        else:
+            ax.legend(loc="best", fontsize=7)
 
     @staticmethod
     def _overlay_linear_fit(ax, x: np.ndarray, y_log: np.ndarray, label: str):

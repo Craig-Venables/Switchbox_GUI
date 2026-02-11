@@ -19,15 +19,14 @@ from ..core.formatters import plain_log_formatter
 
 class SCLCFitPlotter:
     """
-    Simple SCLC-style fit plot on a separate figure.
+    SCLC-style fit plot with separate positive and negative voltage panels.
 
-    - Uses positive voltage branch only.
-    - Fits log10(I) vs log10(V) to estimate slope (m) and R².
-    - Optionally searches for the best-fitting windows near target slopes (e.g. 1, 2, 3).
-    - Shows scatter, fitted line, and reference slope guides.
+    - Left panel: V > 0 branch with log10(I) vs log10(V) and slope fits.
+    - Right panel: V < 0 branch with same analysis.
+    - Each panel has its own global fit, windowed target-slope fits, and optional ref slope.
     """
 
-    def __init__(self, save_dir: Optional[Path] = None, figsize: Tuple[int, int] = (7, 6)):
+    def __init__(self, save_dir: Optional[Path] = None, figsize: Tuple[int, int] = (10, 10)):
         self.manager = PlotManager(save_dir=save_dir)
         self.figsize = figsize
 
@@ -47,85 +46,32 @@ class SCLCFitPlotter:
         plt.rcParams['text.usetex'] = False
         plt.rcParams['mathtext.default'] = 'regular'
         plt.rcParams['axes.formatter.use_mathtext'] = False
-        
+
         v = np.asarray(voltage, dtype=float)
         i = np.asarray(current, dtype=float)
 
-        # Filter: voltage >= 0.1V (user requirement: don't show data below 0.1V or -0.2V)
-        mask = (v >= 0.1) & np.isfinite(v) & np.isfinite(i) & (np.abs(i) > 0)
-        v_pos = v[mask]
-        i_pos = np.abs(i[mask])
-
-        fig, ax = plt.subplots(figsize=self.figsize)
+        # Stacked 2x1 so each panel gets full width and half the figure height
+        fig, (ax_pos, ax_neg) = plt.subplots(2, 1, figsize=self.figsize)
         if title:
             fig.suptitle(title)
 
-        ax.loglog(v_pos, i_pos, "ko", markersize=4, label=device_label or "data")
-        # Force plain text formatters for log scales - use custom formatter to avoid math text parsing errors
-        ax.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
-        ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+        for ax, positive in [(ax_pos, True), (ax_neg, False)]:
+            ax.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+            ax.set_xlabel("|V| (V)")
+            ax.set_ylabel("|I| (A)")
+            ax.set_title("SCLC V>0" if positive else "SCLC V<0")
+            ax.grid(True, which="both", alpha=0.3)
+            self._plot_sclc_one_polarity(
+                ax, v, i, positive=positive,
+                device_label=device_label,
+                ref_slope=ref_slope,
+                target_slopes=target_slopes,
+                high_slope_min=high_slope_min,
+                min_points=min_points,
+            )
+            ax.legend(loc="best", fontsize=7)
 
-        # Global fit on all positive points
-        if len(v_pos) >= 2:
-            slope, r2, v_fit, i_fit = self._fit_line(v_pos, i_pos)
-            ax.loglog(v_fit, i_fit, "r-", label=f"global m={slope:.2f}, R²={r2:.2f}")
-        else:
-            ax.text(0.5, 0.5, "Insufficient positive-V points", ha="center", va="center", transform=ax.transAxes)
-
-        # Windowed fits near target slopes (pick best window per target)
-        if len(v_pos) >= min_points:
-            log_v = np.log10(v_pos)
-            log_i = np.log10(i_pos)
-            colors = ["b", "g", "m", "c"]
-            for idx, target in enumerate(target_slopes):
-                best = self._best_window(log_v, log_i, target, min_points=min_points)
-                if best is None:
-                    continue
-                s_idx, e_idx, slope_t, r2_t = best
-                v_seg = v_pos[s_idx:e_idx]
-                i_seg = i_pos[s_idx:e_idx]
-                v_fit = np.logspace(np.log10(v_seg.min()), np.log10(v_seg.max()), 100)
-                i_fit = i_seg[0] * (v_fit / v_seg[0]) ** slope_t
-                ax.loglog(
-                    v_fit,
-                    i_fit,
-                    f"{colors[idx % len(colors)]}-",
-                    label=f"~m={target:g} fit m={slope_t:.2f}, R²={r2_t:.2f}",
-                    alpha=0.8,
-                )
-
-            # Optional high-slope search (e.g., >4)
-            if high_slope_min is not None:
-                hi = self._best_window(log_v, log_i, target=None, min_points=min_points, min_slope=high_slope_min)
-                if hi is not None:
-                    s_idx, e_idx, slope_h, r2_h = hi
-                    v_seg = v_pos[s_idx:e_idx]
-                    i_seg = i_pos[s_idx:e_idx]
-                    v_fit = np.logspace(np.log10(v_seg.min()), np.log10(v_seg.max()), 100)
-                    i_fit = i_seg[0] * (v_fit / v_seg[0]) ** slope_h
-                    ax.loglog(
-                        v_fit,
-                        i_fit,
-                        "y-",
-                        label=f"high-slope m={slope_h:.2f}, R²={r2_h:.2f}",
-                        alpha=0.8,
-                    )
-
-        # Reference slope guide through first point
-        if ref_slope is not None and len(v_pos) > 0:
-            v_ref0 = v_pos.min()
-            i_ref0 = i_pos[0]
-            v_ref = np.logspace(np.log10(v_ref0), np.log10(v_pos.max()), 50)
-            i_ref = i_ref0 * (v_ref / v_ref0) ** ref_slope
-            ax.loglog(v_ref, i_ref, "k--", alpha=0.4, label=f"ref m={ref_slope:g}")
-
-        ax.set_xlabel("Voltage (V)")
-        ax.set_ylabel("|Current| (A)")
-        ax.set_title("SCLC-style log-log fit")
-        ax.grid(True, which="both", alpha=0.3)
-        ax.legend()
-
-        # Improve spacing, but don't crash if tight_layout has font/mathtext issues
         try:
             fig.tight_layout()
         except Exception:
@@ -134,7 +80,81 @@ class SCLCFitPlotter:
             if self.manager.save_dir is None:
                 raise ValueError("save_dir must be set to save figures")
             self.manager.save(fig, save_name)
-        return fig, ax
+        return fig, (ax_pos, ax_neg)
+
+    def _plot_sclc_one_polarity(
+        self,
+        ax,
+        v: np.ndarray,
+        i: np.ndarray,
+        positive: bool,
+        device_label: str = "",
+        ref_slope: float = 2.0,
+        target_slopes: Tuple[float, ...] = (1.0, 2.0, 3.0),
+        high_slope_min: Optional[float] = 4.0,
+        min_points: int = 8,
+    ):
+        """Plot SCLC log-log and fits for one polarity (V>0 or V<0)."""
+        if positive:
+            mask = (v >= 0.1) & np.isfinite(v) & np.isfinite(i) & (np.abs(i) > 0)
+        else:
+            mask = (v <= -0.1) & np.isfinite(v) & np.isfinite(i) & (np.abs(i) > 0)
+        v_b = np.abs(v[mask])
+        i_b = np.abs(i[mask])
+
+        if len(v_b) == 0:
+            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+            ax.loglog([1e-2, 1], [1e-12, 1e-12], "w")
+            return
+
+        ax.loglog(v_b, i_b, "ko", markersize=4, label=device_label or "data")
+
+        if len(v_b) >= 2:
+            slope, r2, v_fit, i_fit = self._fit_line(v_b, i_b)
+            ax.loglog(v_fit, i_fit, "r-", label=f"global m={slope:.2f} R²={r2:.2f}")
+
+        if len(v_b) >= min_points:
+            log_v = np.log10(v_b)
+            log_i = np.log10(i_b)
+            colors = ["b", "g", "m", "c"]
+            for idx, target in enumerate(target_slopes):
+                best = self._best_window(log_v, log_i, target, min_points=min_points)
+                if best is None:
+                    continue
+                s_idx, e_idx, slope_t, r2_t = best
+                v_seg = v_b[s_idx:e_idx]
+                i_seg = i_b[s_idx:e_idx]
+                v_fit = np.logspace(np.log10(v_seg.min()), np.log10(v_seg.max()), 100)
+                i_fit = i_seg[0] * (v_fit / v_seg[0]) ** slope_t
+                ax.loglog(
+                    v_fit,
+                    i_fit,
+                    f"{colors[idx % len(colors)]}-",
+                    label=f"~m={target:g} m={slope_t:.2f} R²={r2_t:.2f}",
+                    alpha=0.8,
+                )
+            if high_slope_min is not None:
+                hi = self._best_window(log_v, log_i, target=None, min_points=min_points, min_slope=high_slope_min)
+                if hi is not None:
+                    s_idx, e_idx, slope_h, r2_h = hi
+                    v_seg = v_b[s_idx:e_idx]
+                    i_seg = i_b[s_idx:e_idx]
+                    v_fit = np.logspace(np.log10(v_seg.min()), np.log10(v_seg.max()), 100)
+                    i_fit = i_seg[0] * (v_fit / v_seg[0]) ** slope_h
+                    ax.loglog(
+                        v_fit,
+                        i_fit,
+                        "y-",
+                        label=f"high m={slope_h:.2f} R²={r2_h:.2f}",
+                        alpha=0.8,
+                    )
+
+        if ref_slope is not None and len(v_b) > 0:
+            v_ref0 = v_b.min()
+            i_ref0 = i_b[0]
+            v_ref = np.logspace(np.log10(v_ref0), np.log10(v_b.max()), 50)
+            i_ref = i_ref0 * (v_ref / v_ref0) ** ref_slope
+            ax.loglog(v_ref, i_ref, "k--", alpha=0.4, label=f"ref m={ref_slope:g}")
 
     @staticmethod
     def _fit_line(v: np.ndarray, i: np.ndarray):

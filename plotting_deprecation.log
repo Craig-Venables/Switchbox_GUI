@@ -30,3 +30,12 @@
 2026-02-10T15:57:48 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
 2026-02-10T15:57:48 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
 2026-02-10T15:57:48 | plotting.device_combined_plots -> plotting.device or from plotting.device.device_combined_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\comprehensive_analyzer.py:72
+2026-02-11T19:06:24 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-11T19:06:24 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-11T19:06:25 | plotting.device_combined_plots -> plotting.device or from plotting.device.device_combined_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\comprehensive_analyzer.py:72
+2026-02-11T19:10:14 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-11T19:10:14 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-11T19:10:14 | plotting.device_combined_plots -> plotting.device or from plotting.device.device_combined_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\comprehensive_analyzer.py:72
+2026-02-11T19:15:38 | plotting.sample_plots -> plotting.sample or from plotting.sample.sample_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-11T19:15:38 | plotting.endurance_plots -> plotting.endurance or from plotting.endurance.endurance_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\section_analyzer.py:81
+2026-02-11T19:15:38 | plotting.device_combined_plots -> plotting.device or from plotting.device.device_combined_plots | C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\analysis\aggregators\comprehensive_analyzer.py:72

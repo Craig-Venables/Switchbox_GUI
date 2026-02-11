@@ -36,7 +36,7 @@ Usage:
 from __future__ import annotations
 
 # Standard library imports
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 # Third-party imports
 import tkinter as tk
@@ -67,7 +67,7 @@ class AnalysisStatsWindow:
     FONT_TEXT = ("Segoe UI", 8)
     FONT_VALUE = ("Segoe UI", 8)
     
-    def __init__(self, parent: tk.Toplevel, graph_frame: tk.Frame):
+    def __init__(self, parent: tk.Toplevel, graph_frame: tk.Frame, on_hide: Optional[Callable[[], None]] = None):
         """
         Initialize the analysis stats window.
         
@@ -77,9 +77,12 @@ class AnalysisStatsWindow:
             Parent window (the main measurement GUI window)
         graph_frame : tk.Frame
             Frame containing the graphs (used for positioning)
+        on_hide : callable, optional
+            Called when the window is hidden (e.g. user clicks ×). Use to sync UI (e.g. toggle button label).
         """
         self.parent = parent
         self.graph_frame = graph_frame
+        self.on_hide = on_hide
         self.window: Optional[tk.Toplevel] = None
         self.content_frame: Optional[tk.Frame] = None
         self.current_data: Optional[Dict[str, Any]] = None
@@ -469,6 +472,11 @@ class AnalysisStatsWindow:
         """Hide the stats window"""
         if self.window:
             self.window.withdraw()
+            if callable(getattr(self, 'on_hide', None)):
+                try:
+                    self.on_hide()
+                except Exception:
+                    pass
     
     def is_visible(self) -> bool:
         """Check if the window is currently visible"""
