@@ -147,7 +147,7 @@ class UnifiedPlotter:
         iv_figsize: Tuple[int, int] = (12, 9),
         iv_arrows_points: int = 12,
         # Conduction settings
-        conduction_figsize: Tuple[int, int] = (12, 9),
+        conduction_figsize: Tuple[int, int] = (14, 16),
         target_slopes: Tuple[float, ...] = (1.0, 2.0, 3.0),
         high_slope_min: Optional[float] = 4.0,
         min_points: int = 8,
@@ -159,7 +159,7 @@ class UnifiedPlotter:
         schottky_slope_bounds: Optional[Tuple[float, float]] = None,
         pf_slope_bounds: Optional[Tuple[float, float]] = None,
         # SCLC Fit settings
-        sclc_figsize: Tuple[int, int] = (7, 6),
+        sclc_figsize: Tuple[int, int] = (10, 10),
         sclc_ref_slope: float = 2.0,
     ):
         """

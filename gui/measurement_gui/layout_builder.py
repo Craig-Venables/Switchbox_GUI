@@ -187,6 +187,22 @@ class MeasurementGUILayoutBuilder:
         analysis_checkbox = tk.Checkbutton(analysis_section, variable=gui.analysis_enabled, bg=self.COLOR_BG)
         analysis_checkbox.pack(side='left', padx=(0, 5))
         
+        # Toggle orange analysis stats box (floating window shown when Analysis is enabled)
+        stats_box_cb = self.callbacks.get("toggle_analysis_stats_box")
+        if stats_box_cb:
+            gui.stats_box_button = tk.Button(
+                analysis_section,
+                text="Stats box (off)",
+                font=self.FONT_MAIN,
+                command=stats_box_cb,
+                bg=self.COLOR_BG,
+                relief="raised",
+                padx=8,
+                pady=2,
+                cursor="hand2",
+            )
+            gui.stats_box_button.pack(side='left', padx=(5, 0))
+        
         # Middle section: Current device display
         middle_section = tk.Frame(frame, bg=self.COLOR_BG)
         middle_section.pack(side='left', fill='y', padx=20)

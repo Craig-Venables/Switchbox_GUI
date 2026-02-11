@@ -550,6 +550,7 @@ class MeasurementGUI:
                 "stop_sequential_measurement": self.set_measurment_flag_true,
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
                 "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
+                "toggle_analysis_stats_box": self.toggle_analysis_stats_box,
                 "run_conditional_testing": self.run_conditional_testing,
                 "run_single_pulse": self._run_single_pulse,
                 "run_read_pulse": self._run_read_pulse,
@@ -612,7 +613,8 @@ class MeasurementGUI:
         if hasattr(self, 'measurements_graph_panel'):
             self.analysis_stats_window = AnalysisStatsWindow(
                 parent=self.master,
-                graph_frame=self.measurements_graph_panel
+                graph_frame=self.measurements_graph_panel,
+                on_hide=getattr(self, '_update_stats_box_button_label', lambda: None),
             )
         else:
             self.analysis_stats_window = None
@@ -747,10 +749,43 @@ class MeasurementGUI:
         else:
             # Hide the stats window
             self.analysis_stats_window.hide()
+        # Keep Stats box button label in sync
+        self._update_stats_box_button_label()
         
         # Persist checkbox state so it restores on next load
         try:
             self._save_save_location_config()
+        except Exception:
+            pass
+
+    def toggle_analysis_stats_box(self) -> None:
+        """Toggle the orange analysis stats box (floating window that shows with Analysis)."""
+        if not hasattr(self, 'analysis_stats_window') or not self.analysis_stats_window:
+            return
+        try:
+            visible = self.analysis_stats_window.is_visible()
+            if visible:
+                self.analysis_stats_window.hide()
+                new_visible = False
+            else:
+                self.analysis_stats_window.show()
+                new_visible = True
+            self._update_stats_box_button_label()
+        except Exception:
+            pass
+
+    def _update_stats_box_button_label(self) -> None:
+        """Update the Stats box button to show current visibility of the orange analysis stats window."""
+        btn = getattr(self, 'stats_box_button', None)
+        if not btn or not hasattr(btn, 'config'):
+            return
+        try:
+            visible = (
+                hasattr(self, 'analysis_stats_window')
+                and self.analysis_stats_window
+                and self.analysis_stats_window.is_visible()
+            )
+            btn.config(text="Stats box (on)" if visible else "Stats box (off)")
         except Exception:
             pass
     
@@ -2995,11 +3030,13 @@ class MeasurementGUI:
                     self.optical.set_level(lvl, unit)
                     self.optical.set_enabled(True)
                     self.manual_led_on = True
-                    self.manual_led_btn.config(text="LIGHT ON")
+                    self.manual_led_btn.config(text="LIGHT ON", bg="green", fg="white")
                 else:
                     self.optical.set_enabled(False)
                     self.manual_led_on = False
-                    self.manual_led_btn.config(text="LIGHT OFF")
+                    self.manual_led_btn.config(text="LIGHT OFF", bg="red", fg="white")
+                if hasattr(self, 'led'):
+                    self.led.set(1 if self.manual_led_on else 0)
                 return
             # Legacy PSU path fallback
             if not getattr(self, 'psu_connected', False):
@@ -3007,11 +3044,13 @@ class MeasurementGUI:
             if not self.manual_led_on:
                 self.psu.led_on_380(self.manual_led_power.get())
                 self.manual_led_on = True
-                self.manual_led_btn.config(text="LED ON")
+                self.manual_led_btn.config(text="LED ON", bg="green", fg="white")
             else:
                 self.psu.led_off_380()
                 self.manual_led_on = False
-                self.manual_led_btn.config(text="LED OFF")
+                self.manual_led_btn.config(text="LED OFF", bg="red", fg="white")
+            if hasattr(self, 'led'):
+                self.led.set(1 if self.manual_led_on else 0)
         except Exception:
             pass
 
@@ -3941,6 +3980,8 @@ class MeasurementGUI:
         status_var = getattr(self, "optical_laser_status_var", None)
         if status_var is not None:
             status_var.set("Connected" if self.optical is not None else "Not connected")
+        if hasattr(self, "_refresh_led_laser_controls"):
+            self._refresh_led_laser_controls()
 
     def disconnect_optical_laser(self) -> None:
         """Disconnect laser and restore to manual control."""
@@ -3957,6 +3998,8 @@ class MeasurementGUI:
         status_var = getattr(self, "optical_laser_status_var", None)
         if status_var is not None:
             status_var.set("Not connected")
+        if hasattr(self, "_refresh_led_laser_controls"):
+            self._refresh_led_laser_controls()
 
     def _build_optical_config_from_ui(self):
         """Build full system config dict with optical section from current UI (for connect_optical_laser)."""
@@ -5029,36 +5072,110 @@ class MeasurementGUI:
 
         # Sweep Type variable already declared above; controls will be shown in DC Triangle UI
 
-        # LED Controls mini title
-        tk.Label(frame, text="LED Controls", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=22, column=0, columnspan=2, sticky="w",
-                                                                             pady=(10, 2))
+        # LED / Laser Controls: layout depends on whether optical is Laser or LED
+        self.manual_led_on = False
+        self.manual_led_power = tk.StringVar(value="1")
+        self._led_laser_container = tk.Frame(frame, bg='#f0f0f0')
+        self._led_laser_container.grid(row=22, column=0, columnspan=2, sticky="ew", pady=(10, 2))
+        self._led_laser_container.columnconfigure(1, weight=1)
 
-        # LED Toggle Button
-        tk.Label(frame, text="LED Status:", bg='#f0f0f0').grid(row=23, column=0, sticky="w")
-        self.led = tk.IntVar(value=0)  # Changed to IntVar for toggle
-
-        def toggle_led():
-            current_state = self.led.get()
-            new_state = 1 - current_state
-            self.led.set(new_state)
-            update_led_button()
-        def update_led_button():
-            if self.led.get() == 1:
-                self.led_button.config(text="ON", bg="green", fg="white")
-            else:
-                self.led_button.config(text="OFF", bg="red", fg="white")
-
-        self.led_button = tk.Button(frame, text="OFF", bg="red", fg="white",
-                                    width=8, command=toggle_led)
-        self.led_button.grid(row=23, column=1, sticky="w")
-
-        tk.Label(frame, text="Led_Power (0-1):", bg='#f0f0f0').grid(row=24, column=0, sticky="w")
-        self.led_power = tk.DoubleVar(value=1)
-        tk.Entry(frame, textvariable=self.led_power).grid(row=24, column=1)
-
-        tk.Label(frame, text="Sequence: (01010)", bg='#f0f0f0').grid(row=25, column=0, sticky="w")
+        # LED mode: Power (0-1), button, Sequence
+        self._led_controls_frame = tk.Frame(self._led_laser_container, bg='#f0f0f0')
+        self._led_controls_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self._led_controls_frame.columnconfigure(1, weight=1)
+        tk.Label(self._led_controls_frame, text="LED Controls", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+        tk.Label(self._led_controls_frame, text="LED Status:", bg='#f0f0f0').grid(row=1, column=0, sticky="w")
+        _led_btn = tk.Button(self._led_controls_frame, text="LED OFF", bg="red", fg="white", width=10, command=self.toggle_manual_led)
+        _led_btn.grid(row=1, column=1, sticky="w")
+        tk.Label(self._led_controls_frame, text="Led_Power (0-1):", bg='#f0f0f0').grid(row=2, column=0, sticky="w")
+        tk.Entry(self._led_controls_frame, textvariable=self.manual_led_power, width=10).grid(row=2, column=1, sticky="w")
+        tk.Label(self._led_controls_frame, text="Sequence: (01010)", bg='#f0f0f0').grid(row=3, column=0, sticky="w")
         self.sequence = tk.StringVar()
-        tk.Entry(frame, textvariable=self.sequence).grid(row=25, column=1)
+        tk.Entry(self._led_controls_frame, textvariable=self.sequence, width=14).grid(row=3, column=1, sticky="w")
+
+        # Laser mode: Power (mW), real-world power next to it, Curve button, On/Off button
+        self._laser_controls_frame = tk.Frame(self._led_laser_container, bg='#f0f0f0')
+        self._laser_controls_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+        self._laser_controls_frame.columnconfigure(1, weight=1)
+        tk.Label(self._laser_controls_frame, text="Laser Controls", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+        tk.Label(self._laser_controls_frame, text="Power (mW):", bg='#f0f0f0').grid(row=1, column=0, sticky="w")
+        _laser_cell = tk.Frame(self._laser_controls_frame, bg='#f0f0f0')
+        _laser_cell.grid(row=1, column=1, sticky="w")
+        tk.Entry(_laser_cell, textvariable=self.manual_led_power, width=8).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(_laser_cell, text="Real power:", font=("TkDefaultFont", 8), fg="#333", bg='#f0f0f0').pack(side=tk.LEFT, padx=(0, 2))
+        self._laser_true_power_var = tk.StringVar(value="")
+        tk.Label(_laser_cell, textvariable=self._laser_true_power_var, font=("TkDefaultFont", 8, "bold"), fg="#1976d2", bg='#f0f0f0').pack(side=tk.LEFT, padx=(0, 6))
+
+        def _update_laser_true_power():
+            try:
+                set_mw = float(self.manual_led_power.get().strip())
+                from Equipment.Laser_Power_Meter.laser_power_calibration import (
+                    load_calibration,
+                    get_actual_mw,
+                    format_true_power_display,
+                )
+                cal = load_calibration()
+                true_mw = get_actual_mw(cal, set_mw)
+                self._laser_true_power_var.set(format_true_power_display(true_mw))
+            except (FileNotFoundError, ValueError, Exception):
+                self._laser_true_power_var.set("—")
+
+        def _show_calibration_curve():
+            try:
+                import subprocess
+                import sys
+                from pathlib import Path
+                from Equipment.Laser_Power_Meter import plot_laser_calibration
+                script = Path(plot_laser_calibration.__file__).resolve()
+                repo_root = script.parent.parent.parent
+                subprocess.Popen(
+                    [sys.executable, str(script)],
+                    cwd=str(repo_root),
+                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                )
+            except Exception as e:
+                messagebox.showerror("Calibration curve", f"Could not open plot.\n{e}")
+
+        tk.Button(_laser_cell, text="Curve", font=("TkDefaultFont", 7), command=_show_calibration_curve, bg='#f0f0f0').pack(side=tk.LEFT)
+        self.manual_led_power.trace_add("write", lambda *a: _update_laser_true_power())
+        _update_laser_true_power()
+        tk.Label(self._laser_controls_frame, text="Laser:", bg='#f0f0f0').grid(row=2, column=0, sticky="w")
+        _laser_btn = tk.Button(self._laser_controls_frame, text="LIGHT OFF", bg="red", fg="white", width=10, command=self.toggle_manual_led)
+        _laser_btn.grid(row=2, column=1, sticky="w")
+        # Backward compatibility for code that reads self.led / self.led_power
+        self.led = tk.IntVar(value=0)
+        self.led_power = self.manual_led_power
+        self.manual_led_btn = _led_btn  # default to LED button until _refresh picks mode
+        self.led_button = self.manual_led_btn
+
+        def _refresh_led_laser_controls():
+            opt = getattr(self, 'optical', None)
+            caps = None
+            if opt is not None:
+                caps = getattr(opt, 'capabilities', None)
+                if callable(caps):
+                    caps = caps()
+                if not isinstance(caps, dict):
+                    caps = {}
+            is_laser = (caps or {}).get('type') == 'Laser'
+            if is_laser:
+                self._led_controls_frame.grid_remove()
+                self._laser_controls_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+                self.manual_led_btn = _laser_btn
+                try:
+                    default_mw = float(getattr(self, 'optical_laser_default_var', None) and self.optical_laser_default_var.get() or 1.0)
+                    if not self.manual_led_power.get().strip():
+                        self.manual_led_power.set(str(default_mw))
+                except (ValueError, AttributeError):
+                    pass
+            else:
+                self._laser_controls_frame.grid_remove()
+                self._led_controls_frame.grid(row=0, column=0, columnspan=2, sticky="ew")
+                self.manual_led_btn = _led_btn
+            self.led_button = self.manual_led_btn
+
+        self._refresh_led_laser_controls = _refresh_led_laser_controls
+        _refresh_led_laser_controls()
 
         # Other Controls mini title
         tk.Label(frame, text="Other", font=("Arial", 9, "bold"), bg='#f0f0f0').grid(row=26, column=0, columnspan=2, sticky="w",

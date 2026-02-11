@@ -510,6 +510,7 @@ class MeasurementPlotPanels:
     
     def _create_floating_overlay(self, parent: tk.Frame) -> None:
         """Create a floating info overlay with light orange transparency"""
+        self._overlay_parent = parent
         overlay = tk.Label(
             parent,
             text="Sample: — | Device: — | Voltage: 0V | Loop: #1",
@@ -525,6 +526,29 @@ class MeasurementPlotPanels:
         overlay.place(relx=0.5, rely=0.01, anchor='n')
         
         self.overlay_label = overlay
+        self._overlay_visible = True
+    
+    def set_overlay_visible(self, visible: bool) -> None:
+        """Show or hide the orange info overlay box."""
+        if not getattr(self, 'overlay_label', None):
+            return
+        self._overlay_visible = visible
+        if visible:
+            self.overlay_label.place(relx=0.5, rely=0.01, anchor='n')
+        else:
+            self.overlay_label.place_forget()
+    
+    def toggle_overlay(self) -> bool:
+        """Toggle the orange info overlay box. Returns new visibility state (True = visible)."""
+        if not getattr(self, 'overlay_label', None):
+            return True
+        self._overlay_visible = not getattr(self, '_overlay_visible', True)
+        self.set_overlay_visible(self._overlay_visible)
+        return self._overlay_visible
+    
+    def is_overlay_visible(self) -> bool:
+        """Return whether the orange overlay box is currently visible."""
+        return getattr(self, '_overlay_visible', True)
     
     def update_overlay(self, sample_name: str = "—", device: str = "—", voltage: str = "0V", loop: str = "#1") -> None:
         """Update the floating overlay text"""
