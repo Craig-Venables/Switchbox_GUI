@@ -787,17 +787,20 @@ class TSPTestingGUI(tk.Toplevel):
         self._context_poll_job = self.after(500, self._poll_context)
 
     def destroy(self):
-        """On close: set laser to 0 mW and restore manual (front-panel) control so the dial still works."""
+        """On close: set laser to 0 mW and restore manual control, or release shared ref without closing."""
         laser = getattr(self, "laser", None)
         if laser is not None:
-            try:
-                # 0 mW, analog mode so front-panel dial still works; leave emission ON
-                laser.set_to_analog_modulation_mode(power_mw=0)
-                laser.emission_on()
-                laser.close(restore_to_manual_control=False)  # already in manual mode at 0 mW
-            except Exception:
-                pass
-            self.laser = None
+            if getattr(self, "_laser_from_provider", False):
+                # Shared from Measurement GUI: do not close the port, just release our reference
+                self.laser = None
+            else:
+                try:
+                    laser.set_to_analog_modulation_mode(power_mw=0)
+                    laser.emission_on()
+                    laser.close(restore_to_manual_control=False)
+                except Exception:
+                    pass
+                self.laser = None
         job = getattr(self, "_context_poll_job", None)
         if job:
             try:

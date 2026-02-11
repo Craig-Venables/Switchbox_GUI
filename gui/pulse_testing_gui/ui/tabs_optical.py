@@ -249,12 +249,40 @@ def _show_calibration_curve(gui):
 
 
 def _connect_laser(gui):
+    # Reuse laser from Measurement GUI if already connected there
+    provider = getattr(gui, "provider", None)
+    if provider is not None and hasattr(provider, "get_shared_laser"):
+        shared = provider.get_shared_laser()
+        if shared is not None:
+            gui.laser = shared
+            gui._laser_from_provider = True
+            try:
+                idn = gui.laser.idn()
+            except Exception:
+                idn = "?"
+            if getattr(gui, "laser_power_use_software_var", None) and gui.laser_power_use_software_var.get():
+                try:
+                    power_mw = float(gui.laser_power_var.get().strip())
+                    gui.laser.set_to_digital_power_control(power_mw)
+                    gui.log(f"Optical: Using shared connection ({idn}), power {power_mw} mW.")
+                except ValueError:
+                    gui.log(f"Optical: Using shared connection ({idn}). Set power (mW) and use 'Set (mW)' to apply.")
+            else:
+                gui.log(f"Optical: Using shared connection ({idn}), manual power.")
+            gui.laser_status_var.set("Connected")
+            gui.laser_emission_on_var.set(False)
+            _update_emission_buttons(gui)
+            gui.laser_conn_btn.config(state=tk.DISABLED)
+            gui.laser_disc_btn.config(state=tk.NORMAL)
+            return
+
     port = gui.laser_port_var.get().strip()
     try:
         baud = int(gui.laser_baud_var.get().strip())
     except ValueError:
         gui.log("Optical: Invalid baud rate.")
         return
+    gui._laser_from_provider = False
     try:
         gui.laser = OxxiusLaser(port=port, baud=baud)
         idn = gui.laser.idn()
@@ -279,6 +307,15 @@ def _connect_laser(gui):
 
 def _disconnect_laser(gui):
     if gui.laser is None:
+        return
+    if getattr(gui, "_laser_from_provider", False):
+        gui.laser = None
+        gui.laser_status_var.set("Disconnected")
+        gui.laser_emission_on_var.set(False)
+        _update_emission_buttons(gui)
+        gui.laser_conn_btn.config(state=tk.NORMAL)
+        gui.laser_disc_btn.config(state=tk.DISABLED)
+        gui.log("Optical: Released shared connection (still connected in Measurement GUI).")
         return
     try:
         gui.laser.close(restore_to_manual_control=True)
