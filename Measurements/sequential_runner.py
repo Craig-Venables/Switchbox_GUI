@@ -275,6 +275,24 @@ def _persist_iv_sweep(
         abs_path = os.path.abspath(file_path)
         print(f"[SAVE] File saved to: {abs_path}")
         _log(gui, f"File saved: {abs_path}")
+        try:
+            device_folder = gui._get_save_directory(
+                sample_name, device[0] if len(device) > 0 else "X", device[1:] if len(device) > 1 else "0"
+            )
+            saver = getattr(gui, "data_saver", None)
+            if saver is not None:
+                saver.log_measurement_event(
+                    device_folder,
+                    filename=filename,
+                    file_path=file_path,
+                    measurement_type="IV Sweep (Sequential)",
+                    status="saved",
+                    sample_name=sample_name,
+                    section=device[0] if len(device) > 0 else "X",
+                    device_number=device[1:] if len(device) > 1 else "0",
+                )
+        except Exception:
+            pass
     except Exception as exc:
         print(f"[SAVE ERROR] Failed to save file: {exc}")
         _log(gui, f"Error saving IV sweep: {exc}")

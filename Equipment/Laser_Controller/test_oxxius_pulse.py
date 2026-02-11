@@ -3,12 +3,19 @@ Test script for Oxxius laser ms-scale pulsing.
 Run this to verify pulse_on_ms and pulse_train (e.g. before using Optical tab in Pulse Testing GUI).
 Uses software power control (mW) for the pulses, then restores manual control on exit.
 
+Timing: You cannot reliably go below ~20 ms on/off times with serial control; below that
+you get inconsistent behaviour (serial + firmware latency). Use >= 20 ms for stable pulses;
+for shorter pulses use the laser TTL input (hardware modulation).
+
 Usage:
   python test_oxxius_pulse.py [COM_PORT] [BAUD] [POWER_MW]
   python test_oxxius_pulse.py --timing [COM_PORT] [BAUD] [POWER_MW]   # find shortest pulse
 
 Defaults: COM4, 19200, power 10 mW
 """
+
+# Minimum on/off duration (ms) for consistent behaviour with serial control; below this, timing is inconsistent.
+MIN_PULSE_MS = 20
 
 import sys
 import time
@@ -64,7 +71,8 @@ def run_timing_test(laser, power_mw, n_samples=3):
     print()
     print("Summary:")
     print(f"  - Serial overhead ~{overhead_ms:.0f} ms per on/off cycle.")
-    print(f"  - For reliable pulse length, use on-time >= ~{max(20, overhead_ms * 2):.0f} ms.")
+    print(f"  - Do not go below {MIN_PULSE_MS} ms: below that you get inconsistent behaviour.")
+    print(f"  - For reliable pulse length, use on-time >= ~{max(MIN_PULSE_MS, overhead_ms * 2):.0f} ms.")
     print("  - For shorter pulses, use the laser TTL input (hardware modulation).")
     print("=" * 60)
 
@@ -101,21 +109,21 @@ def main():
             run_timing_test(laser, power_mw)
             return
 
-        # Single pulse: 100 ms on at power_mw
-        print(f"1. Single pulse: 100 ms on @ {power_mw} mW...")
-        t0 = time.perf_counter()
-        laser.pulse_on_ms(100)
-        t1 = time.perf_counter()
-        print(f"   Done in {(t1 - t0) * 1000:.0f} ms")
-        print()
+        # # Single pulse: 100 ms on at power_mw
+        # print(f"1. Single pulse: 100 ms on @ {power_mw} mW...")
+        # t0 = time.perf_counter()
+        # laser.pulse_on_ms(100)
+        # t1 = time.perf_counter()
+        # print(f"   Done in {(t1 - t0) * 1000:.0f} ms")
+        # print()
 
         # Short pause
         time.sleep(0.5)
 
-        # Pulse train: 5 pulses, 100 ms on, 200 ms off at power_mw
+        # Pulse train: keep on_ms and off_ms >= MIN_PULSE_MS (20 ms) for consistent behaviour
         n_pulses = 5
-        on_ms = 100
-        off_ms = 200
+        on_ms = 500
+        off_ms = 1000
         print(f"2. Pulse train: {n_pulses} pulses, {on_ms} ms on, {off_ms} ms off @ {power_mw} mW...")
         t0 = time.perf_counter()
         laser.pulse_train(n_pulses, on_ms, off_ms, power_mw=power_mw)
@@ -127,8 +135,13 @@ def main():
         print("Pulse test finished successfully.")
         print("=" * 50)
     finally:
-        laser.close(restore_to_manual_control=True)
-        print("Laser connection closed, restored to manual control.")
+        # For timing tests we want the last pulse to end cleanly and stay OFF.
+        # Using restore_to_manual_control=True would turn emission back ON as
+        # part of putting the laser into analog mode, which looks like an
+        # extra-long final pulse on the photodetector.
+        laser.emission_off()
+        laser.close(restore_to_manual_control=False)
+        print("Laser connection closed (digital mode, emission OFF).")
 
 
 if __name__ == "__main__":

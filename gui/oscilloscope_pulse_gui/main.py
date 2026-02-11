@@ -520,7 +520,28 @@ class OscilloscopePulseGUI(tk.Toplevel):
             
             if auto_save_enabled:
                 self._auto_save_if_needed()
-            
+            elif getattr(self, "last_data", None):
+                # Log unsaved measurement to device timeline
+                try:
+                    provider = self.context.get("provider")
+                    if provider and getattr(provider, "data_saver", None):
+                        base = self._get_base_save_path()
+                        sample_name = self._get_sample_name()
+                        letter, number = self._extract_device_letter_and_number(
+                            self.context.get("device_label", "A1")
+                        )
+                        device_folder = Path(base) / sample_name / letter / number
+                        meta = self.last_data[3] if len(self.last_data) > 3 else {}
+                        provider.data_saver.log_unsaved_measurement(
+                            device_folder,
+                            "Oscilloscope",
+                            params=meta,
+                            sample_name=sample_name,
+                            section=letter,
+                            device_number=number,
+                        )
+                except Exception:
+                    pass
         self.after(0, reset_ui)
         
     def _auto_save_if_needed(self):
@@ -598,7 +619,23 @@ class OscilloscopePulseGUI(tk.Toplevel):
             
             # Store save path for potential overwrite after alignment
             self.last_save_path = str(save_path)
-            
+            # Log to device timeline
+            try:
+                provider = self.context.get("provider")
+                if provider and getattr(provider, "data_saver", None):
+                    device_folder = save_dir.parent
+                    provider.data_saver.log_measurement_event(
+                        device_folder,
+                        filename=fname,
+                        file_path=save_path,
+                        measurement_type="Oscilloscope",
+                        status="saved",
+                        sample_name=sample_name,
+                        section=letter,
+                        device_number=number,
+                    )
+            except Exception:
+                pass
             # Update save directory display
             if 'save_dir_display' in self.layout.vars:
                 self.layout.vars['save_dir_display'].set(str(save_dir))
@@ -630,6 +667,17 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 t, v, i, meta = self.last_data
                 self._write_file(self.last_save_path, t, v, i, meta)
                 self.layout.set_status(f"Saved (overwritten): {Path(self.last_save_path).name}")
+                try:
+                    provider = self.context.get("provider")
+                    if provider and getattr(provider, "data_saver", None):
+                        p = Path(self.last_save_path)
+                        device_folder = p.parent.parent if p.parent.name == "osillascope_test" else p.parent
+                        provider.data_saver.log_measurement_event(
+                            device_folder, filename=p.name, file_path=p,
+                            measurement_type="Oscilloscope", status="saved",
+                        )
+                except Exception:
+                    pass
                 messagebox.showinfo("Saved", f"File overwritten:\n{self.last_save_path}")
                 return
         
@@ -664,7 +712,17 @@ class OscilloscopePulseGUI(tk.Toplevel):
         
         t, v, i, meta = self.last_data
         self._write_file(filename, t, v, i, meta)
-        
+        try:
+            provider = self.context.get("provider")
+            if provider and getattr(provider, "data_saver", None):
+                p = Path(filename)
+                device_folder = p.parent.parent if p.parent.name == "osillascope_test" else p.parent
+                provider.data_saver.log_measurement_event(
+                    device_folder, filename=p.name, file_path=p,
+                    measurement_type="Oscilloscope", status="saved",
+                )
+        except Exception:
+            pass
         # Store save path for potential overwrite
         self.last_save_path = filename
 

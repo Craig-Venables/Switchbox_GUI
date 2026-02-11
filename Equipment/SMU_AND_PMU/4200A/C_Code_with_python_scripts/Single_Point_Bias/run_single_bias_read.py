@@ -87,13 +87,15 @@ def measure_bias_current(
         raise ValueError("tolerance must be positive.")
 
     num_cycles = 1
+    num_steps = 3  # (NumSteps + 1) × NumCycles = 4 points: 0, +V, -V, 0
     num_points = 4  # 0, +V, -V, 0
     command = build_ex_command(
-        vpos=bias_voltage,
-        vneg=0.0,  # auto-sets to -bias internally
+        vhigh=bias_voltage,
+        vlow=-bias_voltage,
+        num_steps=num_steps,
         num_cycles=num_cycles,
         num_points=num_points,
-        settle_time=settle_time,
+        step_delay=settle_time,
         ilimit=ilimit,
         integration_time=integration_time,
         clarius_debug=1 if debug else 0,

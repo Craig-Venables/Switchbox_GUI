@@ -6338,7 +6338,16 @@ class MeasurementGUI:
                 end = time.time()
                 print("total time for ", selected_measurement, "=", end - start, " - ")
 
-                self.data_saver.create_log_file(save_dir, start_time, selected_measurement)
+                self.data_saver.log_measurement_event(
+                    save_dir,
+                    filename=f"custom_{selected_measurement}",
+                    file_path=save_dir,
+                    measurement_type=selected_measurement,
+                    status="saved",
+                    sample_name=self.sample_name_var.get(),
+                    section=self.final_device_letter,
+                    device_number=self.final_device_number,
+                )
                 
                 # === GENERATE SEQUENCE SUMMARY ===
                 # Wrap in try-except to ensure measurement flow is never interrupted

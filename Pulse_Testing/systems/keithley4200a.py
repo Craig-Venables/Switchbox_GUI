@@ -642,11 +642,13 @@ class Keithley4200ASystem(BaseMeasurementSystem):
         sample_interval_s: float,
         ilimit: float,
         num_points: Optional[int] = None,
+        current_range_a: float = 0.0,
     ) -> Dict[str, Any]:
         """Run SMU_BiasTimedRead: apply voltage for duration_s, sample current at sample_interval_s.
 
         Used by optical+read tests (laser coordinated from Python while instrument collects data).
         Returns dict with timestamps, voltages, currents, resistances.
+        current_range_a: 0 = auto range, >0 = fixed measurement range in A (e.g. 1e-6 for 1 uA).
         """
         try:
             import importlib
@@ -668,6 +670,7 @@ class Keithley4200ASystem(BaseMeasurementSystem):
             sample_interval_s=sample_interval_s,
             ilimit=ilimit,
             num_points=num_points,
+            current_range_a=current_range_a,
         )
 
     def run_bias_timed_read_synced(

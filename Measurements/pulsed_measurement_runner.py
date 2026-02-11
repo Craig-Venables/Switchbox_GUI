@@ -66,6 +66,25 @@ class PulsedMeasurementRunner:
             os.makedirs(save_dir)
         return save_dir
 
+    def _log_measurement_save(
+        self, save_dir: str, filename: str, file_path: str | Path, measurement_type: str
+    ) -> None:
+        try:
+            saver = getattr(self._gui, "data_saver", None)
+            if saver is not None:
+                saver.log_measurement_event(
+                    save_dir,
+                    filename=filename,
+                    file_path=file_path,
+                    measurement_type=measurement_type,
+                    status="saved",
+                    sample_name=self.sample_name_var.get(),
+                    section=self.final_device_letter,
+                    device_number=self.final_device_number,
+                )
+        except Exception:
+            pass
+
     def _run_pulsed_lt_1p5(self, device_count: int, start_index: int) -> None:
         for i in range(device_count):
             device = self.device_list[(start_index + i) % device_count]
@@ -144,6 +163,9 @@ class PulsedMeasurementRunner:
                 self.log_terminal(f"File saved: {os.path.abspath(file_path)}")
                 # Store filename for analysis
                 self._last_pulsed_file_name = name
+                self._log_measurement_save(
+                    save_dir, f"{name}.txt", file_path, "Pulsed IV (<1.5V)"
+                )
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -299,6 +321,9 @@ class PulsedMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
                 # Store filename for analysis
                 self._last_pulsed_file_name = name
+                self._log_measurement_save(
+                    save_dir, f"{name}.txt", file_path, "Pulsed IV (fixed 20V)"
+                )
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -377,6 +402,9 @@ class PulsedMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
                 # Store filename for analysis
                 self._last_pulsed_file_name = name
+                self._log_measurement_save(
+                    save_dir, f"{name}.txt", file_path, "Fast Pulses"
+                )
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
@@ -436,6 +464,9 @@ class PulsedMeasurementRunner:
                 self.log_terminal(f"File saved: {file_path.resolve()}")
                 # Store filename for analysis
                 self._last_pulsed_file_name = name
+                self._log_measurement_save(
+                    save_dir, f"{name}.txt", file_path, "Fast Hold"
+                )
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 

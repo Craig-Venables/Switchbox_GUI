@@ -58,6 +58,25 @@ class SpecialMeasurementRunner:
             os.makedirs(save_dir)
         return save_dir
 
+    def _log_measurement_save(
+        self, save_dir: str, filename: str, file_path: Path, measurement_type: str
+    ) -> None:
+        try:
+            saver = getattr(self._gui, "data_saver", None)
+            if saver is not None:
+                saver.log_measurement_event(
+                    save_dir,
+                    filename=filename,
+                    file_path=file_path,
+                    measurement_type=measurement_type,
+                    status="saved",
+                    sample_name=self.sample_name_var.get(),
+                    section=self.final_device_letter,
+                    device_number=self.final_device_number,
+                )
+        except Exception:
+            pass
+
     def _finalize(self) -> None:
         self._finalize_output()
         self.measuring = False
@@ -138,6 +157,7 @@ class SpecialMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                self._log_measurement_save(save_dir, f"{name}.txt", file_path, "ISPP")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
             
@@ -371,6 +391,7 @@ class SpecialMeasurementRunner:
                     )
                 
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                self._log_measurement_save(save_dir, f"{name}.txt", file_path, "Endurance")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save endurance file: {exc}")
             
@@ -585,6 +606,7 @@ class SpecialMeasurementRunner:
                     )
                 
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                self._log_measurement_save(save_dir, f"{name}.txt", file_path, "Retention")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save retention file: {exc}")
             
@@ -666,6 +688,7 @@ class SpecialMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                self._log_measurement_save(save_dir, f"{name}.txt", file_path, "Pulse Width Sweep")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
             
@@ -746,6 +769,7 @@ class SpecialMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                self._log_measurement_save(save_dir, f"{name}.txt", file_path, "Threshold")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
             
@@ -816,6 +840,7 @@ class SpecialMeasurementRunner:
                     comments="",
                 )
                 self.log_terminal(f"File saved: {file_path.resolve()}")
+                self._log_measurement_save(save_dir, f"{name}.txt", file_path, "Transient")
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
             

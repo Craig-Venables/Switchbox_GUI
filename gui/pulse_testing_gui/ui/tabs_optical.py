@@ -9,6 +9,8 @@ import sys
 import tkinter as tk
 from pathlib import Path
 import threading
+from tkinter import messagebox
+from tkinter import simpledialog
 
 from Equipment.Laser_Controller.oxxius import OxxiusLaser
 
@@ -131,7 +133,44 @@ def build_optical_tab(tab_frame, gui):
     )
     tk.Label(cal_row, text=note_text, font=("TkDefaultFont", 8), fg="gray", wraplength=450, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+    # Laser sync calibration: suggest sync offset from last optical run
+    sync_row = tk.Frame(conn_frame)
+    sync_row.pack(fill=tk.X, pady=(2, 5))
+    tk.Button(sync_row, text="Suggest sync offset from last run", command=lambda: _suggest_laser_sync_offset(gui), font=("TkDefaultFont", 9)).pack(side=tk.LEFT, padx=(0, 8))
+    tk.Label(sync_row, text="Run an optical test with delay=0, then click to get suggested \"Laser sync offset (s)\".", font=("TkDefaultFont", 8), fg="gray", wraplength=400, justify=tk.LEFT).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
     # (Pulse parameters UI removed – pulsing now controlled by optical tests only)
+
+
+def _suggest_laser_sync_offset(gui):
+    """Use last optical run to suggest Laser sync offset (s) so pulses appear at desired time."""
+    results = getattr(gui, "last_results", None)
+    if not results:
+        messagebox.showinfo("Suggest sync offset", "No results from a previous run. Run an optical test first (e.g. with Laser Start Delay = 0).")
+        return
+    timestamps = results.get("timestamps")
+    resistances = results.get("resistances")
+    if not timestamps or not resistances or len(timestamps) != len(resistances):
+        messagebox.showinfo("Suggest sync offset", "Last run has no timestamps/resistances. Run an optical test first.")
+        return
+    desired_s = simpledialog.askfloat("Desired first pulse time (s)", "At what time (s) should the first pulse appear on the plot?", initialvalue=1.0, minvalue=0.0, maxvalue=3600.0)
+    if desired_s is None:
+        return
+    try:
+        from gui.pulse_testing_gui.optical_runner import suggest_laser_sync_offset_s
+        suggested = suggest_laser_sync_offset_s(timestamps, resistances, desired_s)
+    except Exception as e:
+        messagebox.showerror("Suggest sync offset", f"Error: {e}")
+        return
+    if suggested is None:
+        messagebox.showinfo("Suggest sync offset", "Could not detect a resistance drop in the last run. Ensure the run was optical and the photodiode responded.")
+        return
+    messagebox.showinfo(
+        "Suggest sync offset",
+        f"Suggested \"Laser sync offset (s)\" = {suggested:.3f}\n\n"
+        f"Set this in Test Parameters (Laser sync offset) and run again to align the first pulse with {desired_s} s on the plot."
+    )
+
 
 def _update_emission_buttons(gui):
     """Update emission On/Off button states and appearance from laser_emission_on_var and connection."""

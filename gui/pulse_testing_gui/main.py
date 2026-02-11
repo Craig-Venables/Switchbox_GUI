@@ -230,13 +230,19 @@ class TSPTestingGUI(tk.Toplevel):
         main_frame = tk.Frame(self)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Create PanedWindow for adjustable 35/65 split
+        # Create PanedWindow for adjustable 40/60 split
         paned = tk.PanedWindow(main_frame, orient=tk.HORIZONTAL, sashwidth=5, 
                                sashrelief=tk.RAISED, bg="#d0d0d0")
         paned.pack(fill=tk.BOTH, expand=True)
         
-        # Left panel: Controls with scrollbar (35% width target)
-        left_container = tk.Frame(paned, width=420)  # 35% of typical 1200px screen
+        # Left panel: Controls with scrollbar (40% of window width)
+        try:
+            win_w, _ = config.WINDOW_GEOMETRY.lower().split("x")
+            total_w = int(win_w)
+        except (ValueError, AttributeError):
+            total_w = 1400
+        left_width = max(350, int(total_w * 0.40))
+        left_container = tk.Frame(paned, width=left_width)
         left_container.pack_propagate(False)
         
         # Create scrollable canvas for left panel
@@ -270,11 +276,11 @@ class TSPTestingGUI(tk.Toplevel):
         # Also bind to the frame for better responsiveness
         left_panel.bind("<MouseWheel>", lambda e: left_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         
-        # Right panel: Visualizations (65% width target)
+        # Right panel: Visualizations (60% width target)
         right_panel = tk.Frame(paned)
         
-        # Add panels to PanedWindow with size constraints
-        paned.add(left_container, minsize=350, width=420)
+        # Add panels to PanedWindow with size constraints (left = 40% of screen)
+        paned.add(left_container, minsize=350, width=left_width)
         paned.add(right_panel, minsize=400)
         
         # Top bar with help button
@@ -1350,8 +1356,13 @@ class TSPTestingGUI(tk.Toplevel):
         read_params = []
         general_params = []
         other_params = []
+        # Optical tests: section-based grouping (read / laser / advanced)
+        optical_read_params = []
+        optical_laser_params = []
+        optical_advanced_params = []
+        use_section_grouping = any(param_info.get("section") for param_info in params.values())
         
-        # Define parameter categories
+        # Define parameter categories (used when section is not set)
         pulse_keywords = ['pulse', 'set_voltage', 'reset_voltage', 'laser_voltage']
         read_keywords = ['read', 'meas']
         general_keywords = ['num_cycles', 'num_pulses', 'num_reads', 'steps', 'delay_between_cycles', 
@@ -1364,7 +1375,18 @@ class TSPTestingGUI(tk.Toplevel):
             if param_info.get("4200a_only", False) and not is_4200a:
                 continue
             
-            # Categorize parameter
+            section = param_info.get("section")
+            if use_section_grouping and section:
+                if section == "read":
+                    optical_read_params.append((param_name, param_info))
+                elif section == "laser":
+                    optical_laser_params.append((param_name, param_info))
+                elif section == "advanced":
+                    optical_advanced_params.append((param_name, param_info))
+                else:
+                    other_params.append((param_name, param_info))
+                continue
+            # Keyword-based categorization for tests without section
             param_lower = param_name.lower()
             if any(keyword in param_lower for keyword in pulse_keywords):
                 pulse_params.append((param_name, param_info))
@@ -1472,29 +1494,45 @@ class TSPTestingGUI(tk.Toplevel):
             return current_row
         
         # Display parameters in organized sections
-        # Pulse Parameters Section
-        if pulse_params:
-            row = add_section_header("⚡ Pulse Parameters", row)
-            for param_name, param_info in pulse_params:
-                row = add_param_row(param_name, param_info, row)
-        
-        # Read Parameters Section
-        if read_params:
-            row = add_section_header("📖 Read Parameters", row)
-            for param_name, param_info in read_params:
-                row = add_param_row(param_name, param_info, row)
-        
-        # General/Cycle Parameters Section
-        if general_params:
-            row = add_section_header("🔄 Cycle & Timing Parameters", row)
-            for param_name, param_info in general_params:
-                row = add_param_row(param_name, param_info, row)
-        
-        # Other Parameters Section
-        if other_params:
-            row = add_section_header("⚙️ Other Parameters", row)
-            for param_name, param_info in other_params:
-                row = add_param_row(param_name, param_info, row)
+        # Section-based (optical): Read → Laser → Advanced
+        if use_section_grouping:
+            if optical_read_params:
+                row = add_section_header("📖 Read Parameters", row)
+                for param_name, param_info in optical_read_params:
+                    row = add_param_row(param_name, param_info, row)
+            if optical_laser_params:
+                row = add_section_header("🔬 Laser Parameters", row)
+                for param_name, param_info in optical_laser_params:
+                    row = add_param_row(param_name, param_info, row)
+            if optical_advanced_params:
+                row = add_section_header("⚙️ Advanced (calibration)", row)
+                for param_name, param_info in optical_advanced_params:
+                    row = add_param_row(param_name, param_info, row)
+            if other_params:
+                row = add_section_header("⚙️ Other Parameters", row)
+                for param_name, param_info in other_params:
+                    row = add_param_row(param_name, param_info, row)
+        else:
+            # Pulse Parameters Section
+            if pulse_params:
+                row = add_section_header("⚡ Pulse Parameters", row)
+                for param_name, param_info in pulse_params:
+                    row = add_param_row(param_name, param_info, row)
+            # Read Parameters Section
+            if read_params:
+                row = add_section_header("📖 Read Parameters", row)
+                for param_name, param_info in read_params:
+                    row = add_param_row(param_name, param_info, row)
+            # General/Cycle Parameters Section
+            if general_params:
+                row = add_section_header("🔄 Cycle & Timing Parameters", row)
+                for param_name, param_info in general_params:
+                    row = add_param_row(param_name, param_info, row)
+            # Other Parameters Section
+            if other_params:
+                row = add_section_header("⚙️ Other Parameters", row)
+                for param_name, param_info in other_params:
+                    row = add_param_row(param_name, param_info, row)
         
         self.params_frame.columnconfigure(1, weight=1)
         
@@ -1751,7 +1789,25 @@ class TSPTestingGUI(tk.Toplevel):
             self.log("ℹ Auto-save disabled - use Manual Save to save data")
         else:
             self.log("⚠ No data to save")
-    
+        # Log measurement completion to device timeline (unsaved entry; saved entry added in save_data)
+        if self.last_results and self.provider and getattr(self.provider, "data_saver", None):
+            try:
+                default_save_root = getattr(self.provider, "default_save_root", None)
+                sn = getattr(self.provider, "sample_name_var", None)
+                device_section = getattr(self.provider, "device_section_and_number", None)
+                if default_save_root and device_section:
+                    sample_name = (sn.get().strip() if hasattr(sn, "get") else str(sn or "").strip()) or "?"
+                    section = device_section[0] if len(device_section) > 0 else "A"
+                    device_num = device_section[1:] if len(device_section) > 1 else "1"
+                    device_folder = Path(default_save_root) / sample_name / section / device_num
+                    params = self.last_results.get("params", {})
+                    self.provider.data_saver.log_unsaved_measurement(
+                        device_folder, "Pulse Test", params=params,
+                        sample_name=sample_name, section=section, device_number=device_num,
+                    )
+            except Exception:
+                pass
+
     def _plot_incremental(self):
         """Update plot incrementally for real-time updates (e.g., SMU retention)"""
         if not self.last_results:
@@ -2014,6 +2070,26 @@ class TSPTestingGUI(tk.Toplevel):
             )
             
             if success:
+                # Log to device timeline (saved entry)
+                if self.provider and getattr(self.provider, "data_saver", None):
+                    try:
+                        device_folder = filepath.parent.parent if filepath.parent.name == "Pulse_measurements" else filepath.parent
+                        ds = getattr(self.provider, "device_section_and_number", None)
+                        sn_val = sample_name if use_provider_default else None
+                        sec = (ds[0] if ds and len(ds) > 0 else None) if use_provider_default else None
+                        dev = (ds[1:] if ds and len(ds) > 1 else None) if use_provider_default else None
+                        self.provider.data_saver.log_measurement_event(
+                            device_folder,
+                            filename=filepath.name,
+                            file_path=filepath,
+                            measurement_type="Pulse Test",
+                            status="saved",
+                            sample_name=sn_val,
+                            section=sec,
+                            device_number=dev,
+                        )
+                    except Exception:
+                        pass
                 # Display full filepath for easy finding
                 plot_path = filepath.with_suffix('.png')
                 abs_save_dir = filepath.parent.resolve()
