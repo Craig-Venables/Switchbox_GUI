@@ -1,7 +1,11 @@
 from pathlib import Path
 from typing import Optional
 
+import matplotlib
 import matplotlib.pyplot as plt
+
+# Disable "more than 20 figures" warning – we manage closing manually via PlotManager.
+matplotlib.rcParams["figure.max_open_warning"] = 0
 
 
 class PlotManager:

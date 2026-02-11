@@ -3015,6 +3015,19 @@ class MeasurementGUI:
         except Exception:
             pass
 
+    def get_shared_laser(self):
+        """Return the raw Oxxius laser instance if already connected (for Pulse Testing GUI to reuse). Returns None if no laser or not Laser type."""
+        try:
+            opt = getattr(self, "optical", None)
+            if opt is None:
+                return None
+            caps = getattr(opt, "capabilities", {}) or {}
+            if caps.get("type") != "Laser":
+                return None
+            return getattr(opt, "_laser", None)
+        except Exception:
+            return None
+
     def open_pulse_testing_gui(self) -> None:
         """Launch the pulse testing GUI with current sample/context info."""
         sample_name = None
@@ -3845,20 +3858,142 @@ class MeasurementGUI:
                     self.optical_laser_min_var.set(str(limits.get("min", "0.0")))
                 if hasattr(self, 'optical_laser_max_var'):
                     self.optical_laser_max_var.set(str(limits.get("max", "10.0")))
+                defaults = optical_config.get("defaults", {})
+                if hasattr(self, 'optical_laser_default_var'):
+                    self.optical_laser_default_var.set(str(defaults.get("level", 1.0)))
                 # Update UI
                 if hasattr(self, 'optical_config_frame'):
                     self.layout_builder._update_optical_ui(self, self.optical_config_frame)
         elif hasattr(self, 'optical_type_var'):
             self.optical_type_var.set("None")
         
-        # Try to create optical object
+        # Try to create optical object; reuse existing laser connection to avoid "port in use"
+        opt_cfg = config.get("optical") or {}
+        opt_type = (opt_cfg.get("type") or "").strip().lower()
+        existing = getattr(self, "optical", None)
+        if opt_type == "laser" and existing is not None:
+            try:
+                caps = getattr(existing, "capabilities", {}) or {}
+                if caps.get("type") == "Laser":
+                    default_mw = 1.0
+                    if hasattr(self, "optical_laser_default_var"):
+                        try:
+                            default_mw = float(self.optical_laser_default_var.get())
+                        except (ValueError, AttributeError):
+                            pass
+                    existing.set_level(default_mw, "mW")
+                    _opt_status = getattr(self, "optical_laser_status_var", None)
+                    if _opt_status is not None:
+                        _opt_status.set("Connected")
+                    # Skip create_optical - we already have the laser
+                    return
+            except Exception:
+                pass
         try:
             self.optical = create_optical_from_system_config(config)
+            if self.optical is not None and hasattr(self.optical, "set_level"):
+                default_mw = 1.0
+                if hasattr(self, "optical_laser_default_var"):
+                    try:
+                        default_mw = float(self.optical_laser_default_var.get())
+                    except (ValueError, AttributeError):
+                        pass
+                self.optical.set_level(default_mw, "mW")
+            _opt_status = getattr(self, "optical_laser_status_var", None)
+            if _opt_status is not None:
+                _opt_status.set("Connected" if self.optical is not None else "Not connected")
         except Exception:
             self.optical = None
-        
-        # Removed "System Loaded Successfully" popup - it's misleading since connection hasn't been tested
-    
+            _opt_status = getattr(self, "optical_laser_status_var", None)
+            if _opt_status is not None:
+                _opt_status.set("Not connected")
+
+    def connect_optical_laser(self) -> None:
+        """Connect to laser from current Setup tab optical settings. Sets default power to 1 mW (or Default (mW) value)."""
+        if getattr(self, "optical_type_var", None) is None or self.optical_type_var.get() != "Laser":
+            messagebox.showwarning("Laser", "Select Optical type 'Laser' and configure Address/Baud first.")
+            return
+        config = self._build_optical_config_from_ui()
+        if config is None:
+            return
+        try:
+            if getattr(self, "optical", None) is not None:
+                try:
+                    self.optical.close()
+                except Exception:
+                    pass
+                self.optical = None
+            self.optical = create_optical_from_system_config(config)
+            if self.optical is None:
+                messagebox.showerror("Laser", "Could not connect to laser. Check Address (e.g. COM4), Baud, and that the port is not in use by another app.")
+            else:
+                default_mw = 1.0
+                if hasattr(self, "optical_laser_default_var"):
+                    try:
+                        default_mw = float(self.optical_laser_default_var.get())
+                    except (ValueError, AttributeError):
+                        pass
+                self.optical.set_level(default_mw, "mW")
+                messagebox.showinfo("Laser", f"Connected. Default power set to {default_mw} mW.")
+        except Exception as e:
+            self.optical = None
+            messagebox.showerror("Laser", f"Connection failed: {e}")
+        status_var = getattr(self, "optical_laser_status_var", None)
+        if status_var is not None:
+            status_var.set("Connected" if self.optical is not None else "Not connected")
+
+    def disconnect_optical_laser(self) -> None:
+        """Disconnect laser and restore to manual control."""
+        if getattr(self, "optical", None) is None:
+            status_var = getattr(self, "optical_laser_status_var", None)
+            if status_var is not None:
+                status_var.set("Not connected")
+            return
+        try:
+            self.optical.close()
+        except Exception:
+            pass
+        self.optical = None
+        status_var = getattr(self, "optical_laser_status_var", None)
+        if status_var is not None:
+            status_var.set("Not connected")
+
+    def _build_optical_config_from_ui(self):
+        """Build full system config dict with optical section from current UI (for connect_optical_laser)."""
+        opt_type = getattr(self, "optical_type_var", None)
+        if opt_type is None or opt_type.get() != "Laser":
+            return None
+        config = {"optical": {"type": "Laser"}}
+        opt = config["optical"]
+        opt["driver"] = getattr(self, "optical_laser_driver_var", None) and self.optical_laser_driver_var.get() or "Oxxius"
+        opt["address"] = getattr(self, "optical_laser_address_var", None) and self.optical_laser_address_var.get() or "COM4"
+        try:
+            opt["baud"] = int(getattr(self, "optical_laser_baud_var", None) and self.optical_laser_baud_var.get() or 19200)
+        except ValueError:
+            opt["baud"] = 19200
+        opt["units"] = getattr(self, "optical_laser_units_var", None) and self.optical_laser_units_var.get() or "mW"
+        try:
+            opt["wavelength_nm"] = int(getattr(self, "optical_laser_wavelength_var", None) and self.optical_laser_wavelength_var.get() or 405)
+        except ValueError:
+            opt["wavelength_nm"] = 405
+        limits = {}
+        try:
+            limits["min"] = float(getattr(self, "optical_laser_min_var", None) and self.optical_laser_min_var.get() or 0.0)
+        except ValueError:
+            limits["min"] = 0.0
+        try:
+            limits["max"] = float(getattr(self, "optical_laser_max_var", None) and self.optical_laser_max_var.get() or 10.0)
+        except ValueError:
+            limits["max"] = 10.0
+        opt["limits"] = limits
+        defaults = {}
+        try:
+            defaults["level"] = float(getattr(self, "optical_laser_default_var", None) and self.optical_laser_default_var.get() or 1.0)
+        except ValueError:
+            defaults["level"] = 1.0
+        opt["defaults"] = defaults
+        return config
+
     def save_system(self) -> None:
         """Save current configuration as a new system"""
         # Get system name from user
@@ -3998,14 +4133,15 @@ class MeasurementGUI:
                         except ValueError:
                             limits["max"] = 10.0
                     optical_config["limits"] = limits
-                    
-                    # Defaults
+                    # Defaults: default power 1 mW (or value from Default (mW) field)
                     defaults = {}
-                    if hasattr(self, 'optical_laser_min_var'):
+                    if hasattr(self, 'optical_laser_default_var'):
                         try:
-                            defaults["level"] = float(self.optical_laser_min_var.get())
+                            defaults["level"] = float(self.optical_laser_default_var.get())
                         except ValueError:
-                            defaults["level"] = 0.6
+                            defaults["level"] = 1.0
+                    else:
+                        defaults["level"] = 1.0
                     optical_config["defaults"] = defaults
                 
                 config["optical"] = optical_config
@@ -4098,11 +4234,48 @@ class MeasurementGUI:
             self.SMU_type = config.get("SMU Type", "")
             print(self.SMU_type)
 
-            # Optical excitation (LED/Laser) selection based on config
-            try:
-                self.optical = create_optical_from_system_config(config)
-            except Exception:
-                self.optical = None
+            # Optical: reuse existing laser connection when config has Laser (avoids "port in use")
+            opt_cfg = config.get("optical") or {}
+            opt_type = (opt_cfg.get("type") or "").strip().lower()
+            existing = getattr(self, "optical", None)
+            if opt_type == "laser" and existing is not None:
+                try:
+                    caps = getattr(existing, "capabilities", {}) or {}
+                    if caps.get("type") == "Laser":
+                        default_mw = 1.0
+                        if hasattr(self, "optical_laser_default_var"):
+                            try:
+                                default_mw = float(self.optical_laser_default_var.get())
+                            except (ValueError, AttributeError):
+                                pass
+                        existing.set_level(default_mw, "mW")
+                        _s = getattr(self, "optical_laser_status_var", None)
+                        if _s is not None:
+                            _s.set("Connected")
+                        # Skip create_optical - already connected
+                    else:
+                        existing = None
+                except Exception:
+                    existing = None
+            if opt_type != "laser" or existing is None:
+                try:
+                    self.optical = create_optical_from_system_config(config)
+                    if self.optical is not None and hasattr(self.optical, "set_level"):
+                        default_mw = 1.0
+                        if hasattr(self, "optical_laser_default_var"):
+                            try:
+                                default_mw = float(self.optical_laser_default_var.get())
+                            except (ValueError, AttributeError):
+                                pass
+                        self.optical.set_level(default_mw, "mW")
+                    _s = getattr(self, "optical_laser_status_var", None)
+                    if _s is not None:
+                        _s.set("Connected" if self.optical is not None else "Not connected")
+                except Exception:
+                    self.optical = None
+                    _s = getattr(self, "optical_laser_status_var", None)
+                    if _s is not None:
+                        _s.set("Not connected")
 
     def _handle_system_selection(self, selected_system: str) -> None:
         """Callback for legacy system dropdown - only connects if a valid system is selected."""
@@ -5652,9 +5825,10 @@ class MeasurementGUI:
                                 nonlocal _graphs_cleared_for_this_measurement
                                 # Clear graphs on first data point (right before plotting new data)
                                 if not _graphs_cleared_for_this_measurement:
-                                    if hasattr(self, '_reset_plots_for_new_sweep'):
-                                        self._reset_plots_for_new_sweep(self)
                                     _graphs_cleared_for_this_measurement = True
+                                    if hasattr(self, 'master') and hasattr(self, '_reset_plots_for_new_sweep'):
+                                        # Schedule reset on main GUI thread for thread safety
+                                        self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
                                 
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
@@ -5702,9 +5876,10 @@ class MeasurementGUI:
                                 nonlocal _graphs_cleared_for_this_measurement
                                 # Clear graphs on first data point (right before plotting new data)
                                 if not _graphs_cleared_for_this_measurement:
-                                    if hasattr(self, '_reset_plots_for_new_sweep'):
-                                        self._reset_plots_for_new_sweep(self)
                                     _graphs_cleared_for_this_measurement = True
+                                    if hasattr(self, 'master') and hasattr(self, '_reset_plots_for_new_sweep'):
+                                        # Schedule reset on main GUI thread for thread safety
+                                        self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
                                 
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)

@@ -125,7 +125,11 @@ class SCLCFitPlotter:
         ax.grid(True, which="both", alpha=0.3)
         ax.legend()
 
-        fig.tight_layout()
+        # Improve spacing, but don't crash if tight_layout has font/mathtext issues
+        try:
+            fig.tight_layout()
+        except Exception:
+            pass
         if save_name:
             if self.manager.save_dir is None:
                 raise ValueError("save_dir must be set to save figures")

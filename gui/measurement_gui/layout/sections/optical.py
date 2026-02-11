@@ -60,6 +60,18 @@ def build_optical_section(parent: tk.Misc, gui: Any) -> None:
     gui.optical_toggle_button = toggle_btn
 
 
+def _connect_optical_laser(gui: Any) -> None:
+    """Connect to laser using current UI config (called from Connect button)."""
+    if hasattr(gui, "connect_optical_laser"):
+        gui.connect_optical_laser()
+
+
+def _disconnect_optical_laser(gui: Any) -> None:
+    """Disconnect laser (called from Disconnect button)."""
+    if hasattr(gui, "disconnect_optical_laser"):
+        gui.disconnect_optical_laser()
+
+
 def toggle_optical_section(gui: Any, frame: tk.Frame, button: tk.Button) -> None:
     """Toggle visibility of optical configuration section."""
     if gui.optical_expanded_var.get():
@@ -160,4 +172,26 @@ def update_optical_ui(gui: Any, parent: tk.Frame) -> None:
         ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_max_var, font=FONT_MAIN, width=15).grid(
             row=5, column=3, sticky="ew", pady=5, padx=(10, 10)
         )
+
+        tk.Label(gui.optical_laser_frame, text="Default (mW):", font=FONT_MAIN, bg=COLOR_BG).grid(row=6, column=0, sticky="w", pady=5)
+        gui.optical_laser_default_var = tk.StringVar(value="1.0")
+        ttk.Entry(gui.optical_laser_frame, textvariable=gui.optical_laser_default_var, font=FONT_MAIN, width=15).grid(
+            row=6, column=1, sticky="ew", pady=5, padx=(10, 10)
+        )
+
+        # Connect / Disconnect and status
+        btn_row = tk.Frame(gui.optical_laser_frame, bg=COLOR_BG)
+        btn_row.grid(row=7, column=0, columnspan=4, sticky="w", pady=(10, 5))
+        ttk.Button(btn_row, text="Connect", command=lambda: _connect_optical_laser(gui)).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="Disconnect", command=lambda: _disconnect_optical_laser(gui)).pack(side=tk.LEFT, padx=(0, 5))
+        gui.optical_laser_status_var = tk.StringVar(value="Not connected")
+        if getattr(gui, "optical", None) is not None:
+            try:
+                caps = getattr(gui.optical, "capabilities", {}) or {}
+                if caps.get("type") == "Laser":
+                    gui.optical_laser_status_var.set("Connected")
+            except Exception:
+                pass
+        ttk.Label(btn_row, textvariable=gui.optical_laser_status_var, font=FONT_MAIN).pack(side=tk.LEFT, padx=(10, 0))
+
         gui.optical_laser_frame.columnconfigure(1, weight=1)

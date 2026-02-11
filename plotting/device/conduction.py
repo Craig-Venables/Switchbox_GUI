@@ -122,10 +122,12 @@ class ConductionPlotter:
             if hasattr(y_formatter, 'set_useMathText'):
                 y_formatter.set_useMathText(False)
             if self.enable_schottky_overlays:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    log_i = np.log(np.maximum(i_pos, 1e-300))
                 self._overlay_linear_windows(
                     ax_schottky,
                     sqrt_v,
-                    np.log(i_pos),
+                    log_i,
                     targets=self.target_slopes_schottky,
                     label_prefix="Schottky",
                     slope_bounds=self.schottky_slope_bounds,
@@ -151,10 +153,12 @@ class ConductionPlotter:
             if hasattr(y_formatter, 'set_useMathText'):
                 y_formatter.set_useMathText(False)
             if self.enable_pf_overlays:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    log_pf_y = np.log(np.maximum(pf_y, 1e-300))
                 self._overlay_linear_windows(
                     ax_pf,
                     sqrt_v,
-                    np.log(pf_y),
+                    log_pf_y,
                     targets=self.target_slopes_pf,
                     label_prefix="PF",
                     slope_bounds=self.pf_slope_bounds,
@@ -179,11 +183,12 @@ class ConductionPlotter:
         plt.rcParams['axes.formatter.use_mathtext'] = False
         plt.rcParams['text.usetex'] = False
         
+        # Use tight_layout to improve spacing, but don't let it crash or spam long parse errors
         try:
             fig.tight_layout()
-        except Exception as e:
-            # If tight_layout fails due to math text, try without it
-            print(f"[CONDUCTION PLOT] Warning: tight_layout failed, saving without it: {e}")
+        except Exception:
+            # Keep plotting robust; just continue with default layout.
+            print("[CONDUCTION PLOT] Warning: tight_layout failed, continuing without it.")
         
         if save_name:
             if self.manager.save_dir is None:

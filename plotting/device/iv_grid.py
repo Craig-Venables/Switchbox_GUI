@@ -14,7 +14,7 @@ matplotlib.rcParams['axes.formatter.min_exponent'] = 0
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 from ..core.base import PlotManager
-from ..core.formatters import plain_log_formatter
+from ..core.formatters import plain_linear_formatter, plain_log_formatter
 
 
 class IVGridPlotter:
@@ -70,11 +70,37 @@ class IVGridPlotter:
         ax_time = axes[1, 1]
         self._plot_current_time(ax_time, i, t, device_label)
 
-        fig.tight_layout()
+        # Force plain-text formatters on ALL axes so savefig/draw never triggers mathtext parse
+        for ax in axes.flat:
+            ax.xaxis.set_major_formatter(FuncFormatter(plain_linear_formatter))
+            ax.yaxis.set_major_formatter(FuncFormatter(plain_linear_formatter))
+        # Log panel y-axis must stay as plain_log for log scale
+        axes[0, 1].yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+
+        # Use tight_layout to improve spacing, but don't let it crash plotting
+        try:
+            fig.tight_layout()
+        except Exception:
+            # Some environments / font backends can raise mathtext parsing errors here.
+            # If that happens, we still want to save the figure with default layout.
+            pass
         if save_name:
             if self.manager.save_dir is None:
                 raise ValueError("save_dir must be set to save figures")
-            self.manager.save(fig, save_name)
+            try:
+                self.manager.save(fig, save_name)
+            except (ValueError, Exception) as e:
+                if "ParseException" in str(type(e).__name__) or "mathtext" in str(e).lower():
+                    import warnings
+                    warnings.warn(
+                        f"[IV GRID] Save failed (mathtext): {save_name}. Skipping.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    if getattr(self.manager, "auto_close", True):
+                        plt.close(fig)
+                else:
+                    raise
         return fig, axes
 
     @staticmethod

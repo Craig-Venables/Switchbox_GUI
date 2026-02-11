@@ -983,7 +983,17 @@ def plot_all_device_graphs(gui: Any) -> None:
         if not os.path.exists(device_dir):
             messagebox.showerror("Directory Not Found", f"Device directory not found:\n{device_dir}")
             return
-        txt_files = sorted([f for f in os.listdir(device_dir) if f.endswith(".txt")])
+        # Exclude known non-measurement .txt files (logs, classification outputs)
+        EXCLUDE_TXT = frozenset(
+            {"log.txt", "classification_log.txt", "classification_summary.txt"}
+        )
+        txt_files = sorted(
+            [
+                f
+                for f in os.listdir(device_dir)
+                if f.endswith(".txt") and f not in EXCLUDE_TXT
+            ]
+        )
         if not txt_files:
             messagebox.showinfo("No Files Found", f"No measurement files (.txt) found in:\n{device_dir}")
             return
@@ -1006,7 +1016,7 @@ def plot_all_device_graphs(gui: Any) -> None:
                 from analysis import quick_analyze
                 from plotting import UnifiedPlotter
                 from analysis.aggregators.dc_endurance_analyzer import DCEnduranceAnalyzer
-                from plotting.unified_plotter import UnifiedPlotter as UP
+                from plotting import UnifiedPlotter as UP
 
                 import matplotlib
                 matplotlib.use("Agg")
@@ -1018,14 +1028,23 @@ def plot_all_device_graphs(gui: Any) -> None:
                         file_path = os.path.join(device_dir, txt_file)
                         filename = os.path.splitext(txt_file)[0]
                         print(f"[DEVICE PLOT] Processing {idx}/{len(txt_files)}: {txt_file}")
+                        if hasattr(gui, "analysis_status_label"):
+                            gui.master.after(
+                                0,
+                                lambda t=f"Plotting {idx}/{len(txt_files)}: {txt_file[:40]}...": gui.analysis_status_label.config(text=t, fg="#2196F3"),
+                            )
                         try:
-                            data = np.loadtxt(file_path, skiprows=1)
-                            if data.shape[1] < 2:
+                            data = np.loadtxt(file_path, skiprows=1, ndmin=2)
+                            if data.ndim < 2 or data.shape[1] < 2:
                                 error_count += 1
                                 continue
                             voltage = data[:, 0]
                             current = data[:, 1]
                             timestamps = data[:, 2] if data.shape[1] > 2 else None
+                        except (ValueError, IndexError, OSError) as e:
+                            print(f"[DEVICE PLOT] Skip (not measurement data): {txt_file} — {e}")
+                            error_count += 1
+                            continue
                         except Exception as e:
                             print(f"[DEVICE PLOT] Error loading {txt_file}: {e}")
                             error_count += 1
@@ -1039,8 +1058,12 @@ def plot_all_device_graphs(gui: Any) -> None:
                             )
                             classification = analysis_data.get("classification", {})
                             device_type = classification.get("device_type", "")
-                            memristivity_score = classification.get("memristivity_score", 0)
-                            is_memristive = device_type in ["memristive", "memcapacitive"] or memristivity_score > 60
+                            raw_score = classification.get("memristivity_score")
+                            memristivity_score = float(raw_score) if raw_score is not None else 0.0
+                            is_memristive = (
+                                device_type in ["memristive", "memcapacitive"]
+                                or memristivity_score > 60
+                            )
                         except Exception as e:
                             print(f"[DEVICE PLOT] Analysis error for {txt_file}: {e}")
                             is_memristive = False
@@ -1075,6 +1098,22 @@ def plot_all_device_graphs(gui: Any) -> None:
                                 all_current_data.append(current)
                                 if dc_endurance_filename is None:
                                     dc_endurance_filename = filename
+                        # Progress: explain what we're plotting so user knows why it may pause
+                        plot_desc = measurement_type
+                        if measurement_type == "IV":
+                            plot_desc = "IV dashboard" + (
+                                " + conduction + SCLC (memristive)"
+                                if is_memristive
+                                else ""
+                            )
+                        print(
+                            f"[DEVICE PLOT] Plotting {plot_desc} for {txt_file} — may take a moment for multi-sweep files."
+                        )
+                        if hasattr(gui, "analysis_status_label"):
+                            gui.master.after(
+                                0,
+                                lambda t=f"Plotting {idx}/{len(txt_files)}: {plot_desc}...": gui.analysis_status_label.config(text=t, fg="#2196F3"),
+                            )
                         try:
                             plot_measurement_in_background(
                                 gui, voltage, current, timestamps,
@@ -1183,7 +1222,11 @@ def plot_all_sample_graphs(gui: Any) -> None:
         if not device_dirs:
             messagebox.showinfo("No Devices", f"No device folders found in {sample_dir}")
             return
-        total_files = sum(len([f for f in os.listdir(d[2]) if f.endswith(".txt") and f != "log.txt"]) for d in device_dirs)
+        _exclude_txt = {"log.txt", "classification_log.txt", "classification_summary.txt"}
+        total_files = sum(
+            len([f for f in os.listdir(d[2]) if f.endswith(".txt") and f not in _exclude_txt])
+            for d in device_dirs
+        )
         response = messagebox.askyesno(
             "Plot All Sample Graphs",
             f"Found {len(device_dirs)} devices with ~{total_files} measurement files.\n\n"
@@ -1201,7 +1244,7 @@ def plot_all_sample_graphs(gui: Any) -> None:
                 from analysis import quick_analyze
                 from plotting import UnifiedPlotter
                 from analysis.aggregators.dc_endurance_analyzer import DCEnduranceAnalyzer
-                from plotting.unified_plotter import UnifiedPlotter as UP
+                from plotting import UnifiedPlotter as UP
                 import matplotlib
                 matplotlib.use("Agg")
                 processed_devices, total_success = 0, 0
@@ -1211,15 +1254,21 @@ def plot_all_sample_graphs(gui: Any) -> None:
                     dc_endurance_filename = None
                     if processed_devices % 1 == 0 and hasattr(gui, "analysis_status_label"):
                         gui.master.after(0, lambda t=f"Processing {section}{device_num} ({processed_devices}/{len(device_dirs)})...": gui.analysis_status_label.config(text=t))
-                    txt_files = [f for f in os.listdir(device_dir) if f.endswith(".txt") and f != "log.txt"]
+                    txt_files = [
+                        f for f in os.listdir(device_dir)
+                        if f.endswith(".txt") and f not in _exclude_txt
+                    ]
                     for txt_file in txt_files:
                         try:
                             file_path = os.path.join(device_dir, txt_file)
-                            data = np.loadtxt(file_path, skiprows=1)
-                            if data.shape[1] < 2:
+                            try:
+                                data = np.loadtxt(file_path, skiprows=1, ndmin=2)
+                                if data.ndim < 2 or data.shape[1] < 2:
+                                    continue
+                                voltage, current = data[:, 0], data[:, 1]
+                                timestamps = data[:, 2] if data.shape[1] > 2 else None
+                            except (ValueError, IndexError, OSError):
                                 continue
-                            voltage, current = data[:, 0], data[:, 1]
-                            timestamps = data[:, 2] if data.shape[1] > 2 else None
                             analysis_data = quick_analyze(
                                 voltage=list(voltage),
                                 current=list(current),
@@ -1228,8 +1277,12 @@ def plot_all_sample_graphs(gui: Any) -> None:
                             )
                             classification = analysis_data.get("classification", {})
                             device_type = classification.get("device_type", "")
-                            memristivity_score = classification.get("memristivity_score", 0)
-                            is_memristive = device_type in ["memristive", "memcapacitive"] or memristivity_score > 60
+                            raw_score = classification.get("memristivity_score")
+                            memristivity_score = float(raw_score) if raw_score is not None else 0.0
+                            is_memristive = (
+                                device_type in ["memristive", "memcapacitive"]
+                                or memristivity_score > 60
+                            )
                             measurement_type = "IV"
                             measurement_params = {}
                             if "ENDURANCE" in txt_file.upper():
