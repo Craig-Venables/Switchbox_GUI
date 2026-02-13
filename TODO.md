@@ -3,6 +3,9 @@
 Tracked items for future development. See also issue tracker and `.cursor/plans/` for
 larger refactoring plans.
 
+
+analsis needs speeding up, if already done skip, uses already existing analysis these can be toggleable 
+
 ---
 
 ## Feature Requests
