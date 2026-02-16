@@ -10,10 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# When frozen (PyInstaller), use bundle root so resources/Json_Files paths resolve
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    _PROJECT_ROOT = Path(sys._MEIPASS)
+else:
+    _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BASE_DIR = _PROJECT_ROOT
 
 sample_config: Dict[str, Any] = {
