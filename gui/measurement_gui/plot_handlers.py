@@ -16,7 +16,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -1189,6 +1189,231 @@ def plot_all_device_graphs(gui: Any) -> None:
         messagebox.showerror("Error", f"Failed to start plotting:\n{str(e)}")
 
 
+_EXCLUDE_TXT = {"log.txt", "classification_log.txt", "classification_summary.txt"}
+
+# Top-level dirs under base path that are not sample folders
+_NON_SAMPLE_DIRS = frozenset({"Multiplexer_Avg_Measure"})
+
+
+def get_discovered_sample_names(gui: Any) -> List[str]:
+    """
+    Discover sample folder names under the GUI's data save base path.
+    Returns sorted list of names; only includes dirs that look like samples
+    (optional: have at least one section/device subtree).
+    """
+    base = getattr(gui, "_get_base_save_path", None)
+    if not base or not callable(base):
+        return []
+    base_path = Path(base())
+    if not base_path.is_dir():
+        return []
+    names = []
+    for item in base_path.iterdir():
+        if not item.is_dir() or item.name in _NON_SAMPLE_DIRS:
+            continue
+        # Optional: only include if it has at least one section/device (letter/digit)
+        has_devices = False
+        for sub in item.iterdir():
+            if sub.is_dir() and len(sub.name) == 1 and sub.name.isalpha():
+                for subsub in sub.iterdir():
+                    if subsub.is_dir() and subsub.name.isdigit():
+                        has_devices = True
+                        break
+            if has_devices:
+                break
+        if has_devices:
+            names.append(item.name)
+    return sorted(names)
+
+
+def _run_plot_all_sample_graphs_for_dir(
+    gui: Any,
+    sample_dir: str,
+    sample_name: str,
+    status_callback: Optional[Callable[[str, str], None]] = None,
+) -> tuple[int, int]:
+    """
+    Run plot-all-sample-graphs logic for one sample directory.
+    Returns (processed_devices, total_success). Call from background thread.
+    """
+    from analysis import quick_analyze
+    from plotting import UnifiedPlotter
+    from analysis.aggregators.dc_endurance_analyzer import DCEnduranceAnalyzer
+    from plotting import UnifiedPlotter as UP
+    import matplotlib
+    matplotlib.use("Agg")
+
+    def _status(msg: str, fg: str = "#2196F3") -> None:
+        if status_callback:
+            status_callback(msg, fg)
+        elif hasattr(gui, "analysis_status_label"):
+            gui.master.after(0, lambda m=msg, c=fg: gui.analysis_status_label.config(text=m, fg=c))
+
+    device_dirs: List[tuple] = []
+    for item in os.listdir(sample_dir):
+        section_path = os.path.join(sample_dir, item)
+        if os.path.isdir(section_path) and len(item) == 1 and item.isalpha():
+            for subitem in os.listdir(section_path):
+                device_path = os.path.join(section_path, subitem)
+                if os.path.isdir(device_path) and subitem.isdigit():
+                    device_dirs.append((item, subitem, device_path))
+
+    if not device_dirs:
+        return 0, 0
+
+    processed_devices, total_success = 0, 0
+    for section, device_num, device_dir in device_dirs:
+        processed_devices += 1
+        _status(f"Processing {section}{device_num} ({processed_devices}/{len(device_dirs)})...")
+        device_voltage_data, device_current_data = [], []
+        dc_endurance_filename = None
+        txt_files = [
+            f for f in os.listdir(device_dir)
+            if f.endswith(".txt") and f not in _EXCLUDE_TXT
+        ]
+        for txt_file in txt_files:
+            try:
+                file_path = os.path.join(device_dir, txt_file)
+                try:
+                    data = np.loadtxt(file_path, skiprows=1, ndmin=2)
+                    if data.ndim < 2 or data.shape[1] < 2:
+                        continue
+                    voltage, current = data[:, 0], data[:, 1]
+                    timestamps = data[:, 2] if data.shape[1] > 2 else None
+                except (ValueError, IndexError, OSError):
+                    continue
+                analysis_data = quick_analyze(
+                    voltage=list(voltage),
+                    current=list(current),
+                    time=list(timestamps) if timestamps is not None else None,
+                    analysis_level="full",
+                )
+                classification = analysis_data.get("classification", {})
+                device_type = classification.get("device_type", "")
+                raw_score = classification.get("memristivity_score")
+                memristivity_score = float(raw_score) if raw_score is not None else 0.0
+                is_memristive = (
+                    device_type in ["memristive", "memcapacitive"]
+                    or memristivity_score > 60
+                )
+                measurement_type = "IV"
+                measurement_params = {}
+                if "ENDURANCE" in txt_file.upper():
+                    measurement_type = "Endurance"
+                    measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
+                elif "RETENTION" in txt_file.upper():
+                    measurement_type = "Retention"
+                    measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
+                graphs_dir = os.path.join(device_dir, "Graphs")
+                os.makedirs(graphs_dir, exist_ok=True)
+                filename_base = os.path.splitext(txt_file)[0]
+                sample_name_str = sample_name or ""
+                title_prefix = f"{sample_name_str} {section}{device_num}".strip()
+                plotter = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
+                if measurement_type != "Endurance":
+                    sweeps_in_file = UP._detect_sweeps_by_zero_crossings(voltage, current)
+                    if len(sweeps_in_file) >= 10:
+                        try:
+                            split_v_data = [voltage[s:e] for s, e in sweeps_in_file]
+                            split_c_data = [current[s:e] for s, e in sweeps_in_file]
+                            analyzer = DCEnduranceAnalyzer(
+                                split_voltage_data=split_v_data,
+                                split_current_data=split_c_data,
+                                file_name=filename_base,
+                                device_path=device_dir,
+                            )
+                            analyzer.analyze_and_plot()
+                        except Exception as e:
+                            print(f"[SAMPLE PLOT] DC endurance error for {txt_file}: {e}")
+                    else:
+                        device_voltage_data.append(voltage)
+                        device_current_data.append(current)
+                        if dc_endurance_filename is None:
+                            dc_endurance_filename = filename_base
+                if measurement_type == "Endurance":
+                    plotter.plot_endurance_analysis(
+                        voltage=voltage, current=current, timestamps=timestamps,
+                        device_name=filename_base, title_prefix=title_prefix,
+                        read_voltage=measurement_params.get("read_v", 0.2),
+                        save_name_cycle_resistance=f"{filename_base}_endurance_cycle_resistance.png",
+                        save_name_onoff_ratio=f"{filename_base}_endurance_onoff_ratio.png",
+                    )
+                elif measurement_type == "Retention":
+                    plotter.plot_retention_analysis(
+                        voltage=voltage, current=current, timestamps=timestamps,
+                        device_name=filename_base, title_prefix=title_prefix,
+                        read_voltage=measurement_params.get("read_v", 0.2),
+                        save_name_loglog=f"{filename_base}_retention_loglog.png",
+                        save_name_linear=f"{filename_base}_retention_linear.png",
+                        save_name_resistance=f"{filename_base}_retention_resistance.png",
+                    )
+                else:
+                    plot_title = f"{title_prefix} {filename_base} - IV Dashboard".strip()
+                    plotter.plot_iv_dashboard(
+                        voltage=voltage, current=current, time=timestamps,
+                        device_name=filename_base, title=plot_title,
+                        save_name=f"{filename_base}_iv_dashboard.png",
+                        sample_name=sample_name_str,
+                        section=section or "",
+                        device_num=device_num or "",
+                    )
+                    try:
+                        conduction_dir = os.path.join(graphs_dir, "conduction")
+                        sclc_dir = os.path.join(graphs_dir, "sclc_fit")
+                        os.makedirs(conduction_dir, exist_ok=True)
+                        os.makedirs(sclc_dir, exist_ok=True)
+                        plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
+                        plotter_cond.plot_conduction_analysis(
+                            voltage=voltage, current=current,
+                            device_name=filename_base,
+                            title=f"{title_prefix} {filename_base} - Conduction Analysis",
+                            save_name=f"{filename_base}_conduction.png",
+                        )
+                        plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
+                        plotter_sclc.plot_sclc_fit(
+                            voltage=voltage, current=current,
+                            device_name=filename_base,
+                            title=f"{title_prefix} {filename_base} - SCLC Fit",
+                            save_name=f"{filename_base}_sclc_fit.png",
+                        )
+                    except Exception as e:
+                        print(f"[SAMPLE PLOT] Error plotting conduction/SCLC for {txt_file}: {e}")
+                total_success += 1
+            except Exception as e:
+                print(f"Error processing {txt_file}: {e}")
+        if len(device_voltage_data) >= 10 and len(device_voltage_data) == len(device_current_data):
+            try:
+                endurance_filename = dc_endurance_filename or f"{section}{device_num}"
+                analyzer = DCEnduranceAnalyzer(
+                    split_voltage_data=device_voltage_data,
+                    split_current_data=device_current_data,
+                    file_name=endurance_filename,
+                    device_path=device_dir,
+                )
+                analyzer.analyze_and_plot()
+            except Exception as e:
+                print(f"[SAMPLE PLOT] DC endurance analysis error for {section}{device_num}: {e}")
+        elif len(device_voltage_data) > 0:
+            try:
+                combined_voltage = np.concatenate(device_voltage_data)
+                combined_current = np.concatenate(device_current_data)
+                sweeps = UP._detect_sweeps_by_zero_crossings(combined_voltage, combined_current)
+                if len(sweeps) >= 10:
+                    split_v_data = [combined_voltage[s:e] for s, e in sweeps]
+                    split_c_data = [combined_current[s:e] for s, e in sweeps]
+                    endurance_filename = dc_endurance_filename or f"{section}{device_num}"
+                    analyzer = DCEnduranceAnalyzer(
+                        split_voltage_data=split_v_data,
+                        split_current_data=split_c_data,
+                        file_name=endurance_filename,
+                        device_path=device_dir,
+                    )
+                    analyzer.analyze_and_plot()
+            except Exception as e:
+                print(f"[SAMPLE PLOT] DC endurance detection error for {section}{device_num}: {e}")
+    return processed_devices, total_success
+
+
 def plot_all_sample_graphs(gui: Any) -> None:
     """Plot all graphs for ALL devices in the selected sample directory."""
     try:
@@ -1222,9 +1447,8 @@ def plot_all_sample_graphs(gui: Any) -> None:
         if not device_dirs:
             messagebox.showinfo("No Devices", f"No device folders found in {sample_dir}")
             return
-        _exclude_txt = {"log.txt", "classification_log.txt", "classification_summary.txt"}
         total_files = sum(
-            len([f for f in os.listdir(d[2]) if f.endswith(".txt") and f not in _exclude_txt])
+            len([f for f in os.listdir(d[2]) if f.endswith(".txt") and f not in _EXCLUDE_TXT])
             for d in device_dirs
         )
         response = messagebox.askyesno(
@@ -1241,172 +1465,54 @@ def plot_all_sample_graphs(gui: Any) -> None:
 
         def run_sample_plotting() -> None:
             try:
-                from analysis import quick_analyze
-                from plotting import UnifiedPlotter
-                from analysis.aggregators.dc_endurance_analyzer import DCEnduranceAnalyzer
-                from plotting import UnifiedPlotter as UP
-                import matplotlib
-                matplotlib.use("Agg")
-                processed_devices, total_success = 0, 0
-                for section, device_num, device_dir in device_dirs:
-                    processed_devices += 1
-                    device_voltage_data, device_current_data = [], []
-                    dc_endurance_filename = None
-                    if processed_devices % 1 == 0 and hasattr(gui, "analysis_status_label"):
-                        gui.master.after(0, lambda t=f"Processing {section}{device_num} ({processed_devices}/{len(device_dirs)})...": gui.analysis_status_label.config(text=t))
-                    txt_files = [
-                        f for f in os.listdir(device_dir)
-                        if f.endswith(".txt") and f not in _exclude_txt
-                    ]
-                    for txt_file in txt_files:
-                        try:
-                            file_path = os.path.join(device_dir, txt_file)
-                            try:
-                                data = np.loadtxt(file_path, skiprows=1, ndmin=2)
-                                if data.ndim < 2 or data.shape[1] < 2:
-                                    continue
-                                voltage, current = data[:, 0], data[:, 1]
-                                timestamps = data[:, 2] if data.shape[1] > 2 else None
-                            except (ValueError, IndexError, OSError):
-                                continue
-                            analysis_data = quick_analyze(
-                                voltage=list(voltage),
-                                current=list(current),
-                                time=list(timestamps) if timestamps is not None else None,
-                                analysis_level="full",
-                            )
-                            classification = analysis_data.get("classification", {})
-                            device_type = classification.get("device_type", "")
-                            raw_score = classification.get("memristivity_score")
-                            memristivity_score = float(raw_score) if raw_score is not None else 0.0
-                            is_memristive = (
-                                device_type in ["memristive", "memcapacitive"]
-                                or memristivity_score > 60
-                            )
-                            measurement_type = "IV"
-                            measurement_params = {}
-                            if "ENDURANCE" in txt_file.upper():
-                                measurement_type = "Endurance"
-                                measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
-                            elif "RETENTION" in txt_file.upper():
-                                measurement_type = "Retention"
-                                measurement_params = {"read_v": 0.2, "read_voltage": 0.2}
-                            graphs_dir = os.path.join(device_dir, "Graphs")
-                            os.makedirs(graphs_dir, exist_ok=True)
-                            filename_base = os.path.splitext(txt_file)[0]
-                            sample_name_str = sample_name or ""
-                            title_prefix = f"{sample_name_str} {section}{device_num}".strip()
-                            plotter = UnifiedPlotter(save_dir=graphs_dir, auto_close=True)
-                            if measurement_type != "Endurance":
-                                sweeps_in_file = UP._detect_sweeps_by_zero_crossings(voltage, current)
-                                if len(sweeps_in_file) >= 10:
-                                    try:
-                                        split_v_data = [voltage[s:e] for s, e in sweeps_in_file]
-                                        split_c_data = [current[s:e] for s, e in sweeps_in_file]
-                                        analyzer = DCEnduranceAnalyzer(
-                                            split_voltage_data=split_v_data,
-                                            split_current_data=split_c_data,
-                                            file_name=filename_base,
-                                            device_path=device_dir,
-                                        )
-                                        analyzer.analyze_and_plot()
-                                    except Exception as e:
-                                        print(f"[SAMPLE PLOT] DC endurance error for {txt_file}: {e}")
-                                else:
-                                    device_voltage_data.append(voltage)
-                                    device_current_data.append(current)
-                                    if dc_endurance_filename is None:
-                                        dc_endurance_filename = filename_base
-                            if measurement_type == "Endurance":
-                                plotter.plot_endurance_analysis(
-                                    voltage=voltage, current=current, timestamps=timestamps,
-                                    device_name=filename_base, title_prefix=title_prefix,
-                                    read_voltage=measurement_params.get("read_v", 0.2),
-                                    save_name_cycle_resistance=f"{filename_base}_endurance_cycle_resistance.png",
-                                    save_name_onoff_ratio=f"{filename_base}_endurance_onoff_ratio.png",
-                                )
-                            elif measurement_type == "Retention":
-                                plotter.plot_retention_analysis(
-                                    voltage=voltage, current=current, timestamps=timestamps,
-                                    device_name=filename_base, title_prefix=title_prefix,
-                                    read_voltage=measurement_params.get("read_v", 0.2),
-                                    save_name_loglog=f"{filename_base}_retention_loglog.png",
-                                    save_name_linear=f"{filename_base}_retention_linear.png",
-                                    save_name_resistance=f"{filename_base}_retention_resistance.png",
-                                )
-                            else:
-                                plot_title = f"{title_prefix} {filename_base} - IV Dashboard".strip()
-                                plotter.plot_iv_dashboard(
-                                    voltage=voltage, current=current, time=timestamps,
-                                    device_name=filename_base, title=plot_title,
-                                    save_name=f"{filename_base}_iv_dashboard.png",
-                                    sample_name=sample_name_str,
-                                    section=section or "",
-                                    device_num=device_num or "",
-                                )
-                                try:
-                                    conduction_dir = os.path.join(graphs_dir, "conduction")
-                                    sclc_dir = os.path.join(graphs_dir, "sclc_fit")
-                                    os.makedirs(conduction_dir, exist_ok=True)
-                                    os.makedirs(sclc_dir, exist_ok=True)
-                                    plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
-                                    plotter_cond.plot_conduction_analysis(
-                                        voltage=voltage, current=current,
-                                        device_name=filename_base,
-                                        title=f"{title_prefix} {filename_base} - Conduction Analysis",
-                                        save_name=f"{filename_base}_conduction.png",
-                                    )
-                                    plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
-                                    plotter_sclc.plot_sclc_fit(
-                                        voltage=voltage, current=current,
-                                        device_name=filename_base,
-                                        title=f"{title_prefix} {filename_base} - SCLC Fit",
-                                        save_name=f"{filename_base}_sclc_fit.png",
-                                    )
-                                except Exception as e:
-                                    print(f"[SAMPLE PLOT] Error plotting conduction/SCLC for {txt_file}: {e}")
-                            total_success += 1
-                        except Exception as e:
-                            print(f"Error processing {txt_file}: {e}")
-                    if len(device_voltage_data) >= 10 and len(device_voltage_data) == len(device_current_data):
-                        try:
-                            endurance_filename = dc_endurance_filename or f"{section}{device_num}"
-                            analyzer = DCEnduranceAnalyzer(
-                                split_voltage_data=device_voltage_data,
-                                split_current_data=device_current_data,
-                                file_name=endurance_filename,
-                                device_path=device_dir,
-                            )
-                            analyzer.analyze_and_plot()
-                        except Exception as e:
-                            print(f"[SAMPLE PLOT] DC endurance analysis error for {section}{device_num}: {e}")
-                    elif len(device_voltage_data) > 0:
-                        try:
-                            combined_voltage = np.concatenate(device_voltage_data)
-                            combined_current = np.concatenate(device_current_data)
-                            sweeps = UP._detect_sweeps_by_zero_crossings(combined_voltage, combined_current)
-                            if len(sweeps) >= 10:
-                                split_v_data = [combined_voltage[s:e] for s, e in sweeps]
-                                split_c_data = [combined_current[s:e] for s, e in sweeps]
-                                endurance_filename = dc_endurance_filename or f"{section}{device_num}"
-                                analyzer = DCEnduranceAnalyzer(
-                                    split_voltage_data=split_v_data,
-                                    split_current_data=split_c_data,
-                                    file_name=endurance_filename,
-                                    device_path=device_dir,
-                                )
-                                analyzer.analyze_and_plot()
-                        except Exception as e:
-                            print(f"[SAMPLE PLOT] DC endurance detection error for {section}{device_num}: {e}")
-                msg = f"Completed! Generated plots for {processed_devices} devices ({total_success} files)."
+                _devices, _success = _run_plot_all_sample_graphs_for_dir(
+                    gui, sample_dir, sample_name or ""
+                )
+                msg = f"Completed! Generated plots for {_devices} devices ({_success} files)."
                 gui.master.after(0, lambda: messagebox.showinfo("Done", msg))
-                gui.master.after(0, lambda: gui.analysis_status_label.config(text=msg, fg="green"))
+                gui.master.after(0, lambda: gui.analysis_status_label.config(text=msg, fg="#4CAF50"))
             except Exception as e:
-                gui.master.after(0, lambda: gui.analysis_status_label.config(text=f"Error: {e}", fg="red"))
+                gui.master.after(0, lambda: gui.analysis_status_label.config(text=f"Error: {e}", fg="#F44336"))
 
         threading.Thread(target=run_sample_plotting, daemon=True).start()
     except Exception as e:
         messagebox.showerror("Error", f"Failed to start plotting: {e}")
+
+
+def plot_all_sample_graphs_batch(
+    gui: Any,
+    sample_names: List[str],
+    base_path: str,
+) -> None:
+    """Run plot-all-sample-graphs for each selected sample in a single background thread."""
+    def run_batch() -> None:
+        total_devices, total_files = 0, 0
+        n = len(sample_names)
+
+        def status_cb(msg: str, fg: str = "#2196F3") -> None:
+            if hasattr(gui, "analysis_status_label"):
+                gui.master.after(0, lambda m=msg, c=fg: gui.analysis_status_label.config(text=m, fg=c))
+
+        try:
+            for idx, name in enumerate(sample_names, 1):
+                sample_dir = os.path.join(base_path, name)
+                if not os.path.isdir(sample_dir):
+                    status_cb(f"Skipping {name} (not a directory)", fg="#FF9800")
+                    continue
+                status_cb(f"Sample {idx}/{n}: {name}...", fg="#2196F3")
+                devs, success = _run_plot_all_sample_graphs_for_dir(
+                    gui, sample_dir, name, status_callback=status_cb
+                )
+                total_devices += devs
+                total_files += success
+            msg = f"Completed! {n} sample(s), {total_devices} devices, {total_files} files plotted."
+            gui.master.after(0, lambda: messagebox.showinfo("Batch plotting complete", msg))
+            gui.master.after(0, lambda: gui.analysis_status_label.config(text=msg, fg="#4CAF50"))
+        except Exception as e:
+            gui.master.after(0, lambda: gui.analysis_status_label.config(text=f"Error: {e}", fg="#F44336"))
+            gui.master.after(0, lambda: messagebox.showerror("Batch plotting error", str(e)))
+
+    threading.Thread(target=run_batch, daemon=True).start()
 
 
 def run_full_sample_analysis(gui: Any) -> None:

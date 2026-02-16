@@ -34,7 +34,7 @@ def build_graphing_tab(builder: Any, notebook: ttk.Notebook) -> None:
     main_panel = builder._create_scrollable_panel(tab)
     main_panel._container.grid(row=0, column=0, sticky="nsew", padx=20, pady=10)
 
-    # Two columns: left = main analysis, right = Impedance Analyzer
+    # Three columns: left = main analysis, middle = batch plotting, right = Impedance Analyzer
     content_row = tk.Frame(main_panel, bg=COLOR_BG)
     content_row.pack(fill='both', expand=True)
 
@@ -257,6 +257,113 @@ Output location: {sample_dir}/sample_analysis/
         justify=tk.LEFT,
         anchor="w"
     ).pack(fill='x')
+
+    # Middle column: Batch sample plotting
+    middle_col = tk.Frame(content_row, bg=COLOR_BG, width=400)
+    middle_col.pack(side=tk.LEFT, fill=tk.BOTH, padx=(20, 0))
+    middle_col.pack_propagate(False)
+
+    batch_frame = tk.LabelFrame(
+        middle_col,
+        text="3. Batch sample plotting",
+        font=("Segoe UI", 11, "bold"),
+        bg=COLOR_BG,
+        padx=15,
+        pady=15,
+    )
+    batch_frame.pack(fill="x", pady=(0, 10))
+    batch_frame.columnconfigure(0, weight=1)
+
+    tk.Label(
+        batch_frame,
+        text="Run \"Plot All Sample Graphs\" for multiple samples from the data save folder. Select one or more, or use Select all.",
+        font=("Segoe UI", 9),
+        bg=COLOR_BG,
+        fg="#666666",
+        wraplength=360,
+        justify=tk.LEFT,
+    ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+    list_outer = tk.Frame(batch_frame, bg=COLOR_BG)
+    list_outer.grid(row=1, column=0, columnspan=2, sticky="nsew", pady=(0, 10))
+    list_outer.columnconfigure(0, weight=1)
+    list_outer.rowconfigure(0, weight=1)
+
+    batch_canvas = tk.Canvas(list_outer, bg=COLOR_BG, highlightthickness=0)
+    batch_scrollbar = ttk.Scrollbar(list_outer, orient="vertical", command=batch_canvas.yview)
+    gui.batch_sample_checkbox_frame = tk.Frame(batch_canvas, bg=COLOR_BG)
+    batch_canvas_window = batch_canvas.create_window((0, 0), window=gui.batch_sample_checkbox_frame, anchor="nw")
+
+    def _on_frame_configure(e=None):
+        batch_canvas.configure(scrollregion=batch_canvas.bbox("all"))
+
+    def _on_canvas_configure(e):
+        batch_canvas.itemconfig(batch_canvas_window, width=e.width)
+
+    gui.batch_sample_checkbox_frame.bind("<Configure>", _on_frame_configure)
+    batch_canvas.bind("<Configure>", _on_canvas_configure)
+    batch_canvas.configure(yscrollcommand=batch_scrollbar.set)
+
+    batch_canvas.grid(row=0, column=0, sticky="nsew")
+    batch_scrollbar.grid(row=0, column=1, sticky="ns")
+    batch_canvas.config(height=200)
+    try:
+        def _on_mousewheel(event, canvas=batch_canvas):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        batch_canvas.bind("<Enter>", lambda e: batch_canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        batch_canvas.bind("<Leave>", lambda e: batch_canvas.unbind_all("<MouseWheel>"))
+    except Exception:
+        pass
+
+    btn_row = tk.Frame(batch_frame, bg=COLOR_BG)
+    btn_row.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 5))
+    tk.Button(
+        btn_row,
+        text="Refresh",
+        command=gui.refresh_batch_sample_list,
+        font=("Segoe UI", 9),
+        bg="#757575",
+        fg="white",
+        padx=12,
+        pady=5,
+        cursor="hand2",
+    ).pack(side="left", padx=(0, 8))
+    tk.Button(
+        btn_row,
+        text="Select all",
+        command=gui.select_all_batch_samples,
+        font=("Segoe UI", 9),
+        bg="#2196F3",
+        fg="white",
+        padx=12,
+        pady=5,
+        cursor="hand2",
+    ).pack(side="left", padx=(0, 8))
+    tk.Button(
+        btn_row,
+        text="Deselect all",
+        command=gui.deselect_all_batch_samples,
+        font=("Segoe UI", 9),
+        bg="#2196F3",
+        fg="white",
+        padx=12,
+        pady=5,
+        cursor="hand2",
+    ).pack(side="left", padx=(0, 8))
+    tk.Button(
+        btn_row,
+        text="Plot All Sample Graphs (selected)",
+        command=gui.plot_selected_batch_samples,
+        font=("Segoe UI", 10),
+        bg="#9C27B0",
+        fg="white",
+        padx=20,
+        pady=6,
+        cursor="hand2",
+    ).pack(side="left")
+
+    gui.batch_sample_vars = []
+    gui.refresh_batch_sample_list()
 
     # Right column: Impedance Analyzer
     right_col = tk.Frame(content_row, bg=COLOR_BG, width=320)

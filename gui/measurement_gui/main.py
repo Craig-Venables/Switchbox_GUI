@@ -150,8 +150,10 @@ from gui.measurement_gui.plot_handlers import (
     clear_sample_folder_selection as _clear_sample_folder_selection,
     clear_stats_plots as _clear_stats_plots,
     generate_sequence_summary as _generate_sequence_summary,
+    get_discovered_sample_names as _get_discovered_sample_names,
     plot_all_device_graphs as _plot_all_device_graphs,
     plot_all_sample_graphs as _plot_all_sample_graphs,
+    plot_all_sample_graphs_batch as _plot_all_sample_graphs_batch,
     plot_measurement_in_background as _plot_measurement_in_background,
     refresh_stats_list as _refresh_stats_list,
     run_full_sample_analysis as _run_full_sample_analysis,
@@ -181,6 +183,7 @@ from gui.measurement_gui.custom_sweeps import (
     on_custom_sweep_method_selected as _on_custom_sweep_method_selected,
     save_sweep_combinations_to_json as _save_sweep_combinations_to_json,
 )
+from gui.measurement_gui.layout.constants import COLOR_BG
 from gui.measurement_gui.layout_builder import MeasurementGUILayoutBuilder
 from gui.measurement_gui.plot_panels import MeasurementPlotPanels
 from gui.measurement_gui.plot_updaters import PlotUpdaters
@@ -2000,6 +2003,67 @@ class MeasurementGUI:
     def run_full_sample_analysis(self) -> None:
         """Run comprehensive sample analysis with all plots and data exports."""
         _run_full_sample_analysis(self)
+
+    def get_discovered_samples(self) -> list:
+        """Return sorted list of sample names under the data save base path."""
+        return _get_discovered_sample_names(self)
+
+    def refresh_batch_sample_list(self) -> None:
+        """Refresh the batch sample checkbox list from the data save folder."""
+        if not getattr(self, "batch_sample_checkbox_frame", None):
+            return
+        for w in self.batch_sample_checkbox_frame.winfo_children():
+            w.destroy()
+        self.batch_sample_vars = []
+        names = self.get_discovered_samples()
+        if not names:
+            if hasattr(self, "analysis_status_label"):
+                self.analysis_status_label.config(
+                    text=f"No samples found in {self._get_base_save_path()}",
+                    fg="#666666",
+                )
+        for name in names:
+            var = tk.BooleanVar(value=False)
+            self.batch_sample_vars.append((name, var))
+            cb = tk.Checkbutton(
+                self.batch_sample_checkbox_frame,
+                text=name,
+                variable=var,
+                font=("Segoe UI", 9),
+                bg=COLOR_BG,
+                activebackground=COLOR_BG,
+                anchor="w",
+            )
+            cb.pack(fill="x", pady=1)
+
+    def select_all_batch_samples(self) -> None:
+        """Select all samples in the batch list."""
+        for _name, var in getattr(self, "batch_sample_vars", []):
+            var.set(True)
+
+    def deselect_all_batch_samples(self) -> None:
+        """Deselect all samples in the batch list."""
+        for _name, var in getattr(self, "batch_sample_vars", []):
+            var.set(False)
+
+    def plot_selected_batch_samples(self) -> None:
+        """Run Plot All Sample Graphs for each selected sample in the batch list."""
+        selected = [
+            name for name, var in getattr(self, "batch_sample_vars", [])
+            if var.get()
+        ]
+        if not selected:
+            from tkinter import messagebox
+            messagebox.showinfo("No selection", "Select at least one sample to plot.")
+            return
+        base_path = self._get_base_save_path()
+        if hasattr(self, "analysis_status_label"):
+            self.analysis_status_label.config(
+                text=f"Starting batch plotting for {len(selected)} sample(s)...",
+                fg="#2196F3",
+            )
+            self.master.update_idletasks()
+        _plot_all_sample_graphs_batch(self, selected, base_path)
 
     # ======================================================================
     # Custom Sweeps Graphing Methods
