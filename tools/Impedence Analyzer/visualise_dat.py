@@ -9,7 +9,7 @@ Path can be a single .dat file or a folder (all .dat files inside are plotted).
 Set DATA_PATH below for a default, or pass as first argument.
 
 Options:
-  MAX_FREQ = 1e6  — remove data above this frequency (noise); set to None to keep all.
+  MAX_FREQ = 1e6  — data above this frequency (Hz) is greyed out on plots (noise); set to None to show all as normal.
   SAVE_GRAPHS = True  — save figures into <path>/graphs/
   SAVE_ORIGIN = True  — export Origin-ready CSVs into <path>/origin_data/
 """
@@ -20,7 +20,7 @@ import sys
 # Default: set to your .dat file or folder, or leave None and pass as argument
 DATA_PATH = None  # e.g. Path(r"C:\...\1_onstate_10pt_decade.dat") or Path(r"C:\...\Impedance Analyzer")
 
-# Remove data above this frequency (Hz); system noise above 1e6. Set None to keep all.
+# Data above this frequency (Hz) is greyed out on plots (system noise). Set None to show all as normal.
 MAX_FREQ = 1e6
 
 # Save figures and Origin CSVs under the given path
@@ -32,11 +32,11 @@ def main():
     try:
         from dat_loader import load_smart_dat
         from impedance_plots import plot_magnitude_vs_frequency
-        from origin_export import filter_by_max_frequency, export_origin_csv
+        from origin_export import export_origin_csv
     except ImportError:
         from dat_loader import load_smart_dat
         from impedance_plots import plot_magnitude_vs_frequency
-        from origin_export import filter_by_max_frequency, export_origin_csv
+        from origin_export import export_origin_csv
 
     import matplotlib.pyplot as plt
 
@@ -60,11 +60,6 @@ def main():
     if origin_dir:
         origin_dir.mkdir(parents=True, exist_ok=True)
 
-    def apply_filter(df):
-        if MAX_FREQ is not None:
-            return filter_by_max_frequency(df, max_freq=MAX_FREQ)
-        return df
-
     data = {}
     if path.is_file():
         if path.suffix.lower() != ".dat":
@@ -75,12 +70,12 @@ def main():
         except Exception as e:
             print("Failed to load", path.name, ":", e)
             return
-        data[path.stem] = apply_filter(df)
+        data[path.stem] = df
     else:
         for f in sorted(path.glob("*.dat")):
             try:
                 df = load_smart_dat(f)
-                data[f.stem] = apply_filter(df)
+                data[f.stem] = df
             except Exception as e:
                 print("Skip", f.name, ":", e)
 
@@ -94,13 +89,13 @@ def main():
     if origin_dir:
         print("Saved Origin CSVs to", origin_dir)
 
-    print("Plotting:", list(data.keys()), f"{'(filtered to f <= {MAX_FREQ} Hz)' if MAX_FREQ else ''}")
+    print("Plotting:", list(data.keys()), f"{'(data above {MAX_FREQ} Hz greyed out)' if MAX_FREQ else ''}")
 
     fig, ax = plt.subplots(figsize=(8, 5))
     for name, df in data.items():
         if df.empty:
             continue
-        plot_magnitude_vs_frequency(df, ax=ax, label=name)
+        plot_magnitude_vs_frequency(df, ax=ax, label=name, max_trusted_freq=MAX_FREQ)
     ax.legend()
     fig.suptitle("Impedance magnitude (from .dat)" + (f" — {path.name}" if path.is_dir() else ""))
     plt.tight_layout()
