@@ -46,14 +46,41 @@ def _ensure_axes(ax: Optional[plt.Axes] = None) -> plt.Axes:
     return ax
 
 
+def _plot_with_trusted_region(
+    ax: plt.Axes,
+    f: np.ndarray,
+    y: np.ndarray,
+    scale: str,
+    label: str,
+    max_trusted_freq: Optional[float],
+) -> None:
+    """Plot y vs f; if max_trusted_freq set, plot f > max_trusted_freq in grey."""
+    if max_trusted_freq is not None and f.size > 0:
+        trusted = f <= max_trusted_freq
+        untrusted = ~trusted
+        if np.any(trusted):
+            plot_fn = getattr(ax, scale)
+            plot_fn(f[trusted], y[trusted], ".-", label=label)
+        if np.any(untrusted):
+            plot_fn = getattr(ax, scale)
+            plot_fn(f[untrusted], y[untrusted], ".-", color="#888888", alpha=0.5, zorder=0, label="_nolegend_")
+            if not getattr(ax, "_caution_legend_added", False):
+                ax.plot([], [], color="#888888", alpha=0.5, linewidth=2, label="f > 1 MHz (caution)")
+                ax._caution_legend_added = True
+    else:
+        plot_fn = getattr(ax, scale)
+        plot_fn(f, y, ".-", label=label)
+
+
 def plot_magnitude_vs_frequency(
     df: pd.DataFrame,
     ax: Optional[plt.Axes] = None,
     label: Optional[str] = None,
     freq_col: str = FREQ,
     mag_col: str = MAG,
+    max_trusted_freq: Optional[float] = None,
 ) -> plt.Axes:
-    """Plot impedance magnitude |Z| vs frequency (log-log)."""
+    """Plot impedance magnitude |Z| vs frequency (log-log). Data above max_trusted_freq is greyed out."""
     ax = _ensure_axes(ax)
     fc = _col(df, freq_col) or freq_col
     mc = _col(df, mag_col) or mag_col
@@ -62,7 +89,7 @@ def plot_magnitude_vs_frequency(
     out = df[[fc, mc]].dropna()
     f = out[fc].values
     z = np.abs(out[mc].values)
-    ax.loglog(f, z, ".-", label=label or "data")
+    _plot_with_trusted_region(ax, f, z, "loglog", label or "data", max_trusted_freq)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("|Z| (Ω)")
     ax.grid(True, which="both", alpha=0.3)
@@ -75,15 +102,18 @@ def plot_phase_vs_frequency(
     label: Optional[str] = None,
     freq_col: str = FREQ,
     phase_col: str = PHASE,
+    max_trusted_freq: Optional[float] = None,
 ) -> plt.Axes:
-    """Plot impedance phase (degrees) vs frequency (semilog)."""
+    """Plot impedance phase (degrees) vs frequency (semilog). Data above max_trusted_freq is greyed out."""
     ax = _ensure_axes(ax)
     fc = _col(df, freq_col) or freq_col
     pc = _col(df, phase_col) or phase_col
     if fc not in df.columns or pc not in df.columns:
         raise KeyError(f"Need columns {freq_col!r} and {phase_col!r}. Got: {list(df.columns)}")
     out = df[[fc, pc]].dropna()
-    ax.semilogx(out[fc].values, out[pc].values, ".-", label=label or "data")
+    f = out[fc].values
+    y = out[pc].values
+    _plot_with_trusted_region(ax, f, y, "semilogx", label or "data", max_trusted_freq)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Phase (°)")
     ax.grid(True, which="both", alpha=0.3)
@@ -96,17 +126,19 @@ def plot_capacitance_vs_frequency(
     label: Optional[str] = None,
     freq_col: str = FREQ,
     cap_col: str = CAP,
+    max_trusted_freq: Optional[float] = None,
 ) -> plt.Axes:
-    """Plot capacitance vs frequency (log-log)."""
+    """Plot capacitance vs frequency (log-log). Data above max_trusted_freq is greyed out."""
     ax = _ensure_axes(ax)
     fc = _col(df, freq_col) or freq_col
     cc = _col(df, cap_col) or cap_col
     if fc not in df.columns or cc not in df.columns:
         raise KeyError(f"Need columns {freq_col!r} and {cap_col!r}. Got: {list(df.columns)}")
     out = df[[fc, cc]].dropna()
+    f = out[fc].values
     c = np.abs(out[cc].values)
     c = np.where(c <= 0, np.nan, c)
-    ax.loglog(out[fc].values, c, ".-", label=label or "data")
+    _plot_with_trusted_region(ax, f, c, "loglog", label or "data", max_trusted_freq)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("|C| (F)")
     ax.grid(True, which="both", alpha=0.3)
@@ -120,20 +152,37 @@ def plot_nyquist(
     freq_col: str = FREQ,
     mag_col: str = MAG,
     phase_col: str = PHASE,
+    max_trusted_freq: Optional[float] = None,
 ) -> plt.Axes:
-    """Plot Nyquist: -Im(Z) vs Re(Z). Z = |Z| * exp(j*phase_rad)."""
+    """Plot Nyquist: -Im(Z) vs Re(Z). Z = |Z| * exp(j*phase_rad). Points above max_trusted_freq are greyed out."""
     ax = _ensure_axes(ax)
+    fc = _col(df, freq_col) or freq_col
     mc = _col(df, mag_col) or mag_col
     pc = _col(df, phase_col) or phase_col
     if mc not in df.columns or pc not in df.columns:
         raise KeyError(f"Need columns {mag_col!r} and {phase_col!r} for Nyquist. Got: {list(df.columns)}")
-    out = df[[mc, pc]].dropna()
+    cols = [mc, pc]
+    if fc in df.columns:
+        cols.append(fc)
+    out = df[cols].dropna()
     mag = np.abs(out[mc].values)
     phase_deg = out[pc].values
     phase_rad = np.deg2rad(phase_deg)
     re_z = mag * np.cos(phase_rad)
     im_z = mag * np.sin(phase_rad)
-    ax.plot(re_z, -im_z, ".-", label=label or "data")
+    if max_trusted_freq is not None and fc in out.columns and out[fc].size > 0:
+        f = out[fc].values
+        trusted = f <= max_trusted_freq
+        untrusted = ~trusted
+        if np.any(trusted):
+            ax.plot(re_z[trusted], -im_z[trusted], ".-", label=label or "data")
+        if np.any(untrusted):
+            ax.plot(re_z[untrusted], -im_z[untrusted], ".-", color="#888888", alpha=0.5, zorder=0, label="_nolegend_")
+            if not getattr(ax, "_caution_legend_added", False):
+                ax.plot([], [], color="#888888", alpha=0.5, linewidth=2, label="f > 1 MHz (caution)")
+                ax._caution_legend_added = True
+    else:
+        ax.plot(re_z, -im_z, ".-", label=label or "data")
     ax.set_xlabel("Re(Z) (Ω)")
     ax.set_ylabel("-Im(Z) (Ω)")
     # Equal scale (1:1) on x and y so circles look circular
@@ -153,18 +202,19 @@ def plot_all(
     title: str = "Impedance",
     label: Optional[str] = None,
     show: bool = True,
+    max_trusted_freq: Optional[float] = None,
 ) -> plt.Figure:
     """Create figure: |Z| vs f, and if present phase, C, Nyquist. Skips panels when columns missing.
-    Returns the figure; if show=True (default), calls plt.show()."""
+    Data above max_trusted_freq (Hz) is greyed out. Returns the figure; if show=True (default), calls plt.show()."""
     panels = []
     if _has_cols(df, FREQ, MAG):
-        panels.append(("|Z| vs f", lambda ax: plot_magnitude_vs_frequency(df, ax=ax, label=label)))
+        panels.append(("|Z| vs f", lambda ax: plot_magnitude_vs_frequency(df, ax=ax, label=label, max_trusted_freq=max_trusted_freq)))
     if _has_cols(df, FREQ, PHASE):
-        panels.append(("Phase vs f", lambda ax: plot_phase_vs_frequency(df, ax=ax, label=label)))
+        panels.append(("Phase vs f", lambda ax: plot_phase_vs_frequency(df, ax=ax, label=label, max_trusted_freq=max_trusted_freq)))
     if _has_cols(df, FREQ, CAP):
-        panels.append(("C vs f", lambda ax: plot_capacitance_vs_frequency(df, ax=ax, label=label)))
+        panels.append(("C vs f", lambda ax: plot_capacitance_vs_frequency(df, ax=ax, label=label, max_trusted_freq=max_trusted_freq)))
     if _has_cols(df, MAG, PHASE):
-        panels.append(("Nyquist", lambda ax: plot_nyquist(df, ax=ax, label=label)))
+        panels.append(("Nyquist", lambda ax: plot_nyquist(df, ax=ax, label=label, max_trusted_freq=max_trusted_freq)))
 
     if not panels:
         raise KeyError(f"No plottable columns. Need at least ({FREQ}, {MAG}). Got: {list(df.columns)}")
@@ -190,10 +240,12 @@ def plot_folder_comparison(
     data: Dict[str, pd.DataFrame],
     plot_type: str = "magnitude",
     figsize: tuple = (7, 5),
+    max_trusted_freq: Optional[float] = None,
 ) -> plt.Figure:
     """
     Overlay multiple datasets (e.g. on/off state, different bias) on one plot.
     Skips datasets that don't have the required columns for plot_type.
+    Data above max_trusted_freq (Hz) is greyed out.
 
     plot_type : one of "magnitude", "phase", "capacitance", "nyquist"
     """
@@ -212,13 +264,13 @@ def plot_folder_comparison(
         if df.empty or not _has_cols(df, *required[plot_type]):
             continue
         if plot_type == "magnitude":
-            plot_magnitude_vs_frequency(df, ax=ax, label=name)
+            plot_magnitude_vs_frequency(df, ax=ax, label=name, max_trusted_freq=max_trusted_freq)
         elif plot_type == "phase":
-            plot_phase_vs_frequency(df, ax=ax, label=name)
+            plot_phase_vs_frequency(df, ax=ax, label=name, max_trusted_freq=max_trusted_freq)
         elif plot_type == "capacitance":
-            plot_capacitance_vs_frequency(df, ax=ax, label=name)
+            plot_capacitance_vs_frequency(df, ax=ax, label=name, max_trusted_freq=max_trusted_freq)
         else:
-            plot_nyquist(df, ax=ax, label=name)
+            plot_nyquist(df, ax=ax, label=name, max_trusted_freq=max_trusted_freq)
         n_plotted += 1
     if n_plotted == 0:
         ax.text(0.5, 0.5, f"No datasets with required columns for {plot_type}", ha="center", va="center", transform=ax.transAxes)

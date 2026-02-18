@@ -2816,7 +2816,7 @@ class MeasurementGUI:
         # Big bold title
         title_label = tk.Label(
             top_frame,
-            text="CRAIG'S CRAZY FUN IV CONTROL PANEL",
+            text="IV / Pulse Control Panel",
             font=("Helvetica", 12, "bold"),
             fg="black"
         )
