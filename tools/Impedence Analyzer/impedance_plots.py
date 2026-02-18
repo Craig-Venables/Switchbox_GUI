@@ -9,7 +9,7 @@ Produces:
 """
 
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -92,6 +92,7 @@ def plot_magnitude_vs_frequency(
     _plot_with_trusted_region(ax, f, z, "loglog", label or "data", max_trusted_freq)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("|Z| (Ω)")
+    # Log-scale axes use LogFormatter; do not use ticklabel_format(style='scientific')
     ax.grid(True, which="both", alpha=0.3)
     return ax
 
@@ -116,6 +117,7 @@ def plot_phase_vs_frequency(
     _plot_with_trusted_region(ax, f, y, "semilogx", label or "data", max_trusted_freq)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Phase (°)")
+    ax.ticklabel_format(style='scientific', scilimits=(0, 0), useMathText=True, axis='y')
     ax.grid(True, which="both", alpha=0.3)
     return ax
 
@@ -141,8 +143,120 @@ def plot_capacitance_vs_frequency(
     _plot_with_trusted_region(ax, f, c, "loglog", label or "data", max_trusted_freq)
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("|C| (F)")
+    # Log-scale axes use LogFormatter; do not use ticklabel_format(style='scientific')
     ax.grid(True, which="both", alpha=0.3)
     return ax
+
+
+def extract_nyquist_parameters(
+    df: pd.DataFrame,
+    freq_col: str = FREQ,
+    mag_col: str = MAG,
+    phase_col: str = PHASE,
+) -> Dict[str, float]:
+    """
+    Extract quantitative parameters from Nyquist plot data.
+    
+    Returns dict with:
+    - series_resistance_ohms: High-frequency intercept (rightmost Re(Z) where -Im(Z) ≈ 0)
+    - parallel_resistance_ohms: Low-frequency intercept (leftmost Re(Z) where -Im(Z) ≈ 0)
+    - peak_frequency_hz: Frequency at maximum -Im(Z)
+    - relaxation_time_s: τ = 1/(2π × f_peak)
+    """
+    fc = _col(df, freq_col) or freq_col
+    mc = _col(df, mag_col) or mag_col
+    pc = _col(df, phase_col) or phase_col
+    if mc not in df.columns or pc not in df.columns:
+        raise KeyError(f"Need columns {mag_col!r} and {phase_col!r} for Nyquist extraction.")
+    
+    cols = [mc, pc]
+    if fc in df.columns:
+        cols.append(fc)
+    out = df[cols].dropna()
+    
+    mag = np.abs(out[mc].values)
+    phase_deg = out[pc].values
+    phase_rad = np.deg2rad(phase_deg)
+    re_z = mag * np.cos(phase_rad)
+    im_z = mag * np.sin(phase_rad)
+    neg_im_z = -im_z
+    
+    if fc in out.columns:
+        f = out[fc].values
+        # Sort by frequency for intercept finding
+        idx_sorted = np.argsort(f)
+        f_sorted = f[idx_sorted]
+        re_z_sorted = re_z[idx_sorted]
+        neg_im_z_sorted = neg_im_z[idx_sorted]
+    else:
+        f_sorted = None
+        re_z_sorted = re_z
+        neg_im_z_sorted = neg_im_z
+    
+    # Threshold for "near zero" imaginary component (1% of max)
+    im_threshold = np.abs(neg_im_z_sorted).max() * 0.01 if len(neg_im_z_sorted) > 0 else 0
+    
+    # High-frequency intercept (series resistance): rightmost point where -Im(Z) < threshold
+    # Or use max Re(Z) from highest frequencies if no zero crossing
+    if f_sorted is not None and len(f_sorted) > 0:
+        # Look at highest 20% of frequencies
+        high_f_idx = np.where(f_sorted >= np.percentile(f_sorted, 80))[0]
+        if len(high_f_idx) > 0:
+            near_zero_high = np.where(np.abs(neg_im_z_sorted[high_f_idx]) < im_threshold)[0]
+            if len(near_zero_high) > 0:
+                series_r = re_z_sorted[high_f_idx[near_zero_high[-1]]]
+            else:
+                series_r = np.max(re_z_sorted[high_f_idx])
+        else:
+            series_r = np.max(re_z_sorted)
+    else:
+        # No frequency data: use rightmost point where -Im(Z) is small
+        near_zero = np.where(np.abs(neg_im_z_sorted) < im_threshold)[0]
+        if len(near_zero) > 0:
+            series_r = re_z_sorted[near_zero[-1]]
+        else:
+            series_r = np.max(re_z_sorted)
+    
+    # Low-frequency intercept (parallel resistance): leftmost point where -Im(Z) < threshold
+    # Or use min Re(Z) from lowest frequencies if no zero crossing
+    if f_sorted is not None and len(f_sorted) > 0:
+        # Look at lowest 20% of frequencies
+        low_f_idx = np.where(f_sorted <= np.percentile(f_sorted, 20))[0]
+        if len(low_f_idx) > 0:
+            near_zero_low = np.where(np.abs(neg_im_z_sorted[low_f_idx]) < im_threshold)[0]
+            if len(near_zero_low) > 0:
+                parallel_r = re_z_sorted[low_f_idx[near_zero_low[0]]]
+            else:
+                parallel_r = np.min(re_z_sorted[low_f_idx])
+        else:
+            parallel_r = np.min(re_z_sorted)
+    else:
+        # No frequency data: use leftmost point where -Im(Z) is small
+        near_zero = np.where(np.abs(neg_im_z_sorted) < im_threshold)[0]
+        if len(near_zero) > 0:
+            parallel_r = re_z_sorted[near_zero[0]]
+        else:
+            parallel_r = np.min(re_z_sorted)
+    
+    # Peak frequency: frequency at maximum -Im(Z)
+    peak_idx = np.argmax(neg_im_z)
+    if f_sorted is not None and len(f) > 0:
+        peak_freq = f[peak_idx]
+    else:
+        peak_freq = np.nan
+    
+    # Relaxation time: τ = 1/(2π × f_peak)
+    if np.isfinite(peak_freq) and peak_freq > 0:
+        relaxation_time = 1.0 / (2.0 * np.pi * peak_freq)
+    else:
+        relaxation_time = np.nan
+    
+    return {
+        "series_resistance_ohms": float(series_r) if np.isfinite(series_r) else np.nan,
+        "parallel_resistance_ohms": float(parallel_r) if np.isfinite(parallel_r) else np.nan,
+        "peak_frequency_hz": float(peak_freq) if np.isfinite(peak_freq) else np.nan,
+        "relaxation_time_s": float(relaxation_time) if np.isfinite(relaxation_time) else np.nan,
+    }
 
 
 def plot_nyquist(
@@ -153,8 +267,14 @@ def plot_nyquist(
     mag_col: str = MAG,
     phase_col: str = PHASE,
     max_trusted_freq: Optional[float] = None,
-) -> plt.Axes:
-    """Plot Nyquist: -Im(Z) vs Re(Z). Z = |Z| * exp(j*phase_rad). Points above max_trusted_freq are greyed out."""
+    extract_params: bool = False,
+) -> Union[plt.Axes, Tuple[plt.Axes, Dict[str, float]]]:
+    """
+    Plot Nyquist: -Im(Z) vs Re(Z). Z = |Z| * exp(j*phase_rad). Points above max_trusted_freq are greyed out.
+    
+    If extract_params=True, extracts quantitative parameters and annotates the plot.
+    Returns (ax, params_dict) if extract_params=True, else returns ax.
+    """
     ax = _ensure_axes(ax)
     fc = _col(df, freq_col) or freq_col
     mc = _col(df, mag_col) or mag_col
@@ -185,6 +305,7 @@ def plot_nyquist(
         ax.plot(re_z, -im_z, ".-", label=label or "data")
     ax.set_xlabel("Re(Z) (Ω)")
     ax.set_ylabel("-Im(Z) (Ω)")
+    ax.ticklabel_format(style='scientific', scilimits=(0, 0), useMathText=True, axis='both')
     # Equal scale (1:1) on x and y so circles look circular
     xlo, xhi = ax.get_xlim()
     ylo, yhi = ax.get_ylim()
@@ -194,6 +315,42 @@ def plot_nyquist(
     ax.set_ylim(lo, hi)
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.3)
+    
+    params = None
+    if extract_params:
+        try:
+            params = extract_nyquist_parameters(df, freq_col, mag_col, phase_col)
+            # Annotate plot with parameters
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            x_range = xlim[1] - xlim[0]
+            y_range = ylim[1] - ylim[0]
+            
+            # Position text box in upper right, avoiding data
+            text_x = xlim[0] + 0.65 * x_range
+            text_y = ylim[0] + 0.85 * y_range
+            
+            lines = []
+            if np.isfinite(params["series_resistance_ohms"]):
+                lines.append(f"R_s = {params['series_resistance_ohms']:.2e} Ω")
+            if np.isfinite(params["parallel_resistance_ohms"]):
+                lines.append(f"R_p = {params['parallel_resistance_ohms']:.2e} Ω")
+            if np.isfinite(params["peak_frequency_hz"]):
+                lines.append(f"f_peak = {params['peak_frequency_hz']:.2e} Hz")
+            if np.isfinite(params["relaxation_time_s"]):
+                lines.append(f"τ = {params['relaxation_time_s']:.2e} s")
+            
+            if lines:
+                textstr = "\n".join(lines)
+                props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+                ax.text(text_x, text_y, textstr, transform=ax.transData, fontsize=9,
+                       verticalalignment='top', bbox=props)
+        except Exception as e:
+            print(f"Warning: Failed to extract Nyquist parameters: {e}")
+            params = {}
+    
+    if extract_params:
+        return ax, params
     return ax
 
 
@@ -239,13 +396,14 @@ def plot_all(
 def plot_folder_comparison(
     data: Dict[str, pd.DataFrame],
     plot_type: str = "magnitude",
-    figsize: tuple = (7, 5),
+    figsize: tuple = (11, 7),
     max_trusted_freq: Optional[float] = None,
 ) -> plt.Figure:
     """
     Overlay multiple datasets (e.g. on/off state, different bias) on one plot.
     Skips datasets that don't have the required columns for plot_type.
     Data above max_trusted_freq (Hz) is greyed out.
+    For many series (>10), legend is placed outside with smaller font.
 
     plot_type : one of "magnitude", "phase", "capacitance", "nyquist"
     """
@@ -274,8 +432,12 @@ def plot_folder_comparison(
         n_plotted += 1
     if n_plotted == 0:
         ax.text(0.5, 0.5, f"No datasets with required columns for {plot_type}", ha="center", va="center", transform=ax.transAxes)
-    ax.legend()
-    plt.tight_layout()
+    if n_plotted > 10:
+        ax.legend(fontsize="small", bbox_to_anchor=(1.02, 1), loc="upper left", ncol=1)
+        plt.tight_layout(rect=(0, 0, 0.85, 1))
+    else:
+        ax.legend(fontsize="small")
+        plt.tight_layout()
     return fig
 
 
