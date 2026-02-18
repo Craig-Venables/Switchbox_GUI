@@ -147,7 +147,7 @@ class UnifiedPlotter:
         iv_figsize: Tuple[int, int] = (12, 9),
         iv_arrows_points: int = 12,
         # Conduction settings
-        conduction_figsize: Tuple[int, int] = (14, 16),
+        conduction_figsize: Tuple[int, int] = (14, 20),
         target_slopes: Tuple[float, ...] = (1.0, 2.0, 3.0),
         high_slope_min: Optional[float] = 4.0,
         min_points: int = 8,
@@ -433,9 +433,11 @@ class UnifiedPlotter:
         title: Optional[str] = None,
         save_name: Optional[str] = None,
         use_second_sweep: bool = True,
+        length_m: Optional[float] = None,
+        area_m2: Optional[float] = None,
     ):
         """
-        Generate conduction mechanism analysis (2x2 grid).
+        Generate conduction mechanism analysis (5-row grid: SCLC, Schottky, PF, FN).
         
         Saves to: save_dir/device_name_conduction.png (in the main conduction folder)
         Uses second sweep if multiple sweeps are detected.
@@ -447,6 +449,8 @@ class UnifiedPlotter:
             title: Optional plot title
             save_name: Optional filename for saving (will be made unique if file exists)
             use_second_sweep: If True and multiple sweeps detected, use the second sweep (index 1)
+            length_m: Device thickness in meters (for J-E conversion; default 100 nm)
+            area_m2: Device area in m^2 (for J-E conversion; default 100 um^2)
         """
         if title is None:
             title = f"{device_name} - Conduction Analysis"
@@ -475,6 +479,8 @@ class UnifiedPlotter:
             title=title,
             device_label=device_name,
             save_name=save_name,
+            length_m=length_m,
+            area_m2=area_m2,
         )
 
     def plot_sclc_fit(
@@ -485,6 +491,8 @@ class UnifiedPlotter:
         title: Optional[str] = None,
         save_name: Optional[str] = None,
         use_second_sweep: bool = True,
+        length_m: Optional[float] = None,
+        area_m2: Optional[float] = None,
     ):
         """
         Generate SCLC fit plot.
@@ -499,6 +507,8 @@ class UnifiedPlotter:
             title: Optional plot title
             save_name: Optional filename for saving (will be made unique if file exists)
             use_second_sweep: If True and multiple sweeps detected, use the second sweep (index 1)
+            length_m: Device thickness in meters (for J-E conversion; default 100 nm)
+            area_m2: Device area in m^2 (for J-E conversion; default 100 um^2)
         """
         if title is None:
             title = f"{device_name} - SCLC Fit"
@@ -528,6 +538,8 @@ class UnifiedPlotter:
             device_label=device_name,
             ref_slope=self.sclc_ref_slope,
             save_name=save_name,
+            length_m=length_m,
+            area_m2=area_m2,
         )
 
     def plot_conditional(
@@ -1172,6 +1184,7 @@ class UnifiedPlotter:
                     enable_loglog_overlays=self.conduction_plotter.enable_loglog_overlays,
                     enable_schottky_overlays=self.conduction_plotter.enable_schottky_overlays,
                     enable_pf_overlays=self.conduction_plotter.enable_pf_overlays,
+                    enable_fn_overlays=self.conduction_plotter.enable_fn_overlays,
                     target_slopes_schottky=self.conduction_plotter.target_slopes_schottky,
                     target_slopes_pf=self.conduction_plotter.target_slopes_pf,
                     schottky_slope_bounds=self.conduction_plotter.schottky_slope_bounds,
