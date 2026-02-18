@@ -1,7 +1,7 @@
 """
-Test script for Gallery and Overlay tabs.
+Test script for Gallery tab.
 
-This script helps verify the new Gallery and Overlay tabs work correctly.
+This script helps verify the Gallery tab (IV dashboards and optional all plot types).
 """
 
 import sys
@@ -11,8 +11,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from PyQt5.QtWidgets import QApplication
-from tools.device_visualizer.widgets import GalleryTab, OverlayTab
-from tools.device_visualizer.data.device_data_model import DeviceData, MeasurementData
+from tools.device_visualizer.widgets import GalleryTab
+from tools.device_visualizer.data.device_data_model import DeviceData
 
 
 def create_test_device_data():
@@ -62,26 +62,6 @@ def test_gallery_tab():
     print("Gallery tab test complete.\n")
 
 
-def test_overlay_tab():
-    """Test Overlay tab standalone."""
-    print("Testing Overlay Tab...")
-    
-    app = QApplication(sys.argv)
-    
-    overlay = OverlayTab()
-    overlay.setWindowTitle("Overlay Tab Test")
-    overlay.resize(800, 600)
-    overlay.show()
-    
-    # For actual testing, you would load a real device:
-    # device = create_test_device_data()
-    # overlay.update_device(device)
-    
-    print("Overlay tab window opened. Close window to continue.")
-    app.exec_()
-    print("Overlay tab test complete.\n")
-
-
 def test_discovery():
     """
     Test plot image discovery without GUI.
@@ -119,17 +99,16 @@ def test_discovery():
 def print_usage():
     """Print usage instructions."""
     print("=" * 60)
-    print("Gallery and Overlay Tabs Test Script")
+    print("Gallery Tab Test Script")
     print("=" * 60)
     print()
-    print("This script tests the new Gallery and Overlay tabs.")
+    print("This script tests the Gallery tab (IV dashboards, optional all plot types).")
     print()
     print("Test Options:")
     print("  1. Test Gallery tab (standalone)")
-    print("  2. Test Overlay tab (standalone)")
-    print("  3. Test plot discovery")
-    print("  4. Launch full visualizer")
-    print("  5. Exit")
+    print("  2. Test plot discovery")
+    print("  3. Launch full visualizer")
+    print("  4. Exit")
     print()
 
 
@@ -151,25 +130,22 @@ def main():
     print_usage()
     
     while True:
-        choice = input("Select test option (1-5): ").strip()
+        choice = input("Select test option (1-4): ").strip()
         
         if choice == '1':
             test_gallery_tab()
             print_usage()
         elif choice == '2':
-            test_overlay_tab()
-            print_usage()
-        elif choice == '3':
             test_discovery()
             print_usage()
-        elif choice == '4':
+        elif choice == '3':
             launch_full_visualizer()
             break
-        elif choice == '5':
+        elif choice == '4':
             print("Exiting test script.")
             break
         else:
-            print("Invalid choice. Please select 1-5.")
+            print("Invalid choice. Please select 1-4.")
 
 
 if __name__ == '__main__':

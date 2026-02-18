@@ -1,42 +1,29 @@
 """
-Gallery tab for viewing all plot images in a scrollable grid.
+Gallery tab for viewing plot images in a scrollable grid.
 
-Displays all plot images (PNG, JPG) from the device folder in a scrollable grid view.
+By default shows only IV dashboard images. Option "Show all plot types" includes
+Conduction, SCLC, Endurance, Retention, Forming, and Other, grouped by category.
 """
 
 import logging
-import re
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea,
-    QGridLayout, QPushButton, QSizePolicy
+    QGridLayout, QPushButton, QCheckBox
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 
 from ..data.device_data_model import DeviceData
+from ..utils.plot_categories import (
+    sort_plot_paths,
+    group_plots_by_category,
+    get_plot_category,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def natural_sort_key(path: Path) -> List:
-    """
-    Generate a natural sorting key for filenames with numbers.
-    
-    Converts '1', '2', '10', '11' to sort as [1, 2, 10, 11] instead of [1, 10, 11, 2].
-    
-    Args:
-        path: Path object
-        
-    Returns:
-        List of strings and integers for natural sorting
-    """
-    def atoi(text):
-        return int(text) if text.isdigit() else text.lower()
-    
-    return [atoi(c) for c in re.split(r'(\d+)', str(path.name))]
 
 
 class GalleryTab(QWidget):
@@ -68,21 +55,26 @@ class GalleryTab(QWidget):
         """Initialize the user interface."""
         layout = QVBoxLayout()
         layout.setContentsMargins(5, 5, 5, 5)
-        
-        # Header with info label
+
+        # Header: info label, "Show all plot types" checkbox, refresh
         header_layout = QHBoxLayout()
         self.info_label = QLabel("No device selected")
         self.info_label.setStyleSheet("font-weight: bold; padding: 5px;")
         header_layout.addWidget(self.info_label)
         header_layout.addStretch()
-        
-        # Refresh button
+
+        self.show_all_check = QCheckBox("Show all plot types")
+        self.show_all_check.setChecked(False)
+        self.show_all_check.setToolTip("Unchecked: only IV dashboards. Checked: all plot types (Conduction, SCLC, etc.).")
+        self.show_all_check.stateChanged.connect(self._on_show_all_changed)
+        header_layout.addWidget(self.show_all_check)
+
         self.refresh_btn = QPushButton("🔄 Refresh")
         self.refresh_btn.setMaximumWidth(100)
         self.refresh_btn.clicked.connect(self._refresh_plots)
         self.refresh_btn.setEnabled(False)
         header_layout.addWidget(self.refresh_btn)
-        
+
         layout.addLayout(header_layout)
         
         # Create scroll area for plots
@@ -139,14 +131,12 @@ class GalleryTab(QWidget):
         # Discover plot images
         self.plot_paths = self._discover_plot_images(device)
         
-        # Update info label
-        self.info_label.setText(
-            f"Device: {device.device_id} - Found {len(self.plot_paths)} plot images"
-        )
-        
-        # Display plots
+        # Update info label (count depends on filter)
+        self._update_info_label()
+
+        # Display plots (respects "Show all plot types" checkbox)
         self._display_plots()
-        
+
         logger.info(f"Gallery updated for device {device.device_id}: {len(self.plot_paths)} plots")
     
     def _discover_plot_images(self, device: DeviceData) -> List[Path]:
@@ -178,37 +168,85 @@ class GalleryTab(QWidget):
             found_images = list(device_folder.rglob(ext))
             plot_paths.extend(found_images)
         
-        # Sort naturally by filename (1, 2, 10, 11 instead of 1, 10, 11, 2)
-        plot_paths.sort(key=natural_sort_key)
-        
+        # Sort by category (IV dashboard first) then naturally by filename
+        plot_paths = sort_plot_paths(plot_paths)
+
         logger.debug(f"Discovered {len(plot_paths)} plot images in {device_folder}")
         return plot_paths
-    
+
+    def _paths_to_display(self) -> List[Path]:
+        """Paths to show: IV dashboards only, or all if 'Show all plot types' is checked."""
+        if not self.plot_paths:
+            return []
+        if self.show_all_check.isChecked():
+            return self.plot_paths
+        return [p for p in self.plot_paths if get_plot_category(p) == "IV Dashboard"]
+
+    def _update_info_label(self):
+        """Update header label with device and count of visible plots."""
+        if not self.current_device:
+            self.info_label.setText("No device selected")
+            return
+        visible = self._paths_to_display()
+        total = len(self.plot_paths)
+        if len(visible) == total:
+            self.info_label.setText(
+                f"Device: {self.current_device.device_id} - {len(visible)} plot images"
+            )
+        else:
+            self.info_label.setText(
+                f"Device: {self.current_device.device_id} - {len(visible)} shown (IV only; {total} total)"
+            )
+
+    def _on_show_all_changed(self, _state):
+        """Re-display when 'Show all plot types' is toggled."""
+        self._update_info_label()
+        self._display_plots()
+
     def _display_plots(self):
-        """Display all plot images in grid layout."""
+        """Display plot images in grid: IV dashboards only by default, or all grouped by category."""
         self._clear_plots()
-        
-        if len(self.plot_paths) == 0:
+
+        paths = self._paths_to_display()
+        if len(paths) == 0:
             # Show "no plots" message
-            no_plots_label = QLabel("No plot images found in device folder")
+            msg = (
+                "No IV dashboard images found."
+                if not self.show_all_check.isChecked() and self.plot_paths
+                else "No plot images found in device folder"
+            )
+            no_plots_label = QLabel(msg)
             no_plots_label.setAlignment(Qt.AlignCenter)
             no_plots_label.setStyleSheet("font-size: 14px; color: gray; padding: 50px;")
             self.plots_layout.addWidget(no_plots_label, 0, 0)
             return
-        
-        # Display plots in grid (3 columns)
+
         num_columns = 3
-        
-        for idx, plot_path in enumerate(self.plot_paths):
-            row = idx // num_columns
-            col = idx % num_columns
-            
-            # Create plot widget
-            plot_widget = self._create_plot_widget(plot_path)
-            self.plots_layout.addWidget(plot_widget, row, col)
-        
+        current_row = 0
+        show_all = self.show_all_check.isChecked()
+
+        for category_name, category_paths in group_plots_by_category(paths):
+            # Section header spanning all columns
+            header = QLabel(category_name)
+            header.setStyleSheet(
+                "font-size: 13px; font-weight: bold; color: #333; "
+                "padding: 12px 5px 6px 5px; border-bottom: 2px solid #ccc;"
+            )
+            # Only show section headers when showing all plot types
+            if show_all:
+                self.plots_layout.addWidget(header, current_row, 0, 1, num_columns)
+                current_row += 1
+
+            for idx, plot_path in enumerate(category_paths):
+                row = current_row + idx // num_columns
+                col = idx % num_columns
+                plot_widget = self._create_plot_widget(plot_path)
+                self.plots_layout.addWidget(plot_widget, row, col)
+
+            current_row += (len(category_paths) + num_columns - 1) // num_columns
+
         # Add stretch at the end to push plots to top
-        self.plots_layout.setRowStretch(len(self.plot_paths) // num_columns + 1, 1)
+        self.plots_layout.setRowStretch(current_row, 1)
     
     def _create_plot_widget(self, plot_path: Path) -> QWidget:
         """
