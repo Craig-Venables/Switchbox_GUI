@@ -158,6 +158,7 @@ from gui.measurement_gui.plot_handlers import (
     refresh_stats_list as _refresh_stats_list,
     run_full_sample_analysis as _run_full_sample_analysis,
     run_impedance_visualisation as _run_impedance_visualisation,
+    run_impedance_combinations as _run_impedance_combinations,
     update_classification_display as _update_classification_display,
     update_stats_display as _update_stats_display,
     update_stats_plots as _update_stats_plots,
@@ -1989,6 +1990,10 @@ class MeasurementGUI:
     def run_impedance_visualisation(self) -> None:
         """Run Impedance Analyzer visualisation on the selected folder."""
         _run_impedance_visualisation(self)
+    
+    def run_impedance_combinations(self) -> None:
+        """Run impedance combinations comparison."""
+        _run_impedance_combinations(self)
 
     def plot_all_device_graphs(self) -> None:
         """Plot all graphs for all measurement files in the currently selected device."""

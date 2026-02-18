@@ -426,6 +426,17 @@ Output location: {sample_dir}/sample_analysis/
         padx=12,
         pady=4,
         cursor="hand2",
+    ).pack(side="left", padx=(0, 6))
+    tk.Button(
+        imp_btn_frame,
+        text="Compare Combinations",
+        command=lambda: gui.run_impedance_combinations(),
+        font=("Segoe UI", 9),
+        bg="#FF9800",
+        fg="white",
+        padx=12,
+        pady=4,
+        cursor="hand2",
     ).pack(side="left")
 
     builder.widgets["graphing_tab"] = tab

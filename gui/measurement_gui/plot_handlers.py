@@ -15,8 +15,8 @@ import sys
 import threading
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox
-from typing import Any, Callable, Dict, List, Optional
+from tkinter import Toplevel, filedialog, messagebox, Listbox, Scrollbar, Entry
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -154,6 +154,79 @@ def browse_impedance_folder(gui: Any) -> None:
         traceback.print_exc()
 
 
+def _ask_impedance_calibration(parent: Any, folder: str) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Show dialog to choose open/short calibration files for impedance visualisation.
+    Returns (open_path or None, short_path or None).
+    """
+    folder_path = Path(folder)
+    open_path = None
+    short_path = None
+    try:
+        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "Impedence Analyzer"
+        if str(tools_dir) not in sys.path:
+            sys.path.insert(0, str(tools_dir))
+        from calibration import detect_open_short_paths
+        open_path, short_path = detect_open_short_paths(folder_path)
+    except Exception:
+        pass
+
+    result = [None, None]  # open, short
+
+    def use_detected():
+        result[0] = str(open_path) if open_path else None
+        result[1] = str(short_path) if short_path else None
+        dlg.grab_release()
+        dlg.destroy()
+
+    def skip():
+        result[0] = None
+        result[1] = None
+        dlg.grab_release()
+        dlg.destroy()
+
+    def pick_files():
+        o = filedialog.askopenfilename(
+            title="Select open-circuit calibration CSV",
+            initialdir=folder,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        s = filedialog.askopenfilename(
+            title="Select short-circuit calibration CSV",
+            initialdir=folder,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        result[0] = o if o else None
+        result[1] = s if s else None
+        dlg.grab_release()
+        dlg.destroy()
+
+    from tkinter import Label, Button, Frame
+    # Get the root Tk window from the GUI object
+    root = parent.master if hasattr(parent, 'master') else parent
+    dlg = Toplevel(root)
+    dlg.title("Impedance calibration")
+    dlg.transient(root)
+    dlg.grab_set()
+    msg_lines = []
+    if open_path and short_path:
+        msg_lines.append(f"Detected open: {open_path.name}")
+        msg_lines.append(f"Detected short: {short_path.name}")
+        msg_lines.append("Use these for calibration?")
+    else:
+        msg_lines.append("No open/short files detected by name.")
+        msg_lines.append("You can skip calibration or pick files manually.")
+    Label(dlg, text="\n".join(msg_lines), justify="left").pack(padx=20, pady=12)
+    btn_frame = Frame(dlg)
+    btn_frame.pack(pady=(0, 12))
+    if open_path and short_path:
+        Button(btn_frame, text="Use detected", command=use_detected).pack(side="left", padx=4)
+    Button(btn_frame, text="Skip calibration", command=skip).pack(side="left", padx=4)
+    Button(btn_frame, text="Pick files...", command=pick_files).pack(side="left", padx=4)
+    dlg.wait_window()
+    return result[0], result[1]
+
+
 def run_impedance_visualisation(gui: Any) -> None:
     """Run the Impedance Analyzer visualisation (CSV) on the selected folder."""
     folder = getattr(gui, "impedance_folder_var", None) and gui.impedance_folder_var.get()
@@ -174,14 +247,263 @@ def run_impedance_visualisation(gui: Any) -> None:
                 f"Expected visualise_csv.py or visualise_dat.py in:\n{tools_dir}",
             )
             return
+        open_path, short_path = _ask_impedance_calibration(gui, folder)
+        cmd = [sys.executable, str(script), folder]
+        if open_path:
+            cmd.extend(["--open", open_path])
+        if short_path:
+            cmd.extend(["--short", short_path])
         subprocess.Popen(
-            [sys.executable, str(script), folder],
+            cmd,
             cwd=str(tools_dir),
             creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
         )
-        print(f"[IMPEDANCE] Launched visualisation for: {folder}")
+        print(f"[IMPEDANCE] Launched visualisation for: {folder}" + (
+            f" (open={open_path!r}, short={short_path!r})" if (open_path or short_path) else ""
+        ))
     except Exception as e:
         messagebox.showerror("Impedance visualisation", str(e))
+        import traceback
+        traceback.print_exc()
+
+
+def _ask_impedance_combinations(parent: Any, initial_dir: Optional[str] = None) -> Optional[Dict[str, List[str]]]:
+    """
+    Show dialog to select combinations of CSV files for comparison.
+    Supports both SMaRT CSV files and Origin CSV files (with corrected columns).
+    If Origin CSV has corrected columns, those are used automatically.
+    Returns dict mapping combination_name -> list of CSV paths, or None if cancelled.
+    """
+    combinations = {}  # name -> list of paths
+    
+    root = parent.master if hasattr(parent, 'master') else parent
+    dlg = Toplevel(root)
+    dlg.title("Compare CSV Combinations")
+    dlg.transient(root)
+    dlg.grab_set()
+    dlg.geometry("700x500")
+    
+    result = [None]  # Use list to allow modification in nested functions
+    
+    # Layout - create widgets first
+    from tkinter import Label, Button, Frame
+    from datetime import datetime
+    main_frame = Frame(dlg)
+    main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Instructions at top
+    instructions = Label(
+        main_frame,
+        text="INSTRUCTIONS:\n1. Enter a combination name (e.g., 'Set1', 'Before', 'After')\n2. Click 'Add Combination' to select CSV files\n3. Repeat for additional combinations\n4. Click 'Compare' when done\n\nIf you don't enter a name, one will be auto-generated for you.",
+        font=("Segoe UI", 9),
+        fg="#333",
+        bg="#f0f0f0",
+        wraplength=680,
+        justify="left",
+        relief="sunken",
+        padx=10,
+        pady=8
+    )
+    instructions.pack(fill="x", pady=(0, 10))
+    
+    # Info label
+    info_label = Label(
+        main_frame,
+        text="Supports SMaRT CSV and Origin CSV (corrected data used automatically).",
+        font=("Segoe UI", 8),
+        fg="#666",
+        wraplength=680,
+        justify="left"
+    )
+    info_label.pack(fill="x", pady=(0, 10))
+    
+    # Top: Add combination
+    add_frame = Frame(main_frame)
+    add_frame.pack(fill="x", pady=(0, 10))
+    Label(add_frame, text="Combination name:").pack(side="left", padx=(0, 5))
+    combo_name_entry = Entry(add_frame, width=20)
+    combo_name_entry.pack(side="left", padx=(0, 5))
+    
+    # Middle: List of combinations
+    list_frame = Frame(main_frame)
+    list_frame.pack(fill="both", expand=True, pady=(0, 10))
+    Label(list_frame, text="Combinations (select files to compare):").pack(anchor="w")
+    
+    scrollbar = Scrollbar(list_frame)
+    scrollbar.pack(side="right", fill="y")
+    combos_listbox = Listbox(list_frame, yscrollcommand=scrollbar.set, height=10)
+    combos_listbox.pack(side="left", fill="both", expand=True)
+    scrollbar.config(command=combos_listbox.yview)
+    
+    # Buttons for managing combinations
+    manage_frame = Frame(main_frame)
+    manage_frame.pack(fill="x", pady=(0, 10))
+    
+    # Bottom: OK/Cancel
+    btn_frame = Frame(main_frame)
+    btn_frame.pack(fill="x")
+    
+    # Now define functions that reference the widgets
+    def update_combinations_list():
+        combos_listbox.delete(0, "end")
+        if combinations:
+            for name, files in combinations.items():
+                combos_listbox.insert("end", f"{name} ({len(files)} files)")
+        else:
+            combos_listbox.insert("end", "(No combinations added yet)")
+    
+    def add_combination():
+        name = combo_name_entry.get().strip()
+        
+        # Auto-generate name if not provided
+        if not name:
+            combo_num = len(combinations) + 1
+            name = f"Combination_{combo_num}"
+            combo_name_entry.delete(0, "end")
+            combo_name_entry.insert(0, name)
+            messagebox.showinfo("Auto-named", f"No name provided. Using '{name}'. You can change it before selecting files.")
+            return
+        
+        if name in combinations:
+            messagebox.showwarning("Duplicate name", f"Combination '{name}' already exists. Use 'Add Files' to add more files to it.")
+            return
+        
+        files = filedialog.askopenfilenames(
+            title=f"Select CSV files for '{name}' (supports SMaRT CSV and Origin CSV with corrected data)",
+            initialdir=initial_dir or ".",
+            filetypes=[("CSV files", "*.csv"), ("Origin CSV", "*_origin.csv"), ("All files", "*.*")],
+        )
+        if files:
+            combinations[name] = list(files)
+            update_combinations_list()
+            combo_name_entry.delete(0, "end")
+            messagebox.showinfo("Added", f"Added combination '{name}' with {len(files)} file(s).")
+        else:
+            messagebox.showinfo("Cancelled", "No files selected.")
+    
+    def remove_combination():
+        selection = combos_listbox.curselection()
+        if not selection:
+            messagebox.showinfo("No selection", "Please select a combination from the list to remove.")
+            return
+        idx = selection[0]
+        if not combinations:
+            return
+        name = list(combinations.keys())[idx]
+        del combinations[name]
+        update_combinations_list()
+        messagebox.showinfo("Removed", f"Removed combination '{name}'.")
+    
+    def view_files():
+        selection = combos_listbox.curselection()
+        if not selection or not combinations:
+            messagebox.showinfo("No selection", "Please select a combination from the list to view its files.")
+            return
+        idx = selection[0]
+        name = list(combinations.keys())[idx]
+        files = combinations[name]
+        file_list = "\n".join([f"{i+1}. {Path(f).name}" for i, f in enumerate(files)])
+        msg = f"Files in '{name}':\n\n{file_list}"
+        messagebox.showinfo(f"Files: {name}", msg)
+    
+    def add_files_to_combo():
+        selection = combos_listbox.curselection()
+        if not selection or not combinations:
+            messagebox.showinfo("No selection", "Please select a combination from the list to add files to.")
+            return
+        idx = selection[0]
+        name = list(combinations.keys())[idx]
+        
+        files = filedialog.askopenfilenames(
+            title=f"Add CSV files to '{name}' (supports SMaRT CSV and Origin CSV with corrected data)",
+            initialdir=initial_dir or ".",
+            filetypes=[("CSV files", "*.csv"), ("Origin CSV", "*_origin.csv"), ("All files", "*.*")],
+        )
+        if files:
+            combinations[name].extend(files)
+            update_combinations_list()
+            messagebox.showinfo("Added", f"Added {len(files)} file(s) to '{name}'.")
+    
+    def ok():
+        if not combinations:
+            messagebox.showwarning("No combinations", "Please add at least one combination:\n1. Enter a name\n2. Click 'Add Combination'\n3. Select CSV files")
+            return
+        result[0] = dict(combinations)
+        dlg.grab_release()
+        dlg.destroy()
+    
+    def cancel():
+        result[0] = None
+        dlg.grab_release()
+        dlg.destroy()
+    
+    # Add buttons now that functions are defined
+    Button(add_frame, text="Add Combination", command=add_combination, bg="#4CAF50", fg="white").pack(side="left")
+    Button(manage_frame, text="View Files", command=view_files).pack(side="left", padx=2)
+    Button(manage_frame, text="Add Files", command=add_files_to_combo).pack(side="left", padx=2)
+    Button(manage_frame, text="Remove", command=remove_combination, bg="#F44336", fg="white").pack(side="left", padx=2)
+    Button(btn_frame, text="Cancel", command=cancel).pack(side="right", padx=5)
+    Button(btn_frame, text="Compare", command=ok, bg="#2196F3", fg="white", padx=20).pack(side="right")
+    
+    # Initialize listbox
+    update_combinations_list()
+    
+    dlg.wait_window()
+    return result[0]
+
+
+def run_impedance_combinations(gui: Any) -> None:
+    """Run impedance combinations comparison."""
+    initial_dir = None
+    if hasattr(gui, "impedance_folder_var") and gui.impedance_folder_var.get():
+        p = Path(gui.impedance_folder_var.get())
+        if p.exists():
+            initial_dir = str(p)
+    if not initial_dir and hasattr(gui, "data_saver") and hasattr(gui.data_saver, "base_directory"):
+        try:
+            initial_dir = gui.data_saver.base_directory
+        except Exception:
+            pass
+    
+    combinations = _ask_impedance_combinations(gui, initial_dir)
+    if not combinations:
+        return
+    
+    # Determine output directory (use first file's parent or impedance folder)
+    output_dir = None
+    for files in combinations.values():
+        if files:
+            output_dir = Path(files[0]).parent
+            break
+    
+    if not output_dir:
+        messagebox.showerror("Error", "Could not determine output directory.")
+        return
+    
+    try:
+        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "Impedence Analyzer"
+        script = tools_dir / "compare_combinations.py"
+        if not script.exists():
+            messagebox.showerror(
+                "Tool not found",
+                f"Expected compare_combinations.py in:\n{tools_dir}",
+            )
+            return
+        
+        # Convert combinations dict to command-line arguments
+        cmd = [sys.executable, str(script), str(output_dir)]
+        for name, files in combinations.items():
+            files_str = ",".join(str(Path(f).resolve()) for f in files)
+            cmd.append(f"{name}:{files_str}")
+        
+        subprocess.Popen(
+            cmd,
+            cwd=str(tools_dir),
+            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+        )
+        print(f"[IMPEDANCE] Launched combinations comparison: {list(combinations.keys())}")
+    except Exception as e:
+        messagebox.showerror("Combinations comparison", str(e))
         import traceback
         traceback.print_exc()
 
