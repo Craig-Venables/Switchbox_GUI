@@ -1,0 +1,25 @@
+Reference CSV (no glass):   C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\Equipment\Laser_Power_Meter\analog_control\at_sample_btm\analog_power_calibration.csv
+Through-sample CSV (glass): C:\Users\ppxcv1\Documents\GitHub\Switchbox_GUI\Equipment\Laser_Power_Meter\analog_control\at_device (through sample)\analog_power_calibration.csv
+
+=== Overall transmission statistics ===
+Mean transmission: 86.63 %
+Mean % drop:       13.37 %
+
+Per power-limit statistics:
+  Limit    5.0 mW: transmission  71.16 %, drop  28.84 %
+  Limit   10.0 mW: transmission  81.28 %, drop  18.72 %
+  Limit   15.0 mW: transmission  84.60 %, drop  15.40 %
+  Limit   20.0 mW: transmission  86.12 %, drop  13.88 %
+  Limit   25.0 mW: transmission  86.87 %, drop  13.13 %
+  Limit   30.0 mW: transmission  87.64 %, drop  12.36 %
+  Limit   40.0 mW: transmission  88.42 %, drop  11.58 %
+  Limit   50.0 mW: transmission  88.76 %, drop  11.24 %
+  Limit   60.0 mW: transmission  89.25 %, drop  10.75 %
+  Limit   70.0 mW: transmission  89.82 %, drop  10.18 %
+  Limit   80.0 mW: transmission  90.06 %, drop   9.94 %
+  Limit   90.0 mW: transmission  90.37 %, drop   9.63 %
+  Limit  100.0 mW: transmission  89.98 %, drop  10.02 %
+  Limit  150.0 mW: transmission  89.33 %, drop  10.67 %
+  Limit  200.0 mW: transmission  88.74 %, drop  11.26 %
+  Limit  300.0 mW: transmission  87.32 %, drop  12.68 %
+  Limit  330.0 mW: transmission  87.09 %, drop  12.91 %
