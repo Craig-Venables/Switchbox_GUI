@@ -27,56 +27,57 @@ where:
 - \( Z_{imag} = |Z| \sin(\phi) \)
 - \( \phi \) is the phase angle in radians
 
-#### Step 2: Convert to Admittance
+#### Step 2: Remove Short (Series) Contribution First
 
-Admittance is the reciprocal of impedance:
+The short measurement mostly tells you the series lead impedance. Remove the series lead effect first:
 
 \[
-Y = \frac{1}{Z} = G + jB
+Z_s(f) = Z_{short}(f)
 \]
 
-where:
-- \( G \) is the conductance (real part)
-- \( B \) is the susceptance (imaginary part)
-
-This conversion is necessary because:
-- **Open-circuit parasitics** are primarily **parallel** (stray capacitance between probes)
-- **Short-circuit parasitics** are primarily **series** (lead resistance and inductance)
-- Correction works more naturally in admittance form for parallel components
-
-#### Step 3: Remove Open (Parallel) Contribution
-
-The open-circuit measurement captures parasitic admittance \( Y_{open} \) (mainly parallel capacitance):
+Subtract it from the measured device:
 
 \[
-Y_{corr1} = Y_{device} - Y_{open}
-\]
-
-This removes stray capacitance between probes and other parallel parasitics. The open-circuit data is interpolated to match the device measurement frequencies.
-
-#### Step 4: Remove Short (Series) Contribution
-
-Convert the corrected admittance back to impedance:
-
-\[
-Z_{corr1} = \frac{1}{Y_{corr1}}
-\]
-
-Then subtract the short-circuit impedance (series parasitics):
-
-\[
-Z_{final} = Z_{corr1} - Z_{short}
+Z'(f) = Z_{device}(f) - Z_s(f)
 \]
 
 This removes lead resistance, inductance, and other series parasitics. The short-circuit data is interpolated to match the device measurement frequencies.
 
-#### Step 5: Extract True Capacitance
+#### Step 3: Remove Open (Parallel) Contribution
 
-Convert the final corrected impedance back to admittance:
+But first remove the same series effect from the open too:
 
 \[
-Y_{final} = \frac{1}{Z_{final}} = G_{final} + jB_{final}
+Z_{open,shunt}(f) = Z_{open}(f) - Z_s(f)
 \]
+
+Convert that to the setup's parallel admittance:
+
+\[
+Y_p(f) = \frac{1}{Z_{open,shunt}(f)}
+\]
+
+Convert your device-after-series-removal to admittance and subtract:
+
+\[
+Y'(f) = \frac{1}{Z'(f)}
+\]
+
+\[
+Y_{DUT}(f) = Y'(f) - Y_p(f)
+\]
+
+Convert back to get the corrected device impedance:
+
+\[
+Z_{DUT}(f) = \frac{1}{Y_{DUT}(f)}
+\]
+
+This removes stray capacitance between probes and other parallel parasitics. The open-circuit data is interpolated to match the device measurement frequencies.
+
+**Note:** It is critical to remove the series (short) effect from both the device AND the open measurement before using the open to remove parallel effects. This ensures physically correct compensation.
+
+#### Step 4: Extract True Capacitance
 
 The corrected capacitance is derived from the imaginary part of admittance:
 
@@ -84,7 +85,7 @@ The corrected capacitance is derived from the imaginary part of admittance:
 C = \frac{B}{\omega}
 \]
 
-where \( \omega = 2\pi f \) is the angular frequency.
+where \( B = \text{Im}(Y_{DUT}) \) is the susceptance (imaginary part of \( Y_{DUT} \)) and \( \omega = 2\pi f \) is the angular frequency.
 
 ### Auto-Detection of Calibration Files
 
