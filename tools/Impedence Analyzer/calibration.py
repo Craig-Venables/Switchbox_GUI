@@ -101,12 +101,25 @@ def apply_open_short_correction(
     """
     Apply open/short compensation to device data.
 
-    Steps:
-    1. Build Z = Z_real + j*Z_imag for open, short, device.
-    2. Y = 1/Z for each.
-    3. Y_corr1 = Y_device - Y_open (interpolate open to device frequencies).
-    4. Z_corr1 = 1/Y_corr1; Z_final = Z_corr1 - Z_short (interpolate short).
-    5. C_corrected = Im(Y_final) / omega, omega = 2*pi*f.
+    Correction procedure:
+
+    Step 1: Remove the series lead effect first using the short
+      Z_s(f) = Z_short(f)
+      Z'(f) = Z_device(f) - Z_s(f)
+
+    Step 2: Remove the parallel stray capacitance using the open
+      But first remove the same series effect from the open:
+      Z_open,shunt(f) = Z_open(f) - Z_s(f)
+      
+      Convert that to the setup's parallel admittance:
+      Y_p(f) = 1/Z_open,shunt(f)
+      
+      Convert your device-after-series-removal to admittance and subtract:
+      Y'(f) = 1/Z'(f)
+      Y_DUT(f) = Y'(f) - Y_p(f)
+      
+      Convert back to get the corrected device impedance:
+      Z_DUT(f) = 1/Y_DUT(f)
 
     Returns a DataFrame with the same structure as device_df but with
     corrected magnitude, phase, capacitance (and derived Z real/imag).
@@ -122,56 +135,77 @@ def apply_open_short_correction(
     mag_dev = np.asarray(device_df[mc].values, dtype=float)
     phase_dev = np.asarray(device_df[pc].values, dtype=float)
 
+    # Step 1: Build complex Z for device, open, and short
+    zr_dev, zi_dev = _z_from_mag_phase(f_dev, mag_dev, phase_dev)
+
     # Open
     fo = np.asarray(open_df[_col(open_df, freq_col) or freq_col].values, dtype=float)
     mo = np.asarray(open_df[_col(open_df, mag_col) or mag_col].values, dtype=float)
     po = np.asarray(open_df[_col(open_df, phase_col) or phase_col].values, dtype=float)
     zro, zio = _z_from_mag_phase(fo, mo, po)
-    # Interpolate Y_open to device frequencies
-    yr_o, yi_o = _interp_complex(f_dev, fo, zro, zio)
-    Y_open_re = yr_o / (yr_o**2 + yi_o**2)
-    Y_open_im = -yi_o / (yr_o**2 + yi_o**2)
-    # Handle NaN/zero
-    bad = ~np.isfinite(yr_o) | ~np.isfinite(yi_o) | ((yr_o**2 + yi_o**2) < 1e-30)
-    Y_open_re[bad] = np.nan
-    Y_open_im[bad] = np.nan
 
     # Short
     fs = np.asarray(short_df[_col(short_df, freq_col) or freq_col].values, dtype=float)
     ms = np.asarray(short_df[_col(short_df, mag_col) or mag_col].values, dtype=float)
     ps = np.asarray(short_df[_col(short_df, phase_col) or phase_col].values, dtype=float)
     zrs, zis = _z_from_mag_phase(fs, ms, ps)
+
+    # Step 2: Interpolate short to device frequencies, compute Z_s(f) = Z_short(f)
     Z_short_re, Z_short_im = _interp_complex(f_dev, fs, zrs, zis)
 
-    # Device Z and Y
-    zr_dev, zi_dev = _z_from_mag_phase(f_dev, mag_dev, phase_dev)
-    denom = zr_dev**2 + zi_dev**2
-    Y_dev_re = zr_dev / np.where(denom > 1e-30, denom, np.nan)
-    Y_dev_im = -zi_dev / np.where(denom > 1e-30, denom, np.nan)
+    # Step 3: Remove series lead effect from device: Z'(f) = Z_device(f) - Z_s(f)
+    Z_prime_re = zr_dev - Z_short_re
+    Z_prime_im = zi_dev - Z_short_im
 
-    # Step 3: Y_corr1 = Y_device - Y_open
-    Y_corr1_re = Y_dev_re - Y_open_re
-    Y_corr1_im = Y_dev_im - Y_open_im
+    # Step 4: Interpolate short to open frequencies, subtract from open
+    # Z_open,shunt(f) = Z_open(f) - Z_s(f)
+    Z_short_re_open, Z_short_im_open = _interp_complex(fo, fs, zrs, zis)
+    Z_open_shunt_re = zro - Z_short_re_open
+    Z_open_shunt_im = zio - Z_short_im_open
 
-    # Step 4: Z_corr1 = 1/Y_corr1, Z_final = Z_corr1 - Z_short
-    denom1 = Y_corr1_re**2 + Y_corr1_im**2
-    Z_corr1_re = Y_corr1_re / np.where(denom1 > 1e-30, denom1, np.nan)
-    Z_corr1_im = -Y_corr1_im / np.where(denom1 > 1e-30, denom1, np.nan)
-    Z_final_re = Z_corr1_re - Z_short_re
-    Z_final_im = Z_corr1_im - Z_short_im
+    # Step 5: Interpolate corrected open to device frequencies
+    Z_open_shunt_re_dev, Z_open_shunt_im_dev = _interp_complex(f_dev, fo, Z_open_shunt_re, Z_open_shunt_im)
 
-    # Magnitude and phase from Z_final
-    mag_final = np.sqrt(Z_final_re**2 + Z_final_im**2)
-    phase_final_rad = np.arctan2(Z_final_im, Z_final_re)
+    # Step 6: Convert corrected open to admittance: Y_p(f) = 1/Z_open,shunt(f)
+    denom_open = Z_open_shunt_re_dev**2 + Z_open_shunt_im_dev**2
+    Y_p_re = Z_open_shunt_re_dev / np.where(denom_open > 1e-30, denom_open, np.nan)
+    Y_p_im = -Z_open_shunt_im_dev / np.where(denom_open > 1e-30, denom_open, np.nan)
+    # Handle NaN/zero
+    bad_open = ~np.isfinite(Z_open_shunt_re_dev) | ~np.isfinite(Z_open_shunt_im_dev) | (denom_open < 1e-30)
+    Y_p_re[bad_open] = np.nan
+    Y_p_im[bad_open] = np.nan
+
+    # Step 7: Convert device-after-series-removal to admittance: Y'(f) = 1/Z'(f)
+    denom_prime = Z_prime_re**2 + Z_prime_im**2
+    Y_prime_re = Z_prime_re / np.where(denom_prime > 1e-30, denom_prime, np.nan)
+    Y_prime_im = -Z_prime_im / np.where(denom_prime > 1e-30, denom_prime, np.nan)
+    # Handle NaN/zero
+    bad_prime = ~np.isfinite(Z_prime_re) | ~np.isfinite(Z_prime_im) | (denom_prime < 1e-30)
+    Y_prime_re[bad_prime] = np.nan
+    Y_prime_im[bad_prime] = np.nan
+
+    # Step 8: Remove parallel stray capacitance: Y_DUT(f) = Y'(f) - Y_p(f)
+    Y_DUT_re = Y_prime_re - Y_p_re
+    Y_DUT_im = Y_prime_im - Y_p_im
+
+    # Step 9: Convert back to impedance: Z_DUT(f) = 1/Y_DUT(f)
+    denom_dut = Y_DUT_re**2 + Y_DUT_im**2
+    Z_DUT_re = Y_DUT_re / np.where(denom_dut > 1e-30, denom_dut, np.nan)
+    Z_DUT_im = -Y_DUT_im / np.where(denom_dut > 1e-30, denom_dut, np.nan)
+    # Handle NaN/zero
+    bad_dut = ~np.isfinite(Y_DUT_re) | ~np.isfinite(Y_DUT_im) | (denom_dut < 1e-30)
+    Z_DUT_re[bad_dut] = np.nan
+    Z_DUT_im[bad_dut] = np.nan
+
+    # Step 10: Extract magnitude and phase from Z_DUT
+    mag_final = np.sqrt(Z_DUT_re**2 + Z_DUT_im**2)
+    phase_final_rad = np.arctan2(Z_DUT_im, Z_DUT_re)
     phase_final_deg = np.rad2deg(phase_final_rad)
 
-    # Step 5: Y_final = 1/Z_final, C = B/omega, B = Im(Y_final)
-    denom_f = Z_final_re**2 + Z_final_im**2
-    Y_final_re = Z_final_re / np.where(denom_f > 1e-30, denom_f, np.nan)
-    Y_final_im = -Z_final_im / np.where(denom_f > 1e-30, denom_f, np.nan)
+    # Step 11: Extract capacitance from Y_DUT: C = B/omega, where B = Im(Y_DUT)
     omega = 2.0 * np.pi * f_dev
     omega_safe = np.where(omega > 1e-30, omega, np.nan)
-    cap_corrected = Y_final_im / omega_safe  # B/omega
+    cap_corrected = Y_DUT_im / omega_safe  # B/omega
     cap_corrected = np.where(np.isfinite(cap_corrected), cap_corrected, np.nan)
 
     out = device_df.copy()
