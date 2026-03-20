@@ -16,6 +16,11 @@ from .iv_grid import IVGridPlotter
 from .conduction import ConductionPlotter
 from .sclc_fit import SCLCFitPlotter
 from .hdf5_style import HDF5StylePlotter
+from .vi_time_plots import (
+    plot_vi_time_3d as _plot_vi_time_3d,
+    plot_vi_stacked_slices as _plot_vi_stacked_slices,
+    plot_current_time_iteration_3d as _plot_current_time_iteration_3d,
+)
 
 
 class UnifiedPlotter:
@@ -424,6 +429,94 @@ class UnifiedPlotter:
             self._add_resistance_annotations(axes[0, 1], voltage, current, analysis_data)  # Log IV
         
         return fig, axes
+
+    # -------------------------------------------------------------------------
+    # Optional V–I–time and current–time–iteration plots (not wired into flow).
+    # Call explicitly when required.
+    # -------------------------------------------------------------------------
+
+    def plot_vi_time_3d(
+        self,
+        voltage: Sequence[float],
+        current: Sequence[float],
+        time: Optional[Sequence[float]] = None,
+        device_name: str = "device",
+        title_prefix: str = "",
+        title: Optional[str] = None,
+        save_name: Optional[str] = None,
+    ):
+        """
+        Optional 3D plot: X=voltage, Y=current, Z=time (or index).
+        Not called automatically. Use when you want the IV trajectory in (V, I, time) space.
+        """
+        if title is None:
+            title = f"{title_prefix} {device_name} - V–I–time (3D)".strip()
+        save_name = save_name or (f"{device_name}_vi_time_3d.png" if self.save_dir else None)
+        return _plot_vi_time_3d(
+            voltage=voltage,
+            current=current,
+            time=time,
+            title=title,
+            device_label=device_name,
+            save_dir=self.save_dir,
+            save_name=save_name,
+        )
+
+    def plot_vi_stacked_slices(
+        self,
+        voltage: Sequence[float],
+        current: Sequence[float],
+        time: Optional[Sequence[float]] = None,
+        num_slices: int = 5,
+        device_name: str = "device",
+        title_prefix: str = "",
+        title: Optional[str] = None,
+        save_name: Optional[str] = None,
+    ):
+        """
+        Optional stacked 2D plot: one V–I subplot per time/iteration slice.
+        Not called automatically.
+        """
+        if title is None:
+            title = f"{title_prefix} {device_name} - V–I by slice".strip()
+        save_name = save_name or (f"{device_name}_vi_stacked_slices.png" if self.save_dir else None)
+        return _plot_vi_stacked_slices(
+            voltage=voltage,
+            current=current,
+            time=time,
+            num_slices=num_slices,
+            title=title,
+            device_label=device_name,
+            save_dir=self.save_dir,
+            save_name=save_name,
+        )
+
+    def plot_current_time_iteration_3d(
+        self,
+        current: Sequence[float],
+        time: Optional[Sequence[float]] = None,
+        iteration: Optional[Sequence[float]] = None,
+        device_name: str = "device",
+        title_prefix: str = "",
+        title: Optional[str] = None,
+        save_name: Optional[str] = None,
+    ):
+        """
+        Optional 3D plot: X=time, Y=iteration, Z=current.
+        Not called automatically. Use when you want current vs time and iteration.
+        """
+        if title is None:
+            title = f"{title_prefix} {device_name} - Current vs time & iteration (3D)".strip()
+        save_name = save_name or (f"{device_name}_current_time_iteration_3d.png" if self.save_dir else None)
+        return _plot_current_time_iteration_3d(
+            current=current,
+            time=time,
+            iteration=iteration,
+            title=title,
+            device_label=device_name,
+            save_dir=self.save_dir,
+            save_name=save_name,
+        )
 
     def plot_conduction_analysis(
         self,

@@ -1945,3 +1945,99 @@ def run_full_sample_analysis(gui: Any) -> None:
         messagebox.showerror("Analysis Error", error_msg)
         if hasattr(gui, "analysis_status_label"):
             gui.analysis_status_label.config(text=f"✗ Error: {e}")
+
+
+def run_yield_concentration_analysis(gui: Any) -> None:
+    """Run the yield-and-concentration analysis pipeline (single or multi-sample)."""
+    import threading
+
+    # Resolve root/data folder
+    root_folder: str = ""
+    if hasattr(gui, "yield_root_folder_var"):
+        val = gui.yield_root_folder_var.get().strip()
+        if val and val != "(Use current sample)" and os.path.exists(val):
+            root_folder = val
+
+    if not root_folder:
+        # Fall back to analysis_folder_var, then current sample
+        if hasattr(gui, "analysis_folder_var"):
+            val = gui.analysis_folder_var.get()
+            if val and val != "(Use current sample)" and os.path.exists(val):
+                root_folder = val
+        if not root_folder:
+            sample_name = gui.sample_name_var.get().strip() if hasattr(gui, "sample_name_var") else ""
+            if not sample_name:
+                messagebox.showwarning(
+                    "No Sample",
+                    "Please either:\n"
+                    "1. Browse to a data root folder in the 'Yield & Concentration Analysis' section, OR\n"
+                    "2. Select a sample in the main GUI",
+                )
+                return
+            root_folder = gui._get_sample_save_directory(sample_name)
+
+    if not os.path.exists(root_folder):
+        messagebox.showerror("Error", f"Folder not found:\n{root_folder}")
+        return
+
+    # Collect selected samples (for multi-sample mode)
+    selected_samples = None
+    if hasattr(gui, "yield_sample_vars") and gui.yield_sample_vars:
+        selected_samples = [name for name, var in gui.yield_sample_vars if var.get()]
+        if not selected_samples:
+            messagebox.showwarning("No Samples Selected", "Please select at least one sample from the list.")
+            return
+
+    # Excel path
+    excel_path = None
+    if hasattr(gui, "yield_excel_path_var"):
+        val = gui.yield_excel_path_var.get().strip()
+        if val and os.path.exists(val):
+            excel_path = val
+
+    def _status(msg: str, colour: str = "#333333") -> None:
+        if hasattr(gui, "analysis_status_label"):
+            gui.master.after(0, lambda m=msg, c=colour: gui.analysis_status_label.config(text=m, fg=c))
+
+    def _log(msg: str) -> None:
+        print(msg)
+        _status(msg)
+        if hasattr(gui, "plot_panels") and gui.plot_panels:
+            gui.master.after(0, lambda m=msg: gui.plot_panels.log_graph_activity(m))
+
+    def _run() -> None:
+        try:
+            _status("Starting yield & concentration analysis…", "#2196F3")
+            from gui.measurement_gui.yield_concentration.aggregator import run_yield_analysis
+            result = run_yield_analysis(
+                root_or_sample_dir=root_folder,
+                excel_path=excel_path,
+                selected_samples=selected_samples,
+                log_fn=_log,
+            )
+            mode = result.get("mode", "")
+            n_plots = len(result.get("plots", []))
+            sample_yield = result.get("sample_yield", 0.0)
+            output_dir = result.get("output_dir", "")
+            mode_label = "Multi-sample" if mode == "multi" else "Single-sample"
+            summary = (
+                f"Yield analysis complete! ({mode_label})\n\n"
+                f"Average yield: {sample_yield:.1%}\n"
+                f"Plots generated: {n_plots}\n"
+                f"Output: {output_dir}"
+            )
+            gui.master.after(0, lambda: messagebox.showinfo("Yield Analysis Complete", summary))
+            _status(f"✓ Complete — {mode_label}, yield {sample_yield:.1%}, {n_plots} plots", "#4CAF50")
+            try:
+                import subprocess
+                gui.master.after(200, lambda d=output_dir: subprocess.Popen(f'explorer "{d}"'))
+            except Exception:
+                pass
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            gui.master.after(0, lambda e=str(exc): messagebox.showerror("Yield Analysis Error", e))
+            _status(f"✗ Error: {exc}", "#F44336")
+
+    _status("Preparing yield analysis…", "#2196F3")
+    threading.Thread(target=_run, daemon=True).start()

@@ -109,6 +109,7 @@ if TYPE_CHECKING:
 from gui.sample_gui.config import (
     BASE_DIR,
     device_maps,
+    get_or_build_device_map,
     load_device_mapping,
     pin_mapping,
     resolve_default_save_root,
@@ -1955,11 +1956,38 @@ class SampleGUI:
             image_path = BASE_DIR / "resources" / "sample_information" / "Multiplexer_10_OUT.jpg"
         elif sample == '15x15mm':
             image_path = BASE_DIR / "resources" / "sample_information" / "15mmx15mm.JPG"
+        elif sample == 'Generic_Grid':
+            # Placeholder image: blank canvas with light grid and device cells
+            mapping = get_or_build_device_map(sample)
+            self.original_image = Image.new("RGB", (600, 500), "white")
+            draw = ImageDraw.Draw(self.original_image)
+            # Draw faint device rectangles and grid
+            for bounds in mapping.values():
+                x_min = bounds.get("x_min", 0)
+                y_min = bounds.get("y_min", 0)
+                x_max = bounds.get("x_max", 600)
+                y_max = bounds.get("y_max", 500)
+                draw.rectangle([x_min, y_min, x_max, y_max], outline="#cccccc", width=1)
+            img = self.original_image
+            try:
+                self.tk_img = ImageTk.PhotoImage(img)
+                self.canvas.delete("all")
+                self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
+                self.log_terminal(f"Loaded generic grid for {sample}", "SUCCESS")
+                if hasattr(self, 'quick_scan_canvas'):
+                    self._update_quick_scan_background(img)
+                self.update_canvas_selection_highlights()
+                self._redraw_quick_scan_overlay()
+            except Exception as e:
+                self.log_terminal(f"Error loading generic grid: {e}", "ERROR")
+                self.original_image = None
+                self.tk_img = None
+            return
 
         if image_path is None:
             self.log_terminal(f"No image path defined for sample: {sample}", "WARNING")
             return
-            
+
         if not image_path.exists():
             self.log_terminal(f"Image file not found: {image_path}", "ERROR")
             self.original_image = None
@@ -1989,12 +2017,13 @@ class SampleGUI:
             self.tk_img = None
 
     def update_device_type(self, current_device_map: str) -> None:
-        # all maps from dict
+        # Use get_or_build_device_map so Generic_Grid and other config-only samples work
+        mapping = get_or_build_device_map(current_device_map)
         self.current_map_name = current_device_map
-        self.device_mapping = device_maps[current_device_map]
-        self.current_map_map = device_maps[current_device_map]
+        self.device_mapping = mapping
+        self.current_map_map = mapping
         self.device_maps_list = list(device_maps.keys())
-        self.device_list = list(device_maps[current_device_map].keys())  # Dictionary of devices
+        self.device_list = list(mapping.keys())
         self._build_device_name_mapping()
         # Update device checkboxes when device type changes
         if hasattr(self, 'device_checkboxes'):
@@ -2057,7 +2086,9 @@ class SampleGUI:
     def update_dropdowns(self, event: Optional[Any]) -> None:
         sample = self.sample_type_var.get()
         self.log_terminal(f"Sample chosen: {sample}", "INFO")
-        
+        if sample == "Generic_Grid":
+            self.log_terminal("Generic_Grid: use Manual multiplexer; Quick Scan is for multiplexed samples only.", "INFO")
+
         # Load image FIRST before updating device type
         # This ensures the canvas has an image before any drawing happens
         self.load_image(sample)

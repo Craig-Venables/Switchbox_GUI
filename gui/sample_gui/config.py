@@ -37,6 +37,10 @@ sample_config: Dict[str, Any] = {
         "sections": {"A": True, "B": True, "C": True, "D": True},
         "devices": [str(i) for i in range(1, 10)],
     },
+    "Generic_Grid": {
+        "sections": {"A": True},
+        "devices": [str(i) for i in range(1, 13)],  # 12 devices, 3x4 grid
+    },
 }
 
 multiplexer_types: Dict[str, Dict] = {"Pyswitchbox": {}, "Electronic_Mpx": {}, "Manual": {}}
@@ -60,6 +64,59 @@ pin_mapping: Dict[str, Any] = load_device_mapping()
 
 with (BASE_DIR / "Json_Files" / "mapping.json").open("r", encoding="utf-8") as f:
     device_maps: Dict[str, Any] = json.load(f)
+
+# Virtual canvas size used for generic grid layout (matches display canvas)
+_GENERIC_GRID_WIDTH = 600
+_GENERIC_GRID_HEIGHT = 500
+
+
+def build_generic_device_map(sample_name: str, devices: List[str]) -> Dict[str, Any]:
+    """
+    Build a device map for a generic grid sample (no physical image/mapping file).
+    Layout is a uniform grid over a virtual canvas; each device gets x_min, y_min, x_max, y_max.
+    """
+    n = len(devices)
+    if n == 0:
+        return {}
+    # Choose grid dimensions: prefer more columns than rows for wide canvas
+    n_cols = max(1, int(round((n * _GENERIC_GRID_WIDTH / _GENERIC_GRID_HEIGHT) ** 0.5)))
+    n_rows = (n + n_cols - 1) // n_cols
+    cell_w = _GENERIC_GRID_WIDTH / n_cols
+    cell_h = _GENERIC_GRID_HEIGHT / n_rows
+    result: Dict[str, Any] = {}
+    for idx, dev in enumerate(devices):
+        row = idx // n_cols
+        col = idx % n_cols
+        x_min = int(col * cell_w)
+        y_min = int(row * cell_h)
+        x_max = int((col + 1) * cell_w)
+        y_max = int((row + 1) * cell_h)
+        key = f"device_{dev}" if not dev.startswith("device_") else dev
+        result[key] = {
+            "x_min": x_min,
+            "y_min": y_min,
+            "x_max": x_max,
+            "y_max": y_max,
+            "sample": sample_name,
+            "section": "A",
+        }
+    return result
+
+
+def get_or_build_device_map(sample_name: str) -> Dict[str, Any]:
+    """
+    Return device map for sample_name. If present in device_maps (from JSON), return it.
+    Else if sample_name is in sample_config, build a generic grid map and cache it in device_maps.
+    Otherwise return {} and print a warning.
+    """
+    if sample_name in device_maps:
+        return device_maps[sample_name]
+    if sample_name in sample_config:
+        devices = sample_config[sample_name].get("devices", [])
+        device_maps[sample_name] = build_generic_device_map(sample_name, devices)
+        return device_maps[sample_name]
+    print(f"Warning: Unknown sample type '{sample_name}'; no device map available.")
+    return {}
 
 
 def resolve_default_save_root() -> Path:
