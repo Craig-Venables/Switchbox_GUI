@@ -14,6 +14,7 @@ The Sample GUI provides a visual interface to browse device maps, select devices
 - **Quick Scan**: Rapid device testing functionality
 - **Sample Configuration**: Manage sample types and device mappings
 - **Data Persistence**: Save and load device status and sample information
+- **Generic_Grid (no-design mode)**: Run measurements on small arrays without a bespoke sample image or mapping file; uses a simple grid layout and Manual multiplexer
 
 ## Entry Points
 
@@ -100,6 +101,18 @@ Main window class for device selection and sample management.
 5. **Launch Measurement**: User clicks "Start Measurement" → launches `MeasurementGUI`
 6. **Data Persistence**: Device status and sample info are saved automatically
 
+## Generic_Grid (no-design / quick measurements)
+
+When you have a sample with **no predefined design** (no device map image or `mapping.json` entry), you can still run quick measurements using the **Generic_Grid** sample type:
+
+1. Set **Multiplexer** to **Manual** (no hardware routing; you move probes by hand).
+2. Set **Type** to **Generic_Grid**.
+3. A placeholder grid image and a small array of virtual devices (e.g. 12 in a 3×4 grid) are generated automatically. Use the device list and selection checkboxes to track which devices you are probing.
+4. Open **Measurement GUI** as usual; tests run with manual probe movement. `change_relays()` in Manual mode only logs that you should move probes to the selected device.
+5. **Quick Scan** is intended for multiplexed samples and requires a real multiplexer; it is not used in this no-design mode.
+
+If you later create a proper device map or image for the sample, you can add it via `Json_Files/mapping.json` and a corresponding sample type so that the normal image-based workflow applies.
+
 ## Relationships
 
 ```
@@ -147,5 +160,5 @@ sample_gui = SampleGUI(master)
 - The Sample GUI is the main entry point for the entire measurement system
 - It maintains references to launched GUIs for coordinated operation
 - Device status is persisted across sessions
-- Supports multiple sample types (Cross_bar, etc.)
+- Supports multiple sample types (Cross_bar, Device_Array_10, 15x15mm, Generic_Grid)
 

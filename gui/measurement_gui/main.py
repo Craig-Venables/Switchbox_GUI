@@ -157,6 +157,7 @@ from gui.measurement_gui.plot_handlers import (
     plot_measurement_in_background as _plot_measurement_in_background,
     refresh_stats_list as _refresh_stats_list,
     run_full_sample_analysis as _run_full_sample_analysis,
+    run_yield_concentration_analysis as _run_yield_concentration_analysis,
     run_impedance_visualisation as _run_impedance_visualisation,
     run_impedance_combinations as _run_impedance_combinations,
     update_classification_display as _update_classification_display,
@@ -2008,6 +2009,10 @@ class MeasurementGUI:
     def run_full_sample_analysis(self) -> None:
         """Run comprehensive sample analysis with all plots and data exports."""
         _run_full_sample_analysis(self)
+
+    def run_yield_concentration_analysis(self) -> None:
+        """Run yield and concentration analysis for the current sample."""
+        _run_yield_concentration_analysis(self)
 
     def get_discovered_samples(self) -> list:
         """Return sorted list of sample names under the data save base path."""

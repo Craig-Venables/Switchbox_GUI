@@ -258,6 +258,211 @@ Output location: {sample_dir}/sample_analysis/
         anchor="w"
     ).pack(fill='x')
 
+    # ---------------------------------------------------------------
+    # Yield & Concentration Analysis Section
+    # ---------------------------------------------------------------
+    yield_frame = tk.LabelFrame(
+        left_col,
+        text="Yield & Concentration Analysis",
+        font=("Segoe UI", 11, "bold"),
+        bg=COLOR_BG,
+        padx=15,
+        pady=15,
+    )
+    yield_frame.pack(fill="x", pady=(0, 20))
+    yield_frame.columnconfigure(1, weight=1)
+
+    # --- Row 0: Data folder ---
+    tk.Label(
+        yield_frame, text="Data Folder:", font=("Segoe UI", 10), bg=COLOR_BG
+    ).grid(row=0, column=0, padx=(0, 10), pady=6, sticky="w")
+
+    gui.yield_root_folder_var = tk.StringVar(value="(Use current sample)")
+    tk.Entry(
+        yield_frame,
+        textvariable=gui.yield_root_folder_var,
+        font=("Segoe UI", 9),
+        state="readonly",
+        width=38,
+    ).grid(row=0, column=1, padx=(0, 6), pady=6, sticky="ew")
+
+    def _browse_yield_root() -> None:
+        from tkinter import filedialog
+        path = filedialog.askdirectory(title="Select root data folder or a single sample folder")
+        if path:
+            gui.yield_root_folder_var.set(path)
+            _scan_yield_samples()
+
+    def _clear_yield_root() -> None:
+        gui.yield_root_folder_var.set("(Use current sample)")
+        gui.yield_mode_label.config(text="Mode: auto-detect on run")
+        _clear_sample_list()
+
+    tk.Button(
+        yield_frame, text="Browse…", command=_browse_yield_root,
+        font=("Segoe UI", 9), bg="#2196F3", fg="white", padx=10, pady=4, cursor="hand2",
+    ).grid(row=0, column=2, pady=6)
+    tk.Button(
+        yield_frame, text="Clear", command=_clear_yield_root,
+        font=("Segoe UI", 9), bg="#757575", fg="white", padx=8, pady=4, cursor="hand2",
+    ).grid(row=0, column=3, padx=(4, 0), pady=6)
+
+    # --- Row 1: Mode indicator ---
+    gui.yield_mode_label = tk.Label(
+        yield_frame,
+        text="Mode: auto-detect on run",
+        font=("Segoe UI", 9, "italic"),
+        bg=COLOR_BG,
+        fg="#2196F3",
+        anchor="w",
+    )
+    gui.yield_mode_label.grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 4))
+
+    # --- Row 2: Sample checklist (shown in multi-sample mode) ---
+    yield_list_outer = tk.Frame(yield_frame, bg=COLOR_BG)
+    yield_list_outer.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+    yield_list_outer.columnconfigure(0, weight=1)
+
+    # header + select-all/none buttons
+    yield_list_hdr = tk.Frame(yield_list_outer, bg=COLOR_BG)
+    yield_list_hdr.grid(row=0, column=0, sticky="ew")
+    tk.Label(yield_list_hdr, text="Samples to include:", font=("Segoe UI", 9, "bold"),
+             bg=COLOR_BG).pack(side=tk.LEFT)
+    tk.Button(yield_list_hdr, text="All", font=("Segoe UI", 8), bg=COLOR_BG, padx=6, pady=2,
+              command=lambda: _set_all_yield_samples(True)).pack(side=tk.RIGHT, padx=(4, 0))
+    tk.Button(yield_list_hdr, text="None", font=("Segoe UI", 8), bg=COLOR_BG, padx=6, pady=2,
+              command=lambda: _set_all_yield_samples(False)).pack(side=tk.RIGHT)
+
+    # scrollable checkbox list
+    list_container = tk.Frame(yield_list_outer, bg="white", relief=tk.SUNKEN, bd=1, height=130)
+    list_container.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+    list_container.pack_propagate(False)
+
+    list_canvas = tk.Canvas(list_container, bg="white", highlightthickness=0)
+    list_scroll = tk.Scrollbar(list_container, orient=tk.VERTICAL, command=list_canvas.yview)
+    list_canvas.configure(yscrollcommand=list_scroll.set)
+    list_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    list_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    gui.yield_sample_checkbox_frame = tk.Frame(list_canvas, bg="white")
+    list_canvas.create_window((0, 0), window=gui.yield_sample_checkbox_frame, anchor="nw")
+
+    def _on_frame_resize(event):
+        list_canvas.configure(scrollregion=list_canvas.bbox("all"))
+    gui.yield_sample_checkbox_frame.bind("<Configure>", _on_frame_resize)
+
+    gui.yield_sample_vars = []  # list of (sample_name, BooleanVar)
+
+    # Show a hint when empty
+    gui._yield_empty_label = tk.Label(
+        gui.yield_sample_checkbox_frame,
+        text="Browse to a folder above to discover samples, or leave\n"
+             "blank to use the current sample automatically.",
+        font=("Segoe UI", 9, "italic"), bg="white", fg="#888888", justify=tk.LEFT,
+    )
+    gui._yield_empty_label.pack(pady=10, padx=10)
+
+    def _clear_sample_list() -> None:
+        for w in gui.yield_sample_checkbox_frame.winfo_children():
+            w.destroy()
+        gui.yield_sample_vars.clear()
+        gui._yield_empty_label = tk.Label(
+            gui.yield_sample_checkbox_frame,
+            text="Browse to a folder above to discover samples, or leave\n"
+                 "blank to use the current sample automatically.",
+            font=("Segoe UI", 9, "italic"), bg="white", fg="#888888", justify=tk.LEFT,
+        )
+        gui._yield_empty_label.pack(pady=10, padx=10)
+
+    def _scan_yield_samples() -> None:
+        """Populate the checkbox list after a folder is browsed."""
+        from gui.measurement_gui.yield_concentration.aggregator import detect_mode
+        folder = gui.yield_root_folder_var.get()
+        if not folder or folder == "(Use current sample)":
+            return
+        mode, sample_dirs = detect_mode(folder)
+        for w in gui.yield_sample_checkbox_frame.winfo_children():
+            w.destroy()
+        gui.yield_sample_vars.clear()
+        if mode == "single":
+            gui.yield_mode_label.config(
+                text=f"Mode: single sample — {folder.split('/')[-1]}", fg="#FF9800"
+            )
+            return
+        gui.yield_mode_label.config(
+            text=f"Mode: multi-sample — {len(sample_dirs)} sample(s) found", fg="#4CAF50"
+        )
+        for sd in sample_dirs:
+            name = sd.replace("\\", "/").split("/")[-1]
+            var = tk.BooleanVar(value=True)
+            gui.yield_sample_vars.append((name, var))
+            tk.Checkbutton(
+                gui.yield_sample_checkbox_frame, text=name, variable=var,
+                font=("Segoe UI", 9), bg="white", anchor="w",
+            ).pack(fill="x", padx=6, pady=1)
+
+    def _set_all_yield_samples(state: bool) -> None:
+        for _, var in gui.yield_sample_vars:
+            var.set(state)
+
+    # --- Row 3: Solutions and devices Excel ---
+    tk.Label(
+        yield_frame, text="Solutions & Devices Excel:", font=("Segoe UI", 10), bg=COLOR_BG
+    ).grid(row=3, column=0, padx=(0, 10), pady=(8, 4), sticky="w")
+
+    gui.yield_excel_path_var = tk.StringVar(value="")
+    tk.Entry(
+        yield_frame,
+        textvariable=gui.yield_excel_path_var,
+        font=("Segoe UI", 9),
+        state="readonly",
+        width=38,
+    ).grid(row=3, column=1, padx=(0, 6), pady=(8, 4), sticky="ew")
+
+    def _browse_yield_excel() -> None:
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            title="Select solutions and devices Excel",
+            filetypes=[("Excel files", "*.xlsx *.xls"), ("All files", "*.*")],
+        )
+        if path:
+            gui.yield_excel_path_var.set(path)
+
+    tk.Button(
+        yield_frame, text="Browse…", command=_browse_yield_excel,
+        font=("Segoe UI", 9), bg="#2196F3", fg="white", padx=10, pady=4, cursor="hand2",
+    ).grid(row=3, column=2, pady=(8, 4))
+    tk.Button(
+        yield_frame, text="Clear", command=lambda: gui.yield_excel_path_var.set(""),
+        font=("Segoe UI", 9), bg="#757575", fg="white", padx=8, pady=4, cursor="hand2",
+    ).grid(row=3, column=3, padx=(4, 0), pady=(8, 4))
+
+    tk.Label(
+        yield_frame,
+        text="Optional — provides Np Concentration, Qd Spacing, Polymer for cross-sample plots.",
+        font=("Segoe UI", 9, "italic"), bg=COLOR_BG, fg="#666666", wraplength=520, justify=tk.LEFT,
+    ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(0, 8))
+
+    # --- Row 5: Run button ---
+    tk.Button(
+        yield_frame,
+        text="Run Yield & Concentration Analysis",
+        command=gui.run_yield_concentration_analysis,
+        font=("Segoe UI", 11, "bold"),
+        bg="#4CAF50", fg="white", padx=20, pady=10,
+        cursor="hand2", relief=tk.RAISED, bd=1,
+    ).grid(row=5, column=0, columnspan=4, sticky="ew", pady=(4, 8))
+
+    # --- Row 6: Priority note ---
+    tk.Label(
+        yield_frame,
+        text=(
+            "Yield source priority:  (1) {sample_name}.xlsx manual classification   "
+            "(2) Cached manifest   (3) Auto from device_tracking"
+        ),
+        font=("Consolas", 8), bg=COLOR_BG, fg="#555555", justify=tk.LEFT, anchor="w",
+    ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(0, 4))
+
     # Middle column: Batch sample plotting
     middle_col = tk.Frame(content_row, bg=COLOR_BG, width=400)
     middle_col.pack(side=tk.LEFT, fill=tk.BOTH, padx=(20, 0))
