@@ -1,0 +1,78 @@
+{
+  "Relaxation After Multi-Pulse With Pulse Measurement": {
+    "Fast_no_delay": {
+      "pulse_voltage": 2.5,
+      "num_pulses": 10,
+      "pulse_width": 0.001,
+      "delay_between_pulses": 0.0,
+      "read_voltage": 0.2,
+      "num_reads": 20,
+      "delay_between_reads": 0.0,
+      "clim": 0.0001
+    }
+  },
+  "Relaxation After Multi-Pulse": {
+    "Long_Nonvolitle": {
+      "pulse_voltage": 1.5,
+      "num_pulses": 10,
+      "pulse_width": 0.001,
+      "delay_between_pulses": 0.0,
+      "read_voltage": 0.2,
+      "num_reads": 100,
+      "delay_between_reads": 0.0001,
+      "clim": 0.0001
+    }
+  },
+  "Potentiation-Depression Cycle": {
+    "defualt": {
+      "set_voltage": -2.0,
+      "reset_voltage": 2.0,
+      "pulse_width": 0.001,
+      "read_voltage": 0.2,
+      "steps": 50,
+      "delay_between": 0.0,
+      "clim": 0.0001
+    }
+  },
+  "Width Sweep": {
+    "Wide": {
+      "pulse_voltage": -2.5,
+      "pulse_widths": [
+        0.001,
+        0.005,
+        0.01,
+        0.05,
+        0.1,
+        0.5,
+        1.0
+      ],
+      "read_voltage": 0.2,
+      "num_pulses_per_width": 5,
+      "reset_voltage": -2.5,
+      "reset_width": 0.001,
+      "delay_between_widths": 0.0,
+      "clim": 0.0001
+    }
+  },
+  "Width Sweep (Full)": {
+    "Full": {
+      "pulse_voltage": 1.5,
+      "pulse_widths": [
+        0.001,
+        0.005,
+        0.01,
+        0.05,
+        0.1,
+        0.2,
+        0.5,
+        1.0
+      ],
+      "read_voltage": 0.2,
+      "num_pulses_per_width": 5,
+      "reset_voltage": -1.0,
+      "reset_width": 0.001,
+      "delay_between_widths": 1.0,
+      "clim": 0.0001
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# Requirements for Connection Check Standalone Application
+# Install with: pip install -r requirements_standalone.txt
+
+# Instrument communication
+PyMeasure==0.15.0
+PyVISA==1.15.0
+PyVISA-py==0.8.0
+
+# GUI and plotting
+matplotlib==3.10.1
+numpy==2.2.3
+
+# Note: tkinter is usually included with Python installations
+# If tkinter is missing on Linux, install: sudo apt-get install python3-tk
+
