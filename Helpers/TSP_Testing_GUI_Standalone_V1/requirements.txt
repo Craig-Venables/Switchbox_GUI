@@ -1,0 +1,11 @@
+# TSP Testing GUI - Standalone Requirements
+# Minimal dependencies for running the TSP Testing GUI independently
+
+# Instrument communication
+PyVISA==1.15.0
+PyVISA-py==0.8.0
+
+# Numerical computing and plotting
+numpy==2.2.3
+matplotlib==3.10.1
+
