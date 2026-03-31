@@ -45,6 +45,10 @@ def _reset_for_run(gui: Any) -> None:
     gui.measuring = True
     gui.stop_measurement_flag = False
     try:
+        gui._apply_smu_current_range()
+    except Exception:
+        pass
+    try:
         gui.bring_to_top()
     except Exception:
         pass

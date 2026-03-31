@@ -47,13 +47,23 @@ def build_connection_section(parent, gui):
 
     detected_system = detect_system_from_address(gui.device_address)
     gui.system_var = tk.StringVar()
-    gui.system_var.set(detected_system if detected_system else "keithley4200a")
+    gui.system_var.set(detected_system if detected_system else "keithley4200_pmu")
 
     system_frame = tk.Frame(gui.conn_inner_frame)
     system_frame.pack(fill=tk.X, pady=1)
     tk.Label(system_frame, text="System:").pack(side=tk.LEFT)
-    system_combo = ttk.Combobox(system_frame, textvariable=gui.system_var,
-                                values=["keithley2450", "keithley2450_sim", "keithley4200a", "keithley2400"],
+    system_combo = ttk.Combobox(
+        system_frame,
+        textvariable=gui.system_var,
+        values=[
+            "keithley2450",
+            "keithley2450_sim",
+            "keithley4200_pmu",
+            "keithley4200_smu",
+            "keithley4200_custom",
+            "keithley4200a",
+            "keithley2400",
+        ],
                                 state="readonly", width=20)
     system_combo.pack(side=tk.LEFT, padx=5)
     tk.Button(system_frame, text="🔍 Auto", command=gui._auto_detect_system, width=6, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=2)
@@ -85,6 +95,13 @@ def build_connection_section(parent, gui):
     gui.terminals_var.set(default_terminals)
     tk.Radiobutton(term_frame, text="Front", variable=gui.terminals_var, value="front", command=gui.save_terminal_default).pack(side=tk.LEFT, padx=5)
     tk.Radiobutton(term_frame, text="Rear", variable=gui.terminals_var, value="rear", command=gui.save_terminal_default).pack(side=tk.LEFT, padx=5)
+
+    cr_frame = tk.Frame(gui.conn_inner_frame)
+    cr_frame.pack(fill=tk.X, pady=(3, 1))
+    tk.Label(cr_frame, text="Current range (A) [0=auto]:", font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
+    tk.Entry(cr_frame, textvariable=gui.smu_current_range_var, width=12, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=5)
 
     btn_frame = tk.Frame(gui.conn_inner_frame)
     btn_frame.pack(fill=tk.X, pady=3)

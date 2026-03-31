@@ -52,7 +52,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "laser_rise_time": {"default": 0.1, "label": "CH2 Rise Time (µs)", "type": "float"},
             "laser_fall_time": {"default": 0.1, "label": "CH2 Fall Time (µs)", "type": "float"},
             "volts_source_rng": {"default": 10.0, "label": "CH1 Voltage Range (V)", "type": "float"},
-            "current_measure_rng": {"default": 0.00001, "label": "CH1 Current Range (A)", "type": "float"},
+            "current_measure_rng": {"default": 0.00001, "label": "Current Range (A) [0=auto]", "type": "float"},
             "sample_rate": {"default": 200e6, "label": "Sample Rate (Sa/s)", "type": "float"},
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
@@ -252,14 +252,14 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "params": {
             "pulse_voltage": {"default": 1.0, "label": "Pulse Voltage (V)", "type": "float"},
             "pulse_width": {"default": 0.1, "label": "Pulse Width (s) ⚠️ SECONDS (not ms/µs)", "type": "float"},
-            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A) [0=auto]", "type": "float"},
             "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
             "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
             "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
             "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
         "plot_type": "time_series",
-        "only_for_systems": ["keithley4200a"],
+        "only_for_systems": ["keithley4200_smu"],
     },
     "⚠️ SMU Endurance": {
         "function": "smu_endurance",
@@ -273,14 +273,14 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "repeat_delay": {"default": 1.0, "label": "Repeat Delay (s) ⚠️ SECONDS", "type": "float"},
             "probe_voltage": {"default": 0.2, "label": "Probe Voltage (V)", "type": "float"},
             "probe_duration": {"default": 0.01, "label": "Probe Duration (s) ⚠️ SECONDS", "type": "float"},
-            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A) [0=auto]", "type": "float"},
             "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
             "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
             "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
             "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
         "plot_type": "time_series",
-        "only_for_systems": ["keithley4200a"],
+        "only_for_systems": ["keithley4200_smu"],
     },
     "⚠️ SMU Retention": {
         "function": "smu_retention",
@@ -292,14 +292,14 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_duration": {"default": 0.01, "label": "Read Duration (s) ⚠️ SECONDS", "type": "float"},
             "num_reads": {"default": 10, "label": "Number of Reads", "type": "int"},
             "delay_between_reads": {"default": 1.0, "label": "Delay Between Reads (s) ⚠️ SECONDS", "type": "float"},
-            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A) [0=auto]", "type": "float"},
             "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
             "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
             "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
             "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
         "plot_type": "time_series",
-        "only_for_systems": ["keithley4200a"],
+        "only_for_systems": ["keithley4200_smu"],
     },
     "⚠️ SMU Retention (Pulse Measured)": {
         "function": "smu_retention_with_pulse_measurement",
@@ -313,14 +313,14 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "repeat_delay": {"default": 1.0, "label": "Repeat Delay (s) ⚠️ SECONDS", "type": "float"},
             "probe_voltage": {"default": 0.2, "label": "Probe Voltage (V)", "type": "float"},
             "probe_duration": {"default": 0.01, "label": "Probe Duration (s) ⚠️ SECONDS", "type": "float"},
-            "i_range": {"default": 10e-3, "label": "Current Range (A)", "type": "float"},
+            "i_range": {"default": 10e-3, "label": "Current Range (A) [0=auto]", "type": "float"},
             "i_compliance": {"default": 0.0, "label": "Current Compliance (A, 0=disabled)", "type": "float"},
             "initialize": {"default": True, "label": "Initialize SMU", "type": "bool"},
             "log_messages": {"default": True, "label": "Log Messages", "type": "bool"},
             "enable_debug_output": {"default": True, "label": "Enable Debug Output", "type": "bool"},
         },
         "plot_type": "time_series",
-        "only_for_systems": ["keithley4200a"],
+        "only_for_systems": ["keithley4200_smu"],
     },
     "⚡ Electrical Pulse Train (Memristor Programming)": {
         "function": "pulse_train_varying_amplitudes",
@@ -344,7 +344,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_voltage": {"default": 0.5, "label": "Voltage (V)", "type": "float", "section": "read"},
             "total_time_s": {"default": 10.0, "label": "Time to measure (s)", "type": "float", "section": "read"},
             "sample_interval_s": {"default": 0.02, "label": "Sample interval (s)", "type": "float", "section": "read"},
-            "current_range_a": {"default": 0.0, "label": "Current measurement range (A) [0=auto; set e.g. 1e-6 or few points at high R]", "type": "float", "section": "read"},
+            "current_range_a": {"default": 0.0, "label": "Current Range (A) [0=auto]", "type": "float", "section": "read"},
             "clim": {"default": 1e-3, "label": "Current limit (A)", "type": "float", "section": "read"},
             "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float", "section": "laser"},
             "laser_delay_s": {"default": 0.0, "label": "Fire delay (s)", "type": "float", "section": "laser"},
@@ -361,7 +361,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_voltage": {"default": 0.5, "label": "Voltage (V)", "type": "float", "section": "read"},
             "duration_s": {"default": 5.0, "label": "Time to measure (s)", "type": "float", "section": "read"},
             "sample_interval_s": {"default": 0.02, "label": "Sample interval (s)", "type": "float", "section": "read"},
-            "current_range_a": {"default": 0.0, "label": "Current measurement range (A) [0=auto; set e.g. 1e-6 or few points at high R]", "type": "float", "section": "read"},
+            "current_range_a": {"default": 0.0, "label": "Current Range (A) [0=auto]", "type": "float", "section": "read"},
             "clim": {"default": 1e-3, "label": "Current limit (A)", "type": "float", "section": "read"},
             "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float", "section": "laser"},
             "laser_delay_s": {"default": 0.0, "label": "Fire delay (s)", "type": "float", "section": "laser"},
@@ -379,7 +379,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_voltage": {"default": 0.5, "label": "Voltage (V)", "type": "float", "section": "read"},
             "duration_s": {"default": 5.0, "label": "Time to measure (s)", "type": "float", "section": "read"},
             "sample_interval_s": {"default": 0.02, "label": "Sample interval (s)", "type": "float", "section": "read"},
-            "current_range_a": {"default": 0.0, "label": "Current measurement range (A) [0=auto; set e.g. 1e-6 for 1µA]", "type": "float", "section": "read"},
+            "current_range_a": {"default": 0.0, "label": "Current Range (A) [0=auto]", "type": "float", "section": "read"},
             "clim": {"default": 1e-3, "label": "Current limit (A)", "type": "float", "section": "read"},
             "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float", "section": "laser"},
             "laser_pattern": {"default": "1011", "label": "Pattern (1=fire, 0=skip)", "type": "str", "section": "laser"},
@@ -406,7 +406,7 @@ def get_test_definitions_for_gui(
     all defined tests are returned (e.g. before any system is connected).
 
     Args:
-        system_name: Current system (e.g. 'keithley2450', 'keithley4200a', 'keithley2400')
+        system_name: Current system (e.g. 'keithley2450', 'keithley4200_pmu', 'keithley4200_smu', 'keithley2400')
                     or None to return all definitions.
 
     Returns:

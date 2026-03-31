@@ -77,6 +77,21 @@ def build_laser_section(parent, gui):
     gui.laser_baud_var = tk.StringVar(value="19200")
     tk.Entry(row1, textvariable=gui.laser_baud_var, width=8).pack(side=tk.LEFT, padx=2)
 
+    smu_cr_row = tk.Frame(gui.laser_inner_frame)
+    smu_cr_row.pack(fill=tk.X, pady=(2, 0))
+    tk.Label(
+        smu_cr_row,
+        text="SMU current range (A) [0=auto]:",
+        font=("TkDefaultFont", 8),
+        anchor="w",
+        width=22,
+    ).pack(side=tk.LEFT)
+    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
+    tk.Entry(smu_cr_row, textvariable=gui.smu_current_range_var, width=10, font=("TkDefaultFont", 8)).pack(
+        side=tk.LEFT, padx=2
+    )
+
     btn_row = tk.Frame(gui.laser_inner_frame)
     btn_row.pack(fill=tk.X, pady=2)
     gui.laser_conn_btn = tk.Button(btn_row, text="Connect", command=lambda: _connect_laser(gui), bg="green", fg="white", font=("TkDefaultFont", 8))

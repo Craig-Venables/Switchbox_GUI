@@ -5,7 +5,8 @@ System Wrapper - Test Routing and System Detection
 Routes test calls to the correct system adapter. Adapters and script locations:
 - keithley2400: Pulse_Testing/systems/keithley2400.py -> Equipment/SMU_AND_PMU/keithley2400/scpi_scripts.py
 - keithley2450: Pulse_Testing/systems/keithley2450.py -> Equipment/SMU_AND_PMU/keithley2450/tsp_scripts.py
-- keithley4200a: Pulse_Testing/systems/keithley4200a.py -> Equipment/SMU_AND_PMU/keithley4200/kxci_scripts.py
+- keithley4200_pmu / keithley4200_smu / keithley4200_custom: thin adapters -> keithley4200_core.py -> Equipment/.../keithley4200/kxci_scripts.py
+- keithley4200a: legacy alias (same class family as PMU profile)
 
 1. Detects measurement system from device address
 2. Routes test function calls to appropriate system implementation
@@ -17,6 +18,9 @@ from typing import Dict, Any, Optional, Type
 from .systems.base_system import BaseMeasurementSystem
 from .systems.keithley2450 import Keithley2450System
 from .systems.keithley4200a import Keithley4200ASystem
+from .systems.keithley4200_pmu import Keithley4200PMUSystem
+from .systems.keithley4200_smu import Keithley4200SMUSystem
+from .systems.keithley4200_custom import Keithley4200CustomSystem
 from .systems.keithley2400 import Keithley2400System
 from .test_capabilities import is_test_supported
 from .utils.data_formatter import normalize_data, ensure_list_format
@@ -25,6 +29,9 @@ from .utils.data_formatter import normalize_data, ensure_list_format
 # Map of system names to their implementation classes
 SYSTEM_CLASSES: Dict[str, Type[BaseMeasurementSystem]] = {
     'keithley2450': Keithley2450System,
+    'keithley4200_pmu': Keithley4200PMUSystem,
+    'keithley4200_smu': Keithley4200SMUSystem,
+    'keithley4200_custom': Keithley4200CustomSystem,
     'keithley4200a': Keithley4200ASystem,
     'keithley2400': Keithley2400System,
 }
@@ -56,13 +63,13 @@ def detect_system_from_address(address: str) -> Optional[str]:
         address: Device address string
     
     Returns:
-        System identifier ('keithley2450', 'keithley4200a', etc.) or None if unknown
+        System identifier ('keithley2450', 'keithley4200_pmu', etc.) or None if unknown
     
     Detection logic:
     - USB/GPIB addresses containing "2450" → keithley2450
     - GPIB addresses containing "2400" or "2401" → keithley2400
-    - IP:port format (e.g., "192.168.0.10:8888") → keithley4200a
-    - GPIB0::17::INSTR (common 4200A address) → keithley4200a
+    - IP:port format (e.g., "192.168.0.10:8888") → keithley4200_pmu
+    - GPIB0::17::INSTR (common 4200A address) → keithley4200_pmu
     - Other GPIB addresses → try to query instrument ID, fallback to keithley2450
     - USB addresses → keithley2450 (default)
     """
@@ -91,7 +98,7 @@ def detect_system_from_address(address: str) -> Optional[str]:
                 ip_parts = ip_part.split('.')
                 if len(ip_parts) == 4 and all(p.isdigit() for p in ip_parts):
                     if port_part.isdigit():
-                        return 'keithley4200a'
+                        return 'keithley4200_pmu'
             except:
                 pass
     
@@ -99,17 +106,17 @@ def detect_system_from_address(address: str) -> Optional[str]:
     if address_lower.startswith('tcpip'):
         # TCPIP could be either system, default to 2450 unless we detect otherwise
         if '4200' in address_lower:
-            return 'keithley4200a'
+            return 'keithley4200_pmu'
         return 'keithley2450'
     
     # Check for 4200 indicators in GPIB addresses
     if address_lower.startswith('gpib') and '4200' in address_lower:
-        return 'keithley4200a'
+        return 'keithley4200_pmu'
     
     # Check for common 4200A GPIB address (GPIB0::17::INSTR)
     # This is the standard address used throughout the codebase for 4200A
     if address_normalized == "GPIB0::17::INSTR" or address_lower == "gpib0::17::instr":
-        return 'keithley4200a'
+        return 'keithley4200_pmu'
     
     # For other GPIB addresses without clear indicators, try to query instrument
     if address_lower.startswith('gpib'):
@@ -127,7 +134,7 @@ def detect_system_from_address(address: str) -> Optional[str]:
             
             # Check IDN response for system indicators
             if '4200' in idn or '4200A' in idn or '4200-SCS' in idn:
-                return 'keithley4200a'
+                return 'keithley4200_pmu'
             elif '2450' in idn:
                 return 'keithley2450'
             elif '2400' in idn or '2401' in idn:
@@ -235,6 +242,34 @@ class SystemWrapper:
         if self.current_system:
             return self.current_system.get_hardware_limits()
         return {}
+
+    def apply_current_measurement_range(self, current_range_a: float) -> None:
+        """Best-effort SMU current measurement range (A); 0 = auto. Ignored if unsupported."""
+        if not self.current_system:
+            return
+        try:
+            r = float(current_range_a)
+        except (TypeError, ValueError):
+            r = 0.0
+        if r < 0.0:
+            r = 0.0
+        sys = self.current_system
+        for attr in ("tsp_controller", "controller"):
+            obj = getattr(sys, attr, None)
+            if obj is not None and hasattr(obj, "set_current_measurement_range"):
+                try:
+                    obj.set_current_measurement_range(r)
+                except Exception:
+                    pass
+                return
+        scripts = getattr(sys, "_scripts", None)
+        if scripts is not None:
+            try:
+                ctrl = scripts._get_controller()
+                if ctrl is not None and hasattr(ctrl, "set_current_measurement_range"):
+                    ctrl.set_current_measurement_range(r)
+            except Exception:
+                pass
     
     def run_test(self, test_function: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Run a test function on the current system.

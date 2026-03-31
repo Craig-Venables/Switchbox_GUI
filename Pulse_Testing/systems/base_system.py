@@ -3,7 +3,7 @@ Base Measurement System Interface
 =================================
 
 Abstract base class for all measurement systems. Implementations (adapters) live in
-Pulse_Testing/systems/ (keithley2400.py, keithley2450.py, keithley4200a.py); each
+Pulse_Testing/systems/ (keithley2400.py, keithley2450.py, keithley4200_*.py); each
 delegates to script modules in Equipment/SMU_AND_PMU/<instrument>/.
 See Pulse_Testing/README.md and Equipment/SMU_AND_PMU/README.md for unified layout.
 """
@@ -40,7 +40,7 @@ class BaseMeasurementSystem(ABC):
     
     @abstractmethod
     def get_system_name(self) -> str:
-        """Return the system identifier name (e.g., 'keithley2450', 'keithley4200a')."""
+        """Return the system identifier name (e.g., 'keithley2450', 'keithley4200_pmu')."""
         pass
     
     @abstractmethod

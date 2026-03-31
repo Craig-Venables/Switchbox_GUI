@@ -37,6 +37,13 @@ def build_optical_tab(tab_frame, gui):
     gui.laser_baud_var = tk.StringVar(value="19200")
     tk.Entry(row1, textvariable=gui.laser_baud_var, width=8).pack(side=tk.LEFT, padx=2)
 
+    smu_row = tk.Frame(conn_frame)
+    smu_row.pack(fill=tk.X, pady=(4, 2))
+    tk.Label(smu_row, text="SMU current range (A) [0=auto]:", anchor="w").pack(side=tk.LEFT)
+    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
+    tk.Entry(smu_row, textvariable=gui.smu_current_range_var, width=12).pack(side=tk.LEFT, padx=4)
+
     btn_row = tk.Frame(conn_frame)
     btn_row.pack(fill=tk.X, pady=5)
     gui.laser_conn_btn = tk.Button(btn_row, text="Connect", command=lambda: _connect_laser(gui), bg="green", fg="white")

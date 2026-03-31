@@ -207,6 +207,22 @@ class Keithley2450_TSP:
         except Exception as e:
             print(f"Error measuring current: {e}")
             return None
+
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """Set measurement current range in TSP mode. Use 0 for auto range."""
+        if not self.device:
+            return
+        try:
+            requested = float(current_range_a)
+            self.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+            if requested <= 0.0:
+                self.device.write('smu.measure.autorange = smu.ON')
+            else:
+                self.device.write('smu.measure.autorange = smu.OFF')
+                self.device.write(f'smu.measure.range = {requested}')
+            time.sleep(0.01)
+        except Exception:
+            pass
     
     def enable_output(self, enable: bool = True) -> None:
         """

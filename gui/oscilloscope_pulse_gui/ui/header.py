@@ -28,11 +28,14 @@ def create_top_bar(gui, parent):
     ttk.Label(bar_frame, text=id_text, style="Header.TLabel").pack(side="left", padx=(0, 20))
 
     tk.Label(bar_frame, text="System:", bg=gui_config.COLORS["accent"]).pack(side="left")
-    gui.vars["system"] = tk.StringVar(value=gui.config.get("system", "keithley4200a"))
+    gui.vars["system"] = tk.StringVar(value=gui.config.get("system", "keithley4200_pmu"))
     sys_combo = ttk.Combobox(
         bar_frame,
         textvariable=gui.vars["system"],
-        values=gui.context.get("known_systems", ["keithley4200a", "keithley2450", "keithley2400"]),
+        values=gui.context.get(
+            "known_systems",
+            ["keithley4200_pmu", "keithley4200_smu", "keithley4200a", "keithley2450", "keithley2400"],
+        ),
         width=15,
         state="readonly",
     )

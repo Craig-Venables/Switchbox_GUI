@@ -85,6 +85,7 @@ class _Keithley4200A_KXCI_Wrapper:
         self._last_voltage = 0.0  # Track last set voltage
         self._last_current = 0.0  # Track last set current
         self._ex_command_lock = threading.Lock()  # Lock to prevent concurrent EX commands
+        self._desired_current_measurement_range_a = 0.0  # 0 = auto; stored for future C-module wiring
         
         # Note: Don't force connection in __init__ - connection will be established
         # when needed. This allows the wrapper to be created without immediate connection.
@@ -135,6 +136,19 @@ class _Keithley4200A_KXCI_Wrapper:
         self._last_current = float(current)
         self._output_enabled = True
         # Note: Current sourcing requires a specialized C module
+
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """
+        Store desired current measurement range for 4200A KXCI wrapper.
+        0.0 means auto range. The wrapper cannot always apply LPT rangei calls
+        (no direct lpt handle here); downstream C modules still carry their own
+        IRange parameters.
+        """
+        try:
+            requested = float(current_range_a)
+            self._desired_current_measurement_range_a = requested if requested > 0.0 else 0.0
+        except Exception:
+            self._desired_current_measurement_range_a = 0.0
     
     def measure_voltage(self) -> float:
         """
@@ -658,6 +672,20 @@ class IVControllerManager:
 
     def set_current(self, current: float, Vcc: float = 10.0):
         return self.instrument.set_current(current, Vcc)
+
+    def set_current_measurement_range(self, current_range_a: float = 0.0):
+        """
+        Configure current measurement range on the active instrument.
+        0.0 enables auto range; >0 requests a fixed range.
+        """
+        inst = getattr(self, "instrument", None)
+        if inst is None:
+            return
+        if hasattr(inst, "set_current_measurement_range"):
+            try:
+                inst.set_current_measurement_range(float(current_range_a))
+            except Exception:
+                pass
 
     def measure_voltage(self):
         return self.instrument.measure_voltage()

@@ -139,6 +139,7 @@ class Keithley4200AController:
             if not self._is_pmu:
                 # Auto-range current measure by default
                 self.lpt.rangei(self._instr_id, 0)
+            self._current_measurement_range_a = 0.0
 
         except Exception as exc:
             raise RuntimeError(f"Failed to connect 4200A at {self._ip}:{self._port} ({self._card_name}): {exc}")
@@ -152,6 +153,20 @@ class Keithley4200AController:
         self.lpt.limiti(self._instr_id, float(Icc))
         self.lpt.forcev(self._instr_id, float(voltage))
         self._output_enabled = True
+
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """Set current measurement range (A). Use 0 for auto range."""
+        if self._instr_id is None:
+            return
+        try:
+            requested = float(current_range_a)
+            self._current_measurement_range_a = requested if requested > 0.0 else 0.0
+            if self._current_measurement_range_a <= 0.0:
+                self.lpt.rangei(self._instr_id, 0)
+            else:
+                self.lpt.rangei(self._instr_id, self._current_measurement_range_a)
+        except Exception:
+            pass
 
     def set_current(self, current: float, Vcc: float = 10.0):
         self._last_source_mode = "current"
