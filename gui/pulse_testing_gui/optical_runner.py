@@ -17,6 +17,8 @@ import threading
 import time
 from typing import Dict, Any, Tuple, Optional, List
 
+from Pulse_Testing.keithley4200_constants import KEITHLEY4200_SMU_OPTICAL_SYSTEMS
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,9 +92,10 @@ def run_optical_test(gui, func_name: str, params: dict) -> Tuple[Optional[Dict[s
         return (None, RuntimeError("No measurement system. Connect the instrument in the Connection tab first."))
 
     system_name = getattr(system, 'get_system_name', lambda: getattr(gui.system_wrapper, 'system_name', 'unknown'))()
-    logger.info(f"Optical test: system_name = '{system_name}'")
-    
-    if system_name == 'keithley4200a':
+    wrapper_system = getattr(getattr(gui, 'system_wrapper', None), 'system_name', None)
+    logger.info(f"Optical test: system_name = '{system_name}', wrapper = '{wrapper_system}'")
+
+    if wrapper_system in KEITHLEY4200_SMU_OPTICAL_SYSTEMS:
         if not hasattr(system, 'run_bias_timed_read'):
             return (None, RuntimeError("4200A optical path requires run_bias_timed_read."))
         try:
@@ -104,7 +107,7 @@ def run_optical_test(gui, func_name: str, params: dict) -> Tuple[Optional[Dict[s
 
     if not hasattr(system, 'source_voltage_for_optical') or not hasattr(system, 'measure_current_once'):
         return (None, RuntimeError(
-            f"Current system ({system_name}) does not support optical+read tests. Use Keithley 2450, 2400, or 4200A."
+            f"Current system ({system_name}) does not support optical+read tests. Use Keithley 2450, 2400, or 4200 SMU profile (keithley4200_smu)."
         ))
 
     try:

@@ -4,7 +4,7 @@ Pulse Testing Module
 
 Multi-system pulse testing architecture supporting:
 - Keithley 2450 (TSP mode)
-- Keithley 4200A (future, template ready)
+- Keithley 4200-SCS (KXCI): `keithley4200_pmu`, `keithley4200_smu`, `keithley4200_custom`, legacy `keithley4200a`
 
 Provides unified interface for pulse testing across different measurement systems.
 """

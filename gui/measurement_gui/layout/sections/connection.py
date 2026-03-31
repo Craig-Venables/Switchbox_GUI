@@ -152,8 +152,13 @@ def _build_smu_section(builder: Any, frame: tk.Frame, gui) -> None:
     button_frame_smu = tk.Frame(smu_frame, bg=COLOR_BG)
     button_frame_smu.grid(row=1, column=3, pady=5, padx=(0, 0))
 
+    tk.Label(smu_frame, text="Current Range (A) [0=auto]:", font=FONT_MAIN, bg=COLOR_BG).grid(row=2, column=0, sticky="w", pady=5)
+    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+        gui.smu_current_range_var = tk.DoubleVar(value=float(getattr(gui, "smu_current_range_a", 0.0) or 0.0))
+    tk.Entry(smu_frame, textvariable=gui.smu_current_range_var, font=FONT_MAIN, width=18).grid(row=2, column=1, sticky="w", pady=5, padx=(10, 10))
+
     gui.smu_device_info = tk.Label(smu_frame, text="", font=("Segoe UI", 8), bg=COLOR_BG, fg="#666666")
-    gui.smu_device_info.grid(row=2, column=1, columnspan=2, sticky="w", padx=(10, 0), pady=(2, 0))
+    gui.smu_device_info.grid(row=3, column=1, columnspan=2, sticky="w", padx=(10, 0), pady=(2, 0))
 
     tk.Button(button_frame_smu, text="Test", font=FONT_BUTTON, bg="#FF9800", fg="white", command=lambda: builder._test_connection(gui, "smu"), padx=10).pack(
         side="left", padx=(0, 5)

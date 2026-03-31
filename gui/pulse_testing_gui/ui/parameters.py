@@ -7,6 +7,8 @@ _on_unit_changed, load_presets_from_file, populate_parameters.
 import tkinter as tk
 from tkinter import ttk
 
+from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
+
 
 def toggle_parameters_section(gui):
     """Toggle collapse/expand of parameters section."""
@@ -53,8 +55,19 @@ def build_parameters_section(parent, gui):
     tk.Button(preset_frame, text="💾 Save", command=gui.save_preset, font=("TkDefaultFont", 8), width=6).pack(side=tk.LEFT, padx=2)
     tk.Button(preset_frame, text="🗑️ Del", command=gui.delete_preset, font=("TkDefaultFont", 8), width=6).pack(side=tk.LEFT, padx=2)
 
+    smu_cr_row = tk.Frame(gui.params_content_frame)
+    smu_cr_row.pack(fill=tk.X, padx=3, pady=(2, 4))
+    tk.Label(
+        smu_cr_row,
+        text="SMU current range (A) [0=auto]:",
+        font=("TkDefaultFont", 8, "bold"),
+    ).pack(side=tk.LEFT, padx=(0, 6))
+    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
+    tk.Entry(smu_cr_row, textvariable=gui.smu_current_range_var, width=14, font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+
     unit_options = ["ns", "µs", "ms", "s"]
-    default_unit = "µs" if getattr(gui, "current_system_name", None) in ("keithley4200a",) else "ms"
+    default_unit = "µs" if getattr(gui, "current_system_name", None) in KEITHLEY4200_PMU_TIMING_SYSTEMS else "ms"
     gui.time_unit_var = tk.StringVar(value=default_unit)
     gui.previous_unit = default_unit
     unit_combo = ttk.Combobox(preset_frame, textvariable=gui.time_unit_var, values=unit_options, state="readonly", width=6, justify="center")

@@ -266,6 +266,10 @@ class HP4140BController:
         self.enable_output(enable=True, channel=channel)
         self.configure_current_source(channel=channel, range_code=range_code, current_a=current, compliance_v=Vcc)
 
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """Compatibility no-op for unified SMU range API (HP4140B uses range codes)."""
+        return
+
     def measure_voltage(self, channel: int = 1) -> float:
         self.trigger_voltage_measure(channel=channel, mode=0)
         _, v, _ = self.read_data(channel)

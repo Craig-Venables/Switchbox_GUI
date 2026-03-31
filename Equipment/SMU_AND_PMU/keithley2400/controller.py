@@ -85,6 +85,20 @@ class Keithley2400Controller:
                     pass
             self.device.source_voltage = voltage
 
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """Set measurement current range (A). Use 0 for auto range."""
+        if not self.device:
+            return
+        try:
+            requested = float(current_range_a)
+            if requested <= 0.0:
+                self.device.write("SENS:CURR:RANG:AUTO ON")
+            else:
+                self.device.write("SENS:CURR:RANG:AUTO OFF")
+                self.device.write(f"SENS:CURR:RANG {requested}")
+        except Exception:
+            pass
+
     def prepare_for_pulses(self, Icc: float = 1e-3, v_range: float = 20.0, ovp: float = 21.0,
                            use_remote_sense: bool = False, autozero_off: bool = True) -> None:
         """One-shot prep for pulsed operation: set fixed range/OVP/sense, bias 0 V, enable output.

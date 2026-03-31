@@ -56,6 +56,13 @@ except ImportError:
     SystemWrapper = None
     detect_system_from_address = None
 
+try:
+    from Pulse_Testing.keithley4200_constants import KEITHLEY4200_SYSTEM_IDS
+except ImportError:
+    KEITHLEY4200_SYSTEM_IDS = frozenset(
+        {'keithley4200a', 'keithley4200_pmu', 'keithley4200_smu', 'keithley4200_custom'}
+    )
+
 class PulseMeasurementLogic:
     """
     Handles the execution of pulse measurements, including:
@@ -267,7 +274,7 @@ class PulseMeasurementLogic:
         debug_print(f"  Pulse Duration  : {dur:.6f} s")
         debug_print(f"  Pre-Bias Hold   : {pre_hold:.6f} s")
         debug_print(f"  Post-Bias Hold  : {post_hold:.6f} s"
-                    f"{' (mirrored from pre-bias for 4200A)' if system_name == 'keithley4200a' else ''}")
+                    f"{' (mirrored from pre-bias for 4200-SCS)' if system_name in KEITHLEY4200_SYSTEM_IDS else ''}")
         debug_print(f"  Compliance      : {comp:.6e} A")
         debug_print(f"  Shunt (for I calc): {shunt:.3f} Ω")
         debug_print("===================")
@@ -477,8 +484,8 @@ class PulseMeasurementLogic:
     
     def _configure_smu_pre_pulse(self, meas_params: Dict[str, Any], system_name: str) -> None:
         """Configure SMU before pulse execution."""
-        if system_name == 'keithley4200a':
-            timing_log("SMU: 4200A - no pre-configuration needed")
+        if system_name in KEITHLEY4200_SYSTEM_IDS:
+            timing_log("SMU: 4200-SCS - no pre-configuration needed")
             return
         
         timing_log(f"SMU: Setting initial bias voltage {meas_params['bias_voltage']:.3f}V")
@@ -581,7 +588,7 @@ class PulseMeasurementLogic:
         on_progress("Pulsing...")
         self._log_pulse_summary(meas_params, system_name)
         
-        if system_name == 'keithley4200a':
+        if system_name in KEITHLEY4200_SYSTEM_IDS:
             # C function handles pre-bias, pulse, and post-bias internally
             # biasHold parameter controls both pre and post bias hold times
             self._execute_smu_pulse_4200a(meas_params)
@@ -819,8 +826,8 @@ class PulseMeasurementLogic:
             # 3. Execute pulse sequence
             self._execute_full_pulse_sequence(meas_params, system_name, on_progress)
             
-            # 4. Disable SMU output (if not 4200A)
-            if not meas_params['simulation_mode'] and system_name != 'keithley4200a':
+            # 4. Disable SMU output (if not 4200-SCS KXCI path)
+            if not meas_params['simulation_mode'] and system_name not in KEITHLEY4200_SYSTEM_IDS:
                 self.smu.enable_output(False)
             
             # 5. Acquire waveform
@@ -868,7 +875,7 @@ class PulseMeasurementLogic:
             # Safety cleanup
             if not meas_params.get('simulation_mode', False) and self.smu:
                 try:
-                    if system_name != 'keithley4200a':
+                    if system_name not in KEITHLEY4200_SYSTEM_IDS:
                         self.smu.enable_output(False)
                 except:
                     pass
@@ -899,7 +906,7 @@ class PulseMeasurementLogic:
             self._execute_full_pulse_sequence(meas_params, system_name, on_progress)
             
             # Disable output
-            if not meas_params['simulation_mode'] and system_name != 'keithley4200a':
+            if not meas_params['simulation_mode'] and system_name not in KEITHLEY4200_SYSTEM_IDS:
                 self.smu.enable_output(False)
             
             timing_log("=== PULSE-ONLY WORKER END ===")
@@ -912,7 +919,7 @@ class PulseMeasurementLogic:
         finally:
             if not meas_params.get('simulation_mode', False) and self.smu:
                 try:
-                    if system_name != 'keithley4200a':
+                    if system_name not in KEITHLEY4200_SYSTEM_IDS:
                         self.smu.enable_output(False)
                 except:
                     pass

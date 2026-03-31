@@ -5,9 +5,11 @@ Test Capability Definitions
 Defines which tests are supported by each measurement system.
 Easy to update: change boolean values to enable/disable test support.
 
-To add 4200A support for a test:
-1. Implement the test method in keithley4200a.py
-2. Change the corresponding boolean to True in SYSTEM_CAPABILITIES['keithley4200a']
+To add Keithley 4200 support for a test:
+1. Implement the method once on ``Keithley4200KXCICommon`` in ``systems/keithley4200_core.py`` (Equipment KXCI scripts as needed).
+2. Set ``True`` in ``SYSTEM_CAPABILITIES['keithley4200_pmu']`` and/or ``['keithley4200_smu']`` (see README — Keithley 4200 profiles).
+
+See also: ``Pulse_Testing/README.md`` (How to add a new test, Keithley 4200 profiles).
 
 IMPORTANT NOTE FOR 4200A DATA COLLECTION:
 ------------------------------------------
@@ -83,39 +85,68 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'optical_pulse_train_read': True,
         'optical_pulse_train_pattern_read': True,
     },
-    'keithley4200a': {
-        # Tests implemented using pmu_pulse_read_interleaved.c and pmu_potentiation_depression.c
-        # The interleaved program is highly versatile and can be configured for most test patterns
-        # NOTE: There is a known issue with GP parameter numbers for data collection - 
-        #       the method from examples is used but may need verification (GP 20, 22, 25, 31)
-        'pulse_read_repeat': True,  # ✅ Uses pmu_pulse_read_interleaved: num_cycles=N, num_reads=1, num_pulses_per_group=1
-        'pulse_then_read': True,  # ✅ Uses pmu_pulse_read_interleaved: same as pulse_read_repeat
-        'multi_pulse_then_read': True,  # ✅ Uses pmu_pulse_read_interleaved: configurable num_pulses_per_group and num_reads
-        'varying_width_pulses': False,  # Not available - use width_sweep_with_reads instead
-        'width_sweep_with_reads': True,  # ⚠️ Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values
-        'width_sweep_with_all_measurements': False,  # ❌ Requires NEW C module with pulse measurement capability
-        'potentiation_depression_cycle': True,  # ✅ Uses pmu_potentiation_depression.c for alternating potentiation/depression cycles
-        'potentiation_only': True,  # ✅ Uses pmu_pulse_read_interleaved: positive pulses only
-        'depression_only': True,  # ✅ Uses pmu_pulse_read_interleaved: negative pulses only
-        'endurance_test': True,  # ✅ Uses pmu_pulse_read_interleaved: can configure alternating SET/RESET pattern
-        'retention_test': False,  # Not yet implemented
-        'pulse_multi_read': True,  # ✅ Uses pmu_pulse_read_interleaved: num_pulses_per_group=N, num_reads=M
-        'multi_read_only': True,  # ✅ Uses pmu_pulse_read_interleaved: num_pulses_per_group=0, num_reads=N
-        'current_range_finder': False,  # ❌ Requires Python-side loop over current ranges
-        'relaxation_after_multi_pulse': True,  # ✅ Uses pmu_pulse_read_interleaved: 1 read → N pulses → M reads
-        'relaxation_after_multi_pulse_with_pulse_measurement': False,  # ❌ Requires NEW C module with pulse measurement capability
-        # Additional tests available in 4200A
+    # --- Keithley 4200-SCS: PMU vs SMU profiles (shared implementation: keithley4200_core.py) ---
+    'keithley4200_pmu': {
+        # Fast interleaved PMU + laser_and_read (CH2 PMU for laser)
+        'pulse_read_repeat': True,
+        'pulse_then_read': True,
+        'multi_pulse_then_read': True,
+        'varying_width_pulses': False,
+        'width_sweep_with_reads': True,
+        'width_sweep_with_all_measurements': False,
+        'potentiation_depression_cycle': True,
+        'potentiation_only': True,
+        'depression_only': True,
+        'endurance_test': True,
+        'retention_test': False,
+        'pulse_multi_read': True,
+        'multi_read_only': True,
+        'current_range_finder': False,
+        'relaxation_after_multi_pulse': True,
+        'relaxation_after_multi_pulse_with_pulse_measurement': False,
         'voltage_amplitude_sweep': True,
         'ispp_test': True,
         'switching_threshold_test': True,
         'multilevel_programming': True,
         'pulse_train_varying_amplitudes': True,
-        'laser_and_read': True,  # ✅ Uses Read_With_Laser_Pulse_SegArb.c: CH1 continuous reads, CH2 independent laser pulse
-        'smu_slow_pulse_measure': True,  # ⚠️ Uses SMU (not PMU) - much slower but supports pulse widths up to 480 seconds
-        'smu_endurance': True,  # ⚠️ Uses SMU (not PMU) - (SET pulse → Read → RESET pulse → Read) × N cycles, supports pulse widths up to 480 seconds
-        'smu_retention': True,  # ⚠️ Uses SMU (not PMU) - Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time), supports pulse widths up to 480 seconds
-        'smu_retention_with_pulse_measurement': True,  # ⚠️ Uses SMU (not PMU) - measures resistance DURING SET/RESET pulses, supports pulse widths up to 480 seconds
-        'optical_read_pulsed_light': True,   # Uses SMU_BiasTimedRead + laser from Python (thread + optical_start_delay_s)
+        'laser_and_read': True,
+        'smu_slow_pulse_measure': False,
+        'smu_endurance': False,
+        'smu_retention': False,
+        'smu_retention_with_pulse_measurement': False,
+        'optical_read_pulsed_light': False,
+        'optical_pulse_train_read': False,
+        'optical_pulse_train_pattern_read': False,
+    },
+    'keithley4200_smu': {
+        # Slow SMU scripts + SMU_BiasTimedRead optical coordination
+        'pulse_read_repeat': False,
+        'pulse_then_read': False,
+        'multi_pulse_then_read': False,
+        'varying_width_pulses': False,
+        'width_sweep_with_reads': False,
+        'width_sweep_with_all_measurements': False,
+        'potentiation_depression_cycle': False,
+        'potentiation_only': False,
+        'depression_only': False,
+        'endurance_test': False,
+        'retention_test': False,
+        'pulse_multi_read': False,
+        'multi_read_only': False,
+        'current_range_finder': False,
+        'relaxation_after_multi_pulse': False,
+        'relaxation_after_multi_pulse_with_pulse_measurement': False,
+        'voltage_amplitude_sweep': False,
+        'ispp_test': False,
+        'switching_threshold_test': False,
+        'multilevel_programming': False,
+        'pulse_train_varying_amplitudes': False,
+        'laser_and_read': False,
+        'smu_slow_pulse_measure': True,
+        'smu_endurance': True,
+        'smu_retention': True,
+        'smu_retention_with_pulse_measurement': True,
+        'optical_read_pulsed_light': True,
         'optical_pulse_train_read': True,
         'optical_pulse_train_pattern_read': True,
     },
@@ -150,12 +181,18 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
     },
 }
 
+# Setup-only profile: connect works; no pulse tests listed in GUI
+SYSTEM_CAPABILITIES['keithley4200_custom'] = {k: False for k in ALL_TEST_FUNCTIONS}
+
+# Legacy alias: same as keithley4200_pmu (saved configs / address auto-detect migration)
+SYSTEM_CAPABILITIES['keithley4200a'] = dict(SYSTEM_CAPABILITIES['keithley4200_pmu'])
+
 
 def is_test_supported(system_name: str, test_function: str) -> bool:
     """Check if a test is supported by a specific system.
     
     Args:
-        system_name: System identifier (e.g., 'keithley2450', 'keithley4200a')
+        system_name: System identifier (e.g., 'keithley2450', 'keithley4200_pmu')
         test_function: Test function name (e.g., 'pulse_read_repeat')
     
     Returns:
@@ -226,10 +263,36 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
             'retention_test': 'Not yet implemented - would require time-based read measurements after initial pulse',
             'current_range_finder': 'Requires Python-side loop over current ranges (interleaved program uses fixed i_range parameter)',
             'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module with pulse measurement capability (interleaved only measures during read windows, not during pulses)',
-            # Add more specific explanations as needed
-        }
+        },
+        'keithley4200_pmu': {
+            'varying_width_pulses': 'Not available - use width_sweep_with_reads instead (uses pmu_pulse_read_interleaved with Python-side loop)',
+            'width_sweep_with_reads': 'Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values (one call per width)',
+            'width_sweep_with_all_measurements': 'Requires NEW C module with pulse peak current measurement capability (interleaved only measures during read windows)',
+            'retention_test': 'Not yet implemented - would require time-based read measurements after initial pulse',
+            'current_range_finder': 'Requires Python-side loop over current ranges (interleaved program uses fixed i_range parameter)',
+            'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module with pulse measurement capability (interleaved only measures during read windows, not during pulses)',
+        },
+        'keithley4200_smu': {
+            'pulse_read_repeat': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'pulse_then_read': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'multi_pulse_then_read': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'width_sweep_with_reads': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'potentiation_depression_cycle': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'potentiation_only': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'depression_only': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'endurance_test': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'pulse_multi_read': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'multi_read_only': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'relaxation_after_multi_pulse': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'voltage_amplitude_sweep': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'ispp_test': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'switching_threshold_test': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'multilevel_programming': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'pulse_train_varying_amplitudes': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'laser_and_read': 'Laser on PMU (CH2). Select keithley4200_pmu in Connection.',
+        },
     }
-    
+
     system_explanations = explanations.get(system_name, {})
     return system_explanations.get(
         test_function,

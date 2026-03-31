@@ -181,6 +181,20 @@ class Keithley2450Controller:
             
         except Exception as e:
             print(f"Error setting voltage: {e}")
+
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """Set measurement current range (A). Use 0 for auto range."""
+        if not self.device:
+            return
+        try:
+            requested = float(current_range_a)
+            if requested <= 0.0:
+                self.device.write(':SENS:CURR:RANG:AUTO ON')
+            else:
+                self.device.write(':SENS:CURR:RANG:AUTO OFF')
+                self.device.write(f':SENS:CURR:RANG {requested}')
+        except Exception:
+            pass
     
     def set_current(self, current: float, Vcc: float = 10.0) -> None:
         """

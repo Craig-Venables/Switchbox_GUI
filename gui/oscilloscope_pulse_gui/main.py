@@ -31,7 +31,13 @@ if __name__ == "__main__":
         except ImportError:
             SystemWrapper = None
             detect_system_from_address = None
-    
+    try:
+        from Pulse_Testing.keithley4200_constants import KEITHLEY4200_SYSTEM_IDS
+    except ImportError:
+        KEITHLEY4200_SYSTEM_IDS = frozenset(
+            {'keithley4200a', 'keithley4200_pmu', 'keithley4200_smu', 'keithley4200_custom'}
+        )
+
     # Try to import connection manager for dropdowns if available
     try:
         from Measurements.connection_manager import InstrumentConnectionManager
@@ -47,6 +53,12 @@ else:
     except ImportError:
         SystemWrapper = None
         detect_system_from_address = None
+    try:
+        from Pulse_Testing.keithley4200_constants import KEITHLEY4200_SYSTEM_IDS
+    except ImportError:
+        KEITHLEY4200_SYSTEM_IDS = frozenset(
+            {'keithley4200a', 'keithley4200_pmu', 'keithley4200_smu', 'keithley4200_custom'}
+        )
     # In integrated mode, manager usually passed or importable
     try:
         from Measurements.connection_manager import InstrumentConnectionManager
@@ -1019,7 +1031,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 
                 # Map SMU Type to system identifier
                 if "4200" in smu_type or "4200a" in smu_type:
-                    system_type = "keithley4200a"
+                    system_type = "keithley4200_smu"
                 elif "2450" in smu_type:
                     system_type = "keithley2450"
                 elif "2400" in smu_type or "2401" in smu_type:
@@ -1143,8 +1155,8 @@ class OscilloscopePulseGUI(tk.Toplevel):
             
             # For 4200A, we need to use specific methods
             # For 2450, we use standard set_voltage/enable_output
-            if self.current_system_name == 'keithley4200a':
-                # Use smu_slow_pulse_measure for 4200A
+            if self.current_system_name in KEITHLEY4200_SYSTEM_IDS:
+                # Use smu_slow_pulse_measure for 4200-SCS (SMU script path)
                 try:
                     result = smu.smu_slow_pulse_measure(
                         pulse_voltage=voltage,

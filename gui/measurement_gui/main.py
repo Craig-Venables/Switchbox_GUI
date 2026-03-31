@@ -3267,6 +3267,7 @@ class MeasurementGUI:
             # Update status
             if hasattr(self, "pulse_single_result"):
                 self.pulse_single_result.set("Running pulse...")
+            self._apply_smu_current_range()
             
             # Run measurement
             voltage_during, current_during, current_at_read = self.measurement_service.run_single_pulse_measurement(
@@ -3328,6 +3329,7 @@ class MeasurementGUI:
             # Update status
             if hasattr(self, "pulse_single_result"):
                 self.pulse_single_result.set("Running read pulse...")
+            self._apply_smu_current_range()
             
             # Set voltage and measure
             try:
@@ -3560,6 +3562,7 @@ class MeasurementGUI:
             # Update status
             if hasattr(self, "forming_status"):
                 self.forming_status.set("Starting forming measurement...")
+            self._apply_smu_current_range()
             
             self.log_terminal("Starting forming measurement...")
             
@@ -3854,6 +3857,33 @@ class MeasurementGUI:
         except (FileNotFoundError, json.JSONDecodeError):
             return ["Please Select System", "No systems available"]
 
+    def _get_smu_current_range_a(self) -> float:
+        """Return configured SMU current measurement range in A (0 = auto)."""
+        raw_value = 0.0
+        try:
+            if hasattr(self, "smu_current_range_var"):
+                raw_value = float(self.smu_current_range_var.get())
+            else:
+                raw_value = float(getattr(self, "smu_current_range_a", 0.0))
+        except Exception:
+            raw_value = 0.0
+        if raw_value < 0:
+            return 0.0
+        return raw_value
+
+    def _apply_smu_current_range(self) -> None:
+        """
+        Apply current measurement range to active SMU if supported.
+        0 means auto range.
+        """
+        current_range_a = self._get_smu_current_range_a()
+        self.smu_current_range_a = current_range_a
+        try:
+            if getattr(self, "keithley", None) is not None and hasattr(self.keithley, "set_current_measurement_range"):
+                self.keithley.set_current_measurement_range(current_range_a)
+        except Exception as e:
+            print(f"Warning: Could not apply SMU current range ({current_range_a} A): {e}")
+
     def load_system(self) -> None:
         """Load the selected system configuration and populate all fields"""
         selected_system = getattr(self, 'system_var', None)
@@ -3876,10 +3906,13 @@ class MeasurementGUI:
         # Update SMU section
         smu_type = config.get("SMU Type", "")
         smu_address = config.get("SMU_address", "")
+        smu_current_range_a = float(config.get("SMU_current_range_a", 0.0) or 0.0)
         if hasattr(self, 'smu_type_var'):
             self.smu_type_var.set(smu_type)
         if hasattr(self, 'keithley_address_var'):
             self.keithley_address_var.set(smu_address)
+        if hasattr(self, "smu_current_range_var"):
+            self.smu_current_range_var.set(smu_current_range_a)
         # Ensure address is in combobox values if using combobox
         if hasattr(self, 'iv_address_combo') and smu_address:
             current_values = list(self.iv_address_combo['values'])
@@ -3888,6 +3921,7 @@ class MeasurementGUI:
         self.SMU_type = smu_type
         self.keithley_address = smu_address
         self.iv_address = smu_address
+        self.smu_current_range_a = smu_current_range_a
         
         # Update PSU section
         psu_type = config.get("psu_type", "None")
@@ -4135,6 +4169,7 @@ class MeasurementGUI:
             config["SMU_address"] = self.keithley_address
         else:
             config["SMU_address"] = ""
+        config["SMU_current_range_a"] = self._get_smu_current_range_a()
         
         # PSU configuration
         if hasattr(self, 'psu_type_var'):
@@ -4303,12 +4338,16 @@ class MeasurementGUI:
 
             # Update IV section
             iv_address = config.get("SMU_address", "")
+            smu_current_range_a = float(config.get("SMU_current_range_a", 0.0) or 0.0)
             self.iv_address = iv_address
             self.keithley_address = iv_address
+            self.smu_current_range_a = smu_current_range_a
             
             # Update the StringVar (this should sync with combobox if bound)
             if hasattr(self, 'keithley_address_var'):
                 self.keithley_address_var.set(iv_address)
+            if hasattr(self, "smu_current_range_var"):
+                self.smu_current_range_var.set(smu_current_range_a)
             
             # Also explicitly update combobox if it exists (in case it's not bound properly)
             if hasattr(self, 'iv_address_combo'):
@@ -4550,6 +4589,10 @@ class MeasurementGUI:
         """Sweep parameter section - no frame wrapper, uses parent directly"""
         # Use parent directly - it's already the content frame from collapsible section
         frame = parent
+
+        # Shared with Connection tab (built later); Measurements tab is built first.
+        if not hasattr(self, "smu_current_range_var") or getattr(self, "smu_current_range_var", None) is None:
+            self.smu_current_range_var = tk.DoubleVar(value=float(getattr(self, "smu_current_range_a", 0.0) or 0.0))
 
         # Measurement Type selector (DC Triangle IV, SMU_AND_PMU pulse modes, etc.)
         tk.Label(frame, text="Measurement Type:", bg='#f0f0f0').grid(row=0, column=0, sticky="w", pady=2)
@@ -5143,6 +5186,15 @@ class MeasurementGUI:
         self._dc_ent_icc = tk.Entry(frame, textvariable=self.icc)
         self._dc_ent_icc.grid(row=9, column=1)
         self._dc_widgets.extend([self._dc_lbl_icc, self._dc_ent_icc])
+
+        # Current measurement range (A); 0 = auto. Same variable as Connection tab.
+        self._sweep_lbl_smu_current_range = tk.Label(
+            frame, text="Current range (A) [0=auto]:", bg="#f0f0f0"
+        )
+        self._sweep_lbl_smu_current_range.grid(row=10, column=0, sticky="w")
+        self._sweep_ent_smu_current_range = tk.Entry(frame, textvariable=self.smu_current_range_var)
+        self._sweep_ent_smu_current_range.grid(row=10, column=1, sticky="ew")
+        # Not in _dc_widgets: visible for all measurement types (pulse, endurance, etc.)
 
         # Sweep Type variable already declared above; controls will be shown in DC Triangle UI
 
@@ -5935,6 +5987,7 @@ class MeasurementGUI:
                         icc_val = float(self.icc.get())  # Use GUI value
                     else:
                         icc_val = float(icc_val)  # Use JSON value
+                    self._apply_smu_current_range()
                     
                     # Read metadata/notes (NEW - optional)
                     sweep_notes = params.get("notes", None)
@@ -6604,14 +6657,14 @@ class MeasurementGUI:
         """Get or create a 4200A system wrapper instance for cyclical sweep.
         
         Returns:
-            Keithley4200ASystem instance or None if not available
+            Keithley4200SMUSystem instance or None if not available
         
         Note:
             This method creates a temporary system wrapper instance that connects
             to the instrument. The caller is responsible for cleanup (disconnection).
         """
         try:
-            from Pulse_Testing.systems.keithley4200a import Keithley4200ASystem
+            from Pulse_Testing.systems.keithley4200_smu import Keithley4200SMUSystem
             
             # Get GPIB address from GUI
             gpib_address = getattr(self, 'keithley_address', None) or getattr(self, 'keithley_address_var', None)
@@ -6622,7 +6675,7 @@ class MeasurementGUI:
                 gpib_address = "GPIB0::17::INSTR"  # Default
             
             # Create system wrapper instance
-            system = Keithley4200ASystem()
+            system = Keithley4200SMUSystem()
             
             # Connect to instrument
             if system.connect(gpib_address, timeout=30.0):
@@ -6631,7 +6684,7 @@ class MeasurementGUI:
                 print(f"WARNING: Failed to connect 4200A system wrapper at {gpib_address}")
                 return None
         except ImportError:
-            print("WARNING: 4200A system wrapper not available (Pulse_Testing.systems.keithley4200a)")
+            print("WARNING: 4200 SMU system wrapper not available (Pulse_Testing.systems.keithley4200_smu)")
             return None
         except Exception as e:
             print(f"WARNING: Failed to create 4200A system wrapper: {e}")
@@ -6921,6 +6974,8 @@ class MeasurementGUI:
             excitation = "DC Triangle IV"
 
         self.stop_measurement_flag = False
+        # Apply SMU current measurement range for every excitation path (DC, pulse, endurance, …)
+        self._apply_smu_current_range()
         # Device routing context
         if self.current_device in self.device_list:
             start_index = self.device_list.index(self.current_device)
@@ -6955,6 +7010,7 @@ class MeasurementGUI:
             except Exception:
                 pass
 
+        self._apply_smu_current_range()
         v_arr, c_arr, t_arr = self.measurement_service.run_retention(
             keithley=self.keithley,
             set_voltage=set_voltage,
@@ -6987,6 +7043,7 @@ class MeasurementGUI:
             self.keithley = instrument
             self.connected = self.connections.is_connected("keithley")
             self._update_conditional_testing_button_state()
+            self._apply_smu_current_range()
             if hasattr(self.keithley, 'beep'):
                 self.keithley.beep(4000, 0.2)
                 time.sleep(0.2)

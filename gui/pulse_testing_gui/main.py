@@ -102,6 +102,7 @@ Keithley2450_TSP_Scripts = keithley2450_tsp_scripts.Keithley2450_TSP_Scripts if 
 from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_address, get_default_address_for_system
 from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
 from Pulse_Testing.test_definitions import TEST_FUNCTIONS, get_test_definitions_for_gui
+from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
 
 from .ui import (
     build_connection_section,
@@ -184,7 +185,8 @@ class TSPTestingGUI(tk.Toplevel):
         
         # New modular system wrapper
         self.system_wrapper = SystemWrapper()
-        self.current_system_name = None  # Track which system is connected
+        # Profile for UI (test list, units, diagram): combo when disconnected; matches wrapper when connected
+        self.current_system_name = None
         
         # Context from provider or caller
         if isinstance(sample_name, str) and sample_name.strip():
@@ -216,6 +218,9 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Internal scheduling handles
         self._context_poll_job = None
+
+        # Shared SMU current measurement range (A), 0 = auto — mirrored across Connection, Parameters, etc.
+        self.smu_current_range_var = tk.DoubleVar(value=0.0)
         
         # Create UI
         self.create_ui()
@@ -311,7 +316,10 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Connection section at top (always visible)
         self.create_connection_section(left_panel)
-        
+        # Match parameter defaults / units to selected system before Manual tab builds widgets
+        if not self.system_wrapper.is_connected():
+            self.current_system_name = self.system_var.get()
+
         # Laser control section (collapsible, integrated for optical testing)
         self.create_laser_section(left_panel)
         
@@ -337,6 +345,9 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Bottom control bar under right panel (under live plot)
         self.create_bottom_control_bar(right_panel)
+
+        # Test list filtered by Connection system (even when not connected)
+        self._update_test_list_capabilities()
     
     def create_manual_testing_tab(self, parent):
         """Create the manual testing tab with test selection, parameters, and controls"""
@@ -423,6 +434,11 @@ class TSPTestingGUI(tk.Toplevel):
         self.auto_delay_var = tk.StringVar(value="5.0")
         tk.Entry(delay_frame, textvariable=self.auto_delay_var, width=10).pack(side=tk.LEFT, padx=5)
         tk.Label(delay_frame, text="(for device relaxation)", font=("TkDefaultFont", 8), fg="gray").pack(side=tk.LEFT, padx=5)
+        
+        smu_cr_auto = tk.Frame(ranges_frame)
+        smu_cr_auto.pack(fill=tk.X, pady=2)
+        tk.Label(smu_cr_auto, text="SMU current range (A) [0=auto]:", width=20, anchor="w").pack(side=tk.LEFT)
+        tk.Entry(smu_cr_auto, textvariable=self.smu_current_range_var, width=12).pack(side=tk.LEFT, padx=5)
         
         # Test matrix preview
         matrix_frame = tk.LabelFrame(parent, text="Test Matrix Preview", padx=5, pady=5)
@@ -976,10 +992,10 @@ class TSPTestingGUI(tk.Toplevel):
         # (even if not connected, this affects default display units)
         if not self.system_wrapper.is_connected():
             self.current_system_name = system_name
-        
-        # Refresh parameters to show correct units (ms for 2450, µs for 4200A)
-        if hasattr(self, 'test_var') and self.test_var.get():
-            self.populate_parameters()
+
+        self._update_test_list_capabilities()
+        if hasattr(self, "test_var") and self.test_var.get():
+            self.on_test_selected(None)
     
     def _update_system_detection(self):
         """Update system selection when address changes (optional - user can override)"""
@@ -987,6 +1003,53 @@ class TSPTestingGUI(tk.Toplevel):
         # For now, we'll allow address to suggest system but not force it
         # User can use the "🔍 Auto" button if they want auto-detection
         pass
+
+    def _get_pulse_smu_current_range_a(self) -> float:
+        """SMU current measurement range in amperes (0 = auto)."""
+        try:
+            v = float(self.smu_current_range_var.get())
+        except Exception:
+            v = 0.0
+        return max(0.0, v)
+
+    def _apply_pulse_smu_current_range(self) -> None:
+        """Apply global current range to the connected SMU when supported."""
+        if not self.system_wrapper.is_connected():
+            return
+        try:
+            self.system_wrapper.apply_current_measurement_range(self._get_pulse_smu_current_range_a())
+        except Exception as e:
+            self.log(f"Note: could not apply SMU current range: {e}")
+
+    def _merge_default_smu_current_range_into_params(self, params: dict) -> dict:
+        """Fill i_range / current_range_a / current_measure_rng from the global GUI value when missing."""
+        test_name = self.test_var.get()
+        if test_name not in TEST_FUNCTIONS:
+            return params
+        schema = TEST_FUNCTIONS[test_name]["params"]
+        is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
+        g = self._get_pulse_smu_current_range_a()
+        out = dict(params)
+        for key in ("i_range", "current_range_a", "current_measure_rng"):
+            if key not in schema:
+                continue
+            pinfo = schema[key]
+            if pinfo.get("4200a_only") and not is_4200a:
+                continue
+            if key not in out:
+                out[key] = g
+        return out
+
+    def _effective_system_name_for_ui(self):
+        """System id for test list and capability checks: wrapper when connected, else Connection combo."""
+        if self.system_wrapper.is_connected():
+            name = self.system_wrapper.system_name
+            return name if name else (self.system_var.get() if hasattr(self, "system_var") and self.system_var else None)
+        if hasattr(self, "system_var") and self.system_var is not None:
+            v = self.system_var.get()
+            if v:
+                return v
+        return None
     
     def connect_device(self):
         """Connect to measurement system (supports multiple systems)"""
@@ -1037,7 +1100,7 @@ class TSPTestingGUI(tk.Toplevel):
             
             # Update unit selector based on connected system
             if hasattr(self, 'time_unit_var'):
-                default_unit = "µs" if connected_system in ('keithley4200a',) else "ms"
+                default_unit = "µs" if connected_system in KEITHLEY4200_PMU_TIMING_SYSTEMS else "ms"
                 self.previous_unit = getattr(self, 'previous_unit', default_unit)
                 self.time_unit_var.set(default_unit)
                 self.previous_unit = default_unit
@@ -1049,6 +1112,7 @@ class TSPTestingGUI(tk.Toplevel):
             self.on_test_selected(None)
             
             self.run_btn.config(state=tk.NORMAL)
+            self._apply_pulse_smu_current_range()
             
         except Exception as e:
             self.conn_status_var.set("Connection Failed")
@@ -1074,11 +1138,10 @@ class TSPTestingGUI(tk.Toplevel):
             self.tsp = None
             self.test_scripts = None
         
-        self.current_system_name = None
+        # Keep UI profile aligned with Connection system (do not show all tests after disconnect)
+        self.current_system_name = self.system_var.get()
         self.conn_status_var.set("Disconnected")
         self.run_btn.config(state=tk.DISABLED)
-        
-        # Reset test list (enable all tests when disconnected)
         self._update_test_list_capabilities()
     
     def _update_test_list_capabilities(self):
@@ -1086,8 +1149,7 @@ class TSPTestingGUI(tk.Toplevel):
         if not hasattr(self, 'test_combo'):
             return  # GUI not fully initialized yet
 
-        system_name = self.current_system_name if self.current_system_name else None
-        definitions = get_test_definitions_for_gui(system_name)
+        definitions = get_test_definitions_for_gui(self._effective_system_name_for_ui())
         test_values = list(definitions.keys())
         
         # Store current selection
@@ -1115,8 +1177,8 @@ class TSPTestingGUI(tk.Toplevel):
         test_info = TEST_FUNCTIONS[test_name]
         test_function = test_info["function"]
         
-        # Check if test is supported by current system
-        system_name = self.current_system_name
+        # Check if test is supported by current system / selected profile
+        system_name = self._effective_system_name_for_ui()
         is_supported = True
         unsupported_msg = None
         
@@ -1154,7 +1216,7 @@ class TSPTestingGUI(tk.Toplevel):
     def _on_unit_changed(self):
         """Handle unit dropdown changes - preserve current values and convert units"""
         # Determine if we're using 4200A (needed for conversion logic)
-        is_4200a = self.current_system_name in ('keithley4200a',)
+        is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         
         # Save current parameter values before repopulating
         saved_values = {}
@@ -1299,7 +1361,7 @@ class TSPTestingGUI(tk.Toplevel):
             row += 1
         
         # Check if current system is 4200A (use µs instead of ms)
-        is_4200a = self.current_system_name in ('keithley4200a',)
+        is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         # Time parameters that should be in µs for 4200A
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
                       'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 'post_read_interval',
@@ -1554,7 +1616,7 @@ class TSPTestingGUI(tk.Toplevel):
         # These are converted to µs in the GUI, so the wrapper should NOT convert them again
         params_4200a_in_us = ['pulse_width', 'delay_between_pulses', 'delay_between_cycles', 'delay_between', 
                               'delay_between_reads', 'reset_width']
-        is_4200a = self.current_system_name in ('keithley4200a',)
+        is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         
         if hasattr(self, 'time_unit_var'):
             selected_unit = self.time_unit_var.get()
@@ -1644,9 +1706,12 @@ class TSPTestingGUI(tk.Toplevel):
             )
             return
         
+        self._apply_pulse_smu_current_range()
+
         # Get parameters
         try:
             params = self.get_test_parameters()
+            params = self._merge_default_smu_current_range_into_params(params)
         except Exception as e:
             messagebox.showerror("Parameter Error", str(e))
             return
@@ -2383,7 +2448,7 @@ class TSPTestingGUI(tk.Toplevel):
             return
         
         try:
-            is_4200a = self.current_system_name in ('keithley4200a',)
+            is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
             time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
                           'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
                           'post_read_interval', 'reset_width', 'delay_between_voltages', 

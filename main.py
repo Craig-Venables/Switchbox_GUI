@@ -28,6 +28,7 @@ See Also:
 - gui.sample_gui: Device selection and sample management
 - gui.measurement_gui: Main measurement interface
 - TODO.md: Tracked feature requests and known issues
+- clean up the test on the pulse generator
 
 # idea - log time of each measurment into the log file to keep track of when each measurment was taken
 # time and data on each measurment on the sample header 

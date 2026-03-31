@@ -205,6 +205,13 @@ class Simulation2400:
         if not self._output_enabled:
             self._output_enabled = True
 
+    def set_current_measurement_range(self, current_range_a: float = 0.0) -> None:
+        """Simulated API parity with real controllers; 0 means auto range."""
+        try:
+            self._measurement_current_range = float(current_range_a)
+        except Exception:
+            self._measurement_current_range = 0.0
+
     def measure_voltage(self) -> float:
         """Measure voltage."""
         self._update_state()

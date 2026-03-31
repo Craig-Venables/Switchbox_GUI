@@ -5,6 +5,7 @@ PulseDiagramHelper draws the pattern on a matplotlib axes. Main builds params an
 
 import numpy as np
 from Pulse_Testing.pulse_pattern_visualizer import PulsePatternVisualizer
+from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
 
 
 class PulseDiagramHelper:
@@ -79,7 +80,7 @@ class PulseDiagramHelper:
         cycles = min(params.get('num_cycles', 100), 5)  # Show max 5 cycles
         
         # Use proper read width - params are already in seconds from update_pulse_diagram
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         if is_4200a:
             # For 4200A, use read_width parameter if provided (already converted to seconds)
             read_width = params.get('read_width', 0.5e-6)  # Default 0.5 µs = 0.5e-6s
@@ -151,7 +152,7 @@ class PulseDiagramHelper:
         cycles = min(params.get('num_cycles', 20), 2)
         
         # Check if 4200A (use realistic timing) or 2450 (use ms-based timing)
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         if is_4200a:
             # For 4200A: use realistic timing matching C code
             # Initial read: riseTime + measWidth + setFallTime + riseTime + measDelay
@@ -271,7 +272,7 @@ class PulseDiagramHelper:
         num_cycles = min(params.get('num_cycles', 1), 3)  # Show max 3 cycles in diagram
         
         # Get timing parameters (already in seconds from update_pulse_diagram)
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         if is_4200a:
             read_width = params.get('read_width', 0.5e-6)  # Already in seconds
             read_rise = params.get('read_rise_time', 0.1e-6) if 'read_rise_time' in params else 0.1e-6
@@ -371,7 +372,7 @@ class PulseDiagramHelper:
         n = params.get('num_pulses', 30)  # Show all pulses, not limited to 5
         
         # Get timing parameters (already in seconds from update_pulse_diagram)
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         if is_4200a:
             read_width = params.get('read_width', 0.5e-6)  # Already in seconds
             read_rise = params.get('read_rise_time', 0.1e-6) if 'read_rise_time' in params else 0.1e-6
@@ -454,7 +455,7 @@ class PulseDiagramHelper:
         n = params.get('num_pulses', 30)  # Show all pulses, not limited to 5
         
         # Get timing parameters (already in seconds from update_pulse_diagram)
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         if is_4200a:
             read_width = params.get('read_width', 0.5e-6)  # Already in seconds
             read_rise = params.get('read_rise_time', 0.1e-6) if 'read_rise_time' in params else 0.1e-6
@@ -667,10 +668,10 @@ class PulseDiagramHelper:
         # Get actual delay parameters (already in seconds)
         delay_between_pulses = params.get('delay_between_pulses', 1e-6)  # Default 1µs
         delay_between_reads = params.get('delay_between_reads', 100e-6)  # Default 100µs
-        read_width = max(params.get('read_width', 0.5e-6 if self._system_name in ('keithley4200a',) else 1e-3), 1e-9)
+        read_width = max(params.get('read_width', 0.5e-6 if self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS else 1e-3), 1e-9)
         
         # Check if 4200A - use realistic timing
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         if is_4200a:
             read_rise = params.get('read_rise_time', 0.1e-6)  # 0.1µs in seconds
             
@@ -772,7 +773,7 @@ class PulseDiagramHelper:
         pulse_read_times = []  # Read at pulse peak
         p_v = params.get('pulse_voltage', 1.5)
         r_v = params.get('read_voltage', 0.2)
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         
         pulse_width = max(params.get('pulse_width', 1e-6 if is_4200a else 1e-3), 1e-9)
         delay_between_pulses = max(params.get('delay_between_pulses', 1e-6 if is_4200a else 1e-3), 0.0)
@@ -1106,7 +1107,7 @@ class PulseDiagramHelper:
         """Draw laser and read pattern using visualizer"""
         try:
             # Check if current system is 4200A (values are in µs)
-            is_4200a = self._system_name in ('keithley4200a',)
+            is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
             
             # Extract parameters (already converted to seconds in update_pulse_diagram)
             read_voltage = params.get('read_voltage', 0.3)
@@ -1437,7 +1438,7 @@ class PulseDiagramHelper:
         warnings = []
         
         # Skip warnings for 4200A (no 1ms minimum limit)
-        is_4200a = self._system_name in ('keithley4200a',)
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         
         if not is_4200a:
             # Check pulse width (min 1ms = 0.001s) - only for 2450
