@@ -1,9 +1,9 @@
 /Data_save_loc
 *.pyc
 
-# PyInstaller build outputs
+# PyInstaller build outputs (root only — not ``Documents/build/`` documentation)
 dist/
-build/
+/build/
 
 # Telegram / messaging secrets (use messaging_data.local.json for real tokens)
 Json_Files/messaging_data.local.json

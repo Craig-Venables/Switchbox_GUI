@@ -1061,9 +1061,11 @@ Configuration files are located in `Json_Files/`:
 
 - **GUI Documentation**: [gui/README.md](gui/README.md)
 - **Notifications Documentation**: [Notifications/README.md](Notifications/README.md)
-- **User Guide**: [Documents/USER_GUIDE.md](Documents/USER_GUIDE.md)
-- **Quick Reference**: [Documents/QUICK_REFERENCE.md](Documents/QUICK_REFERENCE.md)
-- **JSON Configuration Guide**: [Documents/JSON_CONFIG_GUIDE.md](Documents/JSON_CONFIG_GUIDE.md)
+- **Documentation index**: [Documents/README.md](Documents/README.md)
+- **User Guide**: [Documents/guides/USER_GUIDE.md](Documents/guides/USER_GUIDE.md)
+- **Quick Reference**: [Documents/guides/QUICK_REFERENCE.md](Documents/guides/QUICK_REFERENCE.md)
+- **JSON Configuration Guide**: [Documents/guides/JSON_CONFIG_GUIDE.md](Documents/guides/JSON_CONFIG_GUIDE.md)
+- **Build (exe)**: [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.md) · [module checklist](Documents/build/BUILD_MODULES.md)
 
 ## License
 

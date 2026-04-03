@@ -69,7 +69,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Callable
 from collections import defaultdict
 
-from plotting.device_combined_plots import plot_device_combined_sweeps as do_plot_device_combined_sweeps
+from plotting.device import plot_device_combined_sweeps as do_plot_device_combined_sweeps
 
 # Get project root (go up 3 levels: aggregators -> Analysis -> Helpers -> project root)
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -209,7 +209,7 @@ class ComprehensiveAnalyzer:
         return min_sweep
     
     def plot_device_combined_sweeps(self, section: str, device_num: str, code_name: str) -> None:
-        """Plot combined sweeps for a single device (delegates to plotting.device_combined_plots)."""
+        """Plot combined sweeps for a single device (delegates to plotting.device)."""
         device_path = self.sample_dir / section / device_num
         do_plot_device_combined_sweeps(
             device_path,

@@ -68,7 +68,7 @@ launches without errors on the development machine.
 
 ## 11. Wrap-Up
 - Run `py -3 -m pytest tests` to ensure unit tests remain green post-session.
-- Update `Documents/GUI_REFACTORING_PLAN.md` smoke-test table with outcomes.
+- Update `Documents/development/REFACTOR_REMAINING.md` (or your tracking doc) with smoke-test outcomes.
 - Record bugs/regressions discovered, including missing safeguards or desired improvements for the backlog.
 
 ---
