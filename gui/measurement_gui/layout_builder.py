@@ -538,10 +538,10 @@ class MeasurementGUILayoutBuilder:
         tk.Label(scrollable_frame, text="6. Additional Resources", font=("Segoe UI", 12, "bold"), 
                 bg="#f0f0f0").pack(**pad)
         tk.Label(scrollable_frame,
-                text="• USER_GUIDE.md: Complete usage guide\n"
-                      "• JSON_CONFIG_GUIDE.md: Detailed configuration reference\n"
-                      "• QUICK_REFERENCE.md: One-page cheat sheet\n\n"
-                      "All documentation files are in the Documents/ folder.",
+                text="• Documents/guides/USER_GUIDE.md: Complete usage guide\n"
+                      "• Documents/guides/JSON_CONFIG_GUIDE.md: Configuration reference\n"
+                      "• Documents/guides/QUICK_REFERENCE.md: One-page cheat sheet\n\n"
+                      "See Documents/README.md for the full documentation index.",
                 justify="left", bg="#f0f0f0").pack(**pad)
         
         tk.Label(scrollable_frame, text="7. Video Tutorials", font=("Segoe UI", 12, "bold"), 

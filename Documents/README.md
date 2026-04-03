@@ -1,85 +1,65 @@
-# Documentation Index
+# Documentation index
 
-This directory contains documentation for the modular utilities and configuration guides.
+Material for **operators**, **developers**, **AI assistants**, and **release builds** is grouped below. Paths are relative to this `Documents/` folder unless noted.
 
-## Quick Navigation
+## Folder map
 
-### For Users
-- **[USER_GUIDE.md](USER_GUIDE.md)** - Complete guide on how to use all utilities
-- **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - One-page cheat sheet
-- **[JSON_CONFIG_GUIDE.md](JSON_CONFIG_GUIDE.md)** - JSON configuration for automated testing
+| Folder | Audience | Contents |
+|--------|----------|----------|
+| **[`guides/`](guides/)** | Lab users | User guide, quick reference, JSON config, lab checklist, sample-type notes, pulse pattern guide |
+| **[`reference/`](reference/)** | Developers & AI | Architecture maps for Sample GUI, Measurement GUI, pulse / oscilloscope / connection / motor tools, Keithley 4200 flow |
+| **[`build/`](build/)** | Release / CI | PyInstaller instructions, spec behaviour, **module inventory for exe builds** |
+| **[`development/`](development/)** | Maintainers | Refactor backlog, feature summaries, internal write-ups |
+| **[`ai/`](ai/)** | AI tooling | Short orientation: where code and docs live, what to update when imports change |
 
-### Available Utilities
+## Guides ([`guides/`](guides/))
 
-#### Data Utilities (`Measurements/data_utils.py`)
-- `safe_measure_current()` - Normalize current measurements
-- `safe_measure_voltage()` - Normalize voltage measurements
-- Handles all instrument output formats automatically
+- **[USER_GUIDE.md](guides/USER_GUIDE.md)** — full operator walkthrough  
+- **[QUICK_REFERENCE.md](guides/QUICK_REFERENCE.md)** — one-page cheat sheet  
+- **[JSON_CONFIG_GUIDE.md](guides/JSON_CONFIG_GUIDE.md)** — automated testing / JSON configuration  
+- **[LAB_TEST_CHECKLIST.md](guides/LAB_TEST_CHECKLIST.md)** — hardware smoke-test checklist  
+- **[README_ADD_SAMPLE_TYPE.md](guides/README_ADD_SAMPLE_TYPE.md)** — adding a sample type  
+- **[PULSE_PATTERN_PREVIEW_GUIDE.md](guides/PULSE_PATTERN_PREVIEW_GUIDE.md)** — pulse pattern preview  
 
-#### Optical Control (`Measurements/optical_controller.py`)
-- `OpticalController` - Unified interface for laser/LED control
-- Works with any light source automatically
+## Reference ([`reference/`](reference/))
 
-#### Source Modes (`Measurements/source_modes.py`)
-- `SourceMode.VOLTAGE` / `SourceMode.CURRENT` - Source modes
-- `apply_source()` - Apply voltage or current
-- `measure_result()` - Measure corresponding value
-- Enables current source mode (source I, measure V)
+- **[MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md](reference/MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md)** — main app flow: `main.py` → Sample → Measurement GUI (start here for architecture)  
+- **[PULSE_TESTING_GUI_REFERENCE.md](reference/PULSE_TESTING_GUI_REFERENCE.md)**  
+- **[OSCILLOSCOPE_PULSE_GUI_REFERENCE.md](reference/OSCILLOSCOPE_PULSE_GUI_REFERENCE.md)**  
+- **[CONNECTION_CHECK_GUI_REFERENCE.md](reference/CONNECTION_CHECK_GUI_REFERENCE.md)**  
+- **[MOTOR_CONTROL_GUI_REFERENCE.md](reference/MOTOR_CONTROL_GUI_REFERENCE.md)**  
+- **[KEITHLEY_4200_IV_SWEEP_FLOW.md](reference/KEITHLEY_4200_IV_SWEEP_FLOW.md)**  
 
-#### Sweep Patterns (`Measurements/sweep_patterns.py`)
-- `build_sweep_values()` - Generate any sweep pattern
-- `SweepType.POSITIVE/NEGATIVE/FULL/TRIANGLE` - Sweep types
+## Build ([`build/`](build/))
 
-#### Multiplexer (`Equipment/multiplexer_manager.py`)
-- `MultiplexerManager` - Unified multiplexer interface
-- Supports Pyswitchbox, Electronic_Mpx, and more
+- **[BUILD_INSTRUCTIONS.md](build/BUILD_INSTRUCTIONS.md)** — how to produce `Switchbox_GUI.exe`  
+- **[BUILD_EXPLANATION.md](build/BUILD_EXPLANATION.md)** — what the spec file does, what gets bundled next to the exe  
+- **[BUILD_MODULES.md](build/BUILD_MODULES.md)** — **checklist of packages/paths**; keep in sync with root **`build_exe.spec`**  
 
-#### Data Formatting (`Measurements/data_formats.py`)
-- `DataFormatter` - Consistent file formatting
-- `FileNamer` - Standardized filename generation
+## Development notes ([`development/`](development/))
 
-#### Measurement Orchestrators
-- `Measurements/single_measurement_runner.py` – Standard DC IV sweep orchestrator
-- `Measurements/pulsed_measurement_runner.py` – SMU/PMU pulsed and fast-pulse/hold flows
-- `Measurements/special_measurement_runner.py` – ISPP, pulse-width sweep, threshold search, transient capture
-- `Measurements/sequential_runner.py` – Batch IV/averaging loop controller for the sequential panel
-- `Measurements/telegram_coordinator.py` – Telegram post-measurement automation
-- `Measurements/background_workers.py` – Manual endurance/retention worker threads
-- `Measurements/data_saver.py` – Centralized save/plot helpers used by all runners
+- **[REFACTOR_REMAINING.md](development/REFACTOR_REMAINING.md)**  
+- **[OPTICAL_TESTS_UPDATE_SUMMARY.md](development/OPTICAL_TESTS_UPDATE_SUMMARY.md)**  
+- **[DEVICE_VISUALIZER_GALLERY_OVERLAY_SUMMARY.md](development/DEVICE_VISUALIZER_GALLERY_OVERLAY_SUMMARY.md)**  
 
-#### GUI Helpers
-- `gui/layout_builder.py` – Builds all Tk panels (manual endurance, custom sweeps, sequential controls now included in the middle column)
-- `gui/plot_updaters.py` – Background worker threads that keep matplotlib panels in sync during live measurements
-- `Measurement_GUI.bring_to_top()` – Lightweight focus helper runners use to surface the main window
+## AI assistants ([`ai/`](ai/))
 
-## Testing
+- **[README.md](ai/README.md)** — entry point for automated tools (Cursor, etc.)  
 
-Run the automated test suite with:
+---
+
+## Testing (code, not docs)
+
+From repository root:
+
 ```bash
 python -m pytest tests
 ```
 
-`tests/conftest.py` ensures the repo root is on `sys.path`, so `pytest tests` also works if you prefer. The suite covers summary plot generation (`MeasurementDataSaver`) and directory utilities (e.g. `find_largest_number_in_folder`).  Tests run headlessly using `matplotlib`’s Agg backend, so no GUI is required.
+`tests/conftest.py` puts the repo root on `sys.path`. The suite includes headless tests for `MeasurementDataSaver` and related utilities.
 
-Individual modules can still be smoke-tested with `python -m` if needed.
+## Optional runtime dependencies
 
-### Optional Dependencies
-- **Instruments:** `pyvisa`, `pyvisa-py`, `gpib-ctypes` (for legacy GPIB). Without them the GUI falls back to simulation modes.
-- **Telegram Bot:** `python-telegram-bot` – required to enable messaging callbacks.
-- **Plotting:** `matplotlib` (Agg backend configured automatically for tests).
-
-## Getting Started
-
-1. **New to this?** → Start with [USER_GUIDE.md](USER_GUIDE.md)
-2. **Need quick reference?** → See [QUICK_REFERENCE.md](QUICK_REFERENCE.md)
-3. **Configuring automated tests?** → See [JSON_CONFIG_GUIDE.md](JSON_CONFIG_GUIDE.md)
-
-## Future Plans
-
-- **[Documents/GUI_REFACTORING_PLAN.md](Documents/GUI_REFACTORING_PLAN.md)** - Detailed plan for future GUI refactoring (reference only)
-- **[Documents/LAB_TEST_CHECKLIST.md](Documents/LAB_TEST_CHECKLIST.md)** - On-site guide for validating the GUI with real hardware
-- Clear remaining optional import warnings (`PMU_Testing_GUI`, `MeasurementDriver`, `TestRunner`, `MeasurementPlotter`) by lazy-loading or guarding them.
-- Exercise pulsed/special/custom measurement flows with hardware attached; log findings in the smoke-test checklist.
-- Extract plotting setup/update logic into dedicated modules (`gui/plot_panels.py`, `gui/plot_updaters.py`) to complete the architecture.
-- Expand automated coverage with instrument-mock tests for runner orchestration and background workers.
-- Verify Telegram and manual worker flows end-to-end once credentials/hardware are available.
+- **Instruments:** `pyvisa`, `pyvisa-py`, `gpib-ctypes` (legacy GPIB)  
+- **Telegram:** `python-telegram-bot`  
+- **Plotting / analysis:** `matplotlib`, `numpy`, `pandas`, **`scipy`** (required for full `analysis` package behaviour)  

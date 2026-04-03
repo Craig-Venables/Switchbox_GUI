@@ -14,10 +14,11 @@ which keeps hidden Tkinter state out of the persistence layer.
 
 from __future__ import annotations
 
+import csv
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
-import csv
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -29,6 +30,47 @@ except ImportError:  # pragma: no cover - fallback for minimal installs
     pd = None  # type: ignore
 
 from Measurements.data_formats import DataFormatter, FileNamer, save_measurement_data
+
+
+def sanitize_summary_artifact_label(raw: str, max_len: int = 120) -> str:
+    """
+    Make a filesystem-safe stem for summary plot filenames (custom measurements).
+
+    Collapses whitespace and strips characters that are invalid or awkward on Windows paths.
+    """
+    s = (raw or "").strip()
+    s = re.sub(r"[^\w.\-]+", "_", s, flags=re.UNICODE)
+    s = re.sub(r"_+", "_", s).strip("._")
+    if not s:
+        s = "custom_measurement"
+    return s[:max_len]
+
+
+def summary_artifact_filenames(label: str) -> List[str]:
+    """Basenames written for a given summary artifact label (used for collision checks)."""
+    return [
+        f"{label}_All_graphs_IV.png",
+        f"{label}_All_graphs_LOG.png",
+        f"{label}_Final_graph_IV.png",
+        f"{label}_Final_graph_LOG.png",
+        f"{label}_Combined_summary.png",
+    ]
+
+
+def resolve_unique_summary_artifact_label(save_dir: Path | str, base_label: str) -> str:
+    """
+    Return ``base_label``, or ``base_label_2``, ``base_label_3``, ... if any matching
+    summary files already exist in ``save_dir``.
+    """
+    folder = Path(save_dir)
+    if not base_label:
+        return base_label
+    label = base_label
+    suffix_num = 2
+    while any((folder / name).exists() for name in summary_artifact_filenames(label)):
+        label = f"{base_label}_{suffix_num}"
+        suffix_num += 1
+    return label
 
 
 @dataclass
@@ -530,9 +572,14 @@ class MeasurementDataSaver:
         self,
         save_dir: Path | str,
         plot_data: SummaryPlotData,
+        artifact_label: Optional[str] = None,
     ) -> Tuple[Optional[Path], Optional[Path], Optional[Path]]:
         """
         Persist the final sweep (IV + log) and combined summary plots.
+
+        If ``artifact_label`` is set, filenames are prefixed (e.g. ``MyTest_Final_graph_IV.png``)
+        so repeated runs do not overwrite when paired with :func:`resolve_unique_summary_artifact_label`.
+        If ``None``, uses legacy names ``Final_graph_IV.png``, ``Combined_summary.png``, etc.
         """
         try:
             from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -542,6 +589,7 @@ class MeasurementDataSaver:
 
         save_folder = Path(save_dir)
         save_folder.mkdir(parents=True, exist_ok=True)
+        pfx = f"{artifact_label}_" if artifact_label else ""
 
         final_v, final_i = plot_data.final_iv
         final_iv_path: Optional[Path] = None
@@ -557,7 +605,7 @@ class MeasurementDataSaver:
                 ax_iv.set_xlabel("Voltage (V)")
                 ax_iv.set_ylabel("Current (A)")
                 ax_iv.plot(final_v, final_i, marker="o", markersize=2, color="k")
-                final_iv_path = save_folder / "Final_graph_IV.png"
+                final_iv_path = save_folder / f"{pfx}Final_graph_IV.png"
                 fig_iv.savefig(final_iv_path, dpi=300)
 
                 fig_log = Figure(figsize=(4, 3))
@@ -567,7 +615,7 @@ class MeasurementDataSaver:
                 ax_log.set_xlabel("Voltage (V)")
                 ax_log.set_ylabel("|Current| (A)")
                 ax_log.semilogy(final_v, np.abs(final_i), marker="o", markersize=2, color="k")
-                final_log_path = save_folder / "Final_graph_LOG.png"
+                final_log_path = save_folder / f"{pfx}Final_graph_LOG.png"
                 fig_log.savefig(final_log_path, dpi=300)
             except Exception:
                 final_iv_path = None
@@ -604,7 +652,7 @@ class MeasurementDataSaver:
             ax_final_log.set_xlabel("Voltage (V)")
             ax_final_log.set_ylabel("|Current| (A)")
 
-            combined_path = save_folder / "Combined_summary.png"
+            combined_path = save_folder / f"{pfx}Combined_summary.png"
             fig.tight_layout()
             fig.savefig(combined_path, dpi=300)
         except Exception:

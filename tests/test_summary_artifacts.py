@@ -1,7 +1,12 @@
 import os
 from pathlib import Path
 
-from Measurements.data_saver import MeasurementDataSaver, SummaryPlotData
+from Measurements.data_saver import (
+    MeasurementDataSaver,
+    SummaryPlotData,
+    resolve_unique_summary_artifact_label,
+    summary_artifact_filenames,
+)
 from Measurements.single_measurement_runner import find_largest_number_in_folder
 
 
@@ -18,6 +23,32 @@ def test_save_summary_plots_creates_expected_files(tmp_path):
     assert final_iv is not None and final_iv.exists()
     assert final_log is not None and final_log.exists()
     assert combined is not None and combined.exists()
+
+
+def test_save_summary_plots_artifact_label_prefix(tmp_path):
+    saver = MeasurementDataSaver()
+    plot_data = SummaryPlotData(
+        all_iv=[([0.0, 1.0], [0.0, 1.0])],
+        all_log=[([0.1, 1.0], [1e-6, 1e-3])],
+        final_iv=([0.0, 1.0], [0.0, 1.0]),
+    )
+    label = "custom_MyTest"
+    final_iv, final_log, combined = saver.save_summary_plots(
+        tmp_path, plot_data, artifact_label=label
+    )
+
+    assert final_iv == tmp_path / f"{label}_Final_graph_IV.png"
+    assert final_log == tmp_path / f"{label}_Final_graph_LOG.png"
+    assert combined == tmp_path / f"{label}_Combined_summary.png"
+    assert final_iv.exists() and final_log.exists() and combined.exists()
+
+
+def test_resolve_unique_summary_artifact_label_increments(tmp_path):
+    base = "custom_MyTest"
+    first_names = summary_artifact_filenames(base)
+    (tmp_path / first_names[0]).write_bytes(b"x")
+
+    assert resolve_unique_summary_artifact_label(tmp_path, base) == f"{base}_2"
 
 
 def test_create_log_file_appends_entries(tmp_path):

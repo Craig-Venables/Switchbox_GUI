@@ -130,7 +130,12 @@ from Measurements.background_workers import (
     start_manual_retention as bw_start_manual_retention,
 )
 from Measurements.connection_manager import InstrumentConnectionManager
-from Measurements.data_saver import MeasurementDataSaver, SummaryPlotData
+from Measurements.data_saver import (
+    MeasurementDataSaver,
+    SummaryPlotData,
+    resolve_unique_summary_artifact_label,
+    sanitize_summary_artifact_label,
+)
 from Measurements.data_utils import safe_measure_current, safe_measure_voltage
 from Measurements.measurement_services_smu import MeasurementService, VoltageRangeMode
 from Measurements.optical_controller import OpticalController
@@ -6524,10 +6529,11 @@ class MeasurementGUI:
                 except Exception:
                     # Do not skip the rest of the per-device finalization
                     pass
-                plot_filename_iv = f"{save_dir}\\All_graphs_IV.png"
-                plot_filename_log = f"{save_dir}\\All_graphs_LOG.png"
                 try:
-                    self._save_summary_artifacts(save_dir)
+                    custom_label = f"custom_{selected_measurement}"
+                    safe_label = sanitize_summary_artifact_label(custom_label)
+                    unique_label = resolve_unique_summary_artifact_label(save_dir, safe_label)
+                    self._save_summary_artifacts(save_dir, artifact_label=unique_label)
                 except Exception as exc:
                     print(f"[SAVE ERROR] Failed to save summary plots: {exc}")
                     self._last_combined_summary_path = None
@@ -7392,12 +7398,20 @@ class MeasurementGUI:
             final_iv=(list(final_iv[0]), list(final_iv[1])),
         )
 
-    def _save_summary_artifacts(self, save_dir: str) -> None:
-        """Save legacy summary figures and data-saver combined plots."""
+    def _save_summary_artifacts(
+        self, save_dir: str, artifact_label: Optional[str] = None
+    ) -> None:
+        """Save legacy summary figures and data-saver combined plots.
+
+        For custom measurements, pass ``artifact_label`` (already unique via
+        :func:`resolve_unique_summary_artifact_label`) so All/Final/Combined
+        PNGs are named per test run and do not overwrite previous files.
+        """
         Path(save_dir).mkdir(parents=True, exist_ok=True)
+        pfx = f"{artifact_label}_" if artifact_label else ""
         try:
-            iv_path = os.path.join(save_dir, "All_graphs_IV.png")
-            log_path = os.path.join(save_dir, "All_graphs_LOG.png")
+            iv_path = os.path.join(save_dir, f"{pfx}All_graphs_IV.png")
+            log_path = os.path.join(save_dir, f"{pfx}All_graphs_LOG.png")
             self.ax_all_iv.figure.savefig(iv_path, dpi=400)
             self.ax_all_logiv.figure.savefig(log_path, dpi=400)
             print(f"[SAVE] Graph saved to: {os.path.abspath(iv_path)}")
@@ -7406,7 +7420,9 @@ class MeasurementGUI:
             print(f"[SAVE ERROR] Failed to save graphs: {exc}")
 
         plot_data = self._collect_summary_plot_data()
-        _, _, combined = self.data_saver.save_summary_plots(save_dir, plot_data)
+        _, _, combined = self.data_saver.save_summary_plots(
+            save_dir, plot_data, artifact_label=artifact_label
+        )
         self._last_combined_summary_path = combined
 
     def _on_custom_save_toggle(self):

@@ -5,8 +5,8 @@ from .device.hdf5_style import HDF5StylePlotter
 from .device.conduction import ConductionPlotter
 from .device.sclc_fit import SCLCFitPlotter
 from .device.unified_plotter import UnifiedPlotter
-from .sample_plots import SamplePlots
-from . import endurance_plots
+from .sample import SamplePlots
+from . import endurance as endurance_plots
 
 __all__ = [
     "PlotManager",
