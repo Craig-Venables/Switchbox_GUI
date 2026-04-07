@@ -10,8 +10,13 @@ def build_pulse_content(gui, frame):
     gui._add_param(frame, "Pulse Voltage (V):", "pulse_voltage", "1.0", ToolTipText="Amplitude of the pulse")
     gui._add_param(frame, "Pulse Duration (s):", "pulse_duration", "0.001", ToolTipText="Width of the pulse")
     gui._add_param(frame, "Bias Voltage (V):", "bias_voltage", "0.2", ToolTipText="Bias level applied before and after the pulse")
-    gui._add_param(frame, "Pre-Bias Time (s):", "pre_bias_time", "0.1", ToolTipText="Time at bias voltage before the pulse")
-    gui._add_param(frame, "Post-Bias Time (s):", "post_bias_time", "1.0", ToolTipText="Time at bias voltage after the pulse")
+    gui._add_param(
+        frame,
+        "Pre/Post Bias Time (s):",
+        "pre_bias_time",
+        "0.1",
+        ToolTipText="Single shared time used for both pre-bias and post-bias windows.",
+    )
 
 
 def create_pulse_frame(gui, parent):

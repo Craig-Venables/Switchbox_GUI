@@ -90,8 +90,12 @@ class OscilloscopePulseGUI(tk.Toplevel):
              super().__init__(master)
              
         self.title("Oscilloscope Pulse Capture")
-        self.geometry("1200x700")  # Smaller default size
-        # Don't maximize - keep it compact
+        self.geometry("1500x900")
+        self.minsize(1200, 760)
+        try:
+            self.state("zoomed")
+        except Exception:
+            pass
         
         # 1. State & Config
         self.config_manager = ConfigManager()
@@ -144,8 +148,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 'on_system_change': self._on_system_change,
                 'quick_test': self._quick_test_device,
                 'read_scope_settings': self._read_scope_settings,
-                'connect_smu': self._connect_smu,
-                'on_alignment_applied': self._on_alignment_applied
+                'connect_smu': self._connect_smu
             },
             config=self.config,
             context=self.context
@@ -559,17 +562,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
     def _auto_save_if_needed(self):
         """Auto-save using structured folder layout like IV sweep"""
         if not self.last_data: return
-        
-        # Check if alignment was applied - if so, overwrite last file instead of creating new
-        if (hasattr(self.layout, 'alignment_applied') and 
-            self.layout.alignment_applied and 
-            self.last_save_path):
-            # Overwrite existing file with aligned data
-            t, v, i, meta = self.last_data
-            self._write_file(self.last_save_path, t, v, i, meta)
-            self.layout.set_status(f"Auto-saved (overwritten): {Path(self.last_save_path).name}")
-            return
-        
+
         t, v, i, meta = self.last_data
         
         try:
@@ -629,7 +622,7 @@ class OscilloscopePulseGUI(tk.Toplevel):
                 print(f"Warning: Could not save voltage plot: {plot_error}")
                 self.layout.set_status(f"Auto-saved: {save_path.name} (plot failed)")
             
-            # Store save path for potential overwrite after alignment
+            # Store save path for manual "save again" convenience.
             self.last_save_path = str(save_path)
             # Log to device timeline
             try:
@@ -663,36 +656,11 @@ class OscilloscopePulseGUI(tk.Toplevel):
             traceback.print_exc()
 
     def _save_data_dialog(self):
-        """Manual save - overwrites last file if alignment was applied"""
+        """Manual save dialog."""
         if not hasattr(self, 'last_data') or self.last_data is None:
             messagebox.showinfo("Info", "No data to save.")
             return
-        
-        # Check if alignment was applied - if so, overwrite last file
-        if (hasattr(self.layout, 'alignment_applied') and 
-            self.layout.alignment_applied and 
-            self.last_save_path):
-            
-            # Ask user to confirm overwrite
-            if messagebox.askyesno("Overwrite File?", 
-                                  f"Alignment was applied. Overwrite previous file?\n\n{self.last_save_path}"):
-                t, v, i, meta = self.last_data
-                self._write_file(self.last_save_path, t, v, i, meta)
-                self.layout.set_status(f"Saved (overwritten): {Path(self.last_save_path).name}")
-                try:
-                    provider = self.context.get("provider")
-                    if provider and getattr(provider, "data_saver", None):
-                        p = Path(self.last_save_path)
-                        device_folder = p.parent.parent if p.parent.name == "osillascope_test" else p.parent
-                        provider.data_saver.log_measurement_event(
-                            device_folder, filename=p.name, file_path=p,
-                            measurement_type="Oscilloscope", status="saved",
-                        )
-                except Exception:
-                    pass
-                messagebox.showinfo("Saved", f"File overwritten:\n{self.last_save_path}")
-                return
-        
+
         # Normal save dialog
         try:
             # Get structured save directory (same as auto-save)
@@ -746,40 +714,27 @@ class OscilloscopePulseGUI(tk.Toplevel):
             if t is not None and len(t) > 0:
                 t = (t - t[0]) / 1000.0
             
-            # Calculate all derived quantities for saving
-            pulse_voltage = meta.get('pulse_voltage', 1.0)
-            pulse_duration = meta.get('pulse_duration', 0.001)
-            pulse_start_time = meta.get('pulse_start_time', 0.0)
-            
+            # Keep output simple: measured waveform + current + resistance.
+            pulse_voltage = float(meta.get('pulse_voltage', 0.0))
             if 'params' in meta:
                 params = meta['params']
-                pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
-                pulse_duration = float(params.get('pulse_duration', pulse_duration))
-                pre_delay = float(params.get('pre_pulse_delay', pulse_start_time))
-                pulse_start_time = pre_delay
-            
-            shunt_r = meta.get('shunt_resistance', 50.0)
-            
-            # V_shunt is what we measured (RAW oscilloscope data)
-            v_shunt = v
-            
-            # V_SMU is the applied pulse voltage at correct time (assume pulse_start_time)
-            pulse_start = pulse_start_time
-            pulse_end = pulse_start_time + pulse_duration
-            v_smu = np.where((t >= pulse_start) & (t <= pulse_end), pulse_voltage, 0.0)
-            
-            # V_memristor = V_SMU - V_shunt (Kirchhoff's voltage law)
-            # Can be negative for negative pulses
-            v_memristor = v_smu - v_shunt
-            
-            # R_memristor = V_memristor / I (Ohm's law)
+                try:
+                    pulse_voltage = float(params.get('pulse_voltage', pulse_voltage))
+                except (TypeError, ValueError):
+                    pass
+
+            v_shunt = np.asarray(v, dtype=float)
+            current = np.asarray(i, dtype=float)
+
+            # Resistance is estimated from programmed pulse voltage and measured current.
             with np.errstate(divide='ignore', invalid='ignore'):
-                r_memristor = np.divide(v_memristor, i, out=np.full_like(v_memristor, np.nan), where=i!=0)
-                r_memristor = np.where(np.isfinite(r_memristor) & (r_memristor < 1e12), r_memristor, np.nan)
-            
-            # P_memristor = V_memristor × I
-            # Should be positive for resistive devices (V and I same sign)
-            p_memristor = v_memristor * i
+                resistance = np.divide(
+                    pulse_voltage,
+                    current,
+                    out=np.full_like(current, np.nan),
+                    where=np.abs(current) > 1e-15
+                )
+                resistance = np.where(np.isfinite(resistance), resistance, np.nan)
             
             if filename.endswith('.txt'):
                 with open(filename, 'w', encoding='utf-8') as f:
@@ -788,116 +743,44 @@ class OscilloscopePulseGUI(tk.Toplevel):
                     f.write(f"# Timestamp: {datetime.datetime.now()}\n")
                     f.write(f"# Device: {self.context.get('device_label', 'Unknown')}\n")
                     f.write(f"# Sample: {self.context.get('sample_name', 'Unknown')}\n")
-                    f.write(f"# ==================== MEASUREMENT PARAMETERS ====================\n")
+                    f.write(f"# ==================== PARAMETERS ====================\n")
                     params = meta.get('params', meta)
                     for k, val in params.items():
                         if isinstance(val, (str, int, float, bool)):
                            f.write(f"# {k}: {val}\n")
-                    f.write(f"# ==================== CALCULATED VALUES SUMMARY ====================\n")
-                    
-                    # Calculate statistics
-                    valid_r_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
-                    if np.any(valid_r_mask):
-                        r_valid = r_memristor[valid_r_mask]
-                        initial_r = r_valid[0] if len(r_valid) > 0 else np.nan
-                        final_r = r_valid[-1] if len(r_valid) > 0 else np.nan
-                        min_r = np.nanmin(r_valid) if len(r_valid) > 0 else np.nan
-                        max_r = np.nanmax(r_valid) if len(r_valid) > 0 else np.nan
-                        mean_r = np.nanmean(r_valid) if len(r_valid) > 0 else np.nan
-                        
-                        def format_resistance(r_val):
-                            if np.isnan(r_val):
-                                return "N/A"
-                            if r_val >= 1e6:
-                                return f"{r_val/1e6:.3f} MΩ"
-                            elif r_val >= 1e3:
-                                return f"{r_val/1e3:.3f} kΩ"
-                            else:
-                                return f"{r_val:.3f} Ω"
-                        
-                        f.write(f"Initial Memristor Resistance: {format_resistance(initial_r)}\n")
-                        f.write(f"Final Memristor Resistance: {format_resistance(final_r)}\n")
-                        f.write(f"Minimum Memristor Resistance: {format_resistance(min_r)}\n")
-                        f.write(f"Maximum Memristor Resistance: {format_resistance(max_r)}\n")
-                        f.write(f"Mean Memristor Resistance: {format_resistance(mean_r)}\n")
-                        if not np.isnan(initial_r) and not np.isnan(final_r) and initial_r > 0:
-                            resistance_ratio = final_r / initial_r
-                            f.write(f"Resistance Ratio (Final/Initial): {resistance_ratio:.4f}\n")
-                    
-                    # Power statistics
-                    if len(p_memristor) > 0:
-                        peak_power = np.nanmax(p_memristor)
-                        mean_power = np.nanmean(p_memristor[p_memristor > 0]) if np.any(p_memristor > 0) else 0.0
-                        total_energy = np.trapz(p_memristor, t)  # Integrate power over time
-                        f.write(f"\nPeak Power: {peak_power*1e3:.3f} mW\n")
-                        f.write(f"Mean Power: {mean_power*1e3:.3f} mW\n")
-                        f.write(f"Total Energy: {total_energy*1e3:.3f} mJ\n")
-                    
-                    # Current statistics
-                    if len(i) > 0:
-                        peak_current = np.nanmax(np.abs(i))
-                        mean_current = np.nanmean(np.abs(i[i != 0])) if np.any(i != 0) else 0.0
-                        f.write(f"\nPeak Current: {peak_current*1e3:.3f} mA\n")
-                        f.write(f"Mean Current: {mean_current*1e3:.3f} mA\n")
-                    
                     f.write("\n")
                     f.write("=" * 60 + "\n")
-                    # Table header (tab-separated) for Origin
-                    f.write("Time(s)\tV_shunt_raw(V)\tV_SMU(V)\tV_shunt(V)\tV_memristor(V)\tCurrent(A)\tR_memristor(Ω)\tPower(W)\n")
-                    
-                    # Write Data (raw + calculated in one table, left to right)
+                    f.write("Time(s)\tV_shunt_raw(V)\tCurrent(A)\tResistance(Ohm)\n")
+
                     for j in range(len(t)):
-                        r_str = f"{r_memristor[j]:.9e}" if not np.isnan(r_memristor[j]) else "NaN"
-                        f.write(f"{t[j]:.9e}\t{v_shunt[j]:.9e}\t{v_smu[j]:.9e}\t{v_shunt[j]:.9e}\t{v_memristor[j]:.9e}\t{i[j]:.9e}\t{r_str}\t{p_memristor[j]:.9e}\n")
+                        r_str = f"{resistance[j]:.9e}" if not np.isnan(resistance[j]) else "NaN"
+                        f.write(f"{t[j]:.9e}\t{v_shunt[j]:.9e}\t{current[j]:.9e}\t{r_str}\n")
                         
             elif filename.endswith('.json'):
                 data = meta.copy()
                 data['time'] = t.tolist()
-                data['voltage_shunt'] = v.tolist()
-                data['voltage_smu'] = v_smu.tolist()
-                data['voltage_memristor'] = v_memristor.tolist()
-                data['current'] = i.tolist()
+                data['voltage_shunt'] = v_shunt.tolist()
+                data['current'] = current.tolist()
                 # Convert NaN to None for JSON compatibility
-                r_memristor_list = [float(x) if not np.isnan(x) else None for x in r_memristor]
-                data['resistance_memristor'] = r_memristor_list
-                data['power_memristor'] = p_memristor.tolist()
-                # Add statistics
-                valid_r_mask = ~np.isnan(r_memristor) & np.isfinite(r_memristor)
-                if np.any(valid_r_mask):
-                    r_valid = r_memristor[valid_r_mask]
-                    data['statistics'] = {
-                        'initial_resistance': float(r_valid[0]) if len(r_valid) > 0 else None,
-                        'final_resistance': float(r_valid[-1]) if len(r_valid) > 0 else None,
-                        'min_resistance': float(np.nanmin(r_valid)) if len(r_valid) > 0 else None,
-                        'max_resistance': float(np.nanmax(r_valid)) if len(r_valid) > 0 else None,
-                        'mean_resistance': float(np.nanmean(r_valid)) if len(r_valid) > 0 else None,
-                        'peak_power': float(np.nanmax(p_memristor)) if len(p_memristor) > 0 else None,
-                        'total_energy': float(np.trapz(p_memristor, t)) if len(p_memristor) > 0 else None,
-                        'peak_current': float(np.nanmax(np.abs(i))) if len(i) > 0 else None
-                    }
+                resistance_list = [float(x) if not np.isnan(x) else None for x in resistance]
+                data['resistance_ohm'] = resistance_list
                 with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
             elif filename.endswith('.csv'):
                 import pandas as pd
                 df = pd.DataFrame({
                     'time': t,
-                    'voltage_smu': v_smu,
                     'voltage_shunt': v_shunt,
-                    'voltage_memristor': v_memristor,
-                    'current': i,
-                    'resistance_memristor': r_memristor,
-                    'power_memristor': p_memristor
+                    'current': current,
+                    'resistance_ohm': resistance
                 })
                 df.to_csv(filename, index=False, encoding='utf-8')
             elif filename.endswith('.npz'):
                 np.savez(filename, 
                         time=t, 
                         voltage_shunt=v_shunt, 
-                        voltage_smu=v_smu,
-                        voltage_memristor=v_memristor,
-                        current=i, 
-                        resistance_memristor=r_memristor,
-                        power_memristor=p_memristor,
+                        current=current,
+                        resistance_ohm=resistance,
                         metadata=meta)
             
             # Save voltage plot alongside data file (only for .txt files to match auto-save behavior)
@@ -1000,18 +883,6 @@ class OscilloscopePulseGUI(tk.Toplevel):
             # Update display if it exists
             if 'save_dir_display' in self.layout.vars:
                 self.layout.vars['save_dir_display'].set(path)
-    
-    def _on_alignment_applied(self):
-        """Callback when alignment is applied - update last_data for saving"""
-        if hasattr(self.layout, 'plot_data') and 't' in self.layout.plot_data:
-            # Get current plot data (with alignment applied)
-            t = self.layout.plot_data['t']
-            v_shunt = self.layout.plot_data['v_shunt']
-            i = self.layout.plot_data['i']
-            metadata = self.layout.plot_data.get('metadata', {})
-            
-            # Update last_data so save uses aligned data
-            self.last_data = (t, v_shunt, i, metadata)
     
     def _connect_smu(self):
         """Connect to SMU using SystemWrapper"""

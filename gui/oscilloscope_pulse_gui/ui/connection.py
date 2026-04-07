@@ -65,6 +65,37 @@ def build_connection_content(gui, frame):
     smu_status_label.pack(side="left", padx=10)
     gui.widgets["smu_status_label"] = smu_status_label
 
+    note_frame = ttk.LabelFrame(frame, text="Oscilloscope Setup Note", padding=8)
+    note_frame.pack(fill="x", pady=(10, 0))
+
+    note_text = (
+        "Before running measurements, set up the oscilloscope manually:\n"
+        "• Timebase to capture full pulse window\n"
+        "• Voltage scale (V/div) so the shunt signal is clearly visible\n"
+        "• Trigger level/mode to catch pulse start\n"
+        "• Use the selected scope channel for capture"
+    )
+    ttk.Label(note_frame, text=note_text, justify="left").pack(fill="x", anchor="w")
+
+    # Placeholder area for future wiring/setup image.
+    image_placeholder = tk.Frame(
+        note_frame,
+        height=170,
+        bg="#f7f7f7",
+        bd=1,
+        relief="solid",
+    )
+    image_placeholder.pack(fill="x", pady=(8, 0))
+    image_placeholder.pack_propagate(False)
+    tk.Label(
+        image_placeholder,
+        text="[Oscilloscope setup image placeholder]\nAdd wiring/scope screenshot here",
+        bg="#f7f7f7",
+        fg="#555555",
+        justify="center",
+        font=("Segoe UI", 9, "italic"),
+    ).pack(expand=True)
+
 
 def create_connection_frame(gui, parent):
     """Build collapsible connection settings frame."""

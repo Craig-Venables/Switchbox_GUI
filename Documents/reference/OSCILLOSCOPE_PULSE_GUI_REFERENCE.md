@@ -6,13 +6,13 @@
 
 ## 1. General overview
 
-### 1.1 Purpose
+### 1.1 Purpose (current simplified behavior)
 
 The **Oscilloscope Pulse GUI** (`gui/oscilloscope_pulse_gui/`) is a **`tk.Toplevel`** application that coordinates:
 
 - **SMU** — apply a **voltage pulse** (or bias/hold sequence) to the device under test  
 - **Oscilloscope** — capture **waveform data** after the pulse (triggered or timed read)  
-- **Post-processing** — convert captured **voltage** across a **shunt** (or other method) into **current**, plot **V/I vs time**, save CSV/plots  
+- **Post-processing** — compute current from shunt voltage and save **raw data + resistance column**  
 
 It supports **simulation mode** (no hardware) for UI testing and includes helpers for **Tektronix TBS1000C**-style scopes via **`Equipment.managers.oscilloscope.OscilloscopeManager`**.
 
@@ -28,7 +28,7 @@ It supports **simulation mode** (no hardware) for UI testing and includes helper
 ```
 gui/oscilloscope_pulse_gui/
 ├── main.py              # OscilloscopePulseGUI — wiring, context, callbacks, system JSON
-├── layout.py            # OscilloscopePulseLayout — top bar, left controls, right plots
+├── layout.py            # OscilloscopePulseLayout — top bar + tabbed content (Measurements/Connections/Help)
 ├── logic.py             # PulseMeasurementLogic — threads, SMU+scope sequence, simulation
 ├── config.py            # COLORS, THEME, fonts (static GUI styling)
 ├── config_manager.py    # load/save pulse_gui_config.json next to this package
@@ -73,8 +73,10 @@ There is **no** `gui/oscilloscope_pulse_gui/__init__.py` in the tree snapshot us
   - **`self.system_wrapper`** — `SystemWrapper()` when import succeeds (4200/2450 routing parity with pulse testing stack).  
   - **`self.logic = PulseMeasurementLogic(smu_instance)`** — may be updated when SMU reconnects.  
   - **`context`** may include: `device_label`, `sample_name`, `save_directory`, `smu_ports`, `scope_ports`, **`provider`** (Measurement GUI reference for live attributes).  
+- Window now defaults to fullscreen-friendly sizing (`1500x900`, `zoomed` when supported).  
 - **Scrollable outer frame** — `Canvas` + scrollbars wrapping **`content_frame`**.  
-- **`OscilloscopePulseLayout`** receives **callbacks**: `start`, `start_no_config`, `grab_scope`, `pulse_only`, `stop`, `save`, `browse_save`, `refresh_scopes`, `on_system_change`, `quick_test`, `read_scope_settings`, `connect_smu`, `on_alignment_applied`.  
+- **`OscilloscopePulseLayout`** receives callbacks for measurement, scope grab, save, and connection operations.  
+- Save path now writes simplified exports (raw shunt voltage, current, resistance) instead of alignment/derived multi-trace exports.
 - **`_load_systems_from_json`** — reads **`Json_Files/system_configs.json`** like Measurement GUI (named lab configs).  
 - **`_resolve_default_save_root`** — same OneDrive/Documents **`Data_folder`** preference order as other GUIs.  
 - **`WM_DELETE_WINDOW`** → **`_on_close`** for cleanup.
@@ -95,8 +97,11 @@ There is **no** `gui/oscilloscope_pulse_gui/__init__.py` in the tree snapshot us
 ## 5. `OscilloscopePulseLayout` (`layout.py`) — highlights
 
 - Applies ttk styles from **`gui_config`** (`THEME`, `COLORS`, fonts).  
-- **`_build_layout`:** `create_top_bar` → horizontal split: **`create_controls_panel`** (left), **`create_plots`** (right).  
-- Contains optional **collapsible** sections (e.g. quick test) via internal toggles.
+- **Tabbed main content**: `Measurements`, `Connections`, `Help`.  
+- **Measurements tab**: pulse/sweep parameters, action buttons, save options, raw plot.  
+- **Connections tab**: SMU/scope settings + oscilloscope setup note and image placeholder area.  
+- **Help tab**: quick workflow summary + button to open full help window.  
+- Pre/post bias timing is now a single shared value (`Pre/Post Bias Time`), with `post_bias_time` synced to `pre_bias_time` in params extraction.
 
 ---
 
@@ -136,7 +141,7 @@ OscilloscopePulseGUI(master, smu_instance=adapter, context={..., provider})
 
 ## 9. Further reading (in-repo)
 
-- **`gui/oscilloscope_pulse_gui/SIMPLE_USAGE_GUIDE.md`** — operator-style steps  
+- **`gui/oscilloscope_pulse_gui/SIMPLE_USAGE_GUIDE.md`** — operator-style steps (updated simplified flow)  
 - **`gui/oscilloscope_pulse_gui/FIXES_AND_USAGE.md`**, **`V_SMU_FIXES_AND_USAGE.md`** — known issues / versions  
 - **`gui/oscilloscope_pulse_gui/REFACTOR_SUMMARY.md`** — structural history  
 

@@ -560,7 +560,6 @@ class MeasurementGUI:
                 "stop_sequential_measurement": self.set_measurment_flag_true,
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
                 "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
-                "toggle_analysis_stats_box": self.toggle_analysis_stats_box,
                 "run_conditional_testing": self.run_conditional_testing,
                 "run_single_pulse": self._run_single_pulse,
                 "run_read_pulse": self._run_read_pulse,
@@ -619,15 +618,8 @@ class MeasurementGUI:
                 loop="#1"
             )
         
-        # Initialize analysis stats window (floating overlay)
-        if hasattr(self, 'measurements_graph_panel'):
-            self.analysis_stats_window = AnalysisStatsWindow(
-                parent=self.master,
-                graph_frame=self.measurements_graph_panel,
-                on_hide=getattr(self, '_update_stats_box_button_label', lambda: None),
-            )
-        else:
-            self.analysis_stats_window = None
+        # Permanently disable floating analysis stats popup.
+        self.analysis_stats_window = None
         
         # Wire up analysis enabled checkbox to show/hide stats window
         if hasattr(self, 'analysis_enabled'):
@@ -735,31 +727,9 @@ class MeasurementGUI:
     def _on_analysis_enabled_changed(self, *args) -> None:
         """
         Callback when analysis_enabled checkbox changes.
-        Shows or hides the analysis stats window accordingly.
-        Note: If stats panel is visible, floating window will be hidden.
+        Floating analysis stats popup is permanently disabled.
         """
-        if not hasattr(self, 'analysis_stats_window') or not self.analysis_stats_window:
-            return
-        
-        if hasattr(self, 'analysis_enabled') and self.analysis_enabled.get():
-            # Check if stats panel is visible - if so, don't show floating window
-            stats_panel_visible = False
-            if hasattr(self, 'plot_panels') and self.plot_panels:
-                stats_panel_visible = self.plot_panels.plot_visibility.get(
-                    "analysis_stats",
-                    tk.BooleanVar(value=False)
-                ).get()
-            
-            if not stats_panel_visible:
-                # Show the stats window
-                self.analysis_stats_window.show()
-            else:
-                # Stats panel is visible, so hide floating window
-                self.analysis_stats_window.hide()
-        else:
-            # Hide the stats window
-            self.analysis_stats_window.hide()
-        # Keep Stats box button label in sync
+        # Keep the button label in sync with permanent "off" state.
         self._update_stats_box_button_label()
         
         # Persist checkbox state so it restores on next load
@@ -770,19 +740,8 @@ class MeasurementGUI:
 
     def toggle_analysis_stats_box(self) -> None:
         """Toggle the orange analysis stats box (floating window that shows with Analysis)."""
-        if not hasattr(self, 'analysis_stats_window') or not self.analysis_stats_window:
-            return
-        try:
-            visible = self.analysis_stats_window.is_visible()
-            if visible:
-                self.analysis_stats_window.hide()
-                new_visible = False
-            else:
-                self.analysis_stats_window.show()
-                new_visible = True
-            self._update_stats_box_button_label()
-        except Exception:
-            pass
+        # Floating stats box is intentionally disabled.
+        self._update_stats_box_button_label()
 
     def _update_stats_box_button_label(self) -> None:
         """Update the Stats box button to show current visibility of the orange analysis stats window."""
@@ -832,24 +791,7 @@ class MeasurementGUI:
         if hasattr(self, 'plot_panels') and self.plot_panels:
             self.plot_panels.update_stats_panel(analysis_data, analysis_level)
         
-        # Update the floating stats window (if it exists)
-        if hasattr(self, 'analysis_stats_window') and self.analysis_stats_window:
-            self.analysis_stats_window.update_stats(analysis_data, analysis_level)
-            
-            # Show window if analysis is enabled AND stats panel is not visible
-            if hasattr(self, 'analysis_enabled') and self.analysis_enabled.get():
-                # Check if stats panel is visible - if so, hide floating window
-                stats_panel_visible = False
-                if hasattr(self, 'plot_panels') and self.plot_panels:
-                    stats_panel_visible = self.plot_panels.plot_visibility.get(
-                        "analysis_stats", 
-                        tk.BooleanVar(value=False)
-                    ).get()
-                
-                if not stats_panel_visible:
-                    self.analysis_stats_window.show()
-                else:
-                    self.analysis_stats_window.hide()
+        # Floating stats popup is permanently disabled.
 
     def _update_live_classification_display(
         self, 
@@ -2854,6 +2796,29 @@ class MeasurementGUI:
         self.loop_label = tk.Label(info_frame, text="Loop: 5", font=("Helvetica", 12))
         self.loop_label.grid(row=1, column=2, padx=10, sticky="w")
 
+        # Large acquisition indicator (clear visual feedback during external-instrument runs)
+        activity_frame = tk.Frame(top_frame)
+        activity_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        activity_frame.columnconfigure(1, weight=1)
+        tk.Label(
+            activity_frame,
+            text="Acquisition:",
+            font=("Helvetica", 12, "bold"),
+        ).grid(row=0, column=0, padx=(0, 10), sticky="w")
+        self.measurement_activity_label = tk.Label(
+            activity_frame,
+            text="Idle",
+            font=("Helvetica", 13, "bold"),
+            fg="#4d4d4d",
+        )
+        self.measurement_activity_label.grid(row=0, column=1, sticky="w")
+        self.measurement_activity_progress = ttk.Progressbar(
+            activity_frame,
+            mode="indeterminate",
+            length=360,
+        )
+        self.measurement_activity_progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+
         # Motor Control button
         self.motor_control_button = tk.Button(info_frame, text="Motor Control", command=self.open_motor_control)
         self.motor_control_button.grid(row=1, column=3, columnspan=1, pady=5)
@@ -2883,6 +2848,59 @@ class MeasurementGUI:
                 self.log_terminal(message)
             except Exception:
                 print(message)
+
+    def _set_measurement_feedback(self, active: bool, detail: Optional[str] = None) -> None:
+        """Update both large top banner and bottom-bar acquisition indicators."""
+        active = bool(active)
+        if detail is not None:
+            self._measurement_activity_detail = str(detail)
+
+        detail_text = str(getattr(self, "_measurement_activity_detail", "Acquiring data from instrument"))
+        if getattr(self, "stop_measurement_flag", False) and active:
+            base_text = "Stopping measurement"
+        else:
+            base_text = detail_text if detail_text else "Acquiring data from instrument"
+
+        phase = int(getattr(self, "_status_tick_counter", 0)) % 4
+        dots = "." * phase
+        animated_text = f"{base_text}{dots}" if active else "Idle"
+
+        top_label = getattr(self, "measurement_activity_label", None)
+        bottom_label = getattr(self, "status_bar_activity", None)
+        top_progress = getattr(self, "measurement_activity_progress", None)
+        bottom_progress = getattr(self, "status_bar_progress", None)
+
+        if top_label is not None:
+            top_label.config(text=animated_text, fg=("#cc0000" if active else "#4d4d4d"))
+        if bottom_label is not None:
+            bottom_label.config(text=animated_text, fg=("#cc0000" if active else "#4d4d4d"))
+
+        running = bool(getattr(self, "_status_progress_running", False))
+        if active and not running:
+            for bar in (top_progress, bottom_progress):
+                if bar is not None:
+                    try:
+                        bar.start(12)
+                    except Exception:
+                        pass
+            self._status_progress_running = True
+        elif (not active) and running:
+            for bar in (top_progress, bottom_progress):
+                if bar is not None:
+                    try:
+                        bar.stop()
+                    except Exception:
+                        pass
+            self._status_progress_running = False
+        elif not active:
+            # Hard stop even if local running flag got out of sync.
+            for bar in (top_progress, bottom_progress):
+                if bar is not None:
+                    try:
+                        bar.stop()
+                    except Exception:
+                        pass
+            self._status_progress_running = False
 
     def log_test(self, msg: str) -> None:
         """Append a line to the tests log widget or stdout if unavailable."""
@@ -3714,6 +3732,18 @@ class MeasurementGUI:
 
     def _status_update_tick(self):
         try:
+            self._status_tick_counter = int(getattr(self, "_status_tick_counter", 0)) + 1
+
+            # Failsafe: if worker thread has ended unexpectedly, clear busy UI state.
+            if getattr(self, "measuring", False):
+                worker = getattr(self, "measurement_thread", None)
+                if worker is not None:
+                    try:
+                        if not worker.is_alive():
+                            self.measuring = False
+                    except Exception:
+                        pass
+
             # Device name
             try:
                 current_device = self.sample_gui.device_var.get()
@@ -3738,6 +3768,11 @@ class MeasurementGUI:
                 loop_val = self.measurment_number
             if loop_val is not None:
                 self.loop_label.config(text=f"Loop: {loop_val}")
+
+            # Keep acquisition indicators animated and synchronized with run state.
+            # Treat "not measuring" as an explicit idle state every tick.
+            is_measuring = bool(getattr(self, "measuring", False))
+            self._set_measurement_feedback(is_measuring)
             
             # Update orange overlay box to stay in sync with sample/device changes
             if hasattr(self, '_update_overlay_from_current_state'):
@@ -5492,6 +5527,10 @@ class MeasurementGUI:
 
     def set_measurment_flag_true(self) -> None:
         self.stop_measurement_flag = True
+        try:
+            self._set_measurement_feedback(True, "Stopping measurement")
+        except Exception:
+            pass
     
     def open_sweep_editor_popup(self) -> None:
         try:
@@ -5782,6 +5821,7 @@ class MeasurementGUI:
             if response != 'yes':
                 return
         self.measuring = True
+        self._set_measurement_feedback(True, "Acquiring data from instrument")
 
         self.stop_measurement_flag = False
 
@@ -6076,8 +6116,19 @@ class MeasurementGUI:
                                 if not _graphs_cleared_for_this_measurement:
                                     _graphs_cleared_for_this_measurement = True
                                     if hasattr(self, 'master') and hasattr(self, '_reset_plots_for_new_sweep'):
-                                        # Schedule reset on main GUI thread for thread safety
-                                        self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
+                                        # Ensure reset completes before first point append to avoid
+                                        # async reset wiping newly appended data.
+                                        try:
+                                            _reset_done = threading.Event()
+                                            def _do_reset():
+                                                try:
+                                                    self._reset_plots_for_new_sweep(self)
+                                                finally:
+                                                    _reset_done.set()
+                                            self.master.after(0, _do_reset)
+                                            _reset_done.wait(timeout=1.0)
+                                        except Exception:
+                                            self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
                                 
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
@@ -6127,8 +6178,19 @@ class MeasurementGUI:
                                 if not _graphs_cleared_for_this_measurement:
                                     _graphs_cleared_for_this_measurement = True
                                     if hasattr(self, 'master') and hasattr(self, '_reset_plots_for_new_sweep'):
-                                        # Schedule reset on main GUI thread for thread safety
-                                        self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
+                                        # Ensure reset completes before first point append to avoid
+                                        # async reset wiping newly appended data.
+                                        try:
+                                            _reset_done = threading.Event()
+                                            def _do_reset():
+                                                try:
+                                                    self._reset_plots_for_new_sweep(self)
+                                                finally:
+                                                    _reset_done.set()
+                                            self.master.after(0, _do_reset)
+                                            _reset_done.wait(timeout=1.0)
+                                        except Exception:
+                                            self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
                                 
                                 self.v_arr_disp.append(v)
                                 self.c_arr_disp.append(i)
@@ -6644,6 +6706,7 @@ class MeasurementGUI:
 
             # Always mark measurement complete in GUI
             self.measuring = False
+            self._set_measurement_feedback(False)
             if self.telegram.is_enabled():
                 combined = getattr(self, '_last_combined_summary_path', None)
                 self.telegram.start_post_measurement_worker(save_dir, combined)
@@ -6972,6 +7035,7 @@ class MeasurementGUI:
         # Reset graphs/buffers between runs
         self._reset_plots_for_new_run(self)
         self.measuring = True
+        self._set_measurement_feedback(True, "Acquiring data from instrument")
 
         # Branch by excitation mode if available
         try:

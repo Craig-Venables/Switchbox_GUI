@@ -8,6 +8,7 @@ Creates the bottom status bar with connection status, device count, and message.
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 from typing import Any
 
 from ..constants import COLOR_BG_INFO, COLOR_SECONDARY, COLOR_SUCCESS, FONT_MAIN
@@ -51,6 +52,23 @@ def build_bottom_status_bar(builder: Any, parent: tk.Misc) -> None:
         fg=COLOR_SECONDARY,
     )
     gui.status_bar_devices.pack(side="left", padx=15)
+
+    gui.status_bar_activity = tk.Label(
+        middle_section,
+        text="Idle",
+        font=FONT_MAIN,
+        bg=COLOR_BG_INFO,
+        fg=COLOR_SECONDARY,
+    )
+    gui.status_bar_activity.pack(side="left", padx=(15, 8))
+
+    # Indeterminate progress gives visible feedback while external systems run.
+    gui.status_bar_progress = ttk.Progressbar(
+        middle_section,
+        mode="indeterminate",
+        length=120,
+    )
+    gui.status_bar_progress.pack(side="left", padx=(0, 5))
 
     right_section = tk.Frame(frame, bg=COLOR_BG_INFO)
     right_section.pack(side="right", fill="y", padx=10)

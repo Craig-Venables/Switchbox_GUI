@@ -247,6 +247,7 @@ def build_ex_command(
     num_points: int,
     step_delay: float,
     ilimit: float,
+    irange: float,
     integration_time: float,
     clarius_debug: int,
 ) -> str:
@@ -255,9 +256,9 @@ def build_ex_command(
     Function signature:
     int smu_ivsweep(double Vhigh, double Vlow, int NumSteps, int NumCycles, double *Imeas, int NumIPoints,
                     double *Vforce, int NumVPoints, double StepDelay, double Ilimit,
-                    double IntegrationTime, int ClariusDebug)
+                    double IRange, double IntegrationTime, int ClariusDebug)
     
-    Parameters (11 total):
+    Parameters (13 total):
     1. Vhigh (double, Input) - Positive voltage limit (V), must be >= 0
     2. Vlow (double, Input) - Negative voltage limit (V), must be <= 0
     3. NumSteps (int, Input) - Total steps across full sweep path (4-10000)
@@ -268,8 +269,9 @@ def build_ex_command(
     8. NumVPoints (int, Input) - array size for Vforce (must equal (NumSteps + 1) × NumCycles)
     9. StepDelay (double, Input) - Delay per step (seconds)
     10. Ilimit (double, Input) - Current compliance limit (A)
-    11. IntegrationTime (double, Input) - PLC (Power Line Cycles)
-    12. ClariusDebug (int, Input) - 0=off, 1=on
+    11. IRange (double, Input) - Current measurement range (A), 0 = auto range
+    12. IntegrationTime (double, Input) - PLC (Power Line Cycles)
+    13. ClariusDebug (int, Input) - 0=off, 1=on
     
     Pattern: (0V → Vhigh → 0V → Vlow → 0V) × NumCycles
     Total points = (NumSteps + 1) × NumCycles
@@ -292,12 +294,13 @@ def build_ex_command(
         format_param(num_points),       # 8: NumVPoints (array size, must equal NumIPoints)
         format_param(step_delay),       # 9: StepDelay
         format_param(ilimit),           # 10: Ilimit
-        format_param(integration_time), # 11: IntegrationTime
-        format_param(clarius_debug),    # 12: ClariusDebug
+        format_param(irange),           # 11: IRange
+        format_param(integration_time), # 12: IntegrationTime
+        format_param(clarius_debug),    # 13: ClariusDebug
     ]
     
     # Debug: verify the debug flag is correctly formatted
-    debug_param = params[11]  # 12th parameter (0-indexed: 11)
+    debug_param = params[12]  # 13th parameter (0-indexed: 12)
     if clarius_debug == 1 and debug_param != "1":
         print(f"[WARNING] Debug flag mismatch: clarius_debug={clarius_debug}, formatted='{debug_param}'")
     
@@ -366,6 +369,12 @@ def main() -> None:
         help="Current compliance limit (A, default: 0.1, range: 1e-9 to 1.0)"
     )
     parser.add_argument(
+        "--irange",
+        type=float,
+        default=0.0,
+        help="Current measurement range (A). Use 0.0 for auto range (default: 0.0)."
+    )
+    parser.add_argument(
         "--integration-time",
         type=float,
         default=0.01,
@@ -414,6 +423,8 @@ def main() -> None:
         parser.error(f"step-delay={args.step_delay} must be in range [0.001, 10.0] (minimum 1 ms required)")
     if not (1e-9 <= args.ilimit <= 1.0):
         parser.error(f"ilimit={args.ilimit} must be in range [1e-9, 1.0]")
+    if args.irange < 0.0:
+        parser.error(f"irange={args.irange} must be >= 0.0 (0.0 means auto range)")
     
     # Validate integration time
     if not (0.0001 <= args.integration_time <= 1.0):
@@ -430,6 +441,7 @@ def main() -> None:
         num_points=num_points,
         step_delay=args.step_delay,
         ilimit=args.ilimit,
+        irange=args.irange,
         integration_time=args.integration_time,
         clarius_debug=clarius_debug,
     )
@@ -489,6 +501,7 @@ def main() -> None:
         print(f"[KXCI] Total points: {num_points} (({args.num_steps} + 1) × {args.num_cycles})")
         print(f"[KXCI] Step delay: {args.step_delay*1000:.1f} ms per step")
         print(f"[KXCI] Current limit: {args.ilimit:.2e} A")
+        print(f"[KXCI] Current range: {args.irange:.2e} A ({'AUTO' if args.irange == 0.0 else 'FIXED'})")
         print(f"[KXCI] Integration time: {args.integration_time:.6f} PLC")
         print(f"[KXCI] Debug output: {'ON' if args.debug else 'OFF'}")
         
@@ -518,7 +531,9 @@ def main() -> None:
         
         # Query data from GP parameters
         # Based on function signature: 
-        # 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas (output), 6=NumIPoints, 7=Vforce (output), 8=NumVPoints, 9=StepDelay, 10=Ilimit, 11=IntegrationTime, 12=ClariusDebug
+        # 1=Vhigh, 2=Vlow, 3=NumSteps, 4=NumCycles, 5=Imeas (output), 6=NumIPoints,
+        # 7=Vforce (output), 8=NumVPoints, 9=StepDelay, 10=Ilimit, 11=IRange,
+        # 12=IntegrationTime, 13=ClariusDebug
         def safe_query(param: int, count: int, name: str = "") -> List[float]:
             """Query GP parameter with retry."""
             for attempt in range(3):

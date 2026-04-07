@@ -14,13 +14,23 @@ from .scope import create_scope_frame
 from .status_bar import create_status_bar
 
 
-def create_controls_panel(gui, parent):
-    """Build the left panel with all collapsible sections and action buttons."""
-    create_connection_frame(gui, parent)
-    create_scope_frame(gui, parent)
+def create_measurements_controls_panel(gui, parent):
+    """Build controls used for the Measurements tab."""
     create_pulse_frame(gui, parent)
     create_measurement_frame(gui, parent)
     create_calculator_frame(gui, parent)
     create_save_options_frame(gui, parent)
     create_action_buttons(gui, parent)
     create_status_bar(gui, parent)
+
+
+def create_connections_controls_panel(gui, parent):
+    """Build controls used for the Connections tab."""
+    create_connection_frame(gui, parent)
+    create_scope_frame(gui, parent)
+
+
+def create_controls_panel(gui, parent):
+    """Backward-compatible combined control panel."""
+    create_connections_controls_panel(gui, parent)
+    create_measurements_controls_panel(gui, parent)

@@ -33,7 +33,7 @@ def create_measurement_frame(gui, parent):
     create_collapsible_frame(
         gui,
         parent,
-        "Analysis Parameters (Critical!)",
+        "Sweep Parameters (Critical!)",
         lambda f: build_measurement_content(gui, f),
         default_expanded=True,
     )

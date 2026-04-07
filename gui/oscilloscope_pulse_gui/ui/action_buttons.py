@@ -13,7 +13,7 @@ def create_action_buttons(gui, parent):
     frame = ttk.LabelFrame(parent, text="📋 Measurement Workflow", padding=5)
     frame.pack(fill="x", pady=2)
 
-    instructions = "1️⃣ Set scope | 2️⃣ Send Pulse | 3️⃣ Verify | 4️⃣ Read & Analyze"
+    instructions = "1️⃣ Set scope | 2️⃣ Send Pulse | 3️⃣ Verify | 4️⃣ Read Raw Data"
     instr_label = tk.Label(
         frame,
         text=instructions,
@@ -37,7 +37,7 @@ def create_action_buttons(gui, parent):
 
     gui.widgets["grab_scope_btn"] = ttk.Button(
         btn_frame,
-        text="4️⃣ Read & Analyze",
+        text="4️⃣ Read Raw Data",
         command=gui.callbacks.get("grab_scope", lambda: None),
         style="Action.TButton",
     )
