@@ -2,7 +2,7 @@
 
 	MODULE NAME: smu_ivsweep
 	MODULE RETURN TYPE: int 
-	NUMBER OF PARMS: 11
+	NUMBER OF PARMS: 13
 	ARGUMENTS:
 		Vhigh,	double,	Input,	5,	0,	200
 		Vlow,	double,	Input,	-5,	-200,	0
@@ -14,6 +14,7 @@
 		NumVPoints,	int,	Input,	21,	,	
 		StepDelay,	double,	Input,	0.001,	0.0001,	10.0
 		Ilimit,	double,	Input,	0.1,	1e-9,	1.0
+		IRange,	double,	Input,	0.0,	0.0,	1.0
 		IntegrationTime,	double,	Input,	0.01,	0.0001,	1.0
 		ClariusDebug,	int,	Input,	0,	0,	1
 	INCLUDES:
@@ -171,7 +172,7 @@ END USRLIB MODULE HELP DESCRIPTION */
 /* USRLIB MODULE MAIN FUNCTION */
 int smu_ivsweep( double Vhigh, double Vlow, int NumSteps, int NumCycles, double *Imeas, int NumIPoints, 
                  double *Vforce, int NumVPoints, double StepDelay, double Ilimit,
-                 double IntegrationTime, int ClariusDebug )
+                 double IRange, double IntegrationTime, int ClariusDebug )
 {
 /* USRLIB MODULE CODE */
 /* Step-based IV sweep module: 0 → Vhigh → 0 → Vlow → 0V, repeated NumCycles times
@@ -297,6 +298,13 @@ if ( Ilimit < 1e-9 )
     Ilimit = 1e-9; /* Minimum current limit: 1 nA */
 }
 
+/* Validate current range (0.0 means auto; otherwise must be positive) */
+if ( IRange < 0.0 )
+{
+    if(debug) printf("smu_ivsweep WARNING: IRange (%.6e) < 0, using auto range (0.0)\n", IRange);
+    IRange = 0.0;
+}
+
 /* Validate integration time (must be positive) */
 if ( IntegrationTime < 0.0001 )
 {
@@ -334,6 +342,17 @@ if ( status != 0 )
 {
     if(debug) printf("smu_ivsweep ERROR: limiti() failed with status: %d\n", status);
     return( -6 ); /* Failed to set current limit */
+}
+
+/* Optional fixed current measurement range (0.0 keeps auto range) */
+if ( IRange > 0.0 )
+{
+    status = rangei(SMU1, IRange);
+    if ( status != 0 )
+    {
+        if(debug) printf("smu_ivsweep ERROR: rangei() failed with status: %d\n", status);
+        return( -8 ); /* Failed to set current range */
+    }
 }
 
 /* Calculate step distribution across 4 segments (will be reset per cycle) */

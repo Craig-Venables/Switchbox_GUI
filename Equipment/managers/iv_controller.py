@@ -275,6 +275,7 @@ class _Keithley4200A_KXCI_Wrapper:
             num_points=num_points,
             step_delay=0.01,  # 10ms step delay (was settle_time)
             ilimit=ilimit,
+            irange=self._desired_current_measurement_range_a,
             integration_time=0.01,  # 0.01 PLC
             clarius_debug=0,
         )
@@ -2063,6 +2064,7 @@ class IVControllerManager:
                         num_points=num_points,
                         step_delay=step_delay,
                         ilimit=config.icc,
+                        irange=getattr(kxci_wrapper, "_desired_current_measurement_range_a", 0.0),
                         integration_time=integration_time,
                         clarius_debug=0
                     )
@@ -2112,6 +2114,7 @@ class IVControllerManager:
                                 -5: "Invalid NumSteps (must be >= 4 and <= 10000) or NumCycles (must be >= 1 and <= 1000)",
                                 -6: "limiti() failed (check current limit value)",
                                 -7: "measi() failed (check SMU connection)",
+                                -8: "rangei() failed (check requested current range value)",
                             }
                             msg = error_messages.get(return_value, f"Unknown error code: {return_value}")
                             raise RuntimeError(f"4200A EX command returned error code: {return_value} - {msg}")

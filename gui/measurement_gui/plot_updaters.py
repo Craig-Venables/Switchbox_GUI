@@ -120,25 +120,22 @@ class PlotUpdaters:
         if ax is None or canvas is None:
             return
         try:
-            line.set_data(list(x), list(y))
-            
+            x_data = list(x)
+            y_data = list(y)
+            line.set_data(x_data, y_data)
+
             # Update red dot for most recent value
             recent_dot = self.plot_panels.recent_dots.get(key)
-            if recent_dot is not None and len(x) > 0 and len(y) > 0:
-                # Show red dot at the most recent point
-                recent_dot.set_data([x[-1]], [y[-1]])
+            if recent_dot is not None and x_data and y_data:
+                recent_dot.set_data([x_data[-1]], [y_data[-1]])
             elif recent_dot is not None:
-                # Hide red dot if no data
                 recent_dot.set_data([], [])
-            
+
             ax.relim()
             ax.autoscale_view()
-            canvas.draw()
-            
-            # Note: Graph activity terminal is only for "Run Full Sample Analysis" progress
-            # Real-time plot updates are not logged to avoid spam
+            canvas.draw_idle()
         except Exception:
-            # Drawing errors (e.g., empty data) should not kill the thread.
+            # Drawing errors (e.g., empty data) should not kill updater threads.
             pass
 
     # ------------------------------------------------------------------

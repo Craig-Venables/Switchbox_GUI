@@ -14,7 +14,7 @@ def build_save_options_content(gui, frame):
     gui.vars["auto_save"] = tk.BooleanVar(value=gui.config.get("auto_save", True))
     auto_save_check = ttk.Checkbutton(
         frame,
-        text="Auto-save after 'Read & Analyze'",
+        text="Auto-save after 'Read Raw Data'",
         variable=gui.vars["auto_save"],
     )
     auto_save_check.pack(side="left", padx=5)
