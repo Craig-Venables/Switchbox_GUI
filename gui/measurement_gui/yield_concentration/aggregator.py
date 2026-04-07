@@ -29,6 +29,7 @@ Main entry points
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Callable, List, Optional, Tuple
 
 import pandas as pd
@@ -52,6 +53,7 @@ def run_yield_analysis(
     root_or_sample_dir: str,
     excel_path: Optional[str] = None,
     selected_samples: Optional[List[str]] = None,
+    analysis_mode: str = "device",
     voltage_val: float = 0.1,
     manual_excel_dir: Optional[str] = None,
     log_fn: Callable[[str], None] = print,
@@ -83,6 +85,7 @@ def run_yield_analysis(
             sample_dir=root_or_sample_dir,
             sample_name=os.path.basename(root_or_sample_dir),
             excel_path=excel_path,
+            analysis_mode=analysis_mode,
             voltage_val=voltage_val,
             manual_excel_dir=manual_excel_dir,
             log_fn=log_fn,
@@ -95,6 +98,7 @@ def run_yield_analysis(
             sample_dirs=sample_dirs,
             root_dir=root_or_sample_dir,
             excel_path=excel_path,
+            analysis_mode=analysis_mode,
             voltage_val=voltage_val,
             manual_excel_dir=manual_excel_dir,
             log_fn=log_fn,
@@ -120,6 +124,7 @@ def run_multi_sample_analysis(
     sample_dirs: List[str],
     root_dir: str,
     excel_path: Optional[str] = None,
+    analysis_mode: str = "device",
     voltage_val: float = 0.1,
     manual_excel_dir: Optional[str] = None,
     log_fn: Callable[[str], None] = print,
@@ -182,26 +187,50 @@ def run_multi_sample_analysis(
     _coerce_numeric(sample_df)
     _coerce_numeric(device_df)
 
-    # Save outputs
-    output_dir = os.path.join(root_dir, "yield_analysis")
+    # Sample-focused mode augments one-row-per-sample outputs with
+    # classification composition and resistance summary statistics.
+    if str(analysis_mode).lower().startswith("sample"):
+        sample_df = _apply_sample_focus_metrics(sample_df, device_df)
+
+    # Save outputs under analysis/<timestamp>/yield_analysis
+    output_dir = _make_timestamped_output_dir(root_dir)
     os.makedirs(output_dir, exist_ok=True)
 
     root_name = os.path.basename(root_dir)
-    sample_csv = os.path.join(output_dir, f"{root_name}_sample_summary.csv")
+    if str(analysis_mode).lower().startswith("sample"):
+        sample_csv = os.path.join(output_dir, f"{root_name}_sample_focused_summary.csv")
+    else:
+        sample_csv = os.path.join(output_dir, f"{root_name}_sample_summary.csv")
     device_csv = os.path.join(output_dir, f"{root_name}_device_detail.csv")
     sample_df.to_csv(sample_csv, index=False)
     device_df.to_csv(device_csv, index=False)
     log_fn(f"[YIELD ANALYSIS] Sample CSV: {sample_csv}")
     log_fn(f"[YIELD ANALYSIS] Device CSV: {device_csv}")
+    analysed_manifest = _write_files_analysed_manifest(
+        output_dir=output_dir,
+        analysis_root=root_dir,
+        sample_dirs=sample_dirs,
+        excel_path=excel_path,
+        device_df=device_df,
+    )
+    log_fn(f"[YIELD ANALYSIS] Analysed files list: {analysed_manifest}")
 
     # Plots
     log_fn("[YIELD ANALYSIS] Generating sample-level plots…")
     sample_plots = _plots.generate_sample_level_plots(
-        sample_df, output_dir, title_suffix=f" — {root_name}", log_fn=log_fn
+        sample_df,
+        output_dir,
+        title_suffix=f" — {root_name}",
+        analysis_mode=analysis_mode,
+        log_fn=log_fn,
     )
     log_fn("[YIELD ANALYSIS] Generating device-level plots…")
     device_plots = _plots.generate_device_level_plots(
-        device_df, output_dir, title_suffix=f" — {root_name}", log_fn=log_fn
+        device_df,
+        output_dir,
+        title_suffix=f" — {root_name}",
+        analysis_mode=analysis_mode,
+        log_fn=log_fn,
     )
     all_plots = sample_plots + device_plots
     log_fn(f"[YIELD ANALYSIS] {len(all_plots)} plot(s) saved to: {output_dir}")
@@ -215,6 +244,7 @@ def run_multi_sample_analysis(
         "plots": all_plots,
         "sample_csv": sample_csv,
         "device_csv": device_csv,
+        "files_analysed_txt": analysed_manifest,
     }
 
 
@@ -222,6 +252,7 @@ def run_single_sample_analysis(
     sample_dir: str,
     sample_name: str,
     excel_path: Optional[str] = None,
+    analysis_mode: str = "device",
     voltage_val: float = 0.1,
     manual_excel_dir: Optional[str] = None,
     log_fn: Callable[[str], None] = print,
@@ -257,25 +288,50 @@ def run_single_sample_analysis(
     )
     _coerce_numeric(device_df)
 
-    output_dir = os.path.join(sample_dir, "sample_analysis", "yield_analysis")
+    output_dir = _make_timestamped_output_dir(sample_dir, is_single_sample=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    csv_path = os.path.join(output_dir, f"{sample_name}_yield_analysis.csv")
-    device_df.to_csv(csv_path, index=False)
-    log_fn(f"[YIELD ANALYSIS] CSV saved: {csv_path}")
+    device_csv = os.path.join(output_dir, f"{sample_name}_device_detail.csv")
+    device_df.to_csv(device_csv, index=False)
+    log_fn(f"[YIELD ANALYSIS] Device CSV: {device_csv}")
 
     # For a single sample we still generate device-level plots, and also a
     # mini sample-level summary so the user sees yield vs concentration if
     # they have at least one data point
     sample_df = pd.DataFrame([_make_sample_row(sample_name, sample_yield_frac, fab_info, per_device_yield)])
     _coerce_numeric(sample_df)
+    if str(analysis_mode).lower().startswith("sample"):
+        sample_df = _apply_sample_focus_metrics(sample_df, device_df)
+
+    if str(analysis_mode).lower().startswith("sample"):
+        sample_csv = os.path.join(output_dir, f"{sample_name}_sample_focused_summary.csv")
+    else:
+        sample_csv = os.path.join(output_dir, f"{sample_name}_sample_summary.csv")
+    sample_df.to_csv(sample_csv, index=False)
+    log_fn(f"[YIELD ANALYSIS] Sample CSV: {sample_csv}")
+    analysed_manifest = _write_files_analysed_manifest(
+        output_dir=output_dir,
+        analysis_root=sample_dir,
+        sample_dirs=[sample_dir],
+        excel_path=excel_path,
+        device_df=device_df,
+    )
+    log_fn(f"[YIELD ANALYSIS] Analysed files list: {analysed_manifest}")
 
     log_fn("[YIELD ANALYSIS] Generating plots…")
     device_plots = _plots.generate_device_level_plots(
-        device_df, output_dir, title_suffix=f" — {sample_name}", log_fn=log_fn
+        device_df,
+        output_dir,
+        title_suffix=f" — {sample_name}",
+        analysis_mode=analysis_mode,
+        log_fn=log_fn,
     )
     sample_plots = _plots.generate_sample_level_plots(
-        sample_df, output_dir, title_suffix=f" — {sample_name}", log_fn=log_fn
+        sample_df,
+        output_dir,
+        title_suffix=f" — {sample_name}",
+        analysis_mode=analysis_mode,
+        log_fn=log_fn,
     )
     all_plots = device_plots + sample_plots
     log_fn(f"[YIELD ANALYSIS] {len(all_plots)} plot(s) saved to: {output_dir}")
@@ -287,7 +343,9 @@ def run_single_sample_analysis(
         "output_dir": output_dir,
         "sample_yield": sample_yield_frac,
         "plots": all_plots,
-        "csv": csv_path,
+        "sample_csv": sample_csv,
+        "device_csv": device_csv,
+        "files_analysed_txt": analysed_manifest,
     }
 
 
@@ -433,3 +491,120 @@ def _coerce_numeric(df: pd.DataFrame) -> None:
                 "avg_resistance_first_sweep", "sample_yield"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+
+def _apply_sample_focus_metrics(sample_df: pd.DataFrame, device_df: pd.DataFrame) -> pd.DataFrame:
+    """Return sample_df enriched with per-sample composition and resistance stats."""
+    if sample_df.empty or device_df.empty or "sample_name" not in device_df.columns:
+        return sample_df
+
+    work = device_df.copy()
+    if "classification_type" in work.columns:
+        class_series = work["classification_type"]
+    else:
+        class_series = pd.Series(["unknown"] * len(work), index=work.index)
+    work["classification_type"] = class_series.apply(_normalise_classification_type)
+    work["avg_resistance_first_sweep"] = pd.to_numeric(
+        work.get("avg_resistance_first_sweep"), errors="coerce"
+    )
+
+    # Resistance summary stats
+    res_stats = (
+        work.groupby("sample_name", dropna=False)["avg_resistance_first_sweep"]
+        .agg(["mean", "median", "std", "min", "max"])
+        .rename(
+            columns={
+                "mean": "resistance_mean",
+                "median": "resistance_median",
+                "std": "resistance_std",
+                "min": "resistance_min",
+                "max": "resistance_max",
+            }
+        )
+        .reset_index()
+    )
+
+    # Classification mix percentages
+    class_pct = (
+        work.groupby("sample_name", dropna=False)["classification_type"]
+        .value_counts(normalize=True)
+        .mul(100.0)
+        .rename("pct")
+        .reset_index()
+    )
+    class_pivot = class_pct.pivot(
+        index="sample_name",
+        columns="classification_type",
+        values="pct",
+    ).fillna(0.0)
+    class_pivot = class_pivot.rename(
+        columns={
+            "memristive": "pct_memristive",
+            "ohmic": "pct_ohmic",
+            "capacitive": "pct_capacitive",
+            "half-sweep": "pct_half_sweep",
+            "unknown": "pct_unknown",
+            "other": "pct_other",
+        }
+    ).reset_index()
+
+    enriched = sample_df.merge(res_stats, on="sample_name", how="left")
+    enriched = enriched.merge(class_pivot, on="sample_name", how="left")
+    return enriched
+
+
+def _normalise_classification_type(raw: object) -> str:
+    val = str(raw).strip().lower()
+    if val in {"memristive", "ohmic", "capacitive", "unknown", "other"}:
+        return val
+    if val in {"half sweep", "half-sweep", "halfsweep"}:
+        return "half-sweep"
+    return "other"
+
+
+def _make_timestamped_output_dir(base_path: str, is_single_sample: bool = False) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if is_single_sample:
+        return os.path.join(base_path, "sample_analysis", "analysis", timestamp, "yield_analysis")
+    return os.path.join(base_path, "analysis", timestamp, "yield_analysis")
+
+
+def _write_files_analysed_manifest(
+    output_dir: str,
+    analysis_root: str,
+    sample_dirs: list[str],
+    excel_path: Optional[str],
+    device_df: pd.DataFrame,
+) -> str:
+    manifest_path = os.path.join(output_dir, "files_analysed.txt")
+    lines: list[str] = []
+    lines.append(f"analysis_root: {analysis_root}")
+    lines.append(f"generated_at: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append("")
+    lines.append("sample_directories:")
+    for sample_dir in sorted(set(sample_dirs)):
+        lines.append(f"- {sample_dir}")
+    if excel_path:
+        lines.append("")
+        lines.append("fabrication_excel:")
+        lines.append(f"- {excel_path}")
+
+    if not device_df.empty and "first_sweep_file" in device_df.columns:
+        files = sorted(
+            {
+                str(v)
+                for v in device_df["first_sweep_file"].dropna().tolist()
+                if str(v).strip()
+            }
+        )
+        lines.append("")
+        lines.append("first_sweep_files:")
+        if files:
+            for path in files:
+                lines.append(f"- {path}")
+        else:
+            lines.append("- (none)")
+
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return manifest_path

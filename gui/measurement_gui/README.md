@@ -225,6 +225,20 @@ motor_gui = MotorControlWindow()
 - **Manager Pattern**: Instrument connections use ConnectionManager
 - **Adapter Pattern**: SMUAdapter provides unified interface to different instruments
 
+## Yield And Concentration Modes
+
+The Yield and Concentration analysis section now supports two comparison views under the same run button:
+
+- `Device-focused`: Existing behavior with per-device detail CSV and per-device plots.
+- `Sample-focused`: Whole-sample comparison outputs across selected samples.
+
+Sample-focused mode writes a dedicated sample summary CSV in `yield_analysis/` and adds cross-sample plots for:
+
+- Yield vs concentration
+- Resistance summary (mean/median) vs concentration
+- Classification composition stacked bars per sample
+- Expanded sample-level correlation heatmap
+
 ## Notes
 
 - The Measurement GUI is the central hub for all measurement operations
