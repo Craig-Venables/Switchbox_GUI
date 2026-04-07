@@ -1,0 +1,30 @@
+{
+  "_comment": "FC-2901V hardware interface config. Edit driver/channels to match your wiring.",
+  "_pinout_15pin_D": {
+    "pin_5":  "0-5 V setpoint input  (0 V = 0 sccm, 5 V = full scale)",
+    "pin_9":  "0-5 V flow output     (read by DAQ AI channel)",
+    "pin_14": "TTL valve-OFF          (low = valve closed, high = normal control)",
+    "pin_11": "+15 V power supply",
+    "pin_1":  "-15 V power supply",
+    "pin_8":  "Common / GND"
+  },
+  "_ni_usb6001_suggested_wiring": {
+    "AO0  (screw terminal 22)": "-> MFC pin 5  (setpoint)",
+    "AI0  (screw terminal 3) ": "-> MFC pin 9  (flow output)",
+    "AGND (screw terminal 30)": "-> MFC pin 8  (Common/GND)",
+    "P0.0 (screw terminal 52)": "-> MFC pin 14 (valve OFF)"
+  },
+  "driver": "nidaq",
+  "full_scale_sccm": 200.0,
+  "nidaq": {
+    "device_name": "Dev1",
+    "ao_setpoint_channel": "ao0",
+    "ai_flow_channel": "ai0",
+    "do_valve_off_channel": "port0/line0"
+  },
+  "arduino": {
+    "port": "COM3",
+    "baudrate": 115200,
+    "timeout_s": 0.5
+  }
+}

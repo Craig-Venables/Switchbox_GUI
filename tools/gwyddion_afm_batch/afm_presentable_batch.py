@@ -32,6 +32,7 @@ import argparse
 import glob
 import os
 import sys
+import traceback
 
 DEFAULT_EXTENSIONS = (".gwy", ".nid", ".spm", ".afm", ".dat")
 
@@ -59,6 +60,30 @@ def _apply_default_settings(gwy, settings):
     settings["/module/linematch/method"] = 2
     # plane level: exclude masked regions if any (same as user-guide example)
     settings["/module/level/mode"] = int(gwy.MASKING_EXCLUDE)
+
+
+def _choose_input_dir_with_popup():
+    """Open a simple folder picker popup and return selected path or None."""
+    try:
+        # Python 3
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        try:
+            # Python 2 fallback (common for pygwy environments)
+            tk = __import__("Tkinter")
+            filedialog = __import__("tkFileDialog")
+        except ImportError:
+            return None
+
+    root = tk.Tk()
+    root.withdraw()
+    root.update()
+    path = filedialog.askdirectory(title="Select AFM data folder")
+    root.destroy()
+    if not path:
+        return None
+    return os.path.abspath(path)
 
 
 def _discover_files(input_dir, pattern, extensions, recursive):
@@ -118,6 +143,60 @@ def _resolve_channel_ids(gwy, container, height_only, verbose):
     return list(gwy.gwy_app_data_browser_get_data_ids(container))
 
 
+def _datafield_to_matrix(data_field):
+    """Convert gwy data field to 2D Python list [y][x]."""
+    xres = int(data_field.get_xres())
+    yres = int(data_field.get_yres())
+    flat = list(data_field.get_data())
+    if len(flat) != xres * yres:
+        return None
+    return [flat[y * xres : (y + 1) * xres] for y in range(yres)]
+
+
+def _save_change_preview_image(path_png, raw_mat, proc_mat, title):
+    """Save side-by-side raw/processed/difference PNG."""
+    try:
+        import numpy as np
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return False
+
+    raw = np.asarray(raw_mat, dtype=float)
+    proc = np.asarray(proc_mat, dtype=float)
+    diff = proc - raw
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4), constrained_layout=True)
+    fig.suptitle(title)
+
+    im0 = axes[0].imshow(raw, cmap="viridis")
+    axes[0].set_title("Raw")
+    axes[0].set_xticks([])
+    axes[0].set_yticks([])
+    fig.colorbar(im0, ax=axes[0], shrink=0.7)
+
+    im1 = axes[1].imshow(proc, cmap="viridis")
+    axes[1].set_title("Processed")
+    axes[1].set_xticks([])
+    axes[1].set_yticks([])
+    fig.colorbar(im1, ax=axes[1], shrink=0.7)
+
+    im2 = axes[2].imshow(diff, cmap="coolwarm")
+    axes[2].set_title("Change (Processed - Raw)")
+    axes[2].set_xticks([])
+    axes[2].set_yticks([])
+    fig.colorbar(im2, ax=axes[2], shrink=0.7)
+
+    out_dir = os.path.dirname(path_png)
+    if out_dir and not os.path.isdir(out_dir):
+        os.makedirs(out_dir)
+    fig.savefig(path_png, dpi=150)
+    plt.close(fig)
+    return True
+
+
 def _process_one_file(
     gwy,
     path,
@@ -125,12 +204,22 @@ def _process_one_file(
     height_only,
     do_fix_zero,
     do_flatten_base,
+    save_change_images,
+    image_path_base,
     verbose,
 ):
     container = gwy.gwy_file_load(path, gwy.RUN_NONINTERACTIVE)
+    raw_container = None
+    if save_change_images:
+        raw_container = gwy.gwy_file_load(path, gwy.RUN_NONINTERACTIVE)
     gwy.gwy_app_data_browser_add(container)
+    if raw_container is not None:
+        gwy.gwy_app_data_browser_add(raw_container)
     try:
         ids = _resolve_channel_ids(gwy, container, height_only, verbose)
+        raw_ids = []
+        if raw_container is not None:
+            raw_ids = _resolve_channel_ids(gwy, raw_container, height_only, verbose)
         if not ids:
             if verbose:
                 print("  Skip: no data fields in file.", file=sys.stderr)
@@ -148,6 +237,31 @@ def _process_one_file(
             data_field = container[key]
             data_field.data_changed()
 
+        if save_change_images and raw_container is not None:
+            raw_by_idx = {}
+            for rid in raw_ids:
+                rkey = gwy.gwy_app_get_data_key_for_id(rid)
+                raw_by_idx[rid] = raw_container[rkey]
+            for i in ids:
+                key = gwy.gwy_app_get_data_key_for_id(i)
+                proc_field = container[key]
+                raw_field = raw_by_idx.get(i)
+                if raw_field is None:
+                    continue
+                raw_mat = _datafield_to_matrix(raw_field)
+                proc_mat = _datafield_to_matrix(proc_field)
+                if raw_mat is None or proc_mat is None:
+                    continue
+
+                suffix = "_ch%s" % i
+                png_path = image_path_base + suffix + ".png"
+                _save_change_preview_image(
+                    png_path,
+                    raw_mat,
+                    proc_mat,
+                    os.path.basename(path) + " " + suffix,
+                )
+
         out_dir = os.path.dirname(out_path)
         if out_dir and not os.path.isdir(out_dir):
             os.makedirs(out_dir)
@@ -155,6 +269,8 @@ def _process_one_file(
         return True
     finally:
         gwy.gwy_app_data_browser_remove(container)
+        if raw_container is not None:
+            gwy.gwy_app_data_browser_remove(raw_container)
 
 
 def main(argv=None):
@@ -163,7 +279,9 @@ def main(argv=None):
     )
     parser.add_argument(
         "input_dir",
-        help="Directory containing SPM files (non-recursive unless --recursive).",
+        nargs="?",
+        default=None,
+        help="Directory containing SPM files (non-recursive unless --recursive). If omitted, a folder picker opens.",
     )
     parser.add_argument(
         "-o",
@@ -206,9 +324,26 @@ def main(argv=None):
         "--verbose",
         action="store_true",
     )
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Force a simple folder picker popup for input directory selection.",
+    )
+    parser.add_argument(
+        "--save-change-images",
+        action="store_true",
+        help="Save before/after/difference preview PNG images for processed channels.",
+    )
     args = parser.parse_args(argv)
 
-    input_dir = os.path.abspath(args.input_dir)
+    selected_input = args.input_dir
+    if args.gui or not selected_input:
+        selected_input = _choose_input_dir_with_popup()
+        if not selected_input:
+            sys.stderr.write("No input folder selected.\n")
+            return 1
+
+    input_dir = os.path.abspath(selected_input)
     if not os.path.isdir(input_dir):
         sys.stderr.write("Error: not a directory: %s\n" % input_dir)
         return 2
@@ -247,8 +382,10 @@ def main(argv=None):
             od = os.path.dirname(out_path)
             if od and not os.path.isdir(od):
                 os.makedirs(od)
+            image_path_base = os.path.splitext(os.path.join(out_root, rel))[0] + "_changes"
         else:
             out_path = os.path.join(out_root, os.path.basename(path))
+            image_path_base = os.path.splitext(out_path)[0] + "_changes"
 
         if args.verbose:
             print("%s -> %s" % (path, out_path))
@@ -261,6 +398,8 @@ def main(argv=None):
                 height_only,
                 do_fix_zero,
                 args.flatten_base,
+                args.save_change_images,
+                image_path_base,
                 args.verbose,
             ):
                 ok += 1
@@ -269,6 +408,8 @@ def main(argv=None):
         except Exception as exc:
             fail += 1
             sys.stderr.write("Error processing %s: %s\n" % (path, exc))
+            if args.verbose:
+                traceback.print_exc()
 
     print("Done. %d ok, %d failed, %d files total." % (ok, fail, len(files)))
     return 0 if fail == 0 else 1
