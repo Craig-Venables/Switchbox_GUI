@@ -1995,6 +1995,13 @@ def run_yield_concentration_analysis(gui: Any) -> None:
         if val and os.path.exists(val):
             excel_path = val
 
+    # Analysis view mode
+    analysis_mode = "device"
+    if hasattr(gui, "yield_analysis_mode_var"):
+        mode_raw = gui.yield_analysis_mode_var.get().strip().lower()
+        if mode_raw.startswith("sample"):
+            analysis_mode = "sample"
+
     def _status(msg: str, colour: str = "#333333") -> None:
         if hasattr(gui, "analysis_status_label"):
             gui.master.after(0, lambda m=msg, c=colour: gui.analysis_status_label.config(text=m, fg=c))
@@ -2013,21 +2020,26 @@ def run_yield_concentration_analysis(gui: Any) -> None:
                 root_or_sample_dir=root_folder,
                 excel_path=excel_path,
                 selected_samples=selected_samples,
+                analysis_mode=analysis_mode,
                 log_fn=_log,
             )
             mode = result.get("mode", "")
             n_plots = len(result.get("plots", []))
             sample_yield = result.get("sample_yield", 0.0)
             output_dir = result.get("output_dir", "")
+            view_label = "Sample-focused" if analysis_mode == "sample" else "Device-focused"
             mode_label = "Multi-sample" if mode == "multi" else "Single-sample"
             summary = (
-                f"Yield analysis complete! ({mode_label})\n\n"
+                f"Yield analysis complete! ({mode_label}, {view_label})\n\n"
                 f"Average yield: {sample_yield:.1%}\n"
                 f"Plots generated: {n_plots}\n"
                 f"Output: {output_dir}"
             )
             gui.master.after(0, lambda: messagebox.showinfo("Yield Analysis Complete", summary))
-            _status(f"✓ Complete — {mode_label}, yield {sample_yield:.1%}, {n_plots} plots", "#4CAF50")
+            _status(
+                f"✓ Complete — {mode_label}, {view_label}, yield {sample_yield:.1%}, {n_plots} plots",
+                "#4CAF50",
+            )
             try:
                 import subprocess
                 gui.master.after(200, lambda d=output_dir: subprocess.Popen(f'explorer "{d}"'))

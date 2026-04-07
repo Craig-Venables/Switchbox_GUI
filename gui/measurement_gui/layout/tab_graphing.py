@@ -318,9 +318,23 @@ Output location: {sample_dir}/sample_analysis/
     )
     gui.yield_mode_label.grid(row=1, column=0, columnspan=4, sticky="w", pady=(2, 4))
 
-    # --- Row 2: Sample checklist (shown in multi-sample mode) ---
+    # --- Row 2: Analysis view selector ---
+    tk.Label(
+        yield_frame, text="Comparison View:", font=("Segoe UI", 10), bg=COLOR_BG
+    ).grid(row=2, column=0, padx=(0, 10), pady=(0, 6), sticky="w")
+    gui.yield_analysis_mode_var = tk.StringVar(value="Device-focused")
+    ttk.Combobox(
+        yield_frame,
+        textvariable=gui.yield_analysis_mode_var,
+        values=["Device-focused", "Sample-focused"],
+        state="readonly",
+        width=24,
+        font=("Segoe UI", 9),
+    ).grid(row=2, column=1, columnspan=3, padx=(0, 6), pady=(0, 6), sticky="w")
+
+    # --- Row 3: Sample checklist (shown in multi-sample mode) ---
     yield_list_outer = tk.Frame(yield_frame, bg=COLOR_BG)
-    yield_list_outer.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(0, 6))
+    yield_list_outer.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(0, 6))
     yield_list_outer.columnconfigure(0, weight=1)
 
     # header + select-all/none buttons
@@ -405,10 +419,10 @@ Output location: {sample_dir}/sample_analysis/
         for _, var in gui.yield_sample_vars:
             var.set(state)
 
-    # --- Row 3: Solutions and devices Excel ---
+    # --- Row 4: Solutions and devices Excel ---
     tk.Label(
         yield_frame, text="Solutions & Devices Excel:", font=("Segoe UI", 10), bg=COLOR_BG
-    ).grid(row=3, column=0, padx=(0, 10), pady=(8, 4), sticky="w")
+    ).grid(row=4, column=0, padx=(0, 10), pady=(8, 4), sticky="w")
 
     gui.yield_excel_path_var = tk.StringVar(value="")
     tk.Entry(
@@ -417,7 +431,7 @@ Output location: {sample_dir}/sample_analysis/
         font=("Segoe UI", 9),
         state="readonly",
         width=38,
-    ).grid(row=3, column=1, padx=(0, 6), pady=(8, 4), sticky="ew")
+    ).grid(row=4, column=1, padx=(0, 6), pady=(8, 4), sticky="ew")
 
     def _browse_yield_excel() -> None:
         from tkinter import filedialog
@@ -431,19 +445,19 @@ Output location: {sample_dir}/sample_analysis/
     tk.Button(
         yield_frame, text="Browse…", command=_browse_yield_excel,
         font=("Segoe UI", 9), bg="#2196F3", fg="white", padx=10, pady=4, cursor="hand2",
-    ).grid(row=3, column=2, pady=(8, 4))
+    ).grid(row=4, column=2, pady=(8, 4))
     tk.Button(
         yield_frame, text="Clear", command=lambda: gui.yield_excel_path_var.set(""),
         font=("Segoe UI", 9), bg="#757575", fg="white", padx=8, pady=4, cursor="hand2",
-    ).grid(row=3, column=3, padx=(4, 0), pady=(8, 4))
+    ).grid(row=4, column=3, padx=(4, 0), pady=(8, 4))
 
     tk.Label(
         yield_frame,
         text="Optional — provides Np Concentration, Qd Spacing, Polymer for cross-sample plots.",
         font=("Segoe UI", 9, "italic"), bg=COLOR_BG, fg="#666666", wraplength=520, justify=tk.LEFT,
-    ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(0, 8))
+    ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
-    # --- Row 5: Run button ---
+    # --- Row 6: Run button ---
     tk.Button(
         yield_frame,
         text="Run Yield & Concentration Analysis",
@@ -451,9 +465,9 @@ Output location: {sample_dir}/sample_analysis/
         font=("Segoe UI", 11, "bold"),
         bg="#4CAF50", fg="white", padx=20, pady=10,
         cursor="hand2", relief=tk.RAISED, bd=1,
-    ).grid(row=5, column=0, columnspan=4, sticky="ew", pady=(4, 8))
+    ).grid(row=6, column=0, columnspan=4, sticky="ew", pady=(4, 8))
 
-    # --- Row 6: Priority note ---
+    # --- Row 7: Priority note ---
     tk.Label(
         yield_frame,
         text=(
@@ -461,7 +475,7 @@ Output location: {sample_dir}/sample_analysis/
             "(2) Cached manifest   (3) Auto from device_tracking"
         ),
         font=("Consolas", 8), bg=COLOR_BG, fg="#555555", justify=tk.LEFT, anchor="w",
-    ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(0, 4))
+    ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(0, 4))
 
     # Middle column: Batch sample plotting
     middle_col = tk.Frame(content_row, bg=COLOR_BG, width=400)
