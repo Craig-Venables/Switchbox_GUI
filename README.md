@@ -1,12 +1,15 @@
 # Switchbox Measurement System
 
-Comprehensive measurement system for device characterization with support for IV sweeps, pulse testing, and real-time monitoring. Features modular GUI architecture, unified equipment management, and Telegram notifications, designed for use within the university of nottingham under neil kemp
+Comprehensive measurement system for device characterisation with support for IV sweeps, pulse testing, optical pulse experiments, and real-time monitoring. Features modular GUI architecture, unified equipment management, and Telegram notifications, designed for use within the University of Nottingham under Neil Kemp.
 
 ## Quick Start
 
 ```bash
 # Run the main application
 python main.py
+
+# Run the Laser FG Scope tool standalone (see below)
+python Laser_FG_Scope_GUI.py
 ```
 
 The application starts with the Sample GUI, where you can select devices and launch measurement interfaces.
@@ -19,46 +22,60 @@ The application starts with the Sample GUI, where you can select devices and lau
 - **Telegram Notifications**: Bot messaging for remote prompts and updates
 - **Auto-saving**: Data with device/sample folders and incrementing filenames
 - **Sequential Measurements**: Automated measurement across multiple devices
+- **Optical Pulse Experiments**: High-precision laser pulsing with FG timing master and oscilloscope capture (🚧 In Progress)
 - **Modular Architecture**: Clean, organized package structure
 
 ## Project Structure
 
 ```
 Switchbox_GUI/
-├── main.py                      # Main entry point
-├── TODO.md                      # Tracked feature requests and known issues
-├── gui/                         # All GUI modules (modular structure)
-│   ├── sample_gui/              # Device selection and sample management
-│   ├── measurement_gui/         # Main measurement interface
-│   ├── pulse_testing_gui/       # Fast pulse testing (TSP/4200A)
-│   ├── motor_control_gui/       # XY stage motor control
-│   ├── connection_check_gui/    # Connection verification tool
-│   └── README.md                # GUI package documentation
-├── Equipment/                   # Hardware control modules
-│   ├── managers/                # Unified equipment managers
-│   │   ├── iv_controller.py     # IV controller manager
-│   │   ├── camera.py            # Camera manager
+├── main.py                          # Main entry point
+├── Laser_FG_Scope_GUI.py            # Standalone launcher — Laser FG Scope tool 🚧
+├── TODO.md                          # Tracked feature requests and known issues
+├── gui/                             # All GUI modules (modular structure)
+│   ├── sample_gui/                  # Device selection and sample management
+│   ├── measurement_gui/             # Main measurement interface
+│   ├── pulse_testing_gui/           # Fast pulse testing (TSP/4200A)
+│   ├── oscilloscope_pulse_gui/      # Oscilloscope-triggered pulse capture
+│   ├── laser_fg_scope_gui/          # Laser + FG + Scope optical experiment 🚧
+│   ├── motor_control_gui/           # XY stage motor control
+│   ├── connection_check_gui/        # Connection verification tool
+│   └── README.md                    # GUI package documentation
+├── Equipment/                       # Hardware control modules
+│   ├── managers/                    # Unified equipment managers
+│   │   ├── iv_controller.py         # IV controller manager
+│   │   ├── camera.py                # Camera manager
 │   │   ├── function_generator.py
 │   │   └── ...
-│   └── SMU_AND_PMU/             # SMU/PMU controllers
-├── Measurements/                 # Measurement services
+│   ├── Oscilloscopes/               # Oscilloscope drivers
+│   │   └── TektronixTBS1000C.py     # TBS1000C SCPI driver
+│   ├── Function_Generator/          # FG drivers
+│   │   └── Siglent_SDG1032X.py      # SDG1032X SCPI driver (ARB fixed)
+│   ├── Laser_Controller/            # Laser drivers
+│   │   └── oxxius.py                # Oxxius LBX-405 serial driver
+│   └── SMU_AND_PMU/                 # SMU/PMU controllers
+├── Measurements/                    # Measurement services
 │   ├── measurement_services_smu.py
 │   ├── measurement_services_pmu.py
 │   ├── connection_manager.py
 │   └── ...
-├── Notifications/               # Notification services
-│   ├── telegram_bot.py          # Telegram bot integration
+├── Notifications/                   # Notification services
+│   ├── telegram_bot.py              # Telegram bot integration
 │   └── README.md
-├── Pulse_Testing/               # Pulse testing utilities
-│   ├── system_wrapper.py        # Multi-system routing
-│   └── systems/                 # System implementations
-├── Json_Files/                  # Configuration files
-│   ├── system_configs.json      # System configurations
-│   ├── mapping.json             # Device mappings
+├── Pulse_Testing/                   # Pulse testing utilities
+│   ├── system_wrapper.py            # Multi-system routing
+│   └── systems/                     # System implementations
+├── Json_Files/                      # Configuration files
+│   ├── system_configs.json          # System configurations
+│   ├── mapping.json                 # Device mappings
 │   └── ...
-├── Helpers/                     # Helper scripts and tools
-└── archive/                     # Archived legacy code (see archive/README.md)
+├── tools/                           # Standalone utility tools
+│   └── MASS_FLOW/                   # Mass flow controller GUI
+├── Helpers/                         # Helper scripts and tools
+└── archive/                         # Archived legacy code (see archive/README.md)
 ```
+
+> 🚧 = In Progress — hardware not yet tested in the lab. Code is complete; awaiting bench validation.
 
 ## GUI System
 
@@ -70,11 +87,15 @@ All GUIs are organized in the `gui/` package for modularity and easy maintenance
 main.py
   └─> SampleGUI (gui/sample_gui/)
         └─> MeasurementGUI (gui/measurement_gui/)
-              ├─> TSPTestingGUI (gui/pulse_testing_gui/)
-              ├─> CheckConnection (gui/connection_check_gui/)
-              ├─> MotorControlWindow (gui/motor_control_gui/)
+              ├─> TSPTestingGUI       (gui/pulse_testing_gui/)
+              ├─> OscilloscopePulse   (gui/oscilloscope_pulse_gui/)
+              ├─> LaserFGScopeGUI     (gui/laser_fg_scope_gui/)  🚧
+              ├─> CheckConnection     (gui/connection_check_gui/)
+              ├─> MotorControlWindow  (gui/motor_control_gui/)
               ├─> AdvancedTestsGUI
               └─> AutomatedTesterGUI
+
+Laser_FG_Scope_GUI.py  ─> LaserFGScopeGUI (standalone, no sample context needed)
 ```
 
 ### GUI Modules
@@ -103,6 +124,20 @@ main.py
 - **Purpose**: Real-time connection verification
 - **Features**: Current monitoring, audio alerts, threshold detection
 - **See**: [gui/connection_check_gui/README.md](gui/connection_check_gui/README.md)
+
+#### 6. Oscilloscope Pulse GUI (`gui/oscilloscope_pulse_gui/`)
+- **Purpose**: Trigger and capture waveforms from a Tektronix oscilloscope
+- **Features**: Configurable timebase/trigger, single-shot capture, CSV+PNG export, auto-save linked to sample/device tree
+
+#### 7. Laser FG Scope GUI (`gui/laser_fg_scope_gui/`) 🚧 *In Progress*
+- **Purpose**: Fire precision nanosecond laser pulses at a device under test and capture the electrical response
+- **Instruments**: Oxxius LBX-405 laser (DM1 TTL gate), Siglent SDG1032X function generator (timing master), Tektronix TBS1000C oscilloscope, Keithley 4200 SMU (DC bias only)
+- **Key design**: The SDG1032X is the timing master — its CH1 TTL output gates the laser; its SYNC OUT BNC directly triggers the scope's EXT TRIG input via hardware BNC cable (~1 ns timing, no software in the loop)
+- **Modes**: Simple rectangular pulse or arbitrary (ARB) multi-pulse pattern uploaded via binary `WVDT` command
+- **Save**: CSV + PNG to `Fast_Optical_Pulses/` subfolder; auto-save toggle; integrates with Measurement GUI sample/device path
+- **Launch**: `python Laser_FG_Scope_GUI.py` (standalone) or via "Laser FG Scope" button in the Measurement GUI toolbar
+- **Status**: Code complete, hardware testing pending. See [gui/laser_fg_scope_gui/README.md](gui/laser_fg_scope_gui/README.md)
+- **See also**: [Documents/reference/LASER_FG_SCOPE_HARDWARE_LIMITS.md](Documents/reference/LASER_FG_SCOPE_HARDWARE_LIMITS.md)
 
 For detailed documentation, see [gui/README.md](gui/README.md)
 
@@ -163,8 +198,22 @@ All managers support `from_config()` for configuration-based initialization.
 
 ### Function Generators
 
-- **Siglent SDG1032X** - Triggered pulses, DC levels
+- **Siglent SDG1032X** - Triggered pulses, DC levels, arbitrary waveforms
+  - Minimum pulse width: 32.6 ns (Pulse mode), ~4 ns effective (Square mode)
+  - ARB waveforms: 16 384 points at up to 30 MSa/s, uploaded via binary `WVDT` SCPI command
+  - Used as timing master in the Laser FG Scope experiment (CH1 → laser TTL, SYNC OUT → scope EXT TRIG)
+  - **Note**: A bug in the original ARB driver (wrong `ARWV` command + ASCII format) was fixed. The driver now uses `WVDT` with little-endian 16-bit signed binary samples. See `Equipment/Function_Generator/Siglent_SDG1032X.py`.
 - **Moku Go** - In development
+
+### Oscilloscopes
+
+- **Tektronix TBS1000C** (`Equipment/Oscilloscopes/TektronixTBS1000C.py`)
+  - Bandwidth: 50–200 MHz (model dependent); sample rate 1 GS/s; 20 000-point record
+  - SCPI over USB (USBTMC via PyVISA)
+  - Waveform capture (DAT/CURV? pipeline) confirmed working
+  - Trigger commands: driver uses `TRIG:A:` prefix; the Laser FG Scope GUI configure block uses `TRIG:MAI:` (per PyVISA community docs for TDS/TBS family). Both prefixes may be accepted — confirm with `ALLEV?` when testing. See bug notes in the driver file header.
+  - **Known**: waveform ASCII transfer over USB is slow (~5–30 s for 20 000 pts). Binary `RIBINARY` mode is implemented in the driver and can be used for faster transfers.
+- **GW Instek** - Via oscilloscope manager
 
 ### Cameras
 
@@ -796,6 +845,68 @@ fg_params  = {"channel": 1, "period_s": 1.0, "high_level_v": 1.5, "cycles": 1, "
 df = ms.Single_Laser_Pulse_with_read(pmu_params, fg_params, timeout_s=15.0)
 ```
 
+## Fast Optical Pulse Experiments 🚧 *In Progress*
+
+The Laser FG Scope GUI (`gui/laser_fg_scope_gui/`) enables high-precision photoconductivity and light-response experiments. A semiconductor device is held at a known DC bias while a laser fires a timed nanosecond pulse; the electrical transient is captured by a hardware-triggered oscilloscope.
+
+### Instrument Roles
+
+| Instrument | Role | Why |
+|---|---|---|
+| **Siglent SDG1032X** | Timing master | CH1 TTL → laser gate; SYNC OUT BNC → scope EXT TRIG |
+| **Oxxius LBX-405** | Light source | DM1 mode: HIGH = on, LOW = off. Rise/fall ≤ 2 ns |
+| **Tektronix TBS1000C** | Waveform capture | Single-shot via EXT TRIG; 1 GS/s, 20 000 pts |
+| **Keithley 4200 SMU** | DC bias only | `DV` + `CN` KXCI commands; no timing role |
+
+### Timing Architecture
+
+```
+PC (SCPI ~1–5 ms latency — irrelevant to timing)
+       │
+       ▼
+SDG1032X ── CH1 BNC ──► Laser DM input  (TTL, ≤ 2 ns laser response)
+                │
+                └── SYNC OUT BNC ──► Scope EXT TRIG  (~1 ns hardware)
+                                            │
+                                            ▼
+                                    Scope captures DUT transient
+```
+
+### Hardware Limits
+
+| Parameter | Limit | Source |
+|---|---|---|
+| Min pulse width | 32.6 ns | SDG1032X Pulse mode |
+| Pulse timing jitter | ~300 ps | SDG1032X |
+| Laser rise/fall | ≤ 2 ns | Oxxius LBX-405 DM1 |
+| Scope resolution | 1 ns | TBS1000C at 1 GS/s |
+| Scope bandwidth (TBS1102C) | ~3.5 ns rise time | 100 MHz model |
+
+Full limits: [Documents/reference/LASER_FG_SCOPE_HARDWARE_LIMITS.md](Documents/reference/LASER_FG_SCOPE_HARDWARE_LIMITS.md)
+
+### Save Structure
+
+```
+{base}/{sample}/{letter}/{number}/Fast_Optical_Pulses/
+    001-100ns-+0.00V-20260415_143022.csv   ← data with # metadata header
+    001-100ns-+0.00V-20260415_143022.png   ← companion plot
+```
+
+When run standalone, saves to `{chosen_folder}/Fast_Optical_Pulses/`.
+
+### Status
+
+Code complete (2026-04). Hardware testing scheduled for lab. Key files:
+
+- `gui/laser_fg_scope_gui/` — main GUI package
+- `gui/laser_fg_scope_gui/logic.py` — instrument sequencer (threaded)
+- `gui/laser_fg_scope_gui/save_manager.py` — path resolution + CSV writing
+- `Equipment/Function_Generator/Siglent_SDG1032X.py` — ARB upload fixed
+- `Equipment/Oscilloscopes/TektronixTBS1000C.py` — scope driver (see header for known issues)
+- `Laser_FG_Scope_GUI.py` — standalone launcher
+
+---
+
 ## Notifications
 
 The system includes Telegram bot integration for remote notifications and interactive control.
@@ -874,6 +985,12 @@ SMU-driven pulses are limited by instrument command latency and OS scheduling; t
   - Plotting: `gui/measurement_gui/plot_panels.py`, `plot_updaters.py`
   - Custom Measurements: `gui/measurement_gui/custom_measurements_builder.py`
 - **Pulse Testing GUI**: `gui/pulse_testing_gui/main.py` - Fast pulse testing
+- **Oscilloscope Pulse GUI**: `gui/oscilloscope_pulse_gui/main.py` - Scope-triggered capture
+- **Laser FG Scope GUI**: `gui/laser_fg_scope_gui/main.py` - Optical pulse experiment 🚧
+  - Logic/sequencer: `gui/laser_fg_scope_gui/logic.py`
+  - Save engine: `gui/laser_fg_scope_gui/save_manager.py`
+  - UI panels: `gui/laser_fg_scope_gui/ui/`
+  - Standalone launcher: `Laser_FG_Scope_GUI.py`
 - **Motor Control GUI**: `gui/motor_control_gui/main.py` - XY stage control
 - **Connection Check GUI**: `gui/connection_check_gui/main.py` - Connection verification
 
@@ -1022,7 +1139,7 @@ from Notifications import TelegramBot
 
 Individual GUIs can be run standalone for testing:
 
-```python
+```bash
 # Pulse Testing GUI
 python -m gui.pulse_testing_gui.main
 
@@ -1031,6 +1148,9 @@ python -m gui.motor_control_gui.main
 
 # Connection Check GUI
 python -m gui.connection_check_gui.main
+
+# Laser FG Scope GUI  (🚧 in progress — awaiting lab test)
+python Laser_FG_Scope_GUI.py
 ```
 
 ## Configuration Files
@@ -1056,6 +1176,9 @@ Configuration files are located in `Json_Files/`:
 - **For Ethernet streaming**, ensure both laptops are on the same network and firewall allows the port (default: 8485)
 - **Equipment managers** use lazy imports - missing dependencies won't crash the application
 - **Backward compatibility**: Root-level wrapper files maintain old import paths for compatibility
+- **Laser FG Scope GUI** 🚧 is code-complete but hardware-untested. When first using it in the lab, consult the trigger prefix test procedure in `gui/laser_fg_scope_gui/logic.py` (header) and `Equipment/Oscilloscopes/TektronixTBS1000C.py` (header) — both contain step-by-step diagnostic instructions.
+- **Siglent SDG1032X ARB upload**: a bug in the original driver (wrong `ARWV` command + ASCII format) was fixed. Now uses `WVDT` with binary little-endian 16-bit samples. See `Equipment/Function_Generator/Siglent_SDG1032X.py`.
+- **Tektronix TBS1000C**: waveform capture over ASCII SCPI is slow (~5–30 s). Switching to the binary `RIBINARY` format in `acquire_waveform()` will substantially speed this up when needed.
 
 ## Documentation
 
@@ -1066,6 +1189,9 @@ Configuration files are located in `Json_Files/`:
 - **Quick Reference**: [Documents/guides/QUICK_REFERENCE.md](Documents/guides/QUICK_REFERENCE.md)
 - **JSON Configuration Guide**: [Documents/guides/JSON_CONFIG_GUIDE.md](Documents/guides/JSON_CONFIG_GUIDE.md)
 - **Build (exe)**: [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.md) · [module checklist](Documents/build/BUILD_MODULES.md)
+- **Laser FG Scope README**: [gui/laser_fg_scope_gui/README.md](gui/laser_fg_scope_gui/README.md) 🚧
+- **Laser FG Scope Hardware Limits**: [Documents/reference/LASER_FG_SCOPE_HARDWARE_LIMITS.md](Documents/reference/LASER_FG_SCOPE_HARDWARE_LIMITS.md)
+- **Laser FG Scope Chat Summary**: [Documents/LASER_FG_SCOPE_CHAT_SUMMARY.md](Documents/LASER_FG_SCOPE_CHAT_SUMMARY.md)
 
 ## License
 

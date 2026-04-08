@@ -54,6 +54,8 @@ ALL_TEST_FUNCTIONS = [
     'optical_read_pulsed_light',  # Optical: read at V while laser pulses periodically (2450/2400 only)
     'optical_pulse_train_read',   # Optical: read at V while one laser pulse train (2450/2400 only)
     'optical_pulse_train_pattern_read',  # Optical: read at V while laser fires pattern (11010 etc., 2450/2400 only)
+    'optical_binary_sweep',  # Optical: iterate all 2^N binary patterns, save per-run files
+    'optical_pattern_repeat',  # Optical: repeat one fixed pattern N times, save per-run files
 ]
 
 # System capability matrix
@@ -84,6 +86,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'optical_read_pulsed_light': True,
         'optical_pulse_train_read': True,
         'optical_pulse_train_pattern_read': True,
+        'optical_binary_sweep': True,
+        'optical_pattern_repeat': True,
     },
     # --- Keithley 4200-SCS: PMU vs SMU profiles (shared implementation: keithley4200_core.py) ---
     'keithley4200_pmu': {
@@ -117,6 +121,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'optical_read_pulsed_light': False,
         'optical_pulse_train_read': False,
         'optical_pulse_train_pattern_read': False,
+        'optical_binary_sweep': False,
+        'optical_pattern_repeat': False,
     },
     'keithley4200_smu': {
         # Slow SMU scripts + SMU_BiasTimedRead optical coordination
@@ -149,6 +155,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'optical_read_pulsed_light': True,
         'optical_pulse_train_read': True,
         'optical_pulse_train_pattern_read': True,
+        'optical_binary_sweep': True,
+        'optical_pattern_repeat': True,
     },
     'keithley2400': {
         # Tests implemented using direct SCPI commands via Keithley2400Controller
@@ -178,6 +186,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'optical_read_pulsed_light': True,
         'optical_pulse_train_read': True,
         'optical_pulse_train_pattern_read': True,
+        'optical_binary_sweep': True,
+        'optical_pattern_repeat': True,
     },
 }
 

@@ -22,7 +22,13 @@ from Pulse_Testing.keithley4200_constants import KEITHLEY4200_SMU_OPTICAL_SYSTEM
 logger = logging.getLogger(__name__)
 
 
-OPTICAL_TEST_FUNCTIONS = ('optical_read_pulsed_light', 'optical_pulse_train_read', 'optical_pulse_train_pattern_read')
+OPTICAL_TEST_FUNCTIONS = (
+    'optical_read_pulsed_light',
+    'optical_pulse_train_read',
+    'optical_pulse_train_pattern_read',
+    'optical_binary_sweep',
+    'optical_pattern_repeat',
+)
 
 # Time (s) we wait after sending "start measurement" before we consider measurement started (t0).
 # Allows GPIB commands to send and Keithley to initialise; then we wait laser_fire_delay_s and fire.
@@ -624,6 +630,232 @@ def _run_optical_pulse_train_read(system, laser, params: dict) -> Dict[str, Any]
         'resistances': resistances,
         'laser_on_intervals': laser_on_intervals,
     }
+
+
+def run_binary_sweep_test(
+    gui,
+    params: dict,
+    progress_cb,
+    save_run_cb,
+    stop_flag=None,
+) -> List[Dict[str, Any]]:
+    """Run all 2^N binary laser patterns sequentially as independent measurement runs.
+
+    For each pattern (0b0000 … 0b1111 for N=4):
+      1. Call _run_optical_4200 / 2450 path with laser_pattern set to the current binary string.
+      2. Call save_run_cb(run_idx, pattern_str, result) so the caller can persist files.
+      3. Wait delay_between_runs_s with SMU off.
+
+    Args:
+        gui:          TSPTestingGUI instance (must have .laser, .system_wrapper).
+        params:       Test parameters (num_bits, duration_s, optical_on_ms, …).
+        progress_cb:  Callable(msg: str) → None; called after each run for logging.
+        save_run_cb:  Callable(run_idx: int, pattern_str: str, result: dict) → None.
+        stop_flag:    Optional threading.Event; set to stop early.
+
+    Returns:
+        List of result dicts (one per completed run).  Each dict has the standard
+        optical-runner keys plus 'laser_pattern' set to the binary string used.
+    """
+    num_bits = max(1, int(params.get('num_bits', 4)))
+    num_runs = 2 ** num_bits
+    delay_between_runs_s = float(params.get('delay_between_runs_s', 2.0))
+
+    laser = getattr(gui, 'laser', None)
+    if laser is None:
+        raise RuntimeError("Laser not connected. Connect Oxxius laser in the Optical tab first.")
+
+    if not getattr(gui, 'system_wrapper', None) or not gui.system_wrapper.is_connected():
+        raise RuntimeError("SMU not connected. Connect the instrument in the Connection tab first.")
+
+    system = getattr(gui.system_wrapper, 'current_system', None)
+    if system is None:
+        raise RuntimeError("No measurement system. Connect the instrument in the Connection tab first.")
+
+    wrapper_system = getattr(getattr(gui, 'system_wrapper', None), 'system_name', None)
+
+    # Apply laser power once before the loop
+    power_mw = None
+    try:
+        p = params.get('optical_laser_power_mw')
+        if p is not None:
+            power_mw = float(p)
+    except (TypeError, ValueError):
+        pass
+    if power_mw is not None:
+        try:
+            laser.set_to_digital_power_control(power_mw)
+        except Exception:
+            pass
+        try:
+            from Equipment.Laser_Power_Meter.laser_power_calibration import load_calibration, get_actual_mw
+            cal = load_calibration()
+            params = dict(params)
+            params["optical_laser_power_true_mw"] = get_actual_mw(cal, power_mw)
+        except Exception:
+            params = dict(params)
+            params["optical_laser_power_true_mw"] = None
+
+    all_results: List[Dict[str, Any]] = []
+
+    for run_idx in range(num_runs):
+        if stop_flag is not None and stop_flag.is_set():
+            progress_cb(f"Sweep stopped early at run {run_idx + 1}/{num_runs}.")
+            break
+
+        pattern_str = format(run_idx, f'0{num_bits}b')  # e.g. '0011' for num_bits=4, run_idx=3
+        progress_cb(f"Run {run_idx + 1}/{num_runs}: pattern={pattern_str}")
+
+        # Build per-run params with this pattern substituted in
+        run_params = dict(params)
+        run_params['laser_pattern'] = pattern_str
+        # pattern_repeats must be 1 — each run is a single pattern execution
+        run_params['pattern_repeats'] = 1
+        run_params['time_between_patterns_s'] = 0.0
+
+        try:
+            if wrapper_system in KEITHLEY4200_SMU_OPTICAL_SYSTEMS:
+                if not hasattr(system, 'run_bias_timed_read'):
+                    raise RuntimeError("4200A optical path requires run_bias_timed_read.")
+                result = _run_optical_4200(system, laser, 'optical_pulse_train_pattern_read', run_params)
+            else:
+                result = _run_optical_pulse_train_pattern_read(system, laser, run_params)
+        except Exception as exc:
+            progress_cb(f"  ERROR on pattern {pattern_str}: {exc}")
+            logger.error(f"run_binary_sweep_test: run {run_idx} pattern {pattern_str} failed: {exc}")
+            # Still try remaining patterns — store a minimal error entry
+            result = {
+                'timestamps': [], 'voltages': [], 'currents': [],
+                'resistances': [], 'laser_on_intervals': [], 'error': str(exc),
+            }
+
+        result['laser_pattern'] = pattern_str
+        result['run_index'] = run_idx
+        all_results.append(result)
+
+        try:
+            save_run_cb(run_idx, pattern_str, result)
+        except Exception as exc:
+            progress_cb(f"  WARNING: could not save run {run_idx}: {exc}")
+            logger.warning(f"run_binary_sweep_test: save_run_cb failed for run {run_idx}: {exc}")
+
+        if run_idx < num_runs - 1 and delay_between_runs_s > 0:
+            progress_cb(f"  Waiting {delay_between_runs_s:.1f}s before next run…")
+            time.sleep(delay_between_runs_s)
+
+    progress_cb(f"Binary sweep complete: {len(all_results)} runs done.")
+    return all_results
+
+
+def run_pattern_repeat_test(
+    gui,
+    params: dict,
+    progress_cb,
+    save_run_cb,
+    stop_flag=None,
+) -> List[Dict[str, Any]]:
+    """Run one fixed binary laser pattern N times as independent measurement runs.
+
+    Each repeat is a full independent measurement session (SMU off between runs).
+
+    Args:
+        gui:          TSPTestingGUI instance (must have .laser, .system_wrapper).
+        params:       Test parameters (laser_pattern, n_repeats, duration_s, …).
+        progress_cb:  Callable(msg: str) → None; called after each run for logging.
+        save_run_cb:  Callable(run_idx: int, pattern_str: str, result: dict) → None.
+        stop_flag:    Optional threading.Event; set to stop early.
+
+    Returns:
+        List of result dicts (one per completed run).
+    """
+    pattern_raw = str(params.get('laser_pattern', '0101')).strip()
+    pattern = ''.join(c for c in pattern_raw if c in '01')
+    if not pattern:
+        raise ValueError("Laser pattern is empty. Use 1s and 0s (e.g., 0101).")
+
+    n_repeats = max(1, int(params.get('n_repeats', 5)))
+    delay_between_runs_s = float(params.get('delay_between_runs_s', 2.0))
+
+    laser = getattr(gui, 'laser', None)
+    if laser is None:
+        raise RuntimeError("Laser not connected. Connect Oxxius laser in the Optical tab first.")
+
+    if not getattr(gui, 'system_wrapper', None) or not gui.system_wrapper.is_connected():
+        raise RuntimeError("SMU not connected. Connect the instrument in the Connection tab first.")
+
+    system = getattr(gui.system_wrapper, 'current_system', None)
+    if system is None:
+        raise RuntimeError("No measurement system. Connect the instrument in the Connection tab first.")
+
+    wrapper_system = getattr(getattr(gui, 'system_wrapper', None), 'system_name', None)
+
+    # Apply laser power once before the loop
+    power_mw = None
+    try:
+        p = params.get('optical_laser_power_mw')
+        if p is not None:
+            power_mw = float(p)
+    except (TypeError, ValueError):
+        pass
+    if power_mw is not None:
+        try:
+            laser.set_to_digital_power_control(power_mw)
+        except Exception:
+            pass
+        try:
+            from Equipment.Laser_Power_Meter.laser_power_calibration import load_calibration, get_actual_mw
+            cal = load_calibration()
+            params = dict(params)
+            params["optical_laser_power_true_mw"] = get_actual_mw(cal, power_mw)
+        except Exception:
+            params = dict(params)
+            params["optical_laser_power_true_mw"] = None
+
+    all_results: List[Dict[str, Any]] = []
+
+    run_params = dict(params)
+    run_params['laser_pattern'] = pattern
+    run_params['pattern_repeats'] = 1
+    run_params['time_between_patterns_s'] = 0.0
+
+    for run_idx in range(n_repeats):
+        if stop_flag is not None and stop_flag.is_set():
+            progress_cb(f"Pattern repeat stopped early at run {run_idx + 1}/{n_repeats}.")
+            break
+
+        progress_cb(f"Run {run_idx + 1}/{n_repeats}: pattern={pattern}")
+
+        try:
+            if wrapper_system in KEITHLEY4200_SMU_OPTICAL_SYSTEMS:
+                if not hasattr(system, 'run_bias_timed_read'):
+                    raise RuntimeError("4200A optical path requires run_bias_timed_read.")
+                result = _run_optical_4200(system, laser, 'optical_pulse_train_pattern_read', run_params)
+            else:
+                result = _run_optical_pulse_train_pattern_read(system, laser, run_params)
+        except Exception as exc:
+            progress_cb(f"  ERROR on repeat {run_idx + 1}: {exc}")
+            logger.error(f"run_pattern_repeat_test: run {run_idx} failed: {exc}")
+            result = {
+                'timestamps': [], 'voltages': [], 'currents': [],
+                'resistances': [], 'laser_on_intervals': [], 'error': str(exc),
+            }
+
+        result['laser_pattern'] = pattern
+        result['run_index'] = run_idx
+        all_results.append(result)
+
+        try:
+            save_run_cb(run_idx, pattern, result)
+        except Exception as exc:
+            progress_cb(f"  WARNING: could not save run {run_idx}: {exc}")
+            logger.warning(f"run_pattern_repeat_test: save_run_cb failed for run {run_idx}: {exc}")
+
+        if run_idx < n_repeats - 1 and delay_between_runs_s > 0:
+            progress_cb(f"  Waiting {delay_between_runs_s:.1f}s before next run…")
+            time.sleep(delay_between_runs_s)
+
+    progress_cb(f"Pattern repeat complete: {len(all_results)} runs done.")
+    return all_results
 
 
 def _run_optical_pulse_train_pattern_read(system, laser, params: dict) -> Dict[str, Any]:
