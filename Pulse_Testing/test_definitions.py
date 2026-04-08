@@ -337,7 +337,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "pulse_train",
     },
-    "Optical Read (Pulsed Light)": {
+    "🔦 Optical Read (Pulsed Light)": {
         "function": "optical_read_pulsed_light",
         "description": "SMU at constant voltage; laser pulses periodically. Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
         "params": {
@@ -354,7 +354,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "Optical Pulse Train + Read": {
+    "🔦 Optical Pulse Train + Read": {
         "function": "optical_pulse_train_read",
         "description": "SMU at constant voltage; laser fires N pulses (on/off times). Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
         "params": {
@@ -372,9 +372,9 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "🔬 Optical: Laser Pattern + Continuous Read": {
+    "🔦 Continuous Read with Laser Pulse Pattern": {
         "function": "optical_pulse_train_pattern_read",
-        "description": "SMU at constant voltage; laser fires per pattern (1=fire, 0=skip). Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
+        "description": "SMU at constant voltage; continuously reads while laser fires per pattern (1=fire, 0=skip). This is optical pulsing + continuous read. Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
         "params": {
             "read_voltage": {"default": 0.5, "label": "Voltage (V)", "type": "float", "section": "read"},
             "duration_s": {"default": 5.0, "label": "Time to measure (s)", "type": "float", "section": "read"},
@@ -389,6 +389,56 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "pattern_repeats": {"default": 1, "label": "Repeat pattern N times (e.g. 3 → 1011 wait 1011 wait 1011)", "type": "int", "section": "laser"},
             "time_between_patterns_s": {"default": 0.0, "label": "Time between pattern repeats (s) [0 = one period]", "type": "float", "section": "laser"},
             "measurement_init_time_s": {"default": 1.0, "label": "Calibration/init time (s) [advanced – change only if needed]", "type": "float", "section": "advanced"},
+        },
+        "plot_type": "time_series",
+    },
+    "🔦 Binary Pattern Sweep": {
+        "function": "optical_binary_sweep",
+        "description": (
+            "Iterates all 2^N binary laser patterns (0000 through 1111 for N=4).\n"
+            "Each pattern runs as a separate measurement; results saved per-run as individual files\n"
+            "(txt + png) inside a timestamped session folder, plus a combined wide CSV at the end.\n"
+            "0000 runs as a dark/baseline measurement (laser never fires).\n"
+            "SMU is turned off between runs for the configured inter-run delay."
+        ),
+        "params": {
+            "num_bits": {"default": 4, "label": "Number of bits (N) — 2^N runs total", "type": "int", "section": "sweep"},
+            "read_voltage": {"default": 0.5, "label": "Voltage (V)", "type": "float", "section": "read"},
+            "duration_s": {"default": 5.0, "label": "Measurement duration per run (s)", "type": "float", "section": "read"},
+            "sample_interval_s": {"default": 0.02, "label": "Sample interval (s)", "type": "float", "section": "read"},
+            "current_range_a": {"default": 0.0, "label": "Current Range (A) [0=auto]", "type": "float", "section": "read"},
+            "clim": {"default": 1e-3, "label": "Current limit (A)", "type": "float", "section": "read"},
+            "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float", "section": "laser"},
+            "laser_delay_s": {"default": 1.0, "label": "Pre-pulse baseline time (s) [SMU reads before first laser pulse]", "type": "float", "section": "laser"},
+            "optical_on_ms": {"default": 500.0, "label": "Optical on (ms)", "type": "float", "section": "laser"},
+            "optical_off_ms": {"default": 500.0, "label": "Optical off (ms)", "type": "float", "section": "laser"},
+            "delay_between_runs_s": {"default": 2.0, "label": "Delay between runs (s) [SMU off]", "type": "float", "section": "sweep"},
+            "measurement_init_time_s": {"default": 1.0, "label": "Calibration/init time (s) [advanced]", "type": "float", "section": "advanced"},
+        },
+        "plot_type": "time_series",
+    },
+    "🔦 Pattern Repeat": {
+        "function": "optical_pattern_repeat",
+        "description": (
+            "Runs one fixed binary laser pattern N times as separate measurement runs.\n"
+            "Each repeat is saved as its own file (txt + png) inside a timestamped session folder,\n"
+            "plus a combined wide CSV at the end.\n"
+            "SMU is turned off between runs for the configured inter-run delay."
+        ),
+        "params": {
+            "laser_pattern": {"default": "0101", "label": "Pattern (1=fire, 0=skip)", "type": "str", "section": "laser"},
+            "n_repeats": {"default": 5, "label": "Number of repeats", "type": "int", "section": "sweep"},
+            "read_voltage": {"default": 0.5, "label": "Voltage (V)", "type": "float", "section": "read"},
+            "duration_s": {"default": 5.0, "label": "Measurement duration per run (s)", "type": "float", "section": "read"},
+            "sample_interval_s": {"default": 0.02, "label": "Sample interval (s)", "type": "float", "section": "read"},
+            "current_range_a": {"default": 0.0, "label": "Current Range (A) [0=auto]", "type": "float", "section": "read"},
+            "clim": {"default": 1e-3, "label": "Current limit (A)", "type": "float", "section": "read"},
+            "optical_laser_power_mw": {"default": 1.0, "label": "Laser power (mW)", "type": "float", "section": "laser"},
+            "laser_delay_s": {"default": 1.0, "label": "Pre-pulse baseline time (s) [SMU reads before first laser pulse]", "type": "float", "section": "laser"},
+            "optical_on_ms": {"default": 500.0, "label": "Optical on (ms)", "type": "float", "section": "laser"},
+            "optical_off_ms": {"default": 500.0, "label": "Optical off (ms)", "type": "float", "section": "laser"},
+            "delay_between_runs_s": {"default": 2.0, "label": "Delay between runs (s) [SMU off]", "type": "float", "section": "sweep"},
+            "measurement_init_time_s": {"default": 1.0, "label": "Calibration/init time (s) [advanced]", "type": "float", "section": "advanced"},
         },
         "plot_type": "time_series",
     },

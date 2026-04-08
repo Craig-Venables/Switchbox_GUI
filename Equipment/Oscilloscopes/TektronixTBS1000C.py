@@ -18,6 +18,49 @@ Note: The TBS1000C series has limited SCPI support. Waveform acquisition works
 well, but automatic measurements may not be fully supported on all models.
 
 Author: Generated for Switchbox_GUI project
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BUGS FIXED (2026-04-08) — and how to diagnose if trigger stops working
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FIX 1 — set_trigger_slope() sent only the first character of the slope name
+  Before: self.write(f"TRIG:A:EDGE:SLO {slope.upper()[0]}")  → sent "R", "F"
+  After:  slope_map to RISE / FALL / EITH  (valid SCPI minimum abbreviations)
+
+FIX 2 — Duplicate start_acquisition() / stop_acquisition() at the bottom of
+  the class (lines ~1038-1044) overrode the correct implementations above:
+    - ACQ:STOPA           (no argument — invalid command)
+    - ACQ:STARTA RUN      (non-existent command)
+  The duplicates have been removed. The correct versions now take effect:
+    - start_acquisition() → ACQ:STATE ON
+    - stop_acquisition()  → ACQ:STATE OFF
+
+TRIGGER PREFIX UNCERTAINTY — TRIG:A: vs TRIG:MAIn:
+  This driver uses  TRIG:A:EDGE:SOU / TRIG:A:EDGE:SLO / TRIG:A:LEV  etc.
+  The older TDS/TBS1000B family uses  TRIG:MAIn:EDGE:SOU  etc.
+  The TBS1000C has its own programmer manual (Tektronix Part 077169102,
+  released May 2024) which requires a Tektronix login to download.
+  Community documentation for TDS/TBS scopes (pyvisa.org) shows TRIG:MAI:.
+
+  HOW TO TEST — connect scope via USB, run in Python:
+    scope.write("TRIG:A:EDGE:SOU CH1")
+    scope.write("*OPC?")   # should return "1" if command was accepted
+    err = scope.query("ALLEV?")  # should return "No events" if no error
+  If you get an error, switch to TRIG:MAI:EDGE:SOU CH1 and retry.
+  If TRIG:A: works, keep as-is. If not, do a global replace in this file:
+    TRIG:A:EDGE:SOU  →  TRIG:MAI:EDGE:SOU
+    TRIG:A:EDGE:SLO  →  TRIG:MAI:EDGE:SLO
+    TRIG:A:LEV       →  TRIG:MAI:LEV
+    TRIG:A:MOD       →  TRIG:MAI:MOD
+    TRIG:A:HOLD      →  TRIG:MAI:HOLD
+
+WAVEFORM CAPTURE SPEED
+  Capture is slow (~5-30 s) because 20 000-point ASCII transfer over USB.
+  To speed up: send  scope.write("VERB OFF")  before CURV? queries, then use
+  query_binary_values("CURV?", datatype='b')  (binary RI format, 1 byte/pt).
+  The driver's acquire_waveform() already supports RIBINARY format; just
+  change the format argument from "ASCII" to "RIBINARY".
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 
 import pyvisa
@@ -479,7 +522,8 @@ class TektronixTBS1000C:
         valid_slopes = ['RISING', 'FALLING', 'EITHER']
         if slope.upper() not in valid_slopes:
             raise ValueError(f"Slope must be one of: {valid_slopes}")
-        self.write(f"TRIG:A:EDGE:SLO {slope.upper()[0]}")
+        slope_map = {"RISING": "RISE", "FALLING": "FALL", "EITHER": "EITH"}
+        self.write(f"TRIG:A:EDGE:SLO {slope_map[slope.upper()]}")
     
     def force_trigger(self):
         """Force a trigger event."""
@@ -1034,14 +1078,6 @@ class TektronixTBS1000C:
             return frequency
         
         return 0.0
-    
-    def stop_acquisition(self):
-        """Stop waveform acquisition."""
-        self.write("ACQ:STOPA")
-    
-    def start_acquisition(self):
-        """Start waveform acquisition."""
-        self.write("ACQ:STARTA RUN")
     
     def get_status(self) -> Dict[str, Any]:
         """

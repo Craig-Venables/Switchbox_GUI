@@ -210,20 +210,78 @@ class FunctionGeneratorManager:
         self.instrument.trigger_now(channel)
 
     # ----- ARB helpers -----
-    def upload_csv_waveform(self, channel: int, csv_filename: str, waveform_name: str = "USER") -> bool:
+    def upload_csv_waveform(self, channel: int, csv_filename: str, waveform_name: str = "LSRPULSE") -> bool:
         if not self.instrument:
             raise RuntimeError("Instrument not initialized")
         return bool(self.instrument.upload_csv_waveform(channel, csv_filename, waveform_name))
 
-    def set_arb_waveform(self, channel: int, waveform_name: str = "USER", index: int = 0) -> None:
+    def set_arb_waveform(self, channel: int, waveform_name: str = "LSRPULSE", index: int = 0) -> None:
         if not self.instrument:
             raise RuntimeError("Instrument not initialized")
         self.instrument.set_arb_waveform(channel, waveform_name=waveform_name, index=index)
 
-    def upload_arb_data(self, channel: int, data: list, waveform_name: str = "USER") -> bool:
+    def upload_arb_data(self, channel: int, data: list, waveform_name: str = "LSRPULSE") -> bool:
         if not self.instrument:
             raise RuntimeError("Instrument not initialized")
         return bool(self.instrument.upload_arb_data(channel, data=data, waveform_name=waveform_name))
+
+    def upload_arb_waveform(
+        self,
+        channel: int,
+        samples_normalized: list,
+        waveform_name: str = "LSRPULSE",
+        freq_hz: float = 1000.0,
+        amplitude_v: float = 3.3,
+        offset_v: float = 1.65,
+    ) -> bool:
+        """Upload arbitrary waveform using normalized samples and explicit amplitude/offset.
+
+        This is the preferred method for uploading custom pulse patterns. It uses the
+        correct WVDT binary command per the official SDG1000X Programming Guide.
+
+        Args:
+            channel: Channel (1 or 2).
+            samples_normalized: List of floats in [-1.0, +1.0].
+                +1.0 → offset_v + amplitude_v/2 (high level)
+                -1.0 → offset_v - amplitude_v/2 (low level)
+            waveform_name: Name stored on instrument (≤8 alphanumeric chars).
+            freq_hz: Playback frequency. For a burst use 1/total_duration_s.
+            amplitude_v: Peak-to-peak swing in volts.
+            offset_v: Center voltage in volts.
+        """
+        if not self.instrument:
+            raise RuntimeError("Instrument not initialized")
+        return bool(self.instrument.upload_arb_waveform(
+            channel=channel,
+            samples_normalized=samples_normalized,
+            waveform_name=waveform_name,
+            freq_hz=freq_hz,
+            amplitude_v=amplitude_v,
+            offset_v=offset_v,
+        ))
+
+    @staticmethod
+    def build_ttl_pulse_samples(
+        segments: list,
+        sample_rate_hz: float = 10e6,
+        high_normalized: float = 1.0,
+        low_normalized: float = -1.0,
+    ) -> list:
+        """Build normalized sample list from (level, duration_s) segment table.
+
+        Args:
+            segments: List of ('H'/'L', duration_s) tuples.
+            sample_rate_hz: DAC sample rate (e.g. 10e6 → 100 ns/sample).
+            high_normalized: Value for HIGH segments (default +1.0).
+            low_normalized: Value for LOW segments (default -1.0).
+        """
+        from Equipment.Function_Generator.Siglent_SDG1032X import SiglentSDG1032X
+        return SiglentSDG1032X.build_ttl_pulse_samples(
+            segments=segments,
+            sample_rate_hz=sample_rate_hz,
+            high_normalized=high_normalized,
+            low_normalized=low_normalized,
+        )
 
     def list_arb_waveforms(self, channel: int) -> Optional[str]:
         if not self.instrument:

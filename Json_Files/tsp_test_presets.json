@@ -159,7 +159,7 @@
       "clim": 0.0001
     }
   },
-  "\ud83d\udd2c Optical: Laser Pattern + Continuous Read": {
+  "\ud83d\udd26 Continuous Read with Laser Pulse Pattern": {
     "testing_led": {
       "read_voltage": 0.5,
       "duration_s": 15.0,

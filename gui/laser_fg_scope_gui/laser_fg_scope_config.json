@@ -1,0 +1,45 @@
+{
+    "fg_address": "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR",
+    "scope_address": "",
+    "smu_address": "GPIB0::17::INSTR",
+    "laser_port": "COM4",
+    "laser_baud": 19200,
+    "laser_power_mw": 10.0,
+    "bias_v": 0.1,
+    "bias_compliance": 0.001,
+    "fg_mode": "simple",
+    "pulse_high_v": 3.3,
+    "pulse_low_v": 0.0,
+    "pulse_width_ns": 100.0,
+    "pulse_rate_hz": 1600.0,
+    "burst_count": 2,
+    "arb_sample_rate_msps": 10.0,
+    "arb_segments": [
+        [
+            "H",
+            100.0
+        ],
+        [
+            "L",
+            400.0
+        ]
+    ],
+    "scope_channel": 1,
+    "timebase_us": 1.0,
+    "trig_level_v": 0.1,
+    "volts_per_div": 0.5,
+    "auto_configure_scope": true,
+    "capture_wait_s": 0.15,
+    "arb_samples": [
+        1.0,
+        -1.0,
+        -1.0,
+        -1.0,
+        -1.0
+    ],
+    "arb_freq_hz": 1999999.9999999998,
+    "arb_amplitude_v": 3.3,
+    "arb_offset_v": 1.65,
+    "arb_name": "LSRPULSE",
+    "smu_channel": 1
+}

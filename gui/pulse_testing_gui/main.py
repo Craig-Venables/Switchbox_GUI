@@ -1777,7 +1777,11 @@ class TSPTestingGUI(tk.Toplevel):
 
         self.log(f"Executing {func_name} on {self.current_system_name}...")
         start_time = time.time()
-        if func_name in ("optical_read_pulsed_light", "optical_pulse_train_read", "optical_pulse_train_pattern_read"):
+        if func_name in ("optical_binary_sweep", "optical_pattern_repeat"):
+            from gui.pulse_testing_gui import optical_runner
+            self._run_sweep_test_thread(func_name, params, test_info)
+            return  # _run_sweep_test_thread calls _test_finished itself
+        elif func_name in ("optical_read_pulsed_light", "optical_pulse_train_read", "optical_pulse_train_pattern_read"):
             from gui.pulse_testing_gui import optical_runner
             results, err = optical_runner.run_optical_test(self, func_name, params)
         else:
@@ -2195,6 +2199,319 @@ class TSPTestingGUI(tk.Toplevel):
     def manual_save_with_notes(self):
         """Manually save data with current notes"""
         self.save_data(show_dialog=True)
+
+    # ------------------------------------------------------------------
+    # Multi-run sweep helpers (Binary Pattern Sweep / Pattern Repeat)
+    # ------------------------------------------------------------------
+
+    def _resolve_sweep_session_dir(self, test_name: str) -> Path:
+        """Resolve and create the session folder for a sweep test.
+
+        The session folder is a timestamped subfolder under the same base
+        directory that save_data() would use, named:
+            {cleaned_test_name}_{YYYYMMDD_HHMMSS}/
+
+        Inside it there is always a 'raw' sub-directory for individual runs.
+        """
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        import re
+        name_clean = re.sub(r'[^\w\-]', '_', test_name).strip('_')
+
+        # Mirror save_data priority order to decide the base save location
+        use_provider_default = False
+        default_save_root = None
+        sample_name = None
+        device_section = None
+
+        if self.provider is not None:
+            default_save_root = getattr(self.provider, 'default_save_root', None)
+            sn = getattr(self.provider, 'sample_name_var', None)
+            if sn is not None:
+                try:
+                    sample_name = sn.get().strip()
+                except Exception:
+                    pass
+            if not sample_name and hasattr(self.provider, 'sample_gui') and self.provider.sample_gui:
+                sample_name = getattr(self.provider.sample_gui, 'current_device_name', None)
+            device_section = getattr(self.provider, 'device_section_and_number', None)
+            if default_save_root and sample_name and device_section:
+                use_provider_default = True
+
+        if use_provider_default and default_save_root and sample_name and device_section:
+            section = device_section[0] if len(device_section) > 0 else "A"
+            device_num = device_section[1:] if len(device_section) > 1 else "1"
+            base_dir = Path(default_save_root) / sample_name / section / device_num / "Pulse_measurements"
+        elif self.use_simple_save_var.get() and self.simple_save_path:
+            base_dir = Path(self.simple_save_path)
+        else:
+            namer = FileNamer(base_dir=self.custom_base_path)
+            base_dir = namer.get_device_folder(
+                sample_name=self.sample_name,
+                device=self.device_label if self.device_label != "UnknownDevice" else "A1",
+                subfolder="Pulse_measurements",
+            )
+
+        session_dir = base_dir / f"{name_clean}_{ts}"
+        (session_dir / "raw").mkdir(parents=True, exist_ok=True)
+        return session_dir
+
+    def _sweep_make_fig_for_result(self, result: dict, params: dict, test_name: str) -> "Optional[plt.Figure]":
+        """Build a per-run matplotlib figure (current vs time with laser overlay) and return it."""
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        try:
+            from matplotlib.figure import Figure
+            from gui.pulse_testing_gui.plot_handlers import _draw_laser_on_intervals
+
+            timestamps = result.get('timestamps', [])
+            currents = result.get('currents', [])
+            laser_on_intervals = result.get('laser_on_intervals', [])
+            pattern = result.get('laser_pattern', '')
+
+            fig = Figure(figsize=(8, 4), dpi=100)
+            ax = fig.add_subplot(111)
+
+            if timestamps and currents:
+                ax.plot(timestamps, [abs(c) for c in currents], 'b-', linewidth=1, label='Current (A)')
+                ax.set_yscale('symlog', linthresh=1e-12)
+            ax.set_xlabel('Time (s)')
+            ax.set_ylabel('Current (A)')
+            ax.set_title(f'{test_name}  pattern={pattern}', fontsize=9)
+            ax.grid(True, alpha=0.3)
+
+            _draw_laser_on_intervals(ax, laser_on_intervals)
+
+            run_idx = result.get('run_index', 0)
+            ax.text(0.98, 0.98, f'Run {run_idx + 1}  [{pattern}]',
+                    transform=ax.transAxes, ha='right', va='top',
+                    fontsize=8, color='gray')
+
+            if timestamps and currents:
+                ax.legend(loc='upper left', fontsize=8)
+            fig.tight_layout()
+            return fig
+        except Exception as exc:
+            _log.warning(f"_sweep_make_fig_for_result: could not build figure: {exc}")
+            return None
+
+    def _save_sweep_run(
+        self,
+        session_dir: Path,
+        run_idx: int,
+        pattern_str: str,
+        result: dict,
+        params: dict,
+        test_name: str,
+    ) -> None:
+        """Save one sweep run as {run_idx+1:02d}-{pattern}_{timestamp}.txt + .png in raw/."""
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        raw_dir = session_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{run_idx + 1:02d}-{pattern_str}_{ts}.txt"
+        filepath = raw_dir / filename
+
+        formatter = TSPDataFormatter()
+        metadata = {
+            'sample': self.sample_name,
+            'device': self.device_label,
+            'instrument': self.current_system_name or 'Unknown',
+            'address': self.addr_var.get() if hasattr(self, 'addr_var') else 'N/A',
+            'test_index': run_idx,
+            'laser_pattern': pattern_str,
+            'run_index': run_idx,
+        }
+        if params.get('optical_laser_power_mw') is not None:
+            try:
+                metadata['laser_power_mw'] = float(params['optical_laser_power_mw'])
+            except (TypeError, ValueError):
+                pass
+        if params.get('optical_laser_power_true_mw') is not None:
+            try:
+                metadata['laser_power_true_mw'] = float(params['optical_laser_power_true_mw'])
+            except (TypeError, ValueError):
+                pass
+
+        run_results = dict(result)
+        run_results['test_name'] = test_name
+        run_results['params'] = params
+
+        data, header, fmt, full_metadata = formatter.format_tsp_data(
+            data_dict=run_results,
+            test_name=test_name,
+            params=params,
+            metadata=metadata,
+        )
+
+        fig = self._sweep_make_fig_for_result(result, params, test_name)
+        save_tsp_measurement(
+            filepath=filepath,
+            data=data,
+            header=header,
+            fmt=fmt,
+            metadata=full_metadata,
+            save_plot=fig,
+        )
+        if fig is not None:
+            try:
+                import matplotlib.pyplot as _plt
+                _plt.close(fig)
+            except Exception:
+                pass
+
+    def _save_sweep_combined(
+        self,
+        session_dir: Path,
+        all_results: list,
+        params: dict,
+        test_name: str,
+    ) -> Optional[Path]:
+        """Build and save a wide-format CSV from all sweep runs into session_dir/combined_{ts}.csv.
+
+        Columns: pattern, run_index, then for each time point:
+            time_{i}, current_{i}, resistance_{i}
+        where i is the sample index within a run (runs may have different lengths;
+        shorter runs are padded with empty values).
+        """
+        try:
+            import csv
+            from datetime import datetime as _dt
+
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            combined_path = session_dir / f"combined_{ts}.csv"
+
+            # Find maximum number of time points across all runs
+            max_len = max((len(r.get('timestamps', [])) for r in all_results), default=0)
+
+            with open(combined_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+
+                # --- Header row 1: metadata ---
+                writer.writerow([f"# Test: {test_name}"])
+                writer.writerow([f"# Generated: {_dt.now().isoformat()}"])
+                writer.writerow([f"# Total runs: {len(all_results)}"])
+                writer.writerow([f"# Sample: {self.sample_name}  Device: {self.device_label}"])
+                for k, v in params.items():
+                    writer.writerow([f"# param.{k}: {v}"])
+                writer.writerow([])  # blank separator
+
+                # --- Column headers ---
+                # First two cols: run metadata, then groups of 3 per run
+                col_headers = ['run_index', 'pattern']
+                for run_result in all_results:
+                    pat = run_result.get('laser_pattern', '')
+                    idx = run_result.get('run_index', 0)
+                    col_headers += [
+                        f'time_run{idx:02d}_{pat}',
+                        f'current_run{idx:02d}_{pat}',
+                        f'resistance_run{idx:02d}_{pat}',
+                    ]
+                writer.writerow(col_headers)
+
+                # --- Data rows (one per sample index) ---
+                for sample_idx in range(max_len):
+                    row = ['', '']  # run_index/pattern columns empty for data rows
+                    for run_result in all_results:
+                        ts_list = run_result.get('timestamps', [])
+                        cur_list = run_result.get('currents', [])
+                        res_list = run_result.get('resistances', [])
+                        if sample_idx < len(ts_list):
+                            row += [ts_list[sample_idx], cur_list[sample_idx], res_list[sample_idx]]
+                        else:
+                            row += ['', '', '']
+                    writer.writerow(row)
+
+                # --- Run index reference table after data ---
+                writer.writerow([])
+                writer.writerow(['# Run index reference'])
+                writer.writerow(['run_index', 'pattern', 'n_samples', 'error'])
+                for run_result in all_results:
+                    writer.writerow([
+                        run_result.get('run_index', ''),
+                        run_result.get('laser_pattern', ''),
+                        len(run_result.get('timestamps', [])),
+                        run_result.get('error', ''),
+                    ])
+
+            return combined_path
+        except Exception as exc:
+            self.log(f"  WARNING: could not write combined CSV: {exc}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _run_sweep_test_thread(self, func_name: str, params: dict, test_info: dict) -> None:
+        """Execute a multi-run sweep test (binary_sweep / pattern_repeat) in the current thread.
+
+        This is called *inside* the background thread started by _run_test_thread when
+        func_name is 'optical_binary_sweep' or 'optical_pattern_repeat'.
+        On completion it schedules _test_finished on the main thread.
+        """
+        import logging as _logging
+        _logger = _logging.getLogger(__name__)
+        from gui.pulse_testing_gui import optical_runner
+
+        test_name = self.test_var.get()
+        self.log(f"  Sweep test: {func_name}")
+
+        # Create session folder up front so we can start saving immediately
+        try:
+            session_dir = self._resolve_sweep_session_dir(test_name)
+            self.log(f"  Session folder: {session_dir}")
+        except Exception as exc:
+            self.log(f"  ERROR creating session folder: {exc}")
+            self.after(0, lambda: messagebox.showerror("Sweep Error", str(exc)))
+            self.after(0, self._test_finished)
+            return
+
+        all_results: list = []
+
+        def progress_cb(msg: str) -> None:
+            self.log(f"  {msg}")
+
+        def save_run_cb(run_idx: int, pattern_str: str, result: dict) -> None:
+            try:
+                self._save_sweep_run(session_dir, run_idx, pattern_str, result, params, test_name)
+                self.log(f"    Saved run {run_idx + 1} ({pattern_str})")
+            except Exception as exc:
+                self.log(f"    WARNING: save failed for run {run_idx}: {exc}")
+            all_results.append(result)
+
+            # Update the GUI plot with the most recent run so the user can watch progress
+            last = dict(result)
+            last['test_name'] = test_name
+            last['params'] = params
+            last['plot_type'] = test_info.get('plot_type', 'time_series')
+            self.last_results = last
+            self.after(0, self.plot_results)
+
+        try:
+            if func_name == 'optical_binary_sweep':
+                optical_runner.run_binary_sweep_test(
+                    self, params, progress_cb, save_run_cb, stop_flag=None
+                )
+            else:
+                optical_runner.run_pattern_repeat_test(
+                    self, params, progress_cb, save_run_cb, stop_flag=None
+                )
+        except Exception as exc:
+            self.log(f"  ERROR during sweep: {exc}")
+            import traceback
+            traceback.print_exc()
+            self.after(0, lambda: messagebox.showerror("Sweep Error", str(exc)))
+            self.after(0, self._test_finished)
+            return
+
+        # Generate combined CSV
+        self.log("  Building combined CSV…")
+        combined_path = self._save_sweep_combined(session_dir, all_results, params, test_name)
+        if combined_path:
+            self.log(f"  Combined CSV: {combined_path}")
+        else:
+            self.log("  WARNING: combined CSV not saved.")
+
+        self.log(f"  Session saved to: {session_dir}")
+        self.after(0, self._test_finished)
     
     def open_data_analysis(self):
         """Open the TSP Data Analysis Tool"""

@@ -295,7 +295,21 @@ class MeasurementGUILayoutBuilder:
         )
         scope_btn.pack(side='left', padx=5)
         gui.oscilloscope_pulse_button = scope_btn
-        
+
+        # Laser FG Scope button
+        laser_scope_btn = tk.Button(
+            right_section,
+            text="Laser FG Scope",
+            font=self.FONT_BUTTON,
+            command=self.callbacks.get("open_laser_fg_scope"),
+            bg=self.COLOR_BG,
+            relief='raised',
+            padx=10,
+            pady=5
+        )
+        laser_scope_btn.pack(side='left', padx=5)
+        gui.laser_fg_scope_button = laser_scope_btn
+
         # Help / Guide button (far right)
         help_btn = tk.Button(
             right_section,

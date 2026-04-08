@@ -37,8 +37,14 @@ class PulseDiagramHelper:
             self._draw_depression_only(params)
         elif "Endurance" in test_name:
             self._draw_endurance(params)
+        elif "⚠️ SMU Slow Pulse Measure" in test_name:
+            self._draw_smu_slow_pulse_measure(params)
+        elif "⚠️ SMU Endurance" in test_name:
+            self._draw_smu_endurance(params)
         elif test_name == "⚠️ SMU Retention":
             self._draw_smu_retention(params)
+        elif "⚠️ SMU Retention (Pulse Measured)" in test_name:
+            self._draw_smu_retention_with_pulse_measurement(params)
         elif "Pulse-Multi-Read" in test_name:
             self._draw_pulse_multi_read(params)
         elif "Multi-Read Only" in test_name:
@@ -55,10 +61,14 @@ class PulseDiagramHelper:
             self._draw_multilevel(params)
         elif "Optical Read (Pulsed Light)" in test_name:
             self._draw_optical_read_pulsed_light(params)
-        elif "Optical: Laser Pattern + Continuous Read" in test_name:
+        elif "Continuous Read with Laser Pulse Pattern" in test_name:
             self._draw_optical_laser_pattern_read(params)
         elif "Optical Pulse Train + Read" in test_name:
             self._draw_optical_pulse_train_read(params)
+        elif "Binary Pattern Sweep" in test_name:
+            self._draw_binary_pattern_sweep(params)
+        elif "Pattern Repeat" in test_name:
+            self._draw_pattern_repeat(params)
         elif "Electrical Pulse Train" in test_name or "Pulse Train" in test_name:
             self._draw_pulse_train(params)
         elif "Laser and Read" in test_name:
@@ -651,6 +661,152 @@ class PulseDiagramHelper:
         self.ax.grid(True, alpha=0.3)
         if times_ms.size > 0:
             self.ax.set_xlim(0, times_ms[-1]*1.1)
+
+    def _draw_smu_slow_pulse_measure(self, params):
+        """Draw SMU slow single-pulse measurement in seconds."""
+        t = 0.0
+        times, voltages = [], []
+        pulse_v = params.get('pulse_voltage', 1.0)
+        pulse_width_s = max(params.get('pulse_width', 0.1), 1e-6)
+
+        # Baseline, pulse, baseline
+        times.extend([t, t, t + pulse_width_s, t + pulse_width_s])
+        voltages.extend([0, pulse_v, pulse_v, 0])
+
+        times_s = np.array(times)
+        self.ax.plot(times_s, voltages, color='saddlebrown', linewidth=2)
+        self.ax.fill_between(times_s, 0, voltages, alpha=0.3, color='sandybrown')
+        self.ax.set_xlabel('Time (s)')
+        self.ax.set_ylabel('Voltage (V)')
+        self.ax.set_title('SMU Slow Pulse Measure: Single long pulse with in-pulse measurement', fontsize=9)
+        self.ax.grid(True, alpha=0.3)
+        self._set_preview_ylim(voltages + [0, pulse_v])
+        if times_s.size > 0:
+            self.ax.set_xlim(0, times_s[-1] * 1.1)
+
+    def _draw_smu_endurance(self, params):
+        """Draw SMU endurance in seconds: (SET -> read -> RESET -> read) x N."""
+        t = 0.0
+        times, voltages = [], []
+        read_times = []
+        set_v = params.get('set_voltage', 2.0)
+        reset_v = params.get('reset_voltage', -2.0)
+        read_v = params.get('probe_voltage', 0.2)
+        set_duration = max(params.get('set_duration', 0.1), 1e-6)
+        reset_duration = max(params.get('reset_duration', 0.1), 1e-6)
+        read_duration = max(params.get('probe_duration', 0.01), 1e-6)
+        repeat_delay = max(params.get('repeat_delay', 1.0), 0.0)
+        cycles = min(int(params.get('num_cycles', 10)), 5)
+
+        for i in range(cycles):
+            # SET pulse
+            times.extend([t, t, t + set_duration, t + set_duration])
+            voltages.extend([0, set_v, set_v, 0])
+            t += set_duration + 0.01
+
+            # Read
+            read_start = t
+            read_end = t + read_duration
+            read_times.append((read_start + read_end) / 2)
+            times.extend([read_start, read_start, read_end, read_end])
+            voltages.extend([0, read_v, read_v, 0])
+            t = read_end + 0.01
+
+            # RESET pulse
+            times.extend([t, t, t + reset_duration, t + reset_duration])
+            voltages.extend([0, reset_v, reset_v, 0])
+            t += reset_duration + 0.01
+
+            # Read
+            read_start = t
+            read_end = t + read_duration
+            read_times.append((read_start + read_end) / 2)
+            times.extend([read_start, read_start, read_end, read_end])
+            voltages.extend([0, read_v, read_v, 0])
+            t = read_end
+
+            if i < cycles - 1:
+                t += repeat_delay
+
+        times_s = np.array(times)
+        self.ax.plot(times_s, voltages, color='brown', linewidth=2)
+        self.ax.fill_between(times_s, 0, voltages, alpha=0.3, color='peru')
+        for rt in read_times:
+            self.ax.plot(rt, read_v, 'rx', markersize=8, markeredgewidth=2)
+        self.ax.set_xlabel('Time (s)')
+        self.ax.set_ylabel('Voltage (V)')
+        self.ax.set_title(f'SMU Endurance: {cycles} cycles (SET->Read->RESET->Read)', fontsize=9)
+        self.ax.grid(True, alpha=0.3)
+        self._set_preview_ylim(voltages + [set_v, reset_v, read_v, 0])
+        if times_s.size > 0:
+            self.ax.set_xlim(0, times_s[-1] * 1.1)
+
+    def _draw_smu_retention_with_pulse_measurement(self, params):
+        """Draw SMU retention with measured SET/RESET pulses in seconds."""
+        t = 0.0
+        times, voltages = [], []
+        read_times = []
+        pulse_measure_times = []
+        set_v = params.get('set_voltage', 2.0)
+        reset_v = params.get('reset_voltage', -2.0)
+        read_v = params.get('probe_voltage', 0.2)
+        set_duration = max(params.get('set_duration', 0.1), 1e-6)
+        reset_duration = max(params.get('reset_duration', 0.1), 1e-6)
+        read_duration = max(params.get('probe_duration', 0.01), 1e-6)
+        repeat_delay = max(params.get('repeat_delay', 1.0), 0.0)
+        cycles = min(int(params.get('num_cycles', 10)), 4)
+
+        for i in range(cycles):
+            # SET pulse (+ measured point)
+            set_start = t
+            set_end = t + set_duration
+            pulse_measure_times.append((set_start + set_end) / 2)
+            times.extend([set_start, set_start, set_end, set_end])
+            voltages.extend([0, set_v, set_v, 0])
+            t = set_end + 0.01
+
+            # Read after SET
+            read_start = t
+            read_end = t + read_duration
+            read_times.append((read_start + read_end) / 2)
+            times.extend([read_start, read_start, read_end, read_end])
+            voltages.extend([0, read_v, read_v, 0])
+            t = read_end + 0.01
+
+            # RESET pulse (+ measured point)
+            reset_start = t
+            reset_end = t + reset_duration
+            pulse_measure_times.append((reset_start + reset_end) / 2)
+            times.extend([reset_start, reset_start, reset_end, reset_end])
+            voltages.extend([0, reset_v, reset_v, 0])
+            t = reset_end + 0.01
+
+            # Read after RESET
+            read_start = t
+            read_end = t + read_duration
+            read_times.append((read_start + read_end) / 2)
+            times.extend([read_start, read_start, read_end, read_end])
+            voltages.extend([0, read_v, read_v, 0])
+            t = read_end
+
+            if i < cycles - 1:
+                t += repeat_delay
+
+        times_s = np.array(times)
+        self.ax.plot(times_s, voltages, color='darkslateblue', linewidth=2)
+        self.ax.fill_between(times_s, 0, voltages, alpha=0.25, color='mediumpurple')
+        for rt in read_times:
+            self.ax.plot(rt, read_v, 'rx', markersize=8, markeredgewidth=2)
+        for pt in pulse_measure_times:
+            # Gold markers indicate in-pulse measurement points.
+            self.ax.plot(pt, 0, 'o', color='gold', markersize=7, markeredgecolor='black', markeredgewidth=1.0)
+        self.ax.set_xlabel('Time (s)')
+        self.ax.set_ylabel('Voltage (V)')
+        self.ax.set_title(f'SMU Retention (Pulse Measured): {cycles} measured SET/RESET cycles', fontsize=9)
+        self.ax.grid(True, alpha=0.3)
+        self._set_preview_ylim(voltages + [set_v, reset_v, read_v, 0])
+        if times_s.size > 0:
+            self.ax.set_xlim(0, times_s[-1] * 1.1)
     
     def _draw_pulse_multi_read(self, params):
         """Draw initial read → pulse followed by multiple reads"""
@@ -1420,13 +1576,210 @@ class PulseDiagramHelper:
         
         ax_voltage.set_xlabel('Time (s)', fontsize=9, fontweight='bold')
         ax_voltage.set_title(
-            f'🔬 Optical Pattern: "{pattern_str}" ({ones_count} fire, {zeros_count} skip{delay_str}{repeat_str})',
+            f'Optical Pattern: "{pattern_str}" ({ones_count} fire, {zeros_count} skip{delay_str}{repeat_str})',
             fontsize=9, fontweight='bold'
         )
         ax_voltage.set_xlim(0, duration_s)
         ax_voltage.grid(True, alpha=0.3)
         self._set_preview_ylim([read_voltage, 0])
     
+    def _draw_sweep_two_runs(self, run_defs, read_voltage, on_s, off_s, baseline_s,
+                              duration_s, delay_between_s, total_runs, title):
+        """Shared helper: draw two sequential runs on one timeline.
+
+        Each run shows:
+          - a shaded baseline region (baseline_s) where SMU reads but laser is silent
+          - then N pattern slots: red rectangles for '1', faint dashed lines for '0'
+          - a gap (delay_between_s) between runs representing SMU-off inter-run delay
+
+        run_defs: list of (run_label, pattern_str) tuples, max 2 entries.
+        """
+        self.ax.clear()
+        for ax in self.fig.get_axes():
+            if ax != self.ax:
+                try:
+                    self.fig.delaxes(ax)
+                except Exception:
+                    pass
+
+        ax_v = self.ax
+        ax_l = ax_v.twinx()
+
+        period_s = on_s + off_s
+        # Width of a single run on the preview timeline
+        run_width = baseline_s + duration_s
+        # Total display width: runs + gap between them
+        gap_s = max(delay_between_s * 0.3, period_s * 0.5)  # visual gap (compressed)
+        n_runs = len(run_defs)
+        total_width = n_runs * run_width + (n_runs - 1) * gap_s
+
+        run_colors = ['#1a6fb5', '#0a4a7a']  # two shades of blue for the read line
+
+        for run_i, (run_label, pattern) in enumerate(run_defs):
+            run_start = run_i * (run_width + gap_s)
+
+            # SMU continuous read line for this run
+            ax_v.plot(
+                [run_start, run_start + run_width],
+                [read_voltage, read_voltage],
+                '-', color=run_colors[run_i % len(run_colors)],
+                linewidth=2.0, alpha=0.9,
+                label='SMU Read' if run_i == 0 else '',
+            )
+            ax_v.fill_between(
+                [run_start, run_start + run_width],
+                0, read_voltage,
+                alpha=0.15, color='blue',
+            )
+
+            # Baseline shading (no laser zone)
+            if baseline_s > 0:
+                ax_l.axvspan(run_start, run_start + baseline_s,
+                             ymin=0.05, ymax=0.95,
+                             alpha=0.08, color='green')
+                ax_v.text(
+                    run_start + baseline_s / 2,
+                    read_voltage * 0.5,
+                    'baseline',
+                    ha='center', va='center', fontsize=6.5,
+                    color='darkgreen', alpha=0.7,
+                    rotation=90 if baseline_s < period_s else 0,
+                )
+
+            # Laser slots (start after baseline)
+            t_slot = run_start + baseline_s
+            for bit in pattern:
+                if t_slot - run_start >= duration_s:
+                    break
+                slot_end = min(t_slot + on_s, run_start + run_width)
+                if bit == '1':
+                    ax_l.axvspan(t_slot, slot_end, ymin=0.05, ymax=0.95,
+                                 alpha=0.4, color='red',
+                                 label='Laser ON' if run_i == 0 and t_slot == run_start + baseline_s else '')
+                else:
+                    mid = t_slot + on_s / 2
+                    ax_l.axvline(mid, ymin=0.1, ymax=0.9,
+                                 color='gray', linestyle=':', alpha=0.45, linewidth=1)
+                t_slot += period_s
+
+            # Run label above the run
+            ax_v.annotate(
+                f'{run_label}\n[{pattern}]',
+                xy=(run_start + run_width / 2, read_voltage),
+                xytext=(run_start + run_width / 2, read_voltage * 1.25),
+                ha='center', va='bottom', fontsize=7.5, fontweight='bold',
+                color='navy',
+                arrowprops=dict(arrowstyle='-', color='navy', alpha=0.3),
+            )
+
+            # Gap annotation (between runs)
+            if run_i < n_runs - 1:
+                gap_start = run_start + run_width
+                gap_end = gap_start + gap_s
+                ax_v.annotate(
+                    '', xy=(gap_end, read_voltage * 0.2),
+                    xytext=(gap_start, read_voltage * 0.2),
+                    arrowprops=dict(arrowstyle='<->', color='gray', lw=1.0),
+                )
+                ax_v.text(
+                    (gap_start + gap_end) / 2, read_voltage * 0.35,
+                    'SMU off\n(delay)', ha='center', va='bottom',
+                    fontsize=6, color='gray',
+                )
+
+        ax_l.set_ylabel('Laser (ON/OFF)', color='red', fontsize=9)
+        ax_l.tick_params(axis='y', labelcolor='red')
+        ax_l.set_ylim(-0.05, 1.5)
+        ax_l.set_yticks([])
+
+        ax_v.set_ylabel('SMU Read Voltage (V)', color='blue', fontsize=9)
+        ax_v.tick_params(axis='y', labelcolor='blue')
+        ax_v.set_xlabel('Time (s)  [preview: 2 of ' + str(total_runs) + ' runs]', fontsize=9)
+        ax_v.set_xlim(-period_s * 0.1, total_width + period_s * 0.1)
+        self._set_preview_ylim([read_voltage, 0])
+        ax_v.set_title(title, fontsize=9, fontweight='bold')
+        ax_v.grid(True, alpha=0.25)
+
+        # Remove x-axis ticks (times are relative per-run; absolute wall-clock not meaningful)
+        ax_v.set_xticks([])
+
+    def _draw_binary_pattern_sweep(self, params):
+        """Draw Binary Pattern Sweep preview.
+
+        Shows two sequential runs (run 1 = 0...0 baseline, run 2 = 0...1) on one
+        timeline to make clear that each run is ONE independent pattern.
+        Each run includes a shaded baseline period before the first laser pulse.
+        """
+        num_bits = max(1, int(params.get('num_bits', 4)))
+        read_voltage = params.get('read_voltage', 0.5)
+        optical_on_ms = params.get('optical_on_ms', 500.0)
+        optical_off_ms = params.get('optical_off_ms', 500.0)
+        duration_s = max(params.get('duration_s', 5.0), 0.1)
+        baseline_s = max(float(params.get('laser_delay_s', 1.0)), 0.0)
+        delay_between_s = max(float(params.get('delay_between_runs_s', 2.0)), 0.0)
+        on_s = optical_on_ms / 1000.0
+        off_s = optical_off_ms / 1000.0
+        total_runs = 2 ** num_bits
+
+        # Show exactly 2 runs: 0000 (all dark) and 0001 (last bit fires)
+        run_defs = [
+            (f'Run 1', format(0, f'0{num_bits}b')),
+            (f'Run 2', format(1, f'0{num_bits}b')),
+        ]
+
+        self._draw_sweep_two_runs(
+            run_defs=run_defs,
+            read_voltage=read_voltage,
+            on_s=on_s,
+            off_s=off_s,
+            baseline_s=baseline_s,
+            duration_s=duration_s,
+            delay_between_s=delay_between_s,
+            total_runs=total_runs,
+            title=f'Binary Pattern Sweep: {num_bits} bits — {total_runs} runs total\n'
+                  f'(preview: Run 1={format(0, f"0{num_bits}b")}, Run 2={format(1, f"0{num_bits}b")})',
+        )
+
+    def _draw_pattern_repeat(self, params):
+        """Draw Pattern Repeat preview.
+
+        Shows two sequential runs of the same fixed pattern on one timeline,
+        each with a shaded baseline period before the first laser pulse.
+        """
+        pattern_raw = str(params.get('laser_pattern', '0101')).strip()
+        pattern = ''.join(c for c in pattern_raw if c in '01')
+        if not pattern:
+            pattern = '0101'
+        n_repeats = int(params.get('n_repeats', 5))
+        read_voltage = params.get('read_voltage', 0.5)
+        optical_on_ms = params.get('optical_on_ms', 500.0)
+        optical_off_ms = params.get('optical_off_ms', 500.0)
+        duration_s = max(params.get('duration_s', 5.0), 0.1)
+        baseline_s = max(float(params.get('laser_delay_s', 1.0)), 0.0)
+        delay_between_s = max(float(params.get('delay_between_runs_s', 2.0)), 0.0)
+        on_s = optical_on_ms / 1000.0
+        off_s = optical_off_ms / 1000.0
+
+        pattern_str = pattern if len(pattern) <= 10 else f"{pattern[:10]}..."
+
+        run_defs = [
+            ('Run 1', pattern),
+            ('Run 2', pattern),
+        ]
+
+        self._draw_sweep_two_runs(
+            run_defs=run_defs,
+            read_voltage=read_voltage,
+            on_s=on_s,
+            off_s=off_s,
+            baseline_s=baseline_s,
+            duration_s=duration_s,
+            delay_between_s=delay_between_s,
+            total_runs=n_repeats,
+            title=f'Pattern Repeat: "{pattern_str}" — {n_repeats} runs total\n'
+                  f'(preview: 2 of {n_repeats} runs shown)',
+        )
+
     def _draw_generic_pattern(self):
         """Generic pattern for unknown tests"""
         self.ax.text(0.5, 0.5, "Pulse Pattern\n(Generic)", ha='center', va='center', fontsize=12)

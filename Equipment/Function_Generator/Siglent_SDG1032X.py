@@ -374,105 +374,236 @@ class SiglentSDG1032X:
                 return False
             time.sleep(0.05)
 
-    def upload_csv_waveform(self, channel: int, csv_filename: str, waveform_name: str = "USER"):
+    # ------------- Arbitrary waveform upload (WVDT binary — SDG1000X) -------------
+
+    def upload_arb_waveform(
+        self,
+        channel: int,
+        samples_normalized: list,
+        waveform_name: str = "LSRPULSE",
+        freq_hz: float = 1000.0,
+        amplitude_v: float = 3.3,
+        offset_v: float = 1.65,
+    ) -> bool:
         """
-        Upload a CSV file containing waveform data to the function generator.
-        The CSV should contain one voltage value per line.
-        
-        Updated to use correct SDG1032X ARB commands:
-        - C1:ARWV NAME,{name},DATA,{data} for uploading
-        - C1:ARWV INDEX,{index} for selecting waveform
+        Upload an arbitrary waveform to the SDG1000X using the correct WVDT binary command.
+
+        The SDG1000X requires binary little-endian 16-bit signed integer samples sent
+        via the `WVDT` command — NOT the `ARWV` command (which only selects built-in waveforms).
+        This method follows the official SDG1000X Programming Guide (section 3.22).
+
+        Args:
+            channel: Channel number (1 or 2).
+            samples_normalized: List of floats in range [-1.0, +1.0]:
+                +1.0 → output = offset_v + amplitude_v / 2  (high level)
+                -1.0 → output = offset_v - amplitude_v / 2  (low level)
+                Integers in the 14-bit range [-8192, +8191] are also accepted directly.
+            waveform_name: Name stored on the instrument (≤8 alphanumeric chars).
+            freq_hz: Playback frequency (Hz). Controls how fast the whole waveform plays.
+                     For a single burst, set freq_hz = 1 / total_waveform_duration_s.
+            amplitude_v: Peak-to-peak output amplitude (V).
+                         High = offset_v + amplitude_v/2; Low = offset_v - amplitude_v/2.
+            offset_v: DC offset (V). Center voltage of the output swing.
+
+        Returns:
+            True if upload succeeded, False on error.
+
+        Notes:
+            - Maximum 16,384 samples per waveform.
+            - Minimum 2 samples.
+            - Send uses write_raw() with write_termination='' to avoid corrupting binary data.
+            - After upload, the waveform is selected with ARWV NAME,<name> and output type
+              is set to ARB via BSWV WVTP,ARB.
         """
+        import struct
+
         try:
-            # Read the CSV file
-            with open(csv_filename, 'r') as f:
-                data = f.read().strip()
+            n = len(samples_normalized)
+            if n < 2:
+                raise ValueError("Waveform must have at least 2 samples.")
+            if n > 16384:
+                raise ValueError(f"Too many samples: {n} > 16,384 maximum for SDG1000X.")
 
-            # Convert to the format expected by Siglent
-            # Siglent expects comma-separated values
-            values = [line.strip() for line in data.split('\n') if line.strip()]
-            if not values:
-                raise ValueError("CSV file is empty or contains no valid data")
+            # Convert to 14-bit signed DAC values in [-8192, +8191]
+            dac_values: list = []
+            for v in samples_normalized:
+                if isinstance(v, float):
+                    dac = int(round(float(v) * 8191.0))
+                else:
+                    dac = int(v)
+                dac = max(-8192, min(8191, dac))
+                dac_values.append(dac)
 
-            # Upload the data using correct ARB command format
-            data_str = ",".join(values)
+            # Pack as little-endian 16-bit signed integers (2 bytes per sample)
+            binary_data = struct.pack(f"<{n}h", *dac_values)
+
+            # Build ASCII command header (WVDT with all required parameters)
             pref = self._ch_prefix(channel)
-            
-            # Upload waveform data
-            self.write(f"{pref}ARWV NAME,{waveform_name},DATA,{data_str}")
-            
-            # Wait for operation to complete
-            time.sleep(0.1)
-            
-            # Select the uploaded waveform (index 0 for first user waveform)
-            self.write(f"{pref}ARWV INDEX,0")
-            
+            header_str = (
+                f"{pref}WVDT "
+                f"WVNM,{waveform_name},"
+                f"TYPE,5,"
+                f"LENGTH,{n}B,"
+                f"FREQ,{freq_hz:.6f},"
+                f"AMPL,{amplitude_v:.6f},"
+                f"OFST,{offset_v:.6f},"
+                f"PHASE,0,"
+                f"WAVEDATA,"
+            )
+            header_bytes = header_str.encode("ascii")
+
+            # Send as raw bytes with no write termination to avoid corrupting binary payload
+            old_write_term = self.inst.write_termination
+            self.inst.write_termination = ""
+            try:
+                self.inst.write_raw(header_bytes + binary_data + b"\n")
+            finally:
+                self.inst.write_termination = old_write_term
+
+            time.sleep(0.35)  # Allow instrument time to process binary transfer
+
+            # Select the uploaded waveform and set output type
+            self.write(f"{pref}ARWV NAME,{waveform_name}")
+            self.write(f"{pref}BSWV WVTP,ARB")
+
+            # Check instrument error queue
+            err = self.error_query()
+            if err and not str(err).startswith("0"):
+                print(f"Instrument error after ARB upload: {err}")
+                return False
+
             return True
-        except Exception as e:
-            print(f"Error uploading CSV waveform: {e}")
+
+        except Exception as exc:
+            print(f"Error uploading ARB waveform via WVDT: {exc}")
             return False
 
-    def set_arb_waveform(self, channel: int, waveform_name: str = "USER", index: int = 0):
+    @staticmethod
+    def build_ttl_pulse_samples(
+        segments: list,
+        sample_rate_hz: float = 10e6,
+        high_normalized: float = 1.0,
+        low_normalized: float = -1.0,
+    ) -> list:
         """
-        Set arbitrary waveform with proper indexing.
-        
+        Build a normalized sample list from a (level, duration_s) segment table.
+
         Args:
-            channel: Channel number (1 or 2)
-            waveform_name: Name of the waveform (default: "USER")
-            index: Waveform index (0 for first user waveform)
+            segments: List of (level, duration_s) tuples.
+                      level can be 'H', 'HIGH', 1, True  → high_normalized
+                      or        'L', 'LOW',  0, False → low_normalized
+            sample_rate_hz: DAC sample rate in Sa/s (e.g. 10e6 = 10 MSa/s → 100 ns/point).
+            high_normalized: Normalized value for HIGH segments (default +1.0).
+            low_normalized: Normalized value for LOW segments (default -1.0).
+
+        Returns:
+            List of normalized floats suitable for upload_arb_waveform().
+
+        Example:
+            # 100 ns pulse, 900 ns gap, at 10 MSa/s (100 ns/point)
+            samples = SiglentSDG1032X.build_ttl_pulse_samples(
+                [('H', 100e-9), ('L', 900e-9)], sample_rate_hz=10e6
+            )
+        """
+        HIGH_KEYS = {"h", "high", "1", "true"}
+        result: list = []
+        for level, duration_s in segments:
+            n = max(1, round(float(duration_s) * float(sample_rate_hz)))
+            val = high_normalized if str(level).lower() in HIGH_KEYS else low_normalized
+            result.extend([val] * n)
+        return result
+
+    def upload_arb_data(self, channel: int, data: list, waveform_name: str = "LSRPULSE") -> bool:
+        """
+        Upload arbitrary waveform data given as a list of voltage values.
+
+        Wraps upload_arb_waveform() with automatic amplitude/offset calculation.
+        The data list should contain the target output voltages in volts
+        (e.g. [3.3, 0.0, 3.3, 0.0] for a 3.3 V TTL pattern).
+
+        Args:
+            channel: Channel number (1 or 2).
+            data: List of voltage values (floats). Must have 2–16,384 elements.
+            waveform_name: Name to store on the instrument.
+
+        Returns:
+            True if upload succeeded, False on error.
+        """
+        try:
+            if not data:
+                raise ValueError("data list is empty")
+            v_max = max(float(v) for v in data)
+            v_min = min(float(v) for v in data)
+            amplitude_v = max(v_max - v_min, 1e-6)  # avoid divide-by-zero
+            offset_v = (v_max + v_min) / 2.0
+            half = amplitude_v / 2.0
+            normalized = [(float(v) - offset_v) / half for v in data]
+            return self.upload_arb_waveform(
+                channel=channel,
+                samples_normalized=normalized,
+                waveform_name=waveform_name,
+                amplitude_v=amplitude_v,
+                offset_v=offset_v,
+            )
+        except Exception as exc:
+            print(f"Error in upload_arb_data: {exc}")
+            return False
+
+    def upload_csv_waveform(self, channel: int, csv_filename: str, waveform_name: str = "LSRPULSE") -> bool:
+        """
+        Upload an arbitrary waveform from a CSV file (one voltage value per line or comma-separated).
+
+        Wraps upload_arb_data() with CSV parsing. Amplitude and offset are derived
+        automatically from the data range.
+
+        Args:
+            channel: Channel number (1 or 2).
+            csv_filename: Path to CSV file containing voltage values.
+            waveform_name: Name to store on the instrument.
+
+        Returns:
+            True if upload succeeded, False on error.
+        """
+        try:
+            with open(csv_filename, "r") as fh:
+                raw = fh.read()
+            values: list = []
+            for token in raw.replace("\n", ",").split(","):
+                token = token.strip()
+                if token:
+                    try:
+                        values.append(float(token))
+                    except ValueError:
+                        pass
+            if not values:
+                raise ValueError("CSV file contains no numeric data")
+            return self.upload_arb_data(channel=channel, data=values, waveform_name=waveform_name)
+        except Exception as exc:
+            print(f"Error uploading CSV waveform: {exc}")
+            return False
+
+    def set_arb_waveform(self, channel: int, waveform_name: str = "LSRPULSE", index: int = 0) -> None:
+        """
+        Select an already-uploaded arbitrary waveform by name and set output to ARB mode.
+
+        This only selects; it does not upload data. To upload, call upload_arb_waveform().
+
+        Args:
+            channel: Channel number (1 or 2).
+            waveform_name: Name of the waveform previously uploaded (ARWV NAME,<name>).
+            index: Unused for user waveforms on SDG1000X (kept for API compatibility).
         """
         pref = self._ch_prefix(channel)
-        
-        # Set ARB waveform type
+        self.write(f"{pref}ARWV NAME,{waveform_name}")
         self.write(f"{pref}BSWV WVTP,ARB")
-        
-        # Select the waveform by index
-        self.write(f"{pref}ARWV INDEX,{index}")
-        
-        # Set waveform name if specified
-        if waveform_name:
-            self.write(f"{pref}ARWV NAME,{waveform_name}")
 
-    def upload_arb_data(self, channel: int, data: list, waveform_name: str = "USER"):
-        """
-        Upload arbitrary waveform data directly.
-        
-        Args:
-            channel: Channel number (1 or 2)
-            data: List of voltage values
-            waveform_name: Name for the waveform
-        """
-        try:
-            # Convert data to string format
-            data_str = ",".join([str(val) for val in data])
-            
-            pref = self._ch_prefix(channel)
-            
-            # Upload waveform data
-            self.write(f"{pref}ARWV NAME,{waveform_name},DATA,{data_str}")
-            
-            # Wait for operation to complete
-            time.sleep(0.1)
-            
-            # Select the uploaded waveform (index 0)
-            self.write(f"{pref}ARWV INDEX,0")
-            
-            return True
-        except Exception as e:
-            print(f"Error uploading ARB data: {e}")
-            return False
-
-    def list_arb_waveforms(self, channel: int):
-        """
-        List available arbitrary waveforms on the specified channel.
-        """
+    def list_arb_waveforms(self, channel: int) -> Optional[str]:
+        """Query the current arbitrary waveform type/name for the channel."""
         try:
             pref = self._ch_prefix(channel)
-            # Query available waveforms
-            response = self.query(f"{pref}ARWV?")
-            return response
-        except Exception as e:
-            print(f"Error listing ARB waveforms: {e}")
+            return self.query(f"{pref}ARWV?")
+        except Exception as exc:
+            print(f"Error querying ARB waveforms: {exc}")
             return None
 
 

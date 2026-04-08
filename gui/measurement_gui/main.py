@@ -560,6 +560,7 @@ class MeasurementGUI:
                 "stop_sequential_measurement": self.set_measurment_flag_true,
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
                 "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
+                "open_laser_fg_scope": self.open_laser_fg_scope_gui,
                 "run_conditional_testing": self.run_conditional_testing,
                 "run_single_pulse": self._run_single_pulse,
                 "run_read_pulse": self._run_read_pulse,
@@ -3090,6 +3091,18 @@ class MeasurementGUI:
             print(f"Problem loading TSP Testing GUI: {e}")
             pass
 
+        # Laser FG Scope button: opens laser + function generator + oscilloscope experiment GUI
+        try:
+            self.laser_fg_scope_btn = tk.Button(
+                frame,
+                text="Laser FG Scope",
+                command=self.open_laser_fg_scope_gui,
+            )
+            self.laser_fg_scope_btn.grid(row=0, column=2, padx=(5, 5), pady=(2, 2), sticky='w')
+            print("Laser FG Scope GUI button added")
+        except Exception as e:
+            print(f"Problem adding Laser FG Scope button: {e}")
+
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
         frame.columnconfigure(2, weight=1)
@@ -3205,6 +3218,21 @@ class MeasurementGUI:
             )
         except Exception as exc:
             messagebox.showerror("Pulse Testing", f"Could not open Pulse Testing GUI:\n{exc}")
+
+    def open_laser_fg_scope_gui(self) -> None:
+        """Launch the Laser FG Scope experiment GUI.
+
+        Passes self as provider so the GUI can resolve the sample/device
+        save path from the main Measurement GUI's context.
+        """
+        try:
+            from gui.laser_fg_scope_gui import LaserFGScopeGUI
+            LaserFGScopeGUI(self.master, provider=self)
+        except Exception as exc:
+            messagebox.showerror(
+                "Laser FG Scope GUI",
+                f"Could not open Laser FG Scope GUI:\n{exc}",
+            )
 
     def open_device_visualizer(self) -> None:
         """Launch the Device Analysis Visualizer with current sample/context info."""
