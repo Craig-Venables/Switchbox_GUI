@@ -54,6 +54,8 @@ class ConfigManager:
         "trig_level_v":    DEFAULT_TRIG_LEVEL_V,
         "volts_per_div":   DEFAULT_VOLTS_PER_DIV,
         "auto_configure_scope": True,
+        "auto_timebase":        True,
+        "fg_manual_mode":       False,
         "capture_wait_s":  DEFAULT_CAPTURE_WAIT_S,
         # save
         "simple_save_path": DEFAULT_SAVE_FOLDER,

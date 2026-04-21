@@ -220,6 +220,14 @@ class SiglentSDG1032X:
             if pulse_width_s is not None:
                 base_params["PWID"] = self._fmt_time_value(pulse_width_s)
             self.send_command(f"{pref}BSWV", base_params)
+            # SDG1032X readback reports pulse width as WIDTH (seconds).  Some
+            # firmware revisions accept PWID but only latch reliably when WIDTH
+            # is also written explicitly.
+            if pulse_width_s is not None:
+                try:
+                    self.send_command(f"{pref}BSWV", {"WIDTH": float(pulse_width_s)})
+                except Exception:
+                    pass
         except Exception:
             # Fallback using amplitude/offset
             try:
@@ -284,51 +292,77 @@ class SiglentSDG1032X:
         burst_delay_s: Optional[Union[str, float]] = None,
     ):
         """
-        Convenience wrapper for common burst setup:
-         - mode: 'NCYC' (finite cycles), 'GATE', or 'INF'
-         - trigger_source: 'INT' (internal rate), 'EXT' (rear BNC), 'BUS'/'MAN' (software trigger)
-         - internal_period: e.g., '10MS' or float seconds if TRSR='INT'
+        Configure and enable burst mode.
+
+        On firmware 1.01.01.33 (and similar), a single combined BTWV command
+        (STATE,ON,TRMD,...,TRSR,BUS) silently drops TRSR and leaves the
+        instrument on TRSR=INT (internal auto-fire).  Each parameter must be
+        written as a separate BTWV command.
+
+        Parameters
+        ----------
+        mode            : 'NCYC' (N-cycle), 'GATE', or 'INF'
+        trigger_source  : 'BUS'/'MAN' (software C1:TRIG), 'EXT', or 'INT'
+        internal_period : period in seconds when trigger_source='INT'
         """
-        # Always set basic burst state/mode/source
-        base_params: Dict[str, Union[str, float, int]] = {
-            "STATE": "ON",
-            "TRMD": mode.upper(),
-            "TRSR": "BUS" if trigger_source.upper() in ("BUS", "MAN", "SW") else trigger_source.upper(),
-        }
-        # Build a comprehensive BTWV parameter set and send once to improve reliability
-        params: Dict[str, Union[str, float, int]] = {}
+        pref = self._ch_prefix(channel)
+
+        # SDG1032X firmware 1.01.01.33 uses MAN (not BUS) for software trigger.
+        # BUS is silently ignored and the instrument stays on INT (auto-fire).
+        trsr_map = {"BUS": "MAN", "SW": "MAN", "MAN": "MAN",
+                    "EXT": "EXT", "INT": "INT"}
+        trsr = trsr_map.get(trigger_source.upper(), trigger_source.upper())
+
+        # ── 1. Enable burst first ─────────────────────────────────────────
+        # STATE,ON must come BEFORE individual params — sending it last
+        # resets TIME and TRSR back to firmware defaults.
+        self.write(f"{pref}BTWV STATE,ON")
+        time.sleep(0.05)
+
+        # ── 2. Burst trigger mode ─────────────────────────────────────────
+        self.write(f"{pref}BTWV TRMD,{mode.upper()}")
+        time.sleep(0.04)
+
+        # ── 3. Cycle count ────────────────────────────────────────────────
         if mode.upper() == "NCYC":
-            # Use TIME as per manual; include alternates for compatibility
-            params["TIME"] = int(cycles)
-            params["NCYC"] = int(cycles)
-            params["CNT"] = int(cycles)
-        if trigger_source.upper() == "INT" and internal_period is not None:
-            # provide both PERI (period) and INTFRQ (Hz)
-            params["PERI"] = self._fmt_time_value(internal_period)
-            if isinstance(internal_period, (int, float)) and internal_period:
-                params["INTFRQ"] = 1.0 / float(internal_period)
+            self.write(f"{pref}BTWV TIME,{int(cycles)}")
+            time.sleep(0.04)
+
+        # ── 4. Trigger source — separate command, AFTER STATE,ON ─────────
+        # MAN = software trigger (fires on C1:TRIG / front-panel button).
+        # INT = auto-fire at internal period rate (not what we want).
+        # PRD is read-only on this firmware; do NOT write it — doing so
+        # silently disables burst (STATE goes OFF).
+        self.write(f"{pref}BTWV TRSR,{trsr}")
+        time.sleep(0.04)
+
+        # ── 5. Internal period (only for TRSR=INT) ────────────────────────
+        if trsr == "INT" and internal_period is not None:
+            self.write(f"{pref}BTWV PRD,{self._fmt_time_value(internal_period)}")
+            time.sleep(0.04)
+
+        # ── 6. Burst delay ────────────────────────────────────────────────
         if burst_delay_s is not None:
-            params["DLY"] = self._fmt_time_value(burst_delay_s)
-        # Merge with base and send once
-        all_params = {**base_params, **params}
-        self.set_burst_params(channel, all_params)
+            self.write(f"{pref}BTWV DLAY,{self._fmt_time_value(burst_delay_s)}")
+            time.sleep(0.04)
 
     @staticmethod
     def _fmt_time_value(val: Union[str, float, int]) -> Union[str, float]:
-        # Keep user strings (like '10MS')
+        # Keep user strings (like '10MS') unchanged.
         if isinstance(val, str):
             return val
         s = float(val)
+        # Use :.6g to suppress floating-point noise (e.g. 200.0000000001 → "200")
         if s >= 1.0:
-            return f"{s}S"
+            return f"{s:.6g}S"
         ms = s * 1e3
         if ms >= 1.0:
-            return f"{ms}MS"
+            return f"{ms:.6g}MS"
         us = s * 1e6
         if us >= 1.0:
-            return f"{us}US"
+            return f"{us:.6g}US"
         ns = s * 1e9
-        return f"{ns}NS"
+        return f"{ns:.6g}NS"
 
     def disable_burst(self, channel: int):
         self.set_burst_params(channel, {"STATE": "OFF"})

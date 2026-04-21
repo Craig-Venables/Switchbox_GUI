@@ -53,8 +53,37 @@ class FGPanel(ttk.LabelFrame):
     # ── outer notebook ────────────────────────────────────────────────────────
 
     def _build(self) -> None:
+        # ── Manual FG mode toggle (above tabs) ───────────────────────────────
+        top = tk.Frame(self, bg="#f8f8f8")
+        top.pack(fill="x", pady=(0, 4))
+        self._vars["fg_manual_mode"] = tk.BooleanVar(
+            value=bool(self._cfg.get("fg_manual_mode", False)))
+        self._manual_cb = ttk.Checkbutton(
+            top,
+            text="Manual FG mode  —  skip configuration, just fire C1:TRIG on Run",
+            variable=self._vars["fg_manual_mode"],
+            command=self._on_manual_toggle,
+        )
+        self._manual_cb.pack(anchor="w")
+        # Manual-mode warning note — must be a direct child of self so that
+        # pack(before=self._nb) works correctly.
+        self._manual_note = tk.Label(
+            self,
+            text=(
+                "⚠  Manual mode: GUI will NOT program the FG.\n"
+                "Set up the FG front-panel exactly as you want,\n"
+                "then press Run to trigger the burst and capture."
+            ),
+            justify="left", fg="#856404", bg="#fff3cd",
+            font=("Segoe UI", 7), wraplength=320, padx=4, pady=2,
+        )
+
         self._nb = ttk.Notebook(self)
         self._nb.pack(fill="both", expand=True)
+
+        # Show/hide based on saved state (after _nb is packed so before= works)
+        if self._vars["fg_manual_mode"].get():
+            self._manual_note.pack(fill="x", before=self._nb)
 
         self._simple_tab = ttk.Frame(self._nb, padding=6)
         self._arb_tab    = ttk.Frame(self._nb, padding=6)
@@ -69,6 +98,18 @@ class FGPanel(ttk.LabelFrame):
         active_mode = self._cfg.get("fg_mode", "simple")
         if active_mode == "arb":
             self._nb.select(1)
+
+    def _on_manual_toggle(self) -> None:
+        manual = self._vars["fg_manual_mode"].get()
+        if manual:
+            self._manual_note.pack(fill="x", before=self._nb)
+        else:
+            self._manual_note.pack_forget()
+        # ttk.Notebook doesn't accept state= on the widget itself;
+        # disable/enable each tab individually instead.
+        tab_state = "disabled" if manual else "normal"
+        for i in range(self._nb.index("end")):
+            self._nb.tab(i, state=tab_state)
 
     # ── Simple Pulse tab ──────────────────────────────────────────────────────
 
@@ -295,6 +336,7 @@ class FGPanel(ttk.LabelFrame):
                        if "pulse_high_v" in self._vars else 3.3)
 
         return {
+            "fg_manual_mode":       bool(self._vars["fg_manual_mode"].get()),
             "fg_mode":              mode,
             "pulse_high_v":         float(self._vars.get("pulse_high_v", tk.DoubleVar(value=3.3)).get()
                                           if "pulse_high_v" in self._vars else 3.3),

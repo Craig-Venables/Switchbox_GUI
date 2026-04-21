@@ -91,11 +91,11 @@ Everything below is fully AUTOMATIC — the GUI sends all SCPI/serial
 commands. You do not touch any instrument front panel.
 
 Step 1 — SMU Bias  (Keithley 4200, if connected)
-  Sends KXCI commands:
-    DV <ch>,0,<voltage>,<compliance>   — force the set voltage
-    CN <ch>                            — connect / enable output
-  The 4200 holds this voltage for the entire measurement.
-  NO C module / UL mode is used.  Just two direct KXCI commands.
+  Enters UL mode and sends one EX command:
+    EX A_SMU_BiasTimedRead_Start SMU_BiasTimedRead_Start(voltage, compliance)
+  The C module calls forcev() which latches the SMU output at the requested
+  voltage.  The hardware holds it until the next EX call or a power cycle.
+  Requires the A_SMU_BiasTimedRead_Start module compiled in the 4200 USRLIB.
   If the 4200 is not connected this step is skipped silently.
 
 Step 2 — Laser re-arm check
@@ -221,8 +221,8 @@ TBS1000C Scope      │ Sample rate           : 1 GS/s max
                     │ Effective rise time   : ≈ 1.75 ns (200 MHz)
 ────────────────────┼──────────────────────────────────────────────
 Keithley 4200 SMU   │ Role in this GUI      : DC bias only
-                    │ Bias method           : KXCI DV / CN / CL
-                    │ No C module used      : interactive mode only
+                    │ Bias method           : EX/UL → SMU_BiasTimedRead_Start
+                    │ C module required     : A_SMU_BiasTimedRead_Start (USRLIB)
 ────────────────────┴──────────────────────────────────────────────
 """
 
