@@ -1,5 +1,13 @@
 # Laser FG Scope GUI
 
+> ## Important Status Note (Apr 2026)
+> The current Siglent SDG1032X firmware used in this setup has shown unstable
+> behavior for this workflow (burst state dropping to OFF, trigger-source write
+> inconsistencies, and output-enable transients). As a temporary mitigation, the
+> GUI simple-pulse path is configured as **single pulse with burst disabled**.
+> If robust production use is needed, moving to a different function generator
+> with deterministic one-shot triggering is strongly recommended.
+
 A standalone measurement tool for firing precision laser pulses at a device under test (DUT)
 and capturing the resulting electrical response on an oscilloscope. DC bias is applied to the
 DUT by a Keithley 4200 SMU throughout the measurement.

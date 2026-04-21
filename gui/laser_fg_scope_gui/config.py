@@ -40,7 +40,7 @@ WINDOW_MIN_H      = 720
 
 # ── Hardware defaults (shown in UI on first launch) ────────────────────────────
 DEFAULT_FG_ADDRESS    = "USB0::0xF4EC::0x1103::SDG1XCAQ3R3184::INSTR"
-DEFAULT_SCOPE_ADDRESS = ""          # auto-detect on first use
+DEFAULT_SCOPE_ADDRESS = "USB0::0x0699::0x03C4::C023684::INSTR"
 DEFAULT_4200_ADDRESS  = "GPIB0::17::INSTR"
 DEFAULT_LASER_PORT    = "COM4"
 DEFAULT_LASER_BAUD    = 19200

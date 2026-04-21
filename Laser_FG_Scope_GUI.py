@@ -11,6 +11,13 @@ Usage:
     python Laser_FG_Scope_GUI.py
 
 See gui/laser_fg_scope_gui/README.md for wiring and safety information.
+
+Known FG reliability note (Apr 2026):
+  The Siglent SDG1032X firmware in this setup shows inconsistent burst behavior
+  (TRSR/BTWV state changes and output transients). The GUI currently uses a
+  "single pulse, no burst" fallback in simple mode for stability. If long-term
+  reliability is required, replacing the FG with a unit that has deterministic
+  one-shot trigger behavior is recommended.
 """
 
 import sys

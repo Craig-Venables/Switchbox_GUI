@@ -50,7 +50,16 @@ class ScopePanel(ttk.LabelFrame):
             self,
             text="Auto-configure scope before each Run  (applies timebase and trigger settings)",
             variable=self._vars["auto_configure_scope"],
-        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 2))
+
+        # ── Auto-timebase checkbox ────────────────────────────────────────────
+        self._vars["auto_timebase"] = tk.BooleanVar(
+            value=bool(self._cfg.get("auto_timebase", True)))
+        ttk.Checkbutton(
+            self,
+            text="Auto-timebase from burst duration  (overrides Timebase setting below)",
+            variable=self._vars["auto_timebase"],
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 4))
 
         rows = [
             ("Channel:",      "scope_channel",  "int",   self._cfg.get("scope_channel", 1),
@@ -66,7 +75,7 @@ class ScopePanel(ttk.LabelFrame):
              None, "Seconds to wait after FG trigger before reading waveform."),
         ]
 
-        for row_i, (label, key, kind, default, choices, tip) in enumerate(rows, start=1):
+        for row_i, (label, key, kind, default, choices, tip) in enumerate(rows, start=2):
             tk.Label(self, text=label, anchor="w", bg=bg).grid(
                 row=row_i, column=0, sticky="w", padx=(0, 6), pady=2)
 
@@ -115,7 +124,7 @@ class ScopePanel(ttk.LabelFrame):
                 "Single acquisition mode; scope arms before each Run."
             ),
             fg="#555", bg=bg, font=("Segoe UI", 8), justify="left",
-        ).grid(row=len(rows) + 1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ).grid(row=len(rows) + 2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     def get_values(self) -> Dict[str, Any]:
         return {k: v.get() for k, v in self._vars.items()}
