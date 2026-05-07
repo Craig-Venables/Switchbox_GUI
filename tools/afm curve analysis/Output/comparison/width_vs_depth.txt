@@ -1,0 +1,4 @@
+sample	mean_hole_width_nm	mean_hole_depth_nm	n_holes
+Si.ito.2pacz.pmma.12hr_anneal+tganneal	77.79685372520052	1.1497996999968547	7
+Si.ito.2pacz.pmma.12hr_anneal	60.29558218692911	1.5064576923272766	32
+testing	54.9654680648876	1.4355218556460088	6

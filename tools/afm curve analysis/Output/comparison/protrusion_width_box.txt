@@ -1,0 +1,7 @@
+Si.ito.2pacz.pmma.12hr_anneal+tganneal	Si.ito.2pacz.pmma.12hr_anneal	testing
+69.125	64.419	
+119.268	124.931	
+120.605	129.026	
+79.83	120.803	
+129.301	193.926	
+79.813		
