@@ -1,0 +1,4 @@
+sample	mean_prot_width_nm	mean_prot_height_nm	n_protrusions
+Si.ito.2pacz.pmma.12hr_anneal+tganneal	99.65693852622927	0.5824310135171482	6
+Si.ito.2pacz.pmma.12hr_anneal	126.62099006041908	5.419566839427458	5
+testing			0
