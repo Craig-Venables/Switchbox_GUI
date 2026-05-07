@@ -18,6 +18,7 @@ Plots produced
 9.  ranking_table.html       – ranked table using area-normalised density score
 10. fixed_depth_sensitivity  – % interior pixels ≥ X nm below scan median (shared cutoffs)
 11. hole_depth_over_Rq_box   – detected hole depth / Rq per sample
+12. threshold_review_grid   – per base_sample_name: stacked height | feature maps (reload .ibw)
 """
 
 import os
@@ -819,3 +820,163 @@ def _plot_ranking_table(summary_df, labels, out_dir, template, suffix, save_html
 
     out_df = pd.DataFrame({h: c for h, c in zip(header_vals, cell_vals)})
     if not suffix: _save_txt(_origin_txt_path(out_dir, 'ranking_table.txt'), out_df)
+
+
+def plot_threshold_review_grid(summary_grp: pd.DataFrame, out_dir: str,
+                               stem: str = 'threshold_review_grid'):
+    """
+    Build one multi-row Plotly figure per theme: each row is one scan (same base_sample_name),
+    left = Viridis height map, right = greyscale height + hole/protrusion overlays (same style as
+    per-sample feature maps). Reloads each .ibw and re-runs detection so results match current
+    ``main.py`` threshold settings.
+    """
+    from main import (
+        PLOT_COMP_THRESHOLD_REVIEW,
+        load_ibw,
+        detect_features,
+        measure_features,
+        COL_HOLE,
+        COL_PROT,
+        TEMPLATES,
+    )
+    if not PLOT_COMP_THRESHOLD_REVIEW:
+        return
+    if summary_grp.empty or 'ibw_path' not in summary_grp.columns:
+        return
+    os.makedirs(out_dir, exist_ok=True)
+
+    rows_df = summary_grp.sort_values('filename').reset_index(drop=True)
+    base_label = ''
+    if 'base_sample_name' in rows_df.columns and pd.notna(rows_df['base_sample_name'].iloc[0]):
+        base_label = str(rows_df['base_sample_name'].iloc[0]).strip()
+
+    scans = []
+    for _, row in rows_df.iterrows():
+        path = str(row.get('ibw_path', '')).strip()
+        fn = str(row.get('filename', os.path.basename(path) if path else ''))
+        if not path or not os.path.isfile(path):
+            continue
+        try:
+            z_nm, pixel_nm, _, _ = load_ibw(path)
+            hole_mask, prot_mask, stats = detect_features(z_nm, pixel_nm)
+            fh, hl = measure_features(z_nm, hole_mask, pixel_nm, 'hole', stats['mean_nm'])
+            fp, pl = measure_features(z_nm, prot_mask, pixel_nm, 'protrusion', stats['mean_nm'])
+            scans.append({
+                'label': _short(fn),
+                'z_nm': z_nm,
+                'pixel_nm': pixel_nm,
+                'hole_labeled': hl,
+                'prot_labeled': pl,
+                'features_holes': fh,
+                'features_prots': fp,
+            })
+        except Exception:
+            continue
+
+    if not scans:
+        return
+
+    n_scans = len(scans)
+    subplot_titles = []
+    for s in scans:
+        subplot_titles.extend([f"{s['label']} — height", f"{s['label']} — features"])
+
+    for template, suffix in TEMPLATES:
+        fig = make_subplots(
+            rows=n_scans, cols=2,
+            subplot_titles=tuple(subplot_titles),
+            horizontal_spacing=0.06,
+            vertical_spacing=0.03 if n_scans > 1 else 0.08,
+        )
+        for i, s in enumerate(scans):
+            r = i + 1
+            z_nm = s['z_nm']
+            pixel_nm = s['pixel_nm']
+            ny, nx = z_nm.shape
+            x_um = np.arange(nx) * pixel_nm / 1000.0
+            y_um = np.arange(ny) * pixel_nm / 1000.0
+            hole_labeled = s['hole_labeled']
+            prot_labeled = s['prot_labeled']
+            fh = s['features_holes']
+            fp = s['features_prots']
+
+            kwargs_h = dict(
+                z=z_nm, x=x_um, y=y_um,
+                colorscale='Viridis',
+                hovertemplate='X: %{x:.3f} µm<br>Y: %{y:.3f} µm<br>Z: %{z:.3f} nm<extra></extra>',
+            )
+            if i == n_scans - 1:
+                kwargs_h['showscale'] = True
+                kwargs_h['colorbar'] = dict(title=dict(text='Z (nm)', side='right'))
+            else:
+                kwargs_h['showscale'] = False
+            fig.add_trace(go.Heatmap(**kwargs_h), row=r, col=1)
+
+            fig.add_trace(go.Heatmap(
+                z=z_nm, x=x_um, y=y_um,
+                colorscale='Greys',
+                showscale=False,
+                hovertemplate='X: %{x:.3f} µm<br>Y: %{y:.3f} µm<br>Z: %{z:.3f} nm<extra></extra>',
+            ), row=r, col=2)
+
+            if np.any(hole_labeled > 0):
+                overlay_h = np.where(hole_labeled > 0, 1.0, np.nan)
+                fig.add_trace(go.Heatmap(
+                    z=overlay_h, x=x_um, y=y_um,
+                    colorscale=[[0, 'rgba(76,155,232,0.55)'], [1, 'rgba(76,155,232,0.55)']],
+                    showscale=False,
+                    hoverinfo='skip',
+                ), row=r, col=2)
+            if np.any(prot_labeled > 0):
+                overlay_p = np.where(prot_labeled > 0, 1.0, np.nan)
+                fig.add_trace(go.Heatmap(
+                    z=overlay_p, x=x_um, y=y_um,
+                    colorscale=[[0, 'rgba(232,124,76,0.55)'], [1, 'rgba(232,124,76,0.55)']],
+                    showscale=False,
+                    hoverinfo='skip',
+                ), row=r, col=2)
+
+            if fh:
+                cx = [f['centroid_x_nm'] / 1000 for f in fh]
+                cy = [f['centroid_y_nm'] / 1000 for f in fh]
+                htxt = [
+                    f"Hole {f['feature_id']}<br>Depth: {f.get('depth_nm', 0):.2f} nm"
+                    f"<br>⌀: {f['equiv_diameter_nm']:.1f} nm"
+                    for f in fh
+                ]
+                fig.add_trace(go.Scatter(
+                    x=cx, y=cy, mode='markers',
+                    marker=dict(symbol='x-thin', size=8, color=COL_HOLE,
+                                line=dict(width=2, color=COL_HOLE)),
+                    hovertext=htxt, hoverinfo='text',
+                    showlegend=False,
+                ), row=r, col=2)
+            if fp:
+                cx = [f['centroid_x_nm'] / 1000 for f in fp]
+                cy = [f['centroid_y_nm'] / 1000 for f in fp]
+                htxt = [
+                    f"Prot {f['feature_id']}<br>H: {f.get('height_nm', 0):.2f} nm"
+                    f"<br>⌀: {f['equiv_diameter_nm']:.1f} nm"
+                    for f in fp
+                ]
+                fig.add_trace(go.Scatter(
+                    x=cx, y=cy, mode='markers',
+                    marker=dict(symbol='diamond', size=7, color=COL_PROT,
+                                line=dict(width=1, color='white')),
+                    hovertext=htxt, hoverinfo='text',
+                    showlegend=False,
+                ), row=r, col=2)
+
+        title_txt = '<b>Threshold review — height vs feature map</b>'
+        if base_label:
+            title_txt += f'<br><sup>base_sample_name: {base_label}</sup>'
+        fig.update_layout(
+            title=title_txt,
+            template=template,
+            height=min(280 * n_scans + 140, 9000),
+            width=1100,
+            font=dict(family='Arial, sans-serif'),
+        )
+        fig.write_html(os.path.join(out_dir, f'{stem}{suffix}.html'), include_plotlyjs='cdn')
+
+    print(f"  Threshold review ({n_scans} scans) -> {out_dir} ({stem}*.html)")

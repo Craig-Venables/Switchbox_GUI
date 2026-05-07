@@ -88,6 +88,8 @@ PLOT_COMP_RANKING    = False
 PLOT_COMP_FIXED_DEPTH = False
 # Detected holes only: depth / Rq (roughness-normalised severity)
 PLOT_COMP_DEPTH_OVER_RQ = False
+# Per base_sample_name: one HTML with height + feature map rows (reload .ibw for threshold QA)
+PLOT_COMP_THRESHOLD_REVIEW = True
 
 # --- PNG Export Configuration ---
 SAVE_PNGS = False  # Master override for ALL PNGs. If False, no PNGs are generated.
@@ -1154,6 +1156,7 @@ def process_file(filepath: str, output_root: str, replicate_regex: re.Pattern):
 
     summary = {
         'filename':               os.path.basename(filepath),
+        'ibw_path':               os.path.abspath(filepath),
         'base_sample_name':       base_sample_name,
         'scan_x_um':              round(scan_x_um, 4),
         'scan_y_um':              round(scan_y_um, 4),
@@ -1245,25 +1248,30 @@ def run_experiment(ibw_files, output_dir: str, replicate_regex: re.Pattern, expe
 
     if len(all_summaries) >= 1 and SAVE_PLOTS:
         try:
-            from comparison import plot_cross_file_comparison
+            from comparison import plot_cross_file_comparison, plot_threshold_review_grid
             all_holes_df = pd.DataFrame(all_holes_rows)
             all_prots_df = pd.DataFrame(all_prots_rows)
             comp_dir = os.path.join(output_dir, 'comparison')
             os.makedirs(comp_dir, exist_ok=True)
 
-            # Wave 1: replicate-level comparisons for groups with >= 2 files.
+            # Wave 1: per-base_sample_name comparisons + threshold QA HTML
             if 'base_sample_name' in summary_df.columns:
                 for base_sample_name, grp in summary_df.groupby('base_sample_name', dropna=False):
-                    if len(grp) < 2:
-                        continue
                     if not isinstance(base_sample_name, str) or not base_sample_name.strip():
                         continue
                     group_holes = all_holes_df[all_holes_df['base_sample_name'] == base_sample_name].copy() if not all_holes_df.empty else pd.DataFrame()
                     group_prots = all_prots_df[all_prots_df['base_sample_name'] == base_sample_name].copy() if not all_prots_df.empty else pd.DataFrame()
-                    rep_comp_dir = os.path.join(comp_dir, f'{base_sample_name}_replicates')
-                    os.makedirs(rep_comp_dir, exist_ok=True)
-                    # Replicate folders are now PNG-only for speed and smaller outputs.
-                    plot_cross_file_comparison(grp.copy(), group_holes, group_prots, rep_comp_dir, save_html=False)
+                    grp_sorted = grp.sort_values('filename')
+                    if len(grp_sorted) >= 2:
+                        rep_comp_dir = os.path.join(comp_dir, f'{base_sample_name}_replicates')
+                        os.makedirs(rep_comp_dir, exist_ok=True)
+                        plot_cross_file_comparison(grp_sorted.copy(), group_holes, group_prots, rep_comp_dir, save_html=False)
+                        plot_threshold_review_grid(grp_sorted.copy(), rep_comp_dir, stem='threshold_review_grid')
+                    else:
+                        plot_threshold_review_grid(
+                            grp_sorted.copy(), comp_dir,
+                            stem=f'threshold_review_{_safe_slug(base_sample_name)}',
+                        )
 
             # Wave 2: global averaged comparisons.
             averaged_summary_df, averaged_holes_df, averaged_prots_df = _aggregate_replicates(
