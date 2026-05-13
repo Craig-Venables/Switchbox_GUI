@@ -1,0 +1,7 @@
+filename,profile,n_points,feature_type,width_nm,height_nm,width_at_05pct_nm,width_at_10pct_nm,width_at_20pct_nm
+testing.txt,1,15,hole,66.996,1.809,134.056,124.333,66.996
+testing.txt,2,14,hole,52.45,1.414,106.741,97.443,52.45
+testing.txt,3,11,hole,49.777,1.669,95.712,60.389,49.777
+testing.txt,4,10,hole,57.277,1.567,124.501,96.341,57.277
+testing.txt,5,11,hole,49.356,0.885,164.07,54.608,49.356
+testing.txt,6,11,hole,53.938,1.269,84.868,69.02,53.938

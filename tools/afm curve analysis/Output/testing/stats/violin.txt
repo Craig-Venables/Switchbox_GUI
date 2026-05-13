@@ -1,0 +1,7 @@
+profile	feature_type	width_nm	height_nm
+1	hole	66.996	1.809
+2	hole	52.45	1.414
+3	hole	49.777	1.669
+4	hole	57.277	1.567
+5	hole	49.356	0.885
+6	hole	53.938	1.269

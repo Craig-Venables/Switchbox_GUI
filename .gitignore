@@ -11,3 +11,7 @@ tools/LED_testing/build/
 
 # Telegram / messaging secrets (use messaging_data.local.json for real tokens)
 Json_Files/messaging_data.local.json
+/tools/afm 3d holes and protrusion/Data
+/tools/afm 3d holes and protrusion/Output
+
+
