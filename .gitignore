@@ -5,5 +5,9 @@
 dist/
 /build/
 
+# tools/LED_testing PyInstaller output
+tools/LED_testing/dist/
+tools/LED_testing/build/
+
 # Telegram / messaging secrets (use messaging_data.local.json for real tokens)
 Json_Files/messaging_data.local.json
