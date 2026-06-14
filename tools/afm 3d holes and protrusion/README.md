@@ -220,6 +220,51 @@ Open `main.py` and adjust the variables at the very top under `CONFIGURATION`:
 
 ---
 
+## 3.1. Folder-based substrate comparison workflow
+
+Each subfolder under `Data/` is one **comparison set**. Put every scan you want compared together in that folder — duplicating `.ibw` files across folders is fine.
+
+**Example layout:**
+
+```
+Data/
+├── glass_vs_glass_ito/
+│   ├── Glass_0001.ibw
+│   ├── Glass_0002.ibw
+│   ├── Glass_ITO_0001.ibw
+│   └── Glass_ITO_0002.ibw
+├── glass_vs_si/
+│   ├── Glass_0001.ibw
+│   └── Si_0001.ibw
+└── quartz_bare/
+    └── Quartz_0001.ibw
+```
+
+**Naming convention** (replicate numbers are stripped automatically):
+
+| Role | Filename example | `base_sample_name` | Parsed as |
+|------|------------------|-------------------|-----------|
+| Bare substrate | `Glass_0001.ibw` | `Glass` | baseline |
+| With coating | `Glass_ITO_0001.ibw` | `Glass_ITO` | deposit on `Glass` |
+| PMMA on Si | `Si_PMMA_0001.ibw` | `Si_PMMA` | deposit on `Si` |
+
+Use `_` to separate substrate from deposited layer (`Glass_ITO`, `Glass_PMMA`, `Si_ITO`). Supported substrate tokens are whatever you place before the first underscore (`Glass`, `Quartz`, `Si`, etc.).
+
+**Optional baseline override:** if auto-pairing is ambiguous, add a one-line `baseline.txt` in the comparison folder containing the exact `base_sample_name` of the reference scan (e.g. `Glass`).
+
+**Defect density metrics** (per scan and per replicate-averaged sample):
+
+| Column | Meaning |
+|--------|---------|
+| `holes_per_um2` | Hole count / scan area |
+| `prots_per_um2` | Protrusion count / scan area |
+| `defects_per_um2` | Combined holes + protrusions / scan area |
+| `defects_per_mm2` | Same as above × 10⁶ (reporting convenience) |
+
+After processing, each experiment's `comparison/` folder includes **substrate-vs-deposit** outputs (see Section 4.2).
+
+---
+
 ## 4. Outputs
 
 All results are saved in the `Output/` directory under a timestamped run folder:
@@ -249,7 +294,10 @@ Other comparison artifacts:
 - **`summary.csv`**: One row per file; includes **`ibw_path`** (absolute path to the source `.ibw`) for downstream reloads and the threshold-review HTML.
 - **`surface_coverage.html` / `.png`**: Stacked bar chart showing the % of the physical area taken up by holes vs protrusions.
 - **`surface_coverage_box.html` / `.png`**: Box plot of total surface coverage by sample group (replicate outlier detection).
-- **`feature_density.html` / `.png`**: Bar chart comparing holes/µm² and protrusions/µm² across samples (area-normalised).
+- **`feature_density.html` / `.png`**: Bar chart comparing holes/µm², protrusions/µm², and combined total defects/µm² across samples (area-normalised).
+- **`substrate_delta_summary.csv`**: Substrate vs deposit delta table (density, coverage, roughness) with fold-change when paired.
+- **`substrate_defect_density.html`**: Grouped bar chart of substrate baselines vs coated samples.
+- **`substrate_delta_chart.html`**: Deposit − substrate change in combined defect density (defects/µm²).
 - **`roughness_comparison.html` / `.png`**: 6-panel bar chart comparing Ra, Rq, Rz, Rpv, Rsk, and Rku.
 - **`rq_box.html` / `.png`**: Box plot of RMS roughness (`Rq`) by sample group.
 - **`stats_overview.html` / `.png`**: 4-panel bar chart summarising feature density, depths, diameters, and heights (with ±1 std error bars).

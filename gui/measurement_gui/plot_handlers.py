@@ -163,7 +163,7 @@ def _ask_impedance_calibration(parent: Any, folder: str) -> Tuple[Optional[str],
     open_path = None
     short_path = None
     try:
-        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "Impedence Analyzer"
+        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "impedance_analyzer"
         if str(tools_dir) not in sys.path:
             sys.path.insert(0, str(tools_dir))
         from calibration import detect_open_short_paths
@@ -237,7 +237,7 @@ def run_impedance_visualisation(gui: Any) -> None:
         )
         return
     try:
-        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "Impedence Analyzer"
+        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "impedance_analyzer"
         script = tools_dir / "visualise_csv.py"
         if not script.exists():
             script = tools_dir / "visualise_dat.py"
@@ -481,7 +481,7 @@ def run_impedance_combinations(gui: Any) -> None:
         return
     
     try:
-        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "Impedence Analyzer"
+        tools_dir = Path(__file__).resolve().parents[2] / "tools" / "impedance_analyzer"
         script = tools_dir / "compare_combinations.py"
         if not script.exists():
             messagebox.showerror(

@@ -81,7 +81,7 @@ PLOT_COMP_DENSITY    = True
 PLOT_COMP_COVERAGE   = True
 PLOT_COMP_ROUGHNESS  = True
 PLOT_COMP_BOXPLOTS   = True
-PLOT_COMP_BUBBLE     = False
+PLOT_COMP_BUBBLE     = True
 PLOT_COMP_OVERVIEW   = False
 PLOT_COMP_RANKING    = False
 # Apples-to-apples: % of interior pixels at least X nm below image median (same edge mask as detection)
@@ -1046,6 +1046,9 @@ def _aggregate_replicates(summary_df: pd.DataFrame,
             'std_hole_diameter_nm': round(std_hole_diam, 3) if not np.isnan(std_hole_diam) else float('nan'),
             'n_protrusions': n_prots,
             'prots_per_um2': round(prot_density, 4) if not np.isnan(prot_density) else float('nan'),
+            'n_defects_total': n_holes + n_prots,
+            'defects_per_um2': round((n_holes + n_prots) / total_area, 4) if total_area and not np.isnan(total_area) else float('nan'),
+            'defects_per_mm2': round((n_holes + n_prots) / total_area * 1e6, 2) if total_area and not np.isnan(total_area) else float('nan'),
             'avg_prot_height_nm': round(avg_prot_height, 3) if not np.isnan(avg_prot_height) else float('nan'),
             'std_prot_height_nm': round(std_prot_height, 3) if not np.isnan(std_prot_height) else float('nan'),
             'avg_prot_diameter_nm': round(avg_prot_diam, 3) if not np.isnan(avg_prot_diam) else float('nan'),
@@ -1198,6 +1201,9 @@ def process_file(filepath: str, output_root: str, replicate_regex: re.Pattern):
         'std_hole_diameter_nm':   round(_safe_std(h_diams),   3),
         'n_protrusions':          len(features_prots),
         'prots_per_um2':          round(len(features_prots) / scan_area_um2, 4),
+        'n_defects_total':        len(features_holes) + len(features_prots),
+        'defects_per_um2':        round((len(features_holes) + len(features_prots)) / scan_area_um2, 4),
+        'defects_per_mm2':        round((len(features_holes) + len(features_prots)) / scan_area_um2 * 1e6, 2),
         'avg_prot_height_nm':     round(_safe_mean(p_heights),3),
         'std_prot_height_nm':     round(_safe_std(p_heights), 3),
         'avg_prot_diameter_nm':   round(_safe_mean(p_diams),  3),
@@ -1208,7 +1214,8 @@ def process_file(filepath: str, output_root: str, replicate_regex: re.Pattern):
     return summary, features_holes, features_prots
 
 
-def run_experiment(ibw_files, output_dir: str, replicate_regex: re.Pattern, experiment_name: str):
+def run_experiment(ibw_files, output_dir: str, replicate_regex: re.Pattern, experiment_name: str,
+                   experiment_data_dir=None):
     if not ibw_files:
         print(f"No .ibw files found for experiment '{experiment_name}'")
         return
@@ -1274,9 +1281,13 @@ def run_experiment(ibw_files, output_dir: str, replicate_regex: re.Pattern, expe
                         )
 
             # Wave 2: global averaged comparisons.
-            averaged_summary_df, averaged_holes_df, averaged_prots_df = _aggregate_replicates(
-                summary_df, all_holes_df, all_prots_df
-            )
+            averaged_summary_df = pd.DataFrame()
+            averaged_holes_df = pd.DataFrame()
+            averaged_prots_df = pd.DataFrame()
+            if 'base_sample_name' in summary_df.columns:
+                averaged_summary_df, averaged_holes_df, averaged_prots_df = _aggregate_replicates(
+                    summary_df, all_holes_df, all_prots_df
+                )
             if not averaged_summary_df.empty:
                 avg_comp_dir = os.path.join(comp_dir, 'Global_Averaged')
                 os.makedirs(avg_comp_dir, exist_ok=True)
@@ -1287,6 +1298,19 @@ def run_experiment(ibw_files, output_dir: str, replicate_regex: re.Pattern, expe
                     averaged_prots_df,
                     avg_comp_dir,
                 )
+
+            try:
+                import substrate_comparison
+                analysis_df = averaged_summary_df if not averaged_summary_df.empty else summary_df
+                substrate_comparison.run_substrate_analysis(
+                    summary_df=analysis_df,
+                    output_dir=comp_dir,
+                    experiment_name=experiment_name,
+                    experiment_data_dir=experiment_data_dir,
+                )
+            except Exception as exc:
+                print(f"Substrate comparison ERROR: {exc}")
+                traceback.print_exc()
 
             plot_cross_file_comparison(
                 summary_df,
@@ -1343,7 +1367,8 @@ def main():
 
     for exp_name, exp_files in experiment_specs:
         exp_out = os.path.join(output_dir, _safe_slug(exp_name))
-        run_experiment(exp_files, exp_out, replicate_regex, exp_name)
+        exp_data_dir = data_dir if exp_name == 'unnamed' else os.path.join(data_dir, exp_name)
+        run_experiment(exp_files, exp_out, replicate_regex, exp_name, experiment_data_dir=exp_data_dir)
 
     print('=' * 60)
 

@@ -1,13 +1,43 @@
+# Local data and secrets
 /Data_save_loc
-*.pyc
+Json_Files/messaging_data.local.json
 
-# PyInstaller build outputs (root only — not ``Documents/build/`` documentation)
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# PyInstaller build outputs (root only — not Documents/build/ documentation)
 dist/
 /build/
 
-# Telegram / messaging secrets (use messaging_data.local.json for real tokens)
-Json_Files/messaging_data.local.json
-/tools/afm 3d holes and protrusion/Data
-/tools/afm 3d holes and protrusion/Output
+# Binaries and vendor bundles (install separately — see SETUP.md)
+*.exe
+Equipment/Moku/Moku CLI/
 
+# AFM tool — raw data and generated outputs (regenerate locally)
+tools/afm_3d_holes_protrusion/Data/
+tools/afm_3d_holes_protrusion/Output/
+tools/afm 3d holes and protrusion/Data/
+tools/afm 3d holes and protrusion/Output/
+tools/afm_curve_analysis/Output/
+*.ibw
 
+# ITO / impedance analysis outputs (regenerate locally)
+tools/ito_analysis/**/*.png
+tools/ito_analysis/**/*.csv
+
+# OS
+.DS_Store
+Thumbs.db

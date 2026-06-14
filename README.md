@@ -4,7 +4,14 @@ Comprehensive measurement system for device characterisation with support for IV
 
 ## Quick Start
 
+**New machine?** Follow the full [SETUP.md](SETUP.md) guide (Python 3.10+, venv, dependencies, config).
+
 ```bash
+# Create venv and install (first time only)
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
 # Run the main application
 python main.py
 
@@ -1195,8 +1202,8 @@ Configuration files are located in `Json_Files/`:
 
 ## License
 
-[Add your license information here]
+MIT License — see [LICENSE](LICENSE).
 
 ## Contributing
 
-[Add contributing guidelines here if applicable]
+See [CONTRIBUTING.md](CONTRIBUTING.md) for repository layout, conventions, and handoff notes.

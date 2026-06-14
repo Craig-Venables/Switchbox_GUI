@@ -48,11 +48,17 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 
 ---
 
+## Setup & handoff
+
+- **[SETUP.md](../SETUP.md)** (repo root) — install on a new machine  
+- **[CONTRIBUTING.md](../CONTRIBUTING.md)** — layout, conventions, maintainer notes  
+
 ## Testing (code, not docs)
 
 From repository root:
 
 ```bash
+pip install -r requirements-dev.txt
 python -m pytest tests
 ```
 

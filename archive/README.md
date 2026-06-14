@@ -25,9 +25,9 @@ codebase during refactoring. **No production code depends on these modules.**
   - `Check_Connection.py` – replaced by `gui.connection_check_gui`
   - `Sample_GUI_old.py`, `Sample_GUI.py` – replaced by `gui.sample_gui`
   - `Measurement_GUI.py`, `Measurement_GUI.py.backup` – replaced by `gui.measurement_gui`
-  - `sequential.py` – replaced by `Measurments.sequential_runner`
+  - `sequential.py` – replaced by `Measurements.sequential_runner`
   - `old/Equipment/` – older equipment managers (now in `Equipment/managers/`)
-  - `old/Measurments/` – older measurement services
+  - `old/Measurments/` – older measurement services (superseded by `Measurements/`)
 
 ## Restoration
 
