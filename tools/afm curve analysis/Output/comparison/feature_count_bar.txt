@@ -1,4 +1,0 @@
-sample	n_holes	n_protrusions
-Si.ito.2pacz.pmma.12hr_anneal+tganneal	7	6
-Si.ito.2pacz.pmma.12hr_anneal	32	5
-testing	6	0

@@ -15,7 +15,7 @@ Use this folder as the **entry point** when an automated assistant (Cursor, Copi
 ## Naming that trips people up
 
 - **“Measurement GUI”** in docs means the **package** `gui/measurement_gui/`, not legacy `archive/old_code/Measurement_GUI.py`. This is stated at the top of the measurement architecture reference.
-- The canonical measurement data package is **`Measurements/`** (with an **e**). A typo duplicate **`Measurments/`** exists for older tooling; the main app uses **`Measurements`**.
+- The canonical measurement data package is **`Measurements/`** (with an **e**). **`Measurments/`** is a deprecated compatibility shim that re-exports `Measurements`; do not add code there.
 
 ## When you change imports or add packages
 

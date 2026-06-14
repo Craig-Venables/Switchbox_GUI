@@ -12,6 +12,11 @@ This guide provides step-by-step instructions for installing and configuring the
 
 ## Step 1: Install Moku Python Package
 
+> **Note:** The bundled `Moku CLI/` installer folder is **not stored in git** (see `.gitignore`).
+> Install the CLI from [Liquid Instruments](https://liquidinstruments.com/) or use the Python
+> `liquidinstruments-moku` package below. Place a local copy under `Equipment/Moku/Moku CLI/` if
+> your bench workflow requires the standalone CLI.
+
 First, activate your virtual environment (if using one):
 
 ```bash
@@ -362,7 +367,7 @@ ls -la /opt/liquidinstruments/moku-cli/mokucli
 Equipment_Classes/Moku/
 ├── Monku_Go.py              # Main Moku Go controller script (USB connection)
 ├── README.md                # This comprehensive installation guide
-├── Moku CLI/                # Moku Command Line Interface
+├── Moku CLI/                # Optional local install (gitignored — see Step 2)
 │   ├── mokucli.exe         # Main CLI executable
 │   └── _internal/          # CLI dependencies
 └── Moku_Go.py              # Alternative implementation (Multiplexer version)
@@ -409,7 +414,7 @@ To get the Moku CLI working for USB connections:
 
 - Python: 3.7+
 - liquidinstruments-moku: Latest version (not pymoku!)
-- Moku CLI: v4.0.1 (bundled in project)
+- Moku CLI: install separately (see Step 2; not bundled in git)
 - Connection: USB only (not Ethernet)
 
 ---

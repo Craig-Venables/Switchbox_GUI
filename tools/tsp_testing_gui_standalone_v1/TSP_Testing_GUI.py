@@ -3,6 +3,13 @@ TSP Testing GUI for Keithley 2450
 Fast, buffer-based pulse testing with real-time visualization
 """
 
+import sys
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 import threading
 import time
 import os
@@ -24,7 +31,7 @@ from Equipment.SMU_AND_PMU.Keithley2450_TSP import Keithley2450_TSP
 from Equipment.SMU_AND_PMU.Keithley2450_TSP_Sim import Keithley2450_TSP_Sim
 from Equipment.SMU_AND_PMU.keithley2450_tsp_scripts import Keithley2450_TSP_Scripts
 from Equipment.SMU_AND_PMU.keithley2450_tsp_sim_scripts import Keithley2450_TSP_Sim_Scripts
-from Measurments.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
+from Measurements.data_formats import TSPDataFormatter, FileNamer, save_tsp_measurement
 
 
 # Test function definitions with parameters

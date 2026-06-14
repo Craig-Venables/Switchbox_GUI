@@ -9,10 +9,10 @@ This guide shows how to use the modular utilities for measurements, sweeps, opti
 ### 1. Basic IV Sweep with Optical Control
 
 ```python
-from Measurments.source_modes import SourceMode, apply_source, measure_result
-from Measurments.sweep_patterns import build_sweep_values, SweepType
-from Measurments.optical_controller import OpticalController
-from Measurments.data_utils import safe_measure_current
+from Measurements.source_modes import SourceMode, apply_source, measure_result
+from Measurements.sweep_patterns import build_sweep_values, SweepType
+from Measurements.optical_controller import OpticalController
+from Measurements.data_utils import safe_measure_current
 
 # Setup
 optical_ctrl = OpticalController(optical=laser, psu=psu)
@@ -38,7 +38,7 @@ optical_ctrl.disable()
 
 **Solution:**
 ```python
-from Measurments.data_utils import safe_measure_current, safe_measure_voltage
+from Measurements.data_utils import safe_measure_current, safe_measure_voltage
 
 # Always returns float, handles all instrument types
 current = safe_measure_current(keithley)
@@ -60,7 +60,7 @@ current = current_tuple[1] if isinstance(current_tuple, (list, tuple)) and len(c
 
 **Solution:**
 ```python
-from Measurments.optical_controller import OpticalController
+from Measurements.optical_controller import OpticalController
 
 # Works with laser OR PSU LED automatically
 optical_ctrl = OpticalController(optical=laser, psu=psu)
@@ -92,7 +92,7 @@ elif psu is not None:
 
 **Voltage Mode (Traditional):**
 ```python
-from Measurments.source_modes import SourceMode, apply_source, measure_result
+from Measurements.source_modes import SourceMode, apply_source, measure_result
 
 apply_source(keithley, SourceMode.VOLTAGE, 1.0, compliance=1e-3)
 current = measure_result(keithley, SourceMode.VOLTAGE)
@@ -107,7 +107,7 @@ voltage = measure_result(keithley, SourceMode.CURRENT)
 
 **Using Config Object:**
 ```python
-from Measurments.source_modes import SourceModeConfig, SourceMode
+from Measurements.source_modes import SourceModeConfig, SourceMode
 
 config = SourceModeConfig(SourceMode.CURRENT, 1e-6, 10.0)
 config.apply(keithley)
@@ -120,7 +120,7 @@ measurement = config.measure(keithley)
 
 **Generate any sweep pattern:**
 ```python
-from Measurments.sweep_patterns import build_sweep_values, SweepType
+from Measurements.sweep_patterns import build_sweep_values, SweepType
 
 # Full sweep (start → stop → start)
 voltages = build_sweep_values(0, 1, 0.1, SweepType.FULL)
@@ -188,7 +188,7 @@ elif self.multiplexer_type == "Electronic_Mpx":
 
 **Consistent file output:**
 ```python
-from Measurments.data_formats import DataFormatter, save_measurement_data
+from Measurements.data_formats import DataFormatter, save_measurement_data
 import numpy as np
 
 formatter = DataFormatter()
@@ -208,7 +208,7 @@ save_measurement_data(Path("data.txt"), data, header, fmt)
 
 **File Naming:**
 ```python
-from Measurments.data_formats import FileNamer
+from Measurements.data_formats import FileNamer
 
 namer = FileNamer()
 
@@ -231,11 +231,11 @@ folder = namer.get_device_folder("MySample", "A1", "IV_sweeps")
 ## Complete Example: Generic IV Sweep
 
 ```python
-from Measurments.source_modes import SourceMode, apply_source, measure_result
-from Measurments.sweep_patterns import build_sweep_values, SweepType
-from Measurments.optical_controller import OpticalController
-from Measurments.data_utils import safe_measure_current
-from Measurments.data_formats import DataFormatter, save_measurement_data
+from Measurements.source_modes import SourceMode, apply_source, measure_result
+from Measurements.sweep_patterns import build_sweep_values, SweepType
+from Measurements.optical_controller import OpticalController
+from Measurements.data_utils import safe_measure_current
+from Measurements.data_formats import DataFormatter, save_measurement_data
 import time
 import numpy as np
 from pathlib import Path
@@ -283,12 +283,12 @@ def run_iv_sweep(keithley, optical, psu, start_v, stop_v, step_v, sweep_type, ic
 Each module includes built-in tests:
 
 ```bash
-python -m Measurments.data_utils
-python -m Measurments.optical_controller
-python -m Measurments.source_modes
-python -m Measurments.sweep_patterns
+python -m Measurements.data_utils
+python -m Measurements.optical_controller
+python -m Measurements.source_modes
+python -m Measurements.sweep_patterns
 python -m Equipment.multiplexer_manager
-python -m Measurments.data_formats
+python -m Measurements.data_formats
 ```
 
 All should print "All tests passed!" ✓
@@ -312,17 +312,17 @@ When refactoring existing code:
 
 ```python
 # Data utilities
-from Measurments.data_utils import (
+from Measurements.data_utils import (
     safe_measure_current,
     safe_measure_voltage,
     normalize_measurement
 )
 
 # Optical control
-from Measurments.optical_controller import OpticalController
+from Measurements.optical_controller import OpticalController
 
 # Source modes
-from Measurments.source_modes import (
+from Measurements.source_modes import (
     SourceMode,
     apply_source,
     measure_result,
@@ -330,7 +330,7 @@ from Measurments.source_modes import (
 )
 
 # Sweep patterns
-from Measurments.sweep_patterns import (
+from Measurements.sweep_patterns import (
     build_sweep_values,
     SweepType
 )
@@ -342,7 +342,7 @@ from Equipment.multiplexer_manager import (
 )
 
 # Data formatting
-from Measurments.data_formats import (
+from Measurements.data_formats import (
     DataFormatter,
     FileNamer,
     save_measurement_data

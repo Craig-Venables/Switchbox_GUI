@@ -1,4 +1,0 @@
-Sample	N holes	Width mean (nm)	Width std (nm)	Depth mean (nm)	Depth std (nm)	Rank N	Rank W	Rank D	Composite
-testing	6	55.0	6.0	1.436	0.301	1	1	2	4
-Si.ito.2pacz.pmma.12hr_anneal+tganneal	7	77.8	28.2	1.150	0.187	2	3	1	6
-Si.ito.2pacz.pmma.12hr_anneal	32	60.3	16.8	1.506	0.469	3	2	3	8

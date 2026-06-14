@@ -8,7 +8,7 @@ plus tab-separated .txt companions for Origin.
 Plots produced
 --------------
 1.  feature_counts.html      – raw holes vs protrusions per sample (bar)
-2.  feature_density.html     – holes & protrusions per µm² (area-normalised bar)
+2.  feature_density.html     – holes, protrusions & combined defects per µm² (area-normalised bar)
 3.  hole_depth_box.html      – hole depth distribution per sample (box + strip)
 4.  hole_diameter_box.html   – hole equivalent diameter per sample
 5.  prot_height_box.html     – protrusion height distribution per sample
@@ -360,9 +360,13 @@ def _plot_feature_counts(summary_df, labels, colours, out_dir, template, suffix,
 # ===========================================================================
 
 def _plot_feature_density(summary_df, labels, colours, out_dir, template, suffix, save_html=True):
-    """Bar chart of holes/µm² and protrusions/µm² — fair cross-sample comparison."""
+    """Bar chart of holes/µm², protrusions/µm², and combined defects/µm²."""
     hole_dens = summary_df.get('holes_per_um2', pd.Series([float('nan')] * len(summary_df))).fillna(0).values
     prot_dens = summary_df.get('prots_per_um2', pd.Series([float('nan')] * len(summary_df))).fillna(0).values
+    if 'defects_per_um2' in summary_df.columns:
+        total_dens = summary_df['defects_per_um2'].fillna(0).values
+    else:
+        total_dens = hole_dens + prot_dens
     areas     = summary_df.get('scan_area_um2', pd.Series([float('nan')] * len(summary_df))).values
 
     hover_h = [
@@ -372,6 +376,10 @@ def _plot_feature_density(summary_df, labels, colours, out_dir, template, suffix
     hover_p = [
         f'<b>{lbl}</b><br>Prots/µm²: {pd_:.3f}<br>Scan area: {a:.3f} µm²'
         for lbl, pd_, a in zip(labels, prot_dens, areas)
+    ]
+    hover_t = [
+        f'<b>{lbl}</b><br>Total defects/µm²: {td:.3f}<br>Scan area: {a:.3f} µm²'
+        for lbl, td, a in zip(labels, total_dens, areas)
     ]
 
     fig = go.Figure()
@@ -386,6 +394,12 @@ def _plot_feature_density(summary_df, labels, colours, out_dir, template, suffix
         marker_color='#E87C4C', opacity=0.85,
         text=[f'{v:.3f}' for v in prot_dens], textposition='outside',
         hovertext=hover_p, hoverinfo='text',
+    ))
+    fig.add_trace(go.Bar(
+        name='Total defects / µm²', x=labels, y=total_dens,
+        marker_color='#2ECC71', opacity=0.85,
+        text=[f'{v:.3f}' for v in total_dens], textposition='outside',
+        hovertext=hover_t, hoverinfo='text',
     ))
     fig.update_layout(
         barmode='group',
@@ -409,6 +423,7 @@ def _plot_feature_density(summary_df, labels, colours, out_dir, template, suffix
               pd.DataFrame({'sample': labels,
                             'holes_per_um2': hole_dens,
                             'prots_per_um2': prot_dens,
+                            'defects_per_um2': total_dens,
                             'scan_area_um2': areas}))
 
 

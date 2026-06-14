@@ -7,7 +7,7 @@ One-page cheat sheet for the new modular utilities.
 ## 🔧 Data Normalization
 
 ```python
-from Measurments.data_utils import safe_measure_current, safe_measure_voltage
+from Measurements.data_utils import safe_measure_current, safe_measure_voltage
 
 # Instead of complex tuple checking:
 current = safe_measure_current(keithley)  # Always returns float
@@ -19,7 +19,7 @@ voltage = safe_measure_voltage(keithley)  # Always returns float
 ## 💡 Optical Control
 
 ```python
-from Measurments.optical_controller import OpticalController
+from Measurements.optical_controller import OpticalController
 
 # One interface for all light sources
 optical_ctrl = OpticalController(optical=laser, psu=psu)
@@ -38,7 +38,7 @@ with OpticalController(optical=laser, psu=psu) as ctrl:
 ## ⚡ Source Modes
 
 ```python
-from Measurments.source_modes import SourceMode, apply_source, measure_result
+from Measurements.source_modes import SourceMode, apply_source, measure_result
 
 # Voltage mode (traditional)
 apply_source(keithley, SourceMode.VOLTAGE, 1.0, compliance=1e-3)
@@ -54,7 +54,7 @@ voltage = measure_result(keithley, SourceMode.CURRENT)
 ## 📊 Sweep Patterns
 
 ```python
-from Measurments.sweep_patterns import build_sweep_values, SweepType
+from Measurements.sweep_patterns import build_sweep_values, SweepType
 
 # Generate any sweep pattern
 voltages = build_sweep_values(
@@ -99,7 +99,7 @@ with MultiplexerContext(mpx, device_name, device_index):
 ## 📁 Data Formatting
 
 ```python
-from Measurments.data_formats import DataFormatter, save_measurement_data
+from Measurements.data_formats import DataFormatter, save_measurement_data
 import numpy as np
 
 formatter = DataFormatter()
@@ -122,7 +122,7 @@ save_measurement_data(Path("data.txt"), data, header, fmt)
 ## 📝 File Naming
 
 ```python
-from Measurments.data_formats import FileNamer
+from Measurements.data_formats import FileNamer
 
 namer = FileNamer()
 
@@ -145,10 +145,10 @@ folder = namer.get_device_folder("MySample", "A1", "IV_sweeps")
 ## 🎯 Complete Example
 
 ```python
-from Measurments.source_modes import SourceMode, apply_source, measure_result
-from Measurments.sweep_patterns import build_sweep_values, SweepType
-from Measurments.optical_controller import OpticalController
-from Measurments.data_utils import safe_measure_current
+from Measurements.source_modes import SourceMode, apply_source, measure_result
+from Measurements.sweep_patterns import build_sweep_values, SweepType
+from Measurements.optical_controller import OpticalController
+from Measurements.data_utils import safe_measure_current
 
 # Setup
 optical_ctrl = OpticalController(optical=laser, psu=psu)
@@ -208,17 +208,17 @@ v_list = build_sweep_values(start, stop, step, SweepType.FULL)
 
 ```python
 # Data utilities
-from Measurments.data_utils import (
+from Measurements.data_utils import (
     safe_measure_current,
     safe_measure_voltage,
     normalize_measurement
 )
 
 # Optical control
-from Measurments.optical_controller import OpticalController
+from Measurements.optical_controller import OpticalController
 
 # Source modes
-from Measurments.source_modes import (
+from Measurements.source_modes import (
     SourceMode,
     apply_source,
     measure_result,
@@ -226,7 +226,7 @@ from Measurments.source_modes import (
 )
 
 # Sweep patterns
-from Measurments.sweep_patterns import (
+from Measurements.sweep_patterns import (
     build_sweep_values,
     SweepType
 )
@@ -238,7 +238,7 @@ from Equipment.multiplexer_manager import (
 )
 
 # Data formatting
-from Measurments.data_formats import (
+from Measurements.data_formats import (
     DataFormatter,
     FileNamer,
     save_measurement_data
@@ -251,12 +251,12 @@ from Measurments.data_formats import (
 
 ```bash
 # Test each module
-python -m Measurments.data_utils
-python -m Measurments.optical_controller
-python -m Measurments.source_modes
-python -m Measurments.sweep_patterns
+python -m Measurements.data_utils
+python -m Measurements.optical_controller
+python -m Measurements.source_modes
+python -m Measurements.sweep_patterns
 python -m Equipment.multiplexer_manager
-python -m Measurments.data_formats
+python -m Measurements.data_formats
 ```
 
 All should print "All tests passed!" ✓

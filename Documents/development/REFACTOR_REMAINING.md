@@ -11,7 +11,7 @@ This document tracks outstanding refactoring tasks for the Switchbox GUI project
 - **Documentation**: Module docstrings, README updates, `TODO.md` consolidation
 - **Archive**: Legacy code moved to `archive/`
 - **Deprecation shims**: `IV_Analysis`, `Sample_Analysis` → `analysis`
-- **Naming fixes**: `Measurments` → `Measurements`, `Sample_Infomation` → `Sample_Information`
+- **Naming fixes**: `Measurments` → `Measurements` shim (root `Measurments/` re-exports `Measurements`)
 - **Layout tabs**: All 8 tabs extracted to `gui/measurement_gui/layout/tab_*.py`
 - **Layout sections**: Collapsible panels extracted to `gui/measurement_gui/layout/sections/`
 - **Advanced tests sections**: Manual endurance/retention and conditional testing moved to `layout/sections/advanced_tests.py`
