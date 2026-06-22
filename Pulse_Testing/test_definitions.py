@@ -18,26 +18,134 @@ def _get_supported_tests(system_name: str) -> List[str]:
     return get_supported_tests(system_name)
 
 
+# Dropdown order (by backend function name). Endurance + retention first for PMU workflow.
+TEST_DISPLAY_ORDER: List[str] = [
+    "endurance_test",
+    "retention_test",
+    "pulse_read_repeat",
+    "multi_pulse_then_read",
+    "pulse_multi_read",
+    "multi_read_only",
+    "width_sweep_with_reads",
+    "width_sweep_with_all_measurements",
+    "potentiation_depression_cycle",
+    "potentiation_only",
+    "depression_only",
+    "relaxation_after_multi_pulse",
+    "relaxation_after_multi_pulse_with_pulse_measurement",
+    "current_range_finder",
+    "laser_and_read",
+    "pulse_train_varying_amplitudes",
+    "smu_slow_pulse_measure",
+    "smu_endurance",
+    "smu_retention",
+    "smu_retention_with_pulse_measurement",
+    "optical_read_pulsed_light",
+    "optical_pulse_train_read",
+    "optical_pulse_train_pattern_read",
+    "optical_binary_sweep",
+    "optical_pattern_repeat",
+]
+
+# Old GUI labels → new (presets / saved configs)
+TEST_DISPLAY_NAME_ALIASES: Dict[str, str] = {
+    "Endurance Test": "Endurance",
+    "PMU Retention Test": "Retention",
+    "Pulse-Read-Repeat": "Read → Write → Read",
+    "Multi-Pulse-Then-Read": "Pulse Train → Read",
+    "Pulse-Multi-Read": "Pulse → Multi-Read",
+    "Multi-Read Only": "Read Only",
+    "Width Sweep": "Pulse Width Sweep",
+    "Width Sweep (Full)": "Pulse Width Sweep (+ I)",
+    "Potentiation-Depression Cycle": "Pot / Dep Cycle",
+    "Potentiation Only": "Potentiation",
+    "Depression Only": "Depression",
+    "Relaxation After Multi-Pulse": "Relaxation",
+    "Relaxation After Multi-Pulse With Pulse Measurement": "Relaxation (+ Pulse I)",
+    "Laser and Read": "Laser + Read",
+    "⚠️ SMU Slow Pulse Measure": "SMU: Slow Pulse",
+    "⚠️ SMU Endurance": "SMU: Endurance",
+    "⚠️ SMU Retention": "SMU: Retention",
+    "⚠️ SMU Retention (Pulse Measured)": "SMU: Retention (+ Pulse I)",
+    "⚡ Electrical Pulse Train (Memristor Programming)": "Electrical Pulse Train",
+    "🔦 Optical Read (Pulsed Light)": "Optical: Pulsed Read",
+    "🔦 Optical Pulse Train + Read": "Optical: Pulse Train + Read",
+    "🔦 Continuous Read with Laser Pulse Pattern": "Optical: Pattern + Read",
+    "🔦 Binary Pattern Sweep": "Optical: Binary Sweep",
+    "🔦 Pattern Repeat": "Optical: Pattern Repeat",
+}
+
+
+def canonical_test_display_name(name: str) -> str:
+    """Map legacy display name to current TEST_FUNCTIONS key."""
+    return TEST_DISPLAY_NAME_ALIASES.get(name, name)
+
+
+# Legacy preset names → current tsp_test_presets.json keys (within each test bucket).
+PRESET_NAME_ALIASES: Dict[str, str] = {
+    "PMU 2-cycle smoke": "DUT 10cyc @ 1us",
+    "PMU 8-read smoke": "DUT 20 reads @ 1us program",
+    "PMU 1us write (scope validated)": "DUT 1us write",
+    "PMU 100ns write": "DUT 100ns write",
+    "DUT 50-cycle (1us)": "DUT 20cyc @ 1us (max burst)",
+    "DUT 100-cycle (1us)": "DUT 20cyc @ 1us (max burst)",
+    "DUT 100 retention reads (may exceed burst limit)": "Stress 100 reads (may exceed burst limit)",
+    "DUT 20 program pulses / 30 reads": "DUT 20 program / 30 reads",
+    "DUT min gaps 20ns (reads+pulses)": "DUT min gaps 20ns",
+    "DUT program @ 1us / 20 reads": "DUT 20 reads @ 1us program",
+    "Limit max reads (200) — may exceed burst limit": "Stress 100 reads (may exceed burst limit)",
+}
+
+
+def canonical_preset_name(name: str) -> str:
+    return PRESET_NAME_ALIASES.get(name, name)
+
+
+def migrate_presets_dict(presets: Dict[str, Any]) -> Dict[str, Any]:
+    """Rename preset buckets and preset keys when loading JSON saved under old names."""
+    out: Dict[str, Any] = {}
+    for old_name, preset_map in presets.items():
+        new_name = canonical_test_display_name(old_name)
+        bucket = out.setdefault(new_name, {})
+        if isinstance(preset_map, dict):
+            for preset_name, preset_values in preset_map.items():
+                bucket[canonical_preset_name(preset_name)] = preset_values
+    return out
+
+
+def _display_order_index(defn: Dict[str, Any]) -> int:
+    func = defn.get("function", "")
+    try:
+        return TEST_DISPLAY_ORDER.index(func)
+    except ValueError:
+        return len(TEST_DISPLAY_ORDER)
+
+
 # Display name -> { function, description, params, plot_type, optional only_for_systems }
 TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
-    "Pulse-Read-Repeat": {
+    "Read → Write → Read": {
         "function": "pulse_read_repeat",
-        "description": "Pattern: Initial Read → (Pulse → Read → Delay) × N\nBasic pulse response with immediate read after each pulse",
+        "description": (
+            "Pattern: Initial Read → (Pulse → Read → Delay) × N\n"
+            "4200 PMU: use keithley4200_pmu, ns/µs timing, CH1 force / CH2 measure.\n"
+            "Validated bench: 1 µs write @ 1 V with reads either side (preset: DUT 1us write)."
+        ),
         "params": {
-            "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
+            "pulse_voltage": {"default": 1.0, "label": "Pulse Voltage (V)", "type": "float"},
             "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "num_cycles": {"default": 10, "label": "Number of Cycles", "type": "int"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
-            "read_width": {"default": 0.5, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
-            "read_delay": {"default": 1.0, "label": "Read Delay (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_voltage": {"default": 0.3, "label": "Read Voltage (V)", "type": "float"},
+            "delay_between": {"default": 0.02, "label": "Delay Between (ms)", "type": "float"},
+            "num_cycles": {"default": 1, "label": "Number of Cycles", "type": "int"},
+            "clim": {"default": 1e-3, "label": "Current Limit (A)", "type": "float"},
+            "read_width": {"default": 2.0, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_delay": {"default": 0.02, "label": "Read Delay (µs) [4200A only]", "type": "float", "4200a_only": True},
             "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
-            "enable_debug_output": {"default": True, "label": "Enable Debug Output (Print data after each pulse) [4200A only]", "type": "bool", "4200a_only": True},
+            "pulse_rise_time": {"default": 0.1, "label": "Write Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "enable_debug_output": {"default": False, "label": "Enable Debug Output [4200A only]", "type": "bool", "4200a_only": True},
         },
         "plot_type": "time_series",
     },
-    "Laser and Read": {
+    "Laser + Read": {
         "function": "laser_and_read",
         "description": "⚠️ IMPORTANT: You MUST reconfigure coax cables before running this test!\nPattern: CH1 continuous reads, CH2 independent laser pulse\nPhoto-induced effects, laser-assisted switching, time-resolved photoconductivity",
         "params": {
@@ -58,9 +166,9 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "Multi-Pulse-Then-Read": {
+    "Pulse Train → Read": {
         "function": "multi_pulse_then_read",
-        "description": "Pattern: Initial Read → (Pulse×N → Read×M) × Cycles\nMultiple pulses then multiple reads per cycle",
+        "description": "Pattern: Initial Read → (Pulse×N → Read×M) × Cycles\n4200 PMU: 2-ch (CH1 force / CH2 measure). Multiple pulses then multiple reads per cycle",
         "params": {
             "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
             "num_pulses_per_read": {"default": 10, "label": "Pulses Per Cycle", "type": "int"},
@@ -76,9 +184,9 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "Width Sweep": {
+    "Pulse Width Sweep": {
         "function": "width_sweep_with_reads",
-        "description": "Pattern: Initial Read, (Pulse→Read)×N, Reset (per width)\nFind optimal pulse timing, measure speed dependence",
+        "description": "Pattern: Initial Read, (Pulse→Read)×N, Reset (per width)\n4200 PMU: 2-ch (CH1 force / CH2 measure). Find optimal pulse timing, measure speed dependence",
         "params": {
             "pulse_voltage": {"default": 1.5, "label": "Pulse Voltage (V)", "type": "float"},
             "pulse_widths": {"default": "1e-3,5e-3,10e-3,50e-3", "label": "Pulse Widths (comma-separated, s)", "type": "list"},
@@ -91,7 +199,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "width_vs_resistance",
     },
-    "Width Sweep (Full)": {
+    "Pulse Width Sweep (+ I)": {
         "function": "width_sweep_with_all_measurements",
         "description": "Pattern: Initial Read, (Pulse(measured)→Read)×N, Reset (per width)\nFull characterization including pulse peak currents",
         "params": {
@@ -106,9 +214,9 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "width_vs_resistance",
     },
-    "Potentiation-Depression Cycle": {
+    "Pot / Dep Cycle": {
         "function": "potentiation_depression_cycle",
-        "description": "Pattern: Initial Read → (Gradual SET → Gradual RESET) × N cycles\nSynaptic weight update, neuromorphic applications",
+        "description": "Pattern: Initial Read → (Gradual SET → Gradual RESET) × N cycles\n4200 PMU: 2-ch (CH1 force / CH2 measure). Synaptic weight update, neuromorphic applications",
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
@@ -124,7 +232,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "pot_dep_cycle",
     },
-    "Potentiation Only": {
+    "Potentiation": {
         "function": "potentiation_only",
         "description": "Pattern: Initial Read → Repeated SET pulses with reads\nOptional post-pulse reads to observe relaxation",
         "params": {
@@ -143,7 +251,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "Depression Only": {
+    "Depression": {
         "function": "depression_only",
         "description": "Pattern: Initial Read → Repeated RESET pulses with reads\nOptional post-pulse reads to observe relaxation",
         "params": {
@@ -162,21 +270,55 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "Endurance Test": {
+    "Endurance": {
         "function": "endurance_test",
-        "description": "Pattern: Initial Read → (SET → Read → RESET → Read) × N\nDevice lifetime, cycling endurance monitoring",
+        "description": (
+            "Pattern: Initial Read → (SET → Read → RESET → Read) × N\n"
+            "PMU timing (µs): firmware min 0.02 (20 ns) flat-top; scope-validated ~0.1 (100 ns).\n"
+            "2-ch PMU required: CH1 force / CH2 measure (same as Read→Write→Read).\n"
+            "Use DUT 10cyc @ 20ns → 10us presets to sweep speed. Limit = voltage / cycle-count stress."
+        ),
         "params": {
             "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
             "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
-            "pulse_width": {"default": 1.0, "label": "Pulse Width (ms)", "type": "float"},
-            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
-            "num_cycles": {"default": 100, "label": "Number of Cycles", "type": "int"},
-            "delay_between": {"default": 10.0, "label": "Delay Between (ms)", "type": "float"},
-            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (µs) [PMU] / (ms) [SMU]", "type": "float"},
+            "read_voltage": {"default": 0.3, "label": "Read Voltage (V)", "type": "float"},
+            "num_cycles": {"default": 10, "label": "Number of Cycles", "type": "int"},
+            "delay_between": {"default": 1.0, "label": "Delay Between (µs) [PMU] / (ms) [SMU]", "type": "float"},
+            "clim": {"default": 1e-3, "label": "Current Limit (A)", "type": "float"},
+            "read_width": {"default": 2.0, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "pulse_rise_time": {"default": 0.1, "label": "Write Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
         },
         "plot_type": "endurance",
     },
-    "Pulse-Multi-Read": {
+    "Retention": {
+        "function": "retention_test",
+        "only_for_systems": ["keithley4200_pmu", "keithley4200a", "keithley4200_custom"],
+        "description": (
+            "PMU fast retention (A_Retention / pmu_retention_dual_channel).\n"
+            "Pattern: Baseline reads → program pulse train → retention reads (min 8, max 1000).\n"
+            "2-ch PMU required: CH1 force / CH2 measure (same wiring as Endurance).\n"
+            "Presets: Smoke → DUT (more reads/pulses) → Limit (100ns, 20ns gaps, 200 reads)."
+        ),
+        "params": {
+            "pulse_voltage": {"default": 2.0, "label": "Program Pulse Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Program Pulse Width (µs)", "type": "float"},
+            "num_program_pulses": {"default": 5, "label": "Program Pulses (count)", "type": "int"},
+            "num_initial_reads": {"default": 2, "label": "Baseline Reads (count)", "type": "int"},
+            "read_voltage": {"default": 0.3, "label": "Read Voltage (V)", "type": "float"},
+            "num_reads": {"default": 8, "label": "Retention Reads (count, min 8)", "type": "int"},
+            "delay_between_reads": {"default": 2.0, "label": "Delay Between Reads (µs)", "type": "float"},
+            "delay_between_pulses": {"default": 1.0, "label": "Delay Between Program Pulses (µs)", "type": "float"},
+            "clim": {"default": 1e-4, "label": "Current Limit (A)", "type": "float"},
+            "read_width": {"default": 2.0, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "pulse_rise_time": {"default": 0.1, "label": "Program Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "pulse_fall_time": {"default": 0.1, "label": "Program Fall Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+        },
+        "plot_type": "retention",
+    },
+    "Pulse → Multi-Read": {
         "function": "pulse_multi_read",
         "description": "Pattern: Initial Read → (Pulse × M) → Read × N\nMonitor state relaxation/drift after pulses",
         "params": {
@@ -192,7 +334,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "Multi-Read Only": {
+    "Read Only": {
         "function": "multi_read_only",
         "description": "Pattern: Just reads, no pulses\nBaseline noise, read disturb characterization",
         "params": {
@@ -214,7 +356,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "range_finder",
     },
-    "Relaxation After Multi-Pulse": {
+    "Relaxation": {
         "function": "relaxation_after_multi_pulse",
         "description": "Pattern: 1×Read → N×Pulse → N×Read\nFind how device relaxes after cumulative pulsing",
         "params": {
@@ -230,7 +372,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "relaxation_reads",
     },
-    "Relaxation After Multi-Pulse With Pulse Measurement": {
+    "Relaxation (+ Pulse I)": {
         "function": "relaxation_after_multi_pulse_with_pulse_measurement",
         "description": "Pattern: 1×Read → N×Pulse(measured) → N×Read\nFull relaxation with pulse peak currents",
         "params": {
@@ -246,7 +388,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "relaxation_all",
     },
-    "⚠️ SMU Slow Pulse Measure": {
+    "SMU: Slow Pulse": {
         "function": "smu_slow_pulse_measure",
         "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Single pulse → Measure resistance during pulse\nUse for very slow pulses (milliseconds to seconds), relaxation studies\nLimits: Pulse width 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
@@ -261,7 +403,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "plot_type": "time_series",
         "only_for_systems": ["keithley4200_smu"],
     },
-    "⚠️ SMU Endurance": {
+    "SMU: Endurance": {
         "function": "smu_endurance",
         "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse → Read → RESET pulse → Read) × N cycles\nUse for endurance cycling with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
@@ -282,7 +424,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "plot_type": "time_series",
         "only_for_systems": ["keithley4200_smu"],
     },
-    "⚠️ SMU Retention": {
+    "SMU: Retention": {
         "function": "smu_retention",
         "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time)\nMeasures initial state, then how resistance changes over time after a single pulse\nUse for retention studies with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
@@ -301,7 +443,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "plot_type": "time_series",
         "only_for_systems": ["keithley4200_smu"],
     },
-    "⚠️ SMU Retention (Pulse Measured)": {
+    "SMU: Retention (+ Pulse I)": {
         "function": "smu_retention_with_pulse_measurement",
         "description": "⚠️ IMPORTANT: Uses SMU (not PMU) - Much slower but supports longer pulses\nPattern: (SET pulse+measure → Read → RESET pulse+measure → Read) × N cycles\nMeasures resistance DURING SET/RESET pulses (not just after)\nUse for retention studies with slow pulses (milliseconds to seconds)\nLimits: Pulse widths 40ns to 480s (vs microseconds for PMU)\nWhen NOT to use: Fast pulses (< 1ms) - use PMU functions instead",
         "params": {
@@ -322,7 +464,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "plot_type": "time_series",
         "only_for_systems": ["keithley4200_smu"],
     },
-    "⚡ Electrical Pulse Train (Memristor Programming)": {
+    "Electrical Pulse Train": {
         "function": "pulse_train_varying_amplitudes",
         "description": "⚡ SMU ELECTRICAL SET/RESET pulses (NO laser, NO continuous read): Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N\nSends electrical voltage pulses for memristor programming. Pattern: 1=send pulse voltage, 0=skip (0V).\n\n🚫 For OPTICAL tests with laser + continuous SMU read, use 'Optical Pulse Train with Pattern + Read' below.",
         "params": {
@@ -337,7 +479,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "pulse_train",
     },
-    "🔦 Optical Read (Pulsed Light)": {
+    "Optical: Pulsed Read": {
         "function": "optical_read_pulsed_light",
         "description": "SMU at constant voltage; laser pulses periodically. Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
         "params": {
@@ -354,7 +496,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "🔦 Optical Pulse Train + Read": {
+    "Optical: Pulse Train + Read": {
         "function": "optical_pulse_train_read",
         "description": "SMU at constant voltage; laser fires N pulses (on/off times). Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
         "params": {
@@ -372,7 +514,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "🔦 Continuous Read with Laser Pulse Pattern": {
+    "Optical: Pattern + Read": {
         "function": "optical_pulse_train_pattern_read",
         "description": "SMU at constant voltage; continuously reads while laser fires per pattern (1=fire, 0=skip). This is optical pulsing + continuous read. Set current measurement range correctly or you will get few points at low currents and may miss the pulse.",
         "params": {
@@ -392,7 +534,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "🔦 Binary Pattern Sweep": {
+    "Optical: Binary Sweep": {
         "function": "optical_binary_sweep",
         "description": (
             "Iterates all 2^N binary laser patterns (0000 through 1111 for N=4).\n"
@@ -417,7 +559,7 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "time_series",
     },
-    "🔦 Pattern Repeat": {
+    "Optical: Pattern Repeat": {
         "function": "optical_pattern_repeat",
         "description": (
             "Runs one fixed binary laser pattern N times as separate measurement runs.\n"
@@ -475,7 +617,8 @@ def get_test_definitions_for_gui(
         if only_for is not None and system_name not in only_for:
             continue
         out[display_name] = defn
-    return out
+    ordered = sorted(out.items(), key=lambda item: (_display_order_index(item[1]), item[0]))
+    return dict(ordered)
 
 
 def get_display_name_for_function(function_key: str) -> Optional[str]:

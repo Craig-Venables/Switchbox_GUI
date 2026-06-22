@@ -144,6 +144,32 @@ For voltage sweeps:
 - `pointsPerWfm = 1e-6 × 200e6 + 1 = 201 points`
 - Maximum sweeps: `65,536 / 201 ≈ 326 sweeps`
 
+### 5. Single-burst seg-arb waveform limits (GUI PMU tests)
+
+Several Pulse Testing GUI tests send **one EX command** that builds **one seg-arb waveform** on the PMU. The 4225-PMU hardware allows up to **2048 segments per channel**, but in practice a much lower ceiling (~**350 segments per burst**) is observed on current setups when running endurance, retention, and similar USRLIB modules.
+
+This is **not** the 1 µs pulse-width limit and **not** the 1,000,000-sample A/D cap for short waveforms. It is the **number of line segments** in a single burst.
+
+| Test (GUI) | C module | Approx. segments per… | Typical single-burst ceiling |
+|------------|----------|------------------------|------------------------------|
+| **Endurance** | `pmu_endurance_interleaved` | ~17 per SET/RESET cycle (+6 initial) | **~20 cycles** at 1 µs (≈346 segments) |
+| **Retention** | `pmu_retention_dual_channel` | ~6 per retention read, ~4 per program pulse | **~50 retention reads** with default 5 program + 2 baseline reads (≈330 segments); **100+ reads** in one burst often fails |
+| **Read → Write → Read** | `pmu_pulse_read_interleaved` | Depends on `num_cycles × (pulses + reads)` | Usually fine for smoke tests; large `num_cycles` can hit the same limit |
+| **Read train** | `read_train_ilimit` | Per read pulse in one burst | Long trains may need splitting |
+
+**Segment estimate formulas (for planning presets):**
+
+```
+Endurance:  6 + 17 × num_cycles
+Retention:  2 + 4 × num_initial_reads + 4 × num_program_pulses + 6 × num_reads
+```
+
+**If a run fails** with a negative EX return code (e.g. -211, -16, -90) or no RETURN VALUE, the GUI error should explain this limit. Redeploying the C module alone does **not** fix an oversized burst.
+
+**Workaround (current):** Use presets with fewer cycles/reads/program pulses per run.
+
+**Future fix (not implemented yet):** Automatic burst batching by segment count in `kxci_scripts.py` (`_max_endurance_cycles_per_burst` and equivalent for retention). See `format_pmu_ex_error()` in that file.
+
 ---
 
 ## Speed vs Duration Trade-offs

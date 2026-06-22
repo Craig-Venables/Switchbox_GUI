@@ -457,3 +457,16 @@ Python Script
 - **Potentiation-Depression Module**: For alternating positive/negative programming pulses
 - **Pulse-Read Interleaved Module**: For pulse-read-pulse-read patterns
 
+## Pulse Testing GUI
+
+1. Deploy `pmu_retention_dual_channel.c` + `retention_pulse_ilimit_dual_channel.c` to USRLIB library **`A_Retention`** (not `A_pulse_read_grouped_multi`).
+2. In **TSP Testing GUI** → Connection: **keithley4200_pmu**.
+3. Test: **PMU Retention Test** → preset **PMU 8-read smoke**.
+
+Headless GUI-path check (same code as Run button):
+
+```bash
+python Equipment/SMU_AND_PMU/4200A/scripts/pmu_gui_path_test.py --test retention
+python Equipment/SMU_AND_PMU/4200A/scripts/pmu_retention_smoke_test.py
+```
+

@@ -373,6 +373,10 @@ class KXCIClient:
         self._ul_mode_active = False
 
     def connect(self) -> bool:
+        """Open GPIB session. Idempotent: skips *IDN? if already connected."""
+        if self.inst is not None:
+            return True
+
         try:
             import pyvisa
         except ImportError as exc:  # noqa: F401
@@ -384,11 +388,18 @@ class KXCIClient:
             self.inst.timeout = self.timeout_ms
             self.inst.write_termination = "\n"
             self.inst.read_termination = "\n"
+            # Leave UL mode if a prior session ended without DE (4200 rejects *IDN? in UL)
+            try:
+                self.inst.write("DE")
+                time.sleep(0.03)
+            except Exception:
+                pass
+            self._ul_mode_active = False
             idn = self.inst.query("*IDN?").strip()
-            print(f"✓ Connected to: {idn}")
+            print(f"OK Connected to: {idn}")
             return True
         except Exception as exc:  # noqa: BLE001
-            print(f"❌ Connection failed: {exc}")
+            print(f"Connection failed: {exc}")
             return False
 
     def disconnect(self) -> None:
@@ -725,7 +736,7 @@ def build_retention_ex_command(cfg: RetentionConfig) -> str:
         format_param(cfg.pulse_delay),
         format_param(cfg.clarius_debug),
     ]
-    print(cfg.max_points)
+
     return f"EX A_Retention pmu_retention_dual_channel({','.join(params)})"
 
 
@@ -816,6 +827,58 @@ class PulseReadInterleavedConfig:
             raise ValueError("steps must be >= 0")
 
 
+def estimate_interleaved_timeline(cfg: "PulseReadInterleavedConfig") -> list[tuple[str, float, float]]:
+    """Return [(label, start_us, end_us), ...] matching pmu_pulse_read_interleaved.c segment order."""
+    t = 0.0
+    events: list[tuple[str, float, float]] = []
+
+    def add(label: str, duration: float, level_v: float) -> None:
+        nonlocal t
+        start = t
+        t += duration
+        events.append((f"{label} ({level_v:.2f}V)", start * 1e6, t * 1e6))
+
+    add("reset_delay@0V", cfg.reset_delay, 0.0)
+    add("pre_read_rise@0V", cfg.rise_time, 0.0)
+    add("initial_read_rise", cfg.rise_time, cfg.meas_v)
+    add("initial_read_top", cfg.meas_width, cfg.meas_v)
+    add("initial_read_fall_delay", cfg.set_fall_time, cfg.meas_v)
+    add("initial_read_fall", cfg.rise_time, 0.0)
+    add("post_initial_delay@0V", cfg.meas_delay, 0.0)
+
+    for cycle in range(cfg.num_cycles):
+        for _ in range(cfg.num_pulses_per_group):
+            add(f"c{cycle+1}_write_rise", cfg.pulse_rise_time, cfg.pulse_v)
+            add(f"c{cycle+1}_write_top", cfg.pulse_width, cfg.pulse_v)
+            add(f"c{cycle+1}_write_fall", cfg.pulse_fall_time, 0.0)
+            add(f"c{cycle+1}_post_write_delay@0V", cfg.pulse_delay, 0.0)
+        for _ in range(cfg.num_reads):
+            add(f"c{cycle+1}_read_rise", cfg.rise_time, cfg.meas_v)
+            add(f"c{cycle+1}_read_top", cfg.meas_width, cfg.meas_v)
+            add(f"c{cycle+1}_read_fall_delay", cfg.set_fall_time, cfg.meas_v)
+            add(f"c{cycle+1}_read_fall", cfg.rise_time, 0.0)
+            add(f"c{cycle+1}_post_read_delay@0V", cfg.meas_delay, 0.0)
+
+    return events
+
+
+def print_interleaved_timeline(cfg: "PulseReadInterleavedConfig") -> None:
+    """Print expected CH1 voltage timeline for scope triggering."""
+    events = estimate_interleaved_timeline(cfg)
+    total_us = events[-1][2] if events else 0.0
+    print("\n--- Expected CH1 waveform timeline (from EX parameters) ---")
+    print(f"  Total duration: {total_us:.3f} us")
+    print(f"  Read level: {cfg.meas_v:.2f} V   Write level: {cfg.pulse_v:.2f} V")
+    for label, start_us, end_us in events:
+        marker = " <-- MEASURED" if "read_top" in label or "initial_read_top" in label else ""
+        if "write_top" in label:
+            marker = " <-- WRITE (scope trigger here)"
+        print(f"  {start_us:8.3f} - {end_us:8.3f} us  {label}{marker}")
+    print("  Scope: use CH1, edge trigger ~150-300 mV, timebase ~{:.0f} ns/div".format(
+        max(200, total_us * 1000 / 8)
+    ))
+
+
 def build_interleaved_ex_command(cfg: PulseReadInterleavedConfig) -> str:
     """Build EX command for pmu_pulse_read_interleaved."""
     total_probes = cfg.total_probe_count()
@@ -865,6 +928,183 @@ def build_interleaved_ex_command(cfg: PulseReadInterleavedConfig) -> str:
         format_param(cfg.clarius_debug),
     ]
     return f"EX A_pulse_read_grouped_multi pmu_pulse_read_interleaved({','.join(params)})"
+
+
+def endurance_total_probe_count(num_cycles: int) -> int:
+    """Measurements for Initial Read + (SET read + RESET read) × num_cycles."""
+    return 1 + 2 * num_cycles
+
+
+# ---------------------------------------------------------------------------
+# PMU single-burst waveform limits (seg-arb segment count)
+# Documented in PMU_Measurement_Limits.md — section "Single-burst seg-arb waveform limits".
+# ---------------------------------------------------------------------------
+_PMU_WAVEFORM_LIMITS_DOC = (
+    "Equipment/SMU_AND_PMU/4200A/C_Code_with_python_scripts/"
+    "Read_with_laser_pulse/PMU_Measurement_Limits.md"
+)
+_PMU_OBSERVED_SINGLE_BURST_SEGMENTS = 350
+_PMU_HW_MAX_SEG_ARB_SEGMENTS = 2048
+
+_PMU_EX_ERROR_HINTS: Dict[int, str] = {
+    -16: "seg_arb_sequence failed on the force channel (illegal waveform parameter).",
+    -17: "seg_arb_sequence failed on the measure channel.",
+    -18: "seg_arb_waveform failed on the force channel.",
+    -19: "seg_arb_waveform failed on the measure channel.",
+    -33: "Sample rate could not be calculated (timing vs max_points conflict).",
+    -90: "The shared pulse driver (retention_pulse_ilimit_dual_channel) rejected the waveform.",
+    -122: "A segment time is invalid (must be >= 20 ns).",
+    -202: "A required output array pointer was NULL.",
+    -203: "Failed to allocate probe timing buffers in the C module.",
+    -204: "Output array sizes (setV/setI/PulseTimes) are too small for this burst.",
+    -205: "Too many probe measurements for the allocated capacity.",
+    -207: "Failed to allocate PMU sample buffers for max_points.",
+    -210: "Failed to allocate seg-arb time/voltage buffers in the C module.",
+    -211: "The computed waveform has more segments than the C module buffer allows.",
+}
+
+
+def estimate_endurance_seg_arb_segments(num_cycles: int) -> int:
+    """Seg-arb line segments for pmu_endurance_interleaved (initial + 17 per SET/RESET cycle)."""
+    return 6 + 17 * num_cycles
+
+
+def estimate_retention_seg_arb_segments(
+    num_initial_reads: int,
+    num_program_pulses: int,
+    num_retention_reads: int,
+) -> int:
+    """Seg-arb line segments for pmu_retention_dual_channel."""
+    return 2 + 4 * num_initial_reads + 4 * num_program_pulses + 6 * num_retention_reads
+
+
+def _pmu_waveform_limits_doc_hint() -> str:
+    return (
+        f"Documentation: {_PMU_WAVEFORM_LIMITS_DOC} "
+        '(section "Single-burst seg-arb waveform limits").'
+    )
+
+
+def _pmu_burst_limit_explanation(segments_estimate: Optional[int]) -> str:
+    lines = [
+        "Likely cause: the single EX burst builds too many seg-arb waveform segments.",
+        "This is NOT usually a missing C-module deploy — redeploying alone will not fix it.",
+        (
+            f"Hardware allows up to {_PMU_HW_MAX_SEG_ARB_SEGMENTS} segments per channel; "
+            f"~{_PMU_OBSERVED_SINGLE_BURST_SEGMENTS} segments per burst is a practical ceiling "
+            "on current setups."
+        ),
+    ]
+    if segments_estimate is not None:
+        over = segments_estimate > _PMU_OBSERVED_SINGLE_BURST_SEGMENTS
+        lines.append(f"Estimated segments for this burst: ~{segments_estimate}.")
+        if over:
+            lines.append(
+                "That estimate exceeds the practical single-burst limit — shorten the burst "
+                "or wait for automatic burst batching (not implemented yet)."
+            )
+    lines.extend([
+        "Workaround now: use a preset with fewer cycles/reads/program pulses per run.",
+        "Future fix: burst batching by segment count in kxci_scripts.py "
+        "(_max_endurance_cycles_per_burst; same pattern needed for retention).",
+        _pmu_waveform_limits_doc_hint(),
+    ])
+    return "\n".join(lines)
+
+
+def format_pmu_ex_error(
+    *,
+    module_name: str,
+    return_value: int,
+    test_label: str,
+    segments_estimate: Optional[int] = None,
+    burst_detail: Optional[str] = None,
+    extra_lines: Optional[List[str]] = None,
+) -> str:
+    """Build a user-facing RuntimeError message for a negative PMU EX return code."""
+    hint = _PMU_EX_ERROR_HINTS.get(
+        return_value,
+        "Unknown error from the USRLIB C module (enable clarius_debug=1 for instrument console output).",
+    )
+    parts = [
+        f"PMU {test_label} failed: {module_name} returned {return_value}.",
+        hint,
+    ]
+    if burst_detail:
+        parts.append(burst_detail)
+    parts.append(_pmu_burst_limit_explanation(segments_estimate))
+    if extra_lines:
+        parts.extend(extra_lines)
+    return "\n".join(parts)
+
+
+def format_pmu_ex_no_return(
+    *,
+    module_name: str,
+    test_label: str,
+    segments_estimate: Optional[int] = None,
+    burst_detail: Optional[str] = None,
+) -> str:
+    """Build a user-facing message when the instrument sends no RETURN VALUE."""
+    parts = [
+        f"PMU {test_label}: no RETURN VALUE from {module_name}.",
+        "The instrument may have rejected the burst, timed out, or not finished before GPIB read.",
+    ]
+    if burst_detail:
+        parts.append(burst_detail)
+    parts.append(_pmu_burst_limit_explanation(segments_estimate))
+    return "\n".join(parts)
+
+
+def build_endurance_ex_command(cfg: PulseReadInterleavedConfig, num_endurance_cycles: int) -> str:
+    """Build EX command for pmu_endurance_interleaved (deploy to USRLIB first)."""
+    total_probes = endurance_total_probe_count(num_endurance_cycles)
+    common_size = total_probes
+
+    params = [
+        format_param(cfg.rise_time),
+        format_param(cfg.reset_v),
+        format_param(cfg.reset_width),
+        format_param(cfg.reset_delay),
+        format_param(cfg.meas_v),
+        format_param(cfg.meas_width),
+        format_param(cfg.meas_delay),
+        format_param(cfg.set_width),
+        format_param(cfg.set_fall_time),
+        format_param(cfg.set_delay),
+        format_param(cfg.set_start_v),
+        format_param(cfg.set_stop_v),
+        format_param(cfg.steps),
+        format_param(cfg.i_range),
+        format_param(cfg.max_points),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        format_param(cfg.iteration),
+        "",
+        format_param(common_size),
+        cfg.out1_name,
+        "",
+        format_param(cfg.out2_size),
+        cfg.out2_name,
+        "",
+        format_param(common_size),
+        format_param(1),  # NumbMeasPulses (unused)
+        format_param(1),  # NumInitialMeasPulses (unused)
+        format_param(num_endurance_cycles),  # NumPulses = endurance cycles
+        format_param(cfg.pulse_width),
+        format_param(cfg.pulse_v),  # SET voltage
+        format_param(cfg.pulse_rise_time),
+        format_param(cfg.pulse_fall_time),
+        format_param(cfg.pulse_delay),
+        format_param(cfg.clarius_debug),
+    ]
+    return f"EX A_pulse_read_grouped_multi pmu_endurance_interleaved({','.join(params)})"
 
 
 def build_potentiation_depression_ex_command(cfg: PulseReadInterleavedConfig) -> str:
@@ -1087,6 +1327,218 @@ class Keithley4200_KXCI_Scripts:
     _MIN_EDGE_TIME = 2e-8  # 20 ns KXCI minimum
     _DEFAULT_EDGE_TIME = 1e-7  # 100 ns legacy default
     _FAST_EDGE_THRESHOLD = 5e-7  # ≤500 ns pulses/read windows → use fast edge
+    # Working-example default from pmu_pulse_read_interleaved / scope smoke test.
+    # Do NOT pass converted clim here — wrong IRange changes PMU range behaviour.
+    _SCOPE_VALIDATED_I_RANGE = 1e-4
+
+    def _audit_interleaved_legacy_cfg(self, cfg: "PulseReadInterleavedConfig") -> list[str]:
+        """Return human-readable issues if legacy timing fields look like pre-fix defaults."""
+        issues: list[str] = []
+        max_legacy_seg = 5e-8  # 50 ns — fixed path uses 20 ns (2e-8)
+
+        def _check(name: str, value: float, max_ok: float = max_legacy_seg) -> None:
+            if value > max_ok:
+                issues.append(f"{name}={value:.2e} s ({value*1e6:.3f} µs) — expected ≤{max_ok*1e6:.0f} ns")
+
+        _check("reset_width", cfg.reset_width)
+        _check("reset_delay", cfg.reset_delay)
+        _check("set_width", cfg.set_width)
+        _check("set_delay", cfg.set_delay)
+        _check("set_fall_time", cfg.set_fall_time, max_ok=1.5e-7)  # allow 100 ns read fall
+        if cfg.meas_delay > 1e-7:
+            _check("meas_delay", cfg.meas_delay, max_ok=1e-7)
+        if abs(cfg.reset_v) > 0.01 and abs(cfg.reset_v - 1.5) < 0.01:
+            issues.append(f"reset_v={cfg.reset_v:.2f} V — old default 1.5 V (use 0 for range only)")
+        if cfg.pulse_width >= 2e-7 and cfg.pulse_rise_time <= self._MIN_EDGE_TIME * 1.01:
+            issues.append(
+                f"pulse_rise_time={cfg.pulse_rise_time:.2e} s on {cfg.pulse_width*1e6:.2f} µs write "
+                "— 20 ns edges make write invisible on scope; use 100 ns"
+            )
+        return issues
+
+    def build_pmu_pulse_read_burst_cfg(
+        self,
+        *,
+        pulse_voltage: float,
+        pulse_width_s: float,
+        read_voltage: float,
+        read_width_s: float,
+        read_rise_s: float,
+        delay_between_s: float = 20e-9,
+        num_cycles: int = 1,
+        pulse_rise_s: Optional[float] = None,
+        pulse_fall_s: Optional[float] = None,
+        i_range: Optional[float] = None,
+        max_points: int = 10000,
+        clarius_debug: int = 0,
+    ) -> "PulseReadInterleavedConfig":
+        """Build cfg for Read→Write→Read — same path as pmu_scope_smoke_test.py."""
+        pulse_edge = self._select_edge_time(pulse_width_s, pulse_rise_s)
+        pulse_fall = pulse_fall_s if pulse_fall_s is not None else pulse_edge
+        read_edge = self._select_edge_time(read_width_s, read_rise_s)
+        cfg = self._make_pulse_read_interleaved_config(
+            pulse_voltage=pulse_voltage,
+            pulse_width_s=pulse_width_s,
+            read_voltage=read_voltage,
+            read_width_s=read_width_s,
+            read_delay_s=delay_between_s,
+            read_rise_s=read_edge,
+            delay_between_s=delay_between_s,
+            num_cycles=num_cycles,
+            pulse_rise_s=pulse_edge,
+            pulse_fall_s=pulse_fall,
+            i_range=i_range if i_range is not None else self._SCOPE_VALIDATED_I_RANGE,
+            max_points=max_points,
+            clarius_debug=clarius_debug,
+        )
+        issues = self._audit_interleaved_legacy_cfg(cfg)
+        if issues:
+            print("\n[KXCI] *** LEGACY WAVEFORM CONFIG DETECTED (scope may show ~64 µs / ~500 µs) ***")
+            for item in issues:
+                print(f"  - {item}")
+            raise ValueError(
+                "PMU interleaved config has legacy timing fields. "
+    "Reload preset 'DUT 1us write' or restart GUI."
+            )
+        return cfg
+
+    def build_pmu_endurance_burst_cfg(
+        self,
+        *,
+        set_voltage: float,
+        reset_voltage: float,
+        pulse_width_s: float,
+        read_voltage: float,
+        read_width_s: float,
+        read_rise_s: float,
+        delay_between_s: float = 20e-9,
+        pulse_rise_s: Optional[float] = None,
+        pulse_fall_s: Optional[float] = None,
+        i_range: Optional[float] = None,
+        max_points: int = 10000,
+        clarius_debug: int = 0,
+    ) -> PulseReadInterleavedConfig:
+        """Build cfg for endurance: SET/RESET use pulse_v / set_stop_v."""
+        pulse_edge = self._select_edge_time(pulse_width_s, pulse_rise_s)
+        pulse_fall = pulse_fall_s if pulse_fall_s is not None else pulse_edge
+        read_edge = self._select_edge_time(read_width_s, read_rise_s)
+        min_seg = 2e-8
+        return PulseReadInterleavedConfig(
+            rise_time=read_edge,
+            reset_v=0.0,
+            reset_width=min_seg,
+            reset_delay=min_seg,
+            meas_v=read_voltage,
+            meas_width=read_width_s,
+            meas_delay=max(min_seg, delay_between_s),
+            set_width=min_seg,
+            set_fall_time=min_seg,
+            set_delay=min_seg,
+            set_start_v=read_voltage,
+            set_stop_v=reset_voltage,
+            steps=0,
+            i_range=i_range if i_range is not None else self._SCOPE_VALIDATED_I_RANGE,
+            max_points=max_points,
+            iteration=1,
+            num_cycles=1,
+            num_pulses_per_group=1,
+            num_reads=1,
+            pulse_v=set_voltage,
+            pulse_width=pulse_width_s,
+            pulse_rise_time=max(min_seg, pulse_edge),
+            pulse_fall_time=max(min_seg, pulse_fall),
+            pulse_delay=min_seg,
+            clarius_debug=clarius_debug,
+        )
+
+    def build_pmu_retention_burst_cfg(
+        self,
+        *,
+        pulse_voltage: float,
+        pulse_width_s: float,
+        num_program_pulses: int,
+        num_initial_reads: int,
+        num_reads: int,
+        read_voltage: float,
+        read_width_s: float,
+        read_rise_s: float,
+        delay_between_reads_s: float = 2e-6,
+        pulse_rise_s: Optional[float] = None,
+        pulse_fall_s: Optional[float] = None,
+        delay_between_pulses_s: float = 1e-6,
+        i_range: Optional[float] = None,
+        max_points: int = 10000,
+        clarius_debug: int = 0,
+    ) -> RetentionConfig:
+        """Build cfg for PMU retention: baseline reads → program pulses → retention reads."""
+        min_seg = 2e-8
+        read_edge = self._select_edge_time(read_width_s, read_rise_s)
+        pulse_edge = self._select_edge_time(pulse_width_s, pulse_rise_s)
+        pulse_fall = pulse_fall_s if pulse_fall_s is not None else pulse_edge
+        retention_reads = max(8, int(num_reads))
+        return RetentionConfig(
+            rise_time=read_edge,
+            reset_v=1.0,
+            reset_width=1e-7,
+            reset_delay=5e-7,
+            meas_v=read_voltage,
+            meas_width=read_width_s,
+            meas_delay=max(min_seg, delay_between_reads_s),
+            set_width=min_seg,
+            set_fall_time=min_seg,
+            set_delay=min_seg,
+            set_start_v=read_voltage,
+            set_stop_v=read_voltage,
+            steps=0,
+            i_range=i_range if i_range is not None else self._SCOPE_VALIDATED_I_RANGE,
+            max_points=max_points,
+            iteration=1,
+            num_pulses=retention_reads,
+            num_initial_meas_pulses=max(1, int(num_initial_reads)),
+            num_pulses_seq=max(1, int(num_program_pulses)),
+            pulse_width=pulse_width_s,
+            pulse_v=pulse_voltage,
+            pulse_rise_time=max(min_seg, pulse_edge),
+            pulse_fall_time=max(min_seg, pulse_fall),
+            pulse_delay=max(min_seg, delay_between_pulses_s),
+            clarius_debug=clarius_debug,
+        )
+
+    def _estimate_endurance_total_time(
+        self, cfg: PulseReadInterleavedConfig, num_endurance_cycles: int
+    ) -> float:
+        """Estimate waveform duration for pmu_endurance_interleaved."""
+        half = (
+            cfg.pulse_rise_time + cfg.pulse_width + cfg.pulse_fall_time + cfg.pulse_delay
+            + cfg.rise_time + cfg.meas_width + cfg.set_fall_time + cfg.rise_time
+        )
+        per_cycle = 2 * half + cfg.meas_delay
+        initial = cfg.reset_delay + cfg.rise_time + cfg.meas_width + cfg.rise_time + cfg.meas_delay + cfg.rise_time
+        return initial + num_endurance_cycles * per_cycle
+
+    def _max_endurance_cycles_per_burst(self, cfg: PulseReadInterleavedConfig, requested: int) -> int:
+        """Limit cycles per EX so waveform fits PMU buffer (batched endurance).
+
+        FUTURE: Also cap by seg-arb segment count (~17 segments per endurance cycle;
+        observed single-burst ceiling ~350 segments → ~20 cycles at 1 µs). Current logic
+        only checks max_points vs estimated time, so long endurance runs may still send
+        one oversized EX burst. See PMU_Measurement_Limits.md and format_pmu_ex_error().
+        """
+        if requested < 1:
+            return 1
+        cap = requested
+        while cap > 1:
+            est = self._estimate_endurance_total_time(cfg, cap)
+            min_seg = min(
+                cfg.pulse_width, cfg.pulse_delay, cfg.meas_width, cfg.meas_delay,
+                cfg.pulse_rise_time, cfg.pulse_fall_time, cfg.rise_time, cfg.set_fall_time,
+                cfg.reset_delay,
+            )
+            need = self._calculate_interleaved_min_max_points(est, min_seg)
+            if need <= cfg.max_points:
+                return cap
+            cap = max(1, cap // 2)
+        return 1
 
     def __init__(self, gpib_address: str, timeout: float = 30.0):
         """
@@ -1102,15 +1554,73 @@ class Keithley4200_KXCI_Scripts:
         self._controller: Optional[KXCIClient] = None
     
     def _select_edge_time(self, segment_width_s: float, user_edge_s: Optional[float] = None) -> float:
-        """Choose the fastest safe rise/fall time for a waveform segment."""
+        """Choose rise/fall time for a waveform segment."""
         if user_edge_s is not None:
             edge_time = user_edge_s
         elif segment_width_s <= self._FAST_EDGE_THRESHOLD:
-            edge_time = self._MIN_EDGE_TIME
+            # Sub-200ns segments need minimum hardware edges; wider fast pulses use 100ns
+            edge_time = (
+                self._DEFAULT_EDGE_TIME
+                if segment_width_s >= 2e-7
+                else self._MIN_EDGE_TIME
+            )
         else:
             edge_time = self._DEFAULT_EDGE_TIME
         max_edge = max(self._MIN_EDGE_TIME, min(segment_width_s * 0.45, 1.0))
         return max(self._MIN_EDGE_TIME, min(edge_time, max_edge))
+
+    def _make_pulse_read_interleaved_config(
+        self,
+        *,
+        pulse_voltage: float,
+        pulse_width_s: float,
+        read_voltage: float,
+        read_width_s: float,
+        read_delay_s: float,
+        read_rise_s: float,
+        delay_between_s: float,
+        num_cycles: int,
+        num_pulses_per_group: int = 1,
+        num_reads: int = 1,
+        pulse_rise_s: Optional[float] = None,
+        pulse_fall_s: Optional[float] = None,
+        i_range: float = 1e-4,
+        max_points: int = 10000,
+        clarius_debug: int = 0,
+    ) -> PulseReadInterleavedConfig:
+        """Build interleaved config with legacy timing fields set for short waveforms."""
+        min_seg = 2e-8
+        pulse_edge = pulse_rise_s if pulse_rise_s is not None else self._select_edge_time(pulse_width_s)
+        pulse_fall = pulse_fall_s if pulse_fall_s is not None else self._select_edge_time(pulse_width_s)
+        read_edge = self._select_edge_time(read_width_s, read_rise_s)
+
+        return PulseReadInterleavedConfig(
+            rise_time=read_edge,
+            reset_v=0.0,
+            reset_width=min_seg,
+            reset_delay=min_seg,
+            meas_v=read_voltage,
+            meas_width=read_width_s,
+            meas_delay=max(min_seg, delay_between_s),
+            set_width=min_seg,
+            set_fall_time=min_seg,
+            set_delay=min_seg,
+            set_start_v=read_voltage,
+            set_stop_v=read_voltage,
+            steps=0,
+            i_range=i_range,
+            max_points=max_points,
+            iteration=1,
+            num_cycles=num_cycles,
+            num_pulses_per_group=num_pulses_per_group,
+            num_reads=num_reads,
+            pulse_v=pulse_voltage,
+            pulse_width=pulse_width_s,
+            pulse_rise_time=max(min_seg, pulse_edge),
+            pulse_fall_time=max(min_seg, pulse_fall),
+            pulse_delay=min_seg,
+            clarius_debug=clarius_debug,
+        )
     
     def _run_interleaved_with_fallback(self, cfg: PulseReadInterleavedConfig) -> Tuple[List[float], List[float], List[float], List[float]]:
         """Execute interleaved command, retrying with safe edge times if fast edges fail."""
@@ -1478,6 +1988,50 @@ class Keithley4200_KXCI_Scripts:
 
         if total > rows_to_show:
             print(f"... ({total - rows_to_show} more rows)")
+
+    def _print_pmu_scope_verification(
+        self,
+        cfg: "PulseReadInterleavedConfig",
+        timestamps: List[float],
+        voltages: List[float],
+        currents: List[float],
+    ) -> None:
+        """Compare instrument GP times to expected timeline; warn on load/scope mismatch."""
+        events = estimate_interleaved_timeline(cfg)
+        expected_total_us = events[-1][2] if events else 0.0
+        gp_us = [t * 1e6 for t in timestamps if t and abs(t) > 1e-15]
+
+        print("\n=== PMU scope verification (firmware vs what you should see on CH1) ===")
+        print(f"  Expected waveform length: {expected_total_us:.2f} us")
+        if gp_us:
+            print(f"  Instrument GP probe times: {', '.join(f'{t:.2f} us' for t in gp_us)}")
+        else:
+            print("  Instrument GP probe times: (none returned)")
+
+        if gp_us and gp_us[-1] > 50.0:
+            print("  WARNING: GP times exceed 50 us — timing params may be wrong.")
+        elif gp_us and expected_total_us < 20.0 and gp_us[-1] < 20.0:
+            print("  OK: Firmware confirms a short (~6 us) Read -> Write -> Read sequence.")
+
+        read_v = cfg.meas_v
+        if voltages and read_v > 0:
+            v0 = voltages[0]
+            ratio = v0 / read_v
+            if ratio < 0.6:
+                est_r = (v0 / currents[0]) if currents and abs(currents[0]) > 1e-12 else float("nan")
+                print(f"  WARNING: Read voltage {v0:.3f} V is well below set {read_v:.2f} V ({ratio:.0%}).")
+                if est_r == est_r and est_r < 500:
+                    print(f"  Heavy load (~{est_r:.0f} ohm). Scope may show slow ramps, not sharp us pulses.")
+                    print("  For scope-only bench: use 10x probe / high-Z, or disconnect low-R load.")
+            elif ratio > 0.75:
+                print(f"  Read level OK ({v0:.3f} V vs {read_v:.2f} V set).")
+
+        print("  If scope still shows ~55 us / ~500 us flat regions:")
+        print("    1. Probe PMU CH1 (force) directly — not CH2 or a shared splitter tail")
+        print("    2. Timebase 500 ns/div or 1 us/div (NOT 10 us/div or ms/div)")
+        print("    3. Trigger: Single, CH1 rising edge, level ~150-250 mV")
+        print("    4. Clear persistence / run Single sweep after each GUI run")
+        print("  Software EX params and GP times above are authoritative for pulse width.")
     
     def _query_gp_data(self, controller: KXCIClient, param: int, count: int, 
                       name: str = "") -> List[float]:
@@ -1555,9 +2109,35 @@ class Keithley4200_KXCI_Scripts:
             return_value, error = controller._execute_ex_command(command)
             if error:
                 raise RuntimeError(f"EX command failed: {error}")
-            
+
+            seg_est = estimate_retention_seg_arb_segments(
+                cfg.num_initial_meas_pulses, cfg.num_pulses_seq, cfg.num_pulses
+            )
+            burst_detail = (
+                f"Burst: {cfg.num_initial_meas_pulses} baseline reads + "
+                f"{cfg.num_pulses_seq} program pulses + {cfg.num_pulses} retention reads."
+            )
+            retention_extra = [
+                "Retention: ~6 seg-arb segments per retention read, ~4 per program pulse.",
+                "Same single-burst limit applies as Endurance (shared seg-arb driver).",
+                "Endurance hits the ceiling sooner (~17 segments per SET/RESET cycle).",
+            ]
             if return_value is not None and return_value < 0:
-                raise RuntimeError(f"EX command returned error code: {return_value}")
+                raise RuntimeError(format_pmu_ex_error(
+                    module_name="pmu_retention_dual_channel",
+                    return_value=return_value,
+                    test_label="Retention",
+                    segments_estimate=seg_est,
+                    burst_detail=burst_detail,
+                    extra_lines=retention_extra,
+                ))
+            if return_value is None:
+                raise RuntimeError(format_pmu_ex_no_return(
+                    module_name="pmu_retention_dual_channel",
+                    test_label="Retention",
+                    segments_estimate=seg_est,
+                    burst_detail=burst_detail,
+                ))
             
             time.sleep(0.2)  # Allow data to be ready
             
@@ -1626,34 +2206,50 @@ class Keithley4200_KXCI_Scripts:
             print(f"    meas_width={cfg.meas_width:.2e} s ({cfg.meas_width*1e6:.2f} µs)")
             print(f"    meas_delay={cfg.meas_delay:.2e} s ({cfg.meas_delay*1e6:.2f} µs)")
             print(f"    rise_time={cfg.rise_time:.2e} s ({cfg.rise_time*1e6:.2f} µs)")
+            print(f"  Legacy segment fields (must be ~20 ns for scope):")
+            print(f"    reset_v={cfg.reset_v:.2f} V  reset_width={cfg.reset_width:.2e} s  set_width={cfg.set_width:.2e} s")
+            print(f"    set_fall_time={cfg.set_fall_time:.2e} s  set_delay={cfg.set_delay:.2e} s")
             print(f"  Voltage parameters:")
             print(f"    pulse_v={cfg.pulse_v:.2f} V")
             print(f"    meas_v={cfg.meas_v:.2f} V")
             print(f"  Other parameters:")
-            print(f"    i_range={cfg.i_range:.2e} A")
+            print(f"    i_range={cfg.i_range:.2e} A (scope smoke test uses 1e-4)")
             print(f"    max_points={cfg.max_points}")
+            legacy_issues = self._audit_interleaved_legacy_cfg(cfg)
+            if legacy_issues:
+                print("  *** LEGACY TIMING WARNING (scope may show ~64 us / ~500 us) ***")
+                for item in legacy_issues:
+                    print(f"    - {item}")
             return_value, error = controller._execute_ex_command(command)
             if error:
                 raise RuntimeError(f"EX command failed: {error}")
-            
+
+            burst_detail = (
+                f"Burst: {cfg.num_cycles} cycle(s), {cfg.num_pulses_per_group} pulse(s)/group, "
+                f"{cfg.num_reads} read(s)/cycle."
+            )
             if return_value is not None and return_value < 0:
-                # Error code -207 typically means "minimum segment time" violation
-                # Error code -90 typically means invalid parameter or rate calculation failure
-                error_msg = f"EX command returned error code: {return_value}"
-                if return_value == -207:
-                    error_msg += "\nThis usually indicates a minimum segment time violation."
-                    error_msg += "\nAll timing parameters (pulse_width, pulse_delay, meas_width, meas_delay) must be >= 20 ns (2e-8 seconds)."
-                    error_msg += f"\nCurrent values: pulse_width={cfg.pulse_width:.2e}s, pulse_delay={cfg.pulse_delay:.2e}s, meas_width={cfg.meas_width:.2e}s, meas_delay={cfg.meas_delay:.2e}s"
-                elif return_value == -90:
-                    error_msg += "\nThis usually indicates an invalid parameter or rate calculation failure."
-                    error_msg += "\nCommon causes:"
-                    error_msg += "\n  - Measurement window (read_width) too large or invalid"
-                    error_msg += "\n  - Sampling rate too low (< 200000 Hz)"
-                    error_msg += "\n  - Invalid timing parameters"
-                    error_msg += f"\nCurrent values: pulse_width={cfg.pulse_width:.2e}s ({cfg.pulse_width*1e6:.2f}µs), pulse_delay={cfg.pulse_delay:.2e}s ({cfg.pulse_delay*1e6:.2f}µs)"
-                    error_msg += f"\n  meas_width={cfg.meas_width:.2e}s ({cfg.meas_width*1e6:.2f}µs), meas_delay={cfg.meas_delay:.2e}s ({cfg.meas_delay*1e6:.2f}µs)"
-                    error_msg += f"\n  num_cycles={cfg.num_cycles}, num_pulses_per_group={cfg.num_pulses_per_group}, num_reads={cfg.num_reads}"
-                raise RuntimeError(error_msg)
+                extra = [
+                    f"Timing: pulse_width={cfg.pulse_width:.2e}s, pulse_delay={cfg.pulse_delay:.2e}s, "
+                    f"meas_width={cfg.meas_width:.2e}s, meas_delay={cfg.meas_delay:.2e}s.",
+                ]
+                if return_value in (-207, -90):
+                    extra.append(
+                        "If return code is -207/-90: check all segment times are >= 20 ns (2e-8 s)."
+                    )
+                raise RuntimeError(format_pmu_ex_error(
+                    module_name="pmu_pulse_read_interleaved",
+                    return_value=return_value,
+                    test_label="Read → Write → Read",
+                    burst_detail=burst_detail,
+                    extra_lines=extra,
+                ))
+            if return_value is None:
+                raise RuntimeError(format_pmu_ex_no_return(
+                    module_name="pmu_pulse_read_interleaved",
+                    test_label="Read → Write → Read",
+                    burst_detail=burst_detail,
+                ))
             
             time.sleep(0.2)  # Allow data to be ready
             
@@ -1723,6 +2319,77 @@ class Keithley4200_KXCI_Scripts:
             
             return pulse_times, set_v, set_i, resistances
             
+        finally:
+            try:
+                controller._exit_ul_mode()
+            except Exception:
+                pass
+
+    def _execute_endurance_interleaved(
+        self, cfg: PulseReadInterleavedConfig, num_endurance_cycles: int
+    ) -> Tuple[List[float], List[float], List[float], List[float]]:
+        """Execute pmu_endurance_interleaved (must be deployed to USRLIB)."""
+        total_probes = endurance_total_probe_count(num_endurance_cycles)
+        controller = self._get_controller()
+        if not controller.connect():
+            raise RuntimeError("Unable to connect to instrument")
+        try:
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            command = build_endurance_ex_command(cfg, num_endurance_cycles)
+            print(f"\n[KXCI] Generated EX command for endurance_test:")
+            print(command)
+            print(f"  Endurance cycles in burst: {num_endurance_cycles}")
+            print(f"  Expected measurements: {total_probes} (1 initial + 2 per cycle)")
+            print(f"  SET={cfg.pulse_v:.2f} V  RESET={cfg.set_stop_v:.2f} V  read={cfg.meas_v:.2f} V")
+            return_value, error = controller._execute_ex_command(command)
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+
+            seg_est = estimate_endurance_seg_arb_segments(num_endurance_cycles)
+            burst_detail = (
+                f"Burst: {num_endurance_cycles} SET/RESET cycle(s) "
+                f"({total_probes} probe measurements)."
+            )
+            endurance_extra = [
+                "Endurance: ~17 seg-arb segments per SET/RESET cycle (+ initial read).",
+                "At 1 µs pulses, ~20 cycles per burst is a typical ceiling on current hardware.",
+            ]
+            if return_value is not None and return_value < 0:
+                raise RuntimeError(format_pmu_ex_error(
+                    module_name="pmu_endurance_interleaved",
+                    return_value=return_value,
+                    test_label="Endurance",
+                    segments_estimate=seg_est,
+                    burst_detail=burst_detail,
+                    extra_lines=endurance_extra,
+                ))
+            if return_value is None:
+                raise RuntimeError(format_pmu_ex_no_return(
+                    module_name="pmu_endurance_interleaved",
+                    test_label="Endurance",
+                    segments_estimate=seg_est,
+                    burst_detail=burst_detail,
+                ))
+            time.sleep(0.2)
+            set_v = self._query_gp_data(controller, 20, total_probes, "setV")
+            set_i = self._query_gp_data(controller, 22, total_probes, "setI")
+            pulse_times = self._query_gp_data(controller, 31, total_probes, "PulseTimes")
+            if not pulse_times:
+                pulse_times = [float(i) for i in range(total_probes)]
+            resistances: List[float] = []
+            for voltage, current in zip(set_v, set_i):
+                if abs(current) < 1e-12:
+                    resistances.append(float("inf"))
+                else:
+                    resistances.append(abs(voltage / current))
+            min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances), total_probes)
+            return (
+                pulse_times[:min_len],
+                set_v[:min_len],
+                set_i[:min_len],
+                resistances[:min_len],
+            )
         finally:
             try:
                 controller._exit_ul_mode()
@@ -1849,9 +2516,24 @@ class Keithley4200_KXCI_Scripts:
             return_value, error = controller._execute_ex_command(command)
             if error:
                 raise RuntimeError(f"EX command failed: {error}")
-            
+
             if return_value is not None and return_value < 0:
-                raise RuntimeError(f"EX command returned error code: {return_value}")
+                raise RuntimeError(format_pmu_ex_error(
+                    module_name="readtrain / read_train_ilimit",
+                    return_value=return_value,
+                    test_label="Read train",
+                    burst_detail=f"Burst: {numb_meas_pulses} measurement pulse(s).",
+                    extra_lines=[
+                        "Read train builds one seg-arb waveform per EX call; very long trains "
+                        "may hit the same single-burst segment limit as Endurance/Retention.",
+                    ],
+                ))
+            if return_value is None:
+                raise RuntimeError(format_pmu_ex_no_return(
+                    module_name="readtrain",
+                    test_label="Read train",
+                    burst_detail=f"Burst: {numb_meas_pulses} measurement pulse(s).",
+                ))
             
             time.sleep(0.2)
             
@@ -1900,6 +2582,7 @@ class Keithley4200_KXCI_Scripts:
                          read_width: float = 0.5e-6,  # seconds (default 0.5 µs)
                          read_delay: float = 1e-6,  # seconds (default 1 µs)
                          read_rise_time: float = 0.1e-6,  # seconds (default 0.1 µs)
+                         pulse_rise_time: Optional[float] = None,
                          enable_debug_output: bool = True) -> Dict:
         """(Pulse → Read → Delay) × N cycles.
         
@@ -1918,6 +2601,7 @@ class Keithley4200_KXCI_Scripts:
             read_width: Read pulse width (seconds) - C code expects seconds [4200A only]
             read_delay: Read delay after measurement (seconds) - C code expects seconds [4200A only]
             read_rise_time: Read rise/fall time (seconds) - C code expects seconds [4200A only]
+            pulse_rise_time: Write rise/fall time (seconds); default uses read_rise_time [4200A only]
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
@@ -1929,6 +2613,7 @@ class Keithley4200_KXCI_Scripts:
         read_width_s = read_width
         read_delay_s = read_delay
         read_rise_s = read_rise_time
+        pulse_rise_s = pulse_rise_time if pulse_rise_time is not None else read_rise_s
         
         # Print values for verification (already in seconds)
         print(f"\n[KXCI] Parameter Values (in SECONDS as expected by C module):")
@@ -1937,6 +2622,7 @@ class Keithley4200_KXCI_Scripts:
         print(f"  read_width: {read_width_s:.2e} s ({read_width_s*1e6:.2f} µs)")
         print(f"  read_delay: {read_delay_s:.2e} s ({read_delay_s*1e6:.2f} µs)")
         print(f"  read_rise_time: {read_rise_s:.2e} s ({read_rise_s*1e6:.2f} µs)")
+        print(f"  pulse_rise_time: {pulse_rise_s:.2e} s ({pulse_rise_s*1e6:.2f} µs)")
         
         # Enforce minimum segment time (2e-8 seconds = 20 ns) to prevent error -207
         MIN_SEGMENT_TIME = 2e-8
@@ -1954,37 +2640,34 @@ class Keithley4200_KXCI_Scripts:
                            f"Expected value should be < 1000 µs. Check unit conversion.")
         
         # Use interleaved module: Pattern is Initial Read → (Pulse → Read) × N cycles
-        # All cycles handled by C code (num_cycles parameter)
-        # Pattern: Pulse immediately followed by Read, then delay before next cycle
-        pulse_edge = self._select_edge_time(pulse_width_s)
-        read_edge = self._select_edge_time(read_width_s, read_rise_s)
-        cfg = PulseReadInterleavedConfig(
-            num_cycles=num_cycles,  # Number of (pulse → read) cycles - C code handles loop
-            num_pulses_per_group=1,  # One pulse per cycle
-            num_reads=1,  # One read per cycle
-            pulse_v=pulse_voltage,
-            pulse_width=pulse_width_s,
-            pulse_rise_time=pulse_edge,
-            pulse_fall_time=pulse_edge,
-            pulse_delay=2e-8,  # Minimal delay after pulse (minimum valid segment time, read happens immediately after pulse)
-            # Enforce minimum segment time (2e-8 seconds = 20 ns) to prevent error -207
-            # Round up values that are very close to minimum to avoid floating point precision issues
-            meas_v=read_voltage,  # Use user's read voltage
-            meas_width=read_width_s,  # Use user's read width
-            meas_delay=delay_between_s,  # Delay after read (before next cycle) - this is the cycle-to-cycle delay
-            rise_time=read_edge,  # Fast rise/fall for measurement window
-            i_range=1e-4,  # Default current range
-            max_points=10000,  # Default, will be adjusted if needed
-            iteration=1,
-            clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
+        # Same builder as pmu_scope_smoke_test.py (i_range=1e-4, legacy fields at 20 ns)
+        if clim != self._SCOPE_VALIDATED_I_RANGE:
+            print(
+                f"[KXCI] Note: clim={clim:.2e} A is not sent as EX IRange "
+                f"(using {self._SCOPE_VALIDATED_I_RANGE:.2e} A like scope smoke test)."
+            )
+        cfg = self.build_pmu_pulse_read_burst_cfg(
+            pulse_voltage=pulse_voltage,
+            pulse_width_s=pulse_width_s,
+            read_voltage=read_voltage,
+            read_width_s=read_width_s,
+            read_rise_s=read_rise_s,
+            delay_between_s=delay_between_s,
+            num_cycles=num_cycles,
+            pulse_rise_s=pulse_rise_s,
+            pulse_fall_s=pulse_rise_s,
+            clarius_debug=1 if enable_debug_output else 0,
         )
         cfg.validate()
         
         # Ensure max_points is sufficient for rate calculation (especially for long measurements)
         self._ensure_valid_interleaved_max_points(cfg)
         
+        print_interleaved_timeline(cfg)
+        
         timestamps, voltages, currents, resistances = self._run_interleaved_with_fallback(cfg)
         self._print_results_table(timestamps, voltages, currents, resistances)
+        self._print_pmu_scope_verification(cfg, timestamps, voltages, currents)
         
         return self._format_results(timestamps, voltages, currents, resistances)
     
@@ -3017,25 +3700,28 @@ class Keithley4200_KXCI_Scripts:
             return_value, error = controller._execute_ex_command(command)
             if error:
                 raise RuntimeError(f"EX command failed: {error}")
-            
+
+            burst_detail = (
+                f"Burst: {cfg.num_cycles} cycle(s), {cfg.num_pulses_per_group} pulse(s)/group, "
+                f"{cfg.num_reads} read(s)/cycle."
+            )
             if return_value is not None and return_value < 0:
-                # Error code -207 typically means "minimum segment time" violation
-                # Error code -90 typically means invalid parameter or rate calculation failure
-                error_msg = f"EX command returned error code: {return_value}"
-                if return_value == -207:
-                    error_msg += "\nThis usually indicates a minimum segment time violation."
-                    error_msg += "\nAll timing parameters (pulse_width, pulse_delay, meas_width, meas_delay) must be >= 20 ns (2e-8 seconds)."
-                    error_msg += f"\nCurrent values: pulse_width={cfg.pulse_width:.2e}s, pulse_delay={cfg.pulse_delay:.2e}s, meas_width={cfg.meas_width:.2e}s, meas_delay={cfg.meas_delay:.2e}s"
-                elif return_value == -90:
-                    error_msg += "\nThis usually indicates an invalid parameter or rate calculation failure."
-                    error_msg += "\nCommon causes:"
-                    error_msg += "\n  - Measurement window (read_width) too large or invalid"
-                    error_msg += "\n  - Sampling rate too low (< 200000 Hz)"
-                    error_msg += "\n  - Invalid timing parameters"
-                    error_msg += f"\nCurrent values: pulse_width={cfg.pulse_width:.2e}s ({cfg.pulse_width*1e6:.2f}µs), pulse_delay={cfg.pulse_delay:.2e}s ({cfg.pulse_delay*1e6:.2f}µs)"
-                    error_msg += f"\n  meas_width={cfg.meas_width:.2e}s ({cfg.meas_width*1e6:.2f}µs), meas_delay={cfg.meas_delay:.2e}s ({cfg.meas_delay*1e6:.2f}µs)"
-                    error_msg += f"\n  num_cycles={cfg.num_cycles}, num_pulses_per_group={cfg.num_pulses_per_group}, num_reads={cfg.num_reads}"
-                raise RuntimeError(error_msg)
+                extra = [
+                    f"Timing: pulse_width={cfg.pulse_width:.2e}s, meas_width={cfg.meas_width:.2e}s.",
+                ]
+                raise RuntimeError(format_pmu_ex_error(
+                    module_name="pmu_potentiation_depression",
+                    return_value=return_value,
+                    test_label="Potentiation / Depression",
+                    burst_detail=burst_detail,
+                    extra_lines=extra,
+                ))
+            if return_value is None:
+                raise RuntimeError(format_pmu_ex_no_return(
+                    module_name="pmu_potentiation_depression",
+                    test_label="Potentiation / Depression",
+                    burst_detail=burst_detail,
+                ))
             
             time.sleep(0.2)  # Allow data to be ready
             
@@ -3195,96 +3881,154 @@ class Keithley4200_KXCI_Scripts:
                       read_voltage: float = 0.2,
                       num_cycles: int = 1000,
                       delay_between: float = 10000.0,
-                      clim: float = 100e-3) -> Dict:
-        """Endurance test: SET/RESET cycles for lifetime testing.
-        
-        Pattern: Initial Read → (SET → Read → RESET → Read) × N
-        
-        Args:
-            set_voltage: SET voltage (V)
-            reset_voltage: RESET voltage (V)
-            pulse_width: Pulse width (µs)
-            read_voltage: Read voltage (V)
-            num_cycles: Number of cycles
-            delay_between: Delay between operations (µs)
-            clim: Current limit (A)
-        
-        Returns:
-            Dict with timestamps, voltages, currents, resistances, cycle_numbers
-        """
-        pulse_width_s = self._convert_us_to_seconds(pulse_width)
-        delay_between_s = self._convert_us_to_seconds(delay_between)
-        
-        i_range = self._convert_clim_to_i_range(clim)
-        
+                      clim: float = 100e-3,
+                      read_width: float = 2e-6,
+                      read_rise_time: float = 1e-7,
+                      pulse_rise_time: Optional[float] = None) -> Dict:
+        """Endurance: Initial Read → (SET → Read → RESET → Read) × N via pmu_endurance_interleaved."""
+        pulse_width_s = max(2e-8, pulse_width)
+        delay_between_s = max(2e-8, delay_between)
+        read_width_s = max(2e-8, read_width)
+        read_rise_s = max(2e-8, read_rise_time)
+        pulse_rise_s = pulse_rise_time if pulse_rise_time is not None else read_rise_s
+
+        cfg = self.build_pmu_endurance_burst_cfg(
+            set_voltage=set_voltage,
+            reset_voltage=reset_voltage,
+            pulse_width_s=pulse_width_s,
+            read_voltage=read_voltage,
+            read_width_s=read_width_s,
+            read_rise_s=read_rise_s,
+            delay_between_s=delay_between_s,
+            pulse_rise_s=pulse_rise_s,
+            pulse_fall_s=pulse_rise_s,
+            i_range=self._SCOPE_VALIDATED_I_RANGE,
+        )
+        cfg.validate()
+
         all_timestamps: List[float] = []
         all_voltages: List[float] = []
         all_currents: List[float] = []
         all_resistances: List[float] = []
         cycle_numbers: List[int] = []
-        
-        for cycle in range(num_cycles):
-            # SET
-            # num_pulses must be >= 8, so use 8 and take only first result
-            set_cfg = RetentionConfig(
-                num_initial_meas_pulses=1 if cycle == 0 else 0,
-                num_pulses_seq=1,
-                num_pulses=8,  # Minimum required (was 1, which is invalid)
-                pulse_v=set_voltage,
-                pulse_width=pulse_width_s,
-                pulse_rise_time=1e-7,
-                pulse_fall_time=1e-7,
-                pulse_delay=delay_between_s,
-                meas_v=read_voltage,
-                meas_width=2e-6,
-                meas_delay=delay_between_s,
-                i_range=i_range,
+        operations: List[str] = []
+        batch_size = self._max_endurance_cycles_per_burst(cfg, num_cycles)
+        if batch_size < num_cycles:
+            print(f"[KXCI] Batching endurance: {batch_size} cycles per EX ({num_cycles} total)")
+
+        remaining = num_cycles
+        global_cycle = 0
+        time_offset = 0.0
+
+        while remaining > 0:
+            n_burst = min(batch_size, remaining)
+            burst_cfg = replace(cfg)
+            self._ensure_valid_interleaved_max_points(burst_cfg)
+            est = self._estimate_endurance_total_time(burst_cfg, n_burst)
+            burst_cfg.max_points = max(
+                burst_cfg.max_points,
+                self._calculate_interleaved_min_max_points(
+                    est,
+                    min(
+                        burst_cfg.pulse_width, burst_cfg.meas_width, burst_cfg.pulse_rise_time,
+                        burst_cfg.rise_time,
+                    ),
+                ),
             )
-            set_cfg.validate()
-            self._ensure_valid_max_points(set_cfg)
-            
-            timestamps, voltages, currents, resistances = self._execute_retention(set_cfg)
-            
-            # Return all data - no filtering
-            all_timestamps.extend(timestamps)
-            all_voltages.extend(voltages)
-            all_currents.extend(currents)
-            all_resistances.extend(resistances)
-            cycle_numbers.extend([cycle] * len(timestamps))
-            
-            # RESET
-            # num_pulses must be >= 8, so use 8 and take only first result
-            reset_cfg = RetentionConfig(
-                num_initial_meas_pulses=0,
-                num_pulses_seq=1,
-                num_pulses=8,  # Minimum required (was 1, which is invalid)
-                pulse_v=reset_voltage,
-                pulse_width=pulse_width_s,
-                pulse_rise_time=1e-7,
-                pulse_fall_time=1e-7,
-                pulse_delay=delay_between_s,
-                meas_v=read_voltage,
-                meas_width=2e-6,
-                meas_delay=delay_between_s,
-                i_range=i_range,
+            ts_b, v_b, i_b, r_b = self._execute_endurance_interleaved(
+                burst_cfg, n_burst
             )
-            reset_cfg.validate()
-            self._ensure_valid_max_points(reset_cfg)
-            
-            timestamps, voltages, currents, resistances = self._execute_retention(reset_cfg)
-            
-            # Return all data - no filtering
-            all_timestamps.extend(timestamps)
-            all_voltages.extend(voltages)
-            all_currents.extend(currents)
-            all_resistances.extend(resistances)
-            cycle_numbers.extend([cycle] * len(timestamps))
-        
+
+            for idx in range(1, len(ts_b)):
+                cyc = global_cycle + (idx - 1) // 2
+                op = 'SET' if (idx - 1) % 2 == 0 else 'RESET'
+                all_timestamps.append(ts_b[idx] + time_offset)
+                all_voltages.append(v_b[idx])
+                all_currents.append(i_b[idx])
+                all_resistances.append(r_b[idx])
+                cycle_numbers.append(cyc)
+                operations.append(op)
+
+            if ts_b:
+                time_offset = (ts_b[-1] + time_offset) + delay_between_s
+            global_cycle += n_burst
+            remaining -= n_burst
+
+        self._print_results_table(all_timestamps, all_voltages, all_currents, all_resistances)
+        print(f"[KXCI] Endurance: {len(all_timestamps)} reads ({num_cycles} cycles, SET+RESET per cycle)")
+
         return self._format_results(
             all_timestamps, all_voltages, all_currents, all_resistances,
-            cycle_numbers=cycle_numbers
+            cycle_numbers=cycle_numbers,
+            cycle_number=cycle_numbers,
+            operation=operations,
         )
-    
+
+    def retention_test(
+        self,
+        pulse_voltage: float = 4.0,
+        pulse_width: float = 1e-6,
+        num_program_pulses: int = 5,
+        num_initial_reads: int = 2,
+        num_reads: int = 8,
+        read_voltage: float = 0.3,
+        read_width: float = 2e-6,
+        read_rise_time: float = 1e-7,
+        delay_between_reads: float = 2e-6,
+        delay_between_pulses: float = 1e-6,
+        pulse_rise_time: Optional[float] = None,
+        pulse_fall_time: Optional[float] = None,
+        clim: float = 100e-3,
+        clarius_debug: int = 0,
+    ) -> Dict:
+        """PMU retention: baseline reads → program pulse train → fast retention reads (pmu_retention_dual_channel)."""
+        pulse_width_s = max(2e-8, pulse_width)
+        read_width_s = max(2e-8, read_width)
+        read_rise_s = max(2e-8, read_rise_time)
+        pulse_rise_s = pulse_rise_time if pulse_rise_time is not None else read_rise_s
+        pulse_fall_s = pulse_fall_time if pulse_fall_time is not None else pulse_rise_s
+
+        cfg = self.build_pmu_retention_burst_cfg(
+            pulse_voltage=pulse_voltage,
+            pulse_width_s=pulse_width_s,
+            num_program_pulses=num_program_pulses,
+            num_initial_reads=num_initial_reads,
+            num_reads=num_reads,
+            read_voltage=read_voltage,
+            read_width_s=read_width_s,
+            read_rise_s=read_rise_s,
+            delay_between_reads_s=max(2e-8, delay_between_reads),
+            pulse_rise_s=pulse_rise_s,
+            pulse_fall_s=pulse_fall_s,
+            delay_between_pulses_s=max(2e-8, delay_between_pulses),
+            i_range=self._SCOPE_VALIDATED_I_RANGE,
+            clarius_debug=clarius_debug,
+        )
+        cfg.validate()
+        self._ensure_valid_max_points(cfg)
+
+        timestamps, voltages, currents, resistances = self._execute_retention(cfg)
+
+        n_baseline = cfg.num_initial_meas_pulses
+        phases: List[str] = []
+        for idx in range(len(timestamps)):
+            phases.append("baseline" if idx < n_baseline else "retention")
+
+        self._print_results_table(timestamps, voltages, currents, resistances)
+        print(
+            f"[KXCI] PMU retention: {n_baseline} baseline + "
+            f"{len(timestamps) - n_baseline} retention reads "
+            f"({cfg.num_pulses_seq} program pulses @ {pulse_voltage} V)"
+        )
+
+        return self._format_results(
+            timestamps, voltages, currents, resistances,
+            phase=phases,
+            num_program_pulses=cfg.num_pulses_seq,
+            num_initial_reads=n_baseline,
+            num_retention_reads=cfg.num_pulses,
+        )
+
     def ispp_test(self, start_voltage: float = 0.5,
                   voltage_step: float = 0.05,
                   max_voltage: float = 3.0,

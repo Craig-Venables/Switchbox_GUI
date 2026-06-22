@@ -6,6 +6,7 @@ PulseDiagramHelper draws the pattern on a matplotlib axes. Main builds params an
 import numpy as np
 from Pulse_Testing.pulse_pattern_visualizer import PulsePatternVisualizer
 from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
+from Pulse_Testing.test_definitions import TEST_FUNCTIONS
 
 
 class PulseDiagramHelper:
@@ -23,55 +24,63 @@ class PulseDiagramHelper:
                     self.fig.delaxes(ax)
                 except Exception:
                     pass
-        if "Pulse-Read-Repeat" in test_name:
+
+        func = TEST_FUNCTIONS.get(test_name, {}).get("function", "")
+        if func == "pulse_read_repeat":
             self._draw_pulse_read_repeat(params)
-        elif "Multi-Pulse-Then-Read" in test_name:
+        elif func == "multi_pulse_then_read":
             self._draw_multi_pulse_then_read(params)
-        elif "Width Sweep" in test_name:
-            self._draw_width_sweep(params, "Full" in test_name)
-        elif "Potentiation-Depression" in test_name:
+        elif func == "width_sweep_with_reads":
+            self._draw_width_sweep(params, False)
+        elif func == "width_sweep_with_all_measurements":
+            self._draw_width_sweep(params, True)
+        elif func == "potentiation_depression_cycle":
             self._draw_pot_dep_cycle(params)
-        elif "Potentiation Only" in test_name:
+        elif func == "potentiation_only":
             self._draw_potentiation_only(params)
-        elif "Depression Only" in test_name:
+        elif func == "depression_only":
             self._draw_depression_only(params)
-        elif "Endurance" in test_name:
+        elif func == "endurance_test":
             self._draw_endurance(params)
-        elif "⚠️ SMU Slow Pulse Measure" in test_name:
+        elif func == "retention_test":
+            self._draw_pmu_retention(params)
+        elif func == "smu_slow_pulse_measure":
             self._draw_smu_slow_pulse_measure(params)
-        elif "⚠️ SMU Endurance" in test_name:
+        elif func == "smu_endurance":
             self._draw_smu_endurance(params)
-        elif test_name == "⚠️ SMU Retention":
+        elif func == "smu_retention":
             self._draw_smu_retention(params)
-        elif "⚠️ SMU Retention (Pulse Measured)" in test_name:
+        elif func == "smu_retention_with_pulse_measurement":
             self._draw_smu_retention_with_pulse_measurement(params)
-        elif "Pulse-Multi-Read" in test_name:
+        elif func == "pulse_multi_read":
             self._draw_pulse_multi_read(params)
-        elif "Multi-Read Only" in test_name:
+        elif func == "multi_read_only":
             self._draw_multi_read_only(params)
-        elif "Relaxation" in test_name:
-            self._draw_relaxation(params, "Pulse Measurement" in test_name)
-        elif "Voltage Amplitude Sweep" in test_name:
+        elif func == "relaxation_after_multi_pulse":
+            self._draw_relaxation(params, False)
+        elif func == "relaxation_after_multi_pulse_with_pulse_measurement":
+            self._draw_relaxation(params, True)
+        elif func == "voltage_amplitude_sweep":
             self._draw_voltage_sweep(params)
-        elif "ISPP" in test_name:
+        elif func == "ispp_test":
             self._draw_ispp(params)
-        elif "Switching Threshold" in test_name:
+        elif func == "switching_threshold_test":
             self._draw_threshold(params)
-        elif "Multilevel Programming" in test_name:
+        elif func == "multilevel_programming":
             self._draw_multilevel(params)
-        elif "Optical Read (Pulsed Light)" in test_name:
+        elif func == "optical_read_pulsed_light":
             self._draw_optical_read_pulsed_light(params)
-        elif "Continuous Read with Laser Pulse Pattern" in test_name:
+        elif func == "optical_pulse_train_pattern_read":
             self._draw_optical_laser_pattern_read(params)
-        elif "Optical Pulse Train + Read" in test_name:
+        elif func == "optical_pulse_train_read":
             self._draw_optical_pulse_train_read(params)
-        elif "Binary Pattern Sweep" in test_name:
+        elif func == "optical_binary_sweep":
             self._draw_binary_pattern_sweep(params)
-        elif "Pattern Repeat" in test_name:
+        elif func == "optical_pattern_repeat":
             self._draw_pattern_repeat(params)
-        elif "Electrical Pulse Train" in test_name or "Pulse Train" in test_name:
+        elif func == "pulse_train_varying_amplitudes":
             self._draw_pulse_train(params)
-        elif "Laser and Read" in test_name:
+        elif func == "laser_and_read":
             self._draw_laser_and_read(params)
         else:
             self._draw_generic_pattern()
@@ -130,24 +139,30 @@ class PulseDiagramHelper:
             voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
             t = read_end + read_rise + delay  # Delay before next cycle
         
-        # Convert to ms for display
-        times_ms = np.array(times) * 1e3
-        self.ax.plot(times_ms, voltages, 'b-', linewidth=2, label='Voltage')
-        self.ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='blue')
+        # 4200 PMU params are in seconds; label axis in µs (was mislabeled ms)
+        if is_4200a:
+            times_plot = np.array(times) * 1e6
+            time_label = 'Time (µs)'
+        else:
+            times_plot = np.array(times) * 1e3
+            time_label = 'Time (ms)'
+        self.ax.plot(times_plot, voltages, 'b-', linewidth=2, label='Voltage')
+        self.ax.fill_between(times_plot, 0, voltages, alpha=0.3, color='blue')
         
         # Mark read points with visible markers
+        read_scale = 1e6 if is_4200a else 1e3
         for rt in read_times:
-            self.ax.plot(rt*1e3, r_v, 'ro', markersize=8, markeredgewidth=2, 
-                               markerfacecolor='red', markeredgecolor='darkred', 
+            self.ax.plot(rt * read_scale, r_v, 'ro', markersize=8, markeredgewidth=2,
+                               markerfacecolor='red', markeredgecolor='darkred',
                                label='Read' if rt == read_times[0] else '')
         
-        self.ax.set_xlabel('Time (ms)')
+        self.ax.set_xlabel(time_label)
         self.ax.set_ylabel('Voltage (V)')
         self.ax.set_title(f'Pattern: Initial Read → (Pulse→Read)×{cycles}', fontsize=9)
         self.ax.grid(True, alpha=0.3)
         self._set_preview_ylim(voltages + [r_v, p_v, 0])
-        if times_ms.size > 0:
-            self.ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0, not -0.1
+        if times_plot.size > 0:
+            self.ax.set_xlim(0, times_plot[-1] * 1.1)
     
     def _draw_multi_pulse_then_read(self, params):
         """Draw: Initial Read → (Pulse×N → Read×M) × Cycles"""
@@ -552,53 +567,119 @@ class PulseDiagramHelper:
     
     def _draw_endurance(self, params):
         """Draw endurance test with initial read"""
+        is_4200a = self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         t = 0
         times, voltages = [], []
         read_times = []
         set_v = params.get('set_voltage', 2.0)
         reset_v = params.get('reset_voltage', -2.0)
         r_v = params.get('read_voltage', 0.2)
-        p_w = params.get('pulse_width', 1e-3)
+        p_w = params.get('pulse_width', 1e-6 if is_4200a else 1e-3)
+        delay = params.get('delay_between', 0.02e-6 if is_4200a else 10e-3)
         cycles = min(params.get('num_cycles', 100), 3)
-        
-        # Initial read before any cycles
-        read_t = t + p_w*0.15
-        read_times.append(read_t)
-        times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-        voltages.extend([0, r_v, r_v, 0])
-        t += p_w*0.3 + 0.0001
-        
+        read_w = params.get('read_width', 2e-6 if is_4200a else 1e-3)
+        read_rise = params.get('read_rise_time', 0.1e-6 if is_4200a else 0.1e-3)
+
+        # Initial read
+        read_start = t + read_rise
+        read_end = read_start + read_w
+        read_times.append((read_start + read_end) / 2)
+        times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+        voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+        t = read_end + read_rise + delay
+
         for i in range(cycles):
-            # SET + read
-            times.extend([t, t, t+p_w, t+p_w])
+            times.extend([t, t, t + p_w, t + p_w])
             voltages.extend([0, set_v, set_v, 0])
-            t += p_w + 0.0001
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between', 10e-3)
-            # RESET + read
-            times.extend([t, t, t+p_w, t+p_w])
+            t += p_w + delay * 0.1
+            read_start = t + read_rise
+            read_end = read_start + read_w
+            read_times.append((read_start + read_end) / 2)
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+            t = read_end + read_rise + delay
+            times.extend([t, t, t + p_w, t + p_w])
             voltages.extend([0, reset_v, reset_v, 0])
-            t += p_w + 0.0001
-            read_t = t + p_w*0.15
-            read_times.append(read_t)
-            times.extend([t, t, t+p_w*0.3, t+p_w*0.3])
-            voltages.extend([0, r_v, r_v, 0])
-            t += p_w*0.3 + params.get('delay_between', 10e-3)
-        
-        times_ms = np.array(times) * 1e3
-        self.ax.plot(times_ms, voltages, 'brown', linewidth=2)
-        self.ax.fill_between(times_ms, 0, voltages, alpha=0.3, color='brown')
+            t += p_w + delay * 0.1
+            read_start = t + read_rise
+            read_end = read_start + read_w
+            read_times.append((read_start + read_end) / 2)
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+            t = read_end + read_rise + delay
+
+        if is_4200a:
+            times_plot = np.array(times) * 1e6
+            time_label = 'Time (µs)'
+            read_scale = 1e6
+        else:
+            times_plot = np.array(times) * 1e3
+            time_label = 'Time (ms)'
+            read_scale = 1e3
+        self.ax.plot(times_plot, voltages, 'brown', linewidth=2)
+        self.ax.fill_between(times_plot, 0, voltages, alpha=0.3, color='brown')
         for rt in read_times:
-            self.ax.plot(rt*1e3, r_v, 'rx', markersize=10, markeredgewidth=2)
-        self.ax.set_xlabel('Time (ms)')
+            self.ax.plot(rt * read_scale, r_v, 'rx', markersize=8, markeredgewidth=2)
+        self.ax.set_xlabel(time_label)
         self.ax.set_ylabel('Voltage (V)')
         self.ax.set_title(f'Endurance: Initial Read → {cycles} SET/RESET cycles', fontsize=9)
         self.ax.grid(True, alpha=0.3)
-        if times_ms.size > 0:
-            self.ax.set_xlim(0, times_ms[-1]*1.1)  # Start at 0
+        if times_plot.size > 0:
+            self.ax.set_xlim(0, times_plot[-1] * 1.1)
+
+    def _draw_pmu_retention(self, params):
+        """Draw PMU retention: baseline reads → program train → retention reads."""
+        t = 0.0
+        times, voltages = [], []
+        read_times = []
+        p_v = params.get('pulse_voltage', 2.0)
+        r_v = params.get('read_voltage', 0.3)
+        p_w = params.get('pulse_width', 1e-6)
+        n_prog = min(int(params.get('num_program_pulses', 5)), 5)
+        n_base = min(int(params.get('num_initial_reads', 2)), 3)
+        n_ret = min(int(params.get('num_reads', 8)), 8)
+        read_w = params.get('read_width', 2e-6)
+        read_rise = params.get('read_rise_time', 0.1e-6)
+        pulse_rise = params.get('pulse_rise_time', 0.1e-6)
+        pulse_fall = params.get('pulse_fall_time', pulse_rise)
+        delay_reads = params.get('delay_between_reads', 2e-6)
+        delay_pulses = params.get('delay_between_pulses', 1e-6)
+
+        def add_read():
+            nonlocal t
+            read_start = t + read_rise
+            read_end = read_start + read_w
+            read_times.append((read_start + read_end) / 2)
+            times.extend([t, t, read_start, read_start, read_end, read_end, read_end + read_rise, read_end + read_rise])
+            voltages.extend([0, 0, 0, r_v, r_v, r_v, r_v, 0])
+            t = read_end + read_rise + delay_reads
+
+        t += params.get('reset_delay', 0.5e-7) + read_rise
+        for _ in range(n_base):
+            add_read()
+        t += read_rise
+        for _ in range(n_prog):
+            times.extend([t, t, t + pulse_rise, t + pulse_rise + p_w, t + pulse_rise + p_w + pulse_fall, t + pulse_rise + p_w + pulse_fall])
+            voltages.extend([0, 0, p_v, p_v, p_v, 0])
+            t += pulse_rise + p_w + pulse_fall + delay_pulses
+        for _ in range(n_ret):
+            add_read()
+
+        times_plot = np.array(times) * 1e6
+        self.ax.plot(times_plot, voltages, 'b-', linewidth=2)
+        self.ax.fill_between(times_plot, 0, voltages, alpha=0.25, color='blue')
+        for rt in read_times:
+            self.ax.plot(rt * 1e6, r_v, 'ro', markersize=6)
+        self.ax.set_xlabel('Time (µs)')
+        self.ax.set_ylabel('Voltage (V)')
+        self.ax.set_title(
+            f'PMU Retention: {n_base} baseline → {n_prog} program → {n_ret} retention reads',
+            fontsize=9,
+        )
+        self.ax.grid(True, alpha=0.3)
+        if times_plot.size > 0:
+            self.ax.set_xlim(0, times_plot[-1] * 1.1)
+        self._set_preview_ylim(voltages + [r_v, p_v, 0])
     
     def _draw_smu_retention(self, params):
         """Draw SMU retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3..."""

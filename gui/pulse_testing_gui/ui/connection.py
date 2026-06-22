@@ -6,7 +6,26 @@ Builds the Connection LabelFrame and sets connection-related attributes on the G
 import tkinter as tk
 from tkinter import ttk
 
+from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
 from Pulse_Testing.system_wrapper import detect_system_from_address, get_default_address_for_system
+
+
+def _update_pmu_hint(gui) -> None:
+    """Show PMU wiring hint when fast PMU profile is selected."""
+    if not hasattr(gui, "pmu_hint_label"):
+        return
+    system = getattr(gui, "system_var", None)
+    name = system.get() if system else ""
+    if name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+        gui.pmu_hint_label.config(
+            text=(
+                "PMU profile: most tests need 2-ch DUT wiring (CH1 force → DUT+, CH2 measure → DUT−). "
+                "Endurance & Retention first. Presets: DUT → Limit."
+            ),
+            fg="#004080",
+        )
+    else:
+        gui.pmu_hint_label.config(text="", fg="gray")
 
 
 def toggle_connection_section(gui):
@@ -67,7 +86,17 @@ def build_connection_section(parent, gui):
                                 state="readonly", width=20)
     system_combo.pack(side=tk.LEFT, padx=5)
     tk.Button(system_frame, text="🔍 Auto", command=gui._auto_detect_system, width=6, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=2)
-    gui.system_var.trace_add("write", lambda *args: gui._on_system_changed())
+
+    gui.pmu_hint_label = tk.Label(
+        gui.conn_inner_frame,
+        text="",
+        font=("TkDefaultFont", 8),
+        wraplength=420,
+        justify=tk.LEFT,
+    )
+    gui.pmu_hint_label.pack(fill=tk.X, padx=2, pady=(0, 2))
+    gui.system_var.trace_add("write", lambda *args: (_update_pmu_hint(gui), gui._on_system_changed()))
+    _update_pmu_hint(gui)
 
     addr_frame = tk.Frame(gui.conn_inner_frame)
     addr_frame.pack(fill=tk.X, pady=(3, 1))

@@ -107,13 +107,29 @@ python build_exe.py
 
 Output: `dist/Switchbox_GUI/Switchbox_GUI.exe`
 
+**Pulse Testing GUI only** (standalone exe, no full Switchbox app):
+
+```bash
+python build_pulse_testing_gui.py
+```
+
+Requires **Python 3.10.11+** for PyInstaller (3.10.0 fails during analysis). If your `.venv` is still on 3.10.0, use a separate build env:
+
+```bash
+py -3.10 -m venv .venv-build
+.venv-build\Scripts\pip install -r requirements.txt pyinstaller
+.venv-build\Scripts\python build_pulse_testing_gui.py
+```
+
+Output: `dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe` — distribute the whole `dist/Pulse_Testing_GUI/` folder.
+
 ## 8. Standalone tool launchers
 
 | Tool | Command |
 |------|---------|
 | Main app | `python main.py` |
 | Laser FG Scope | `python Laser_FG_Scope_GUI.py` |
-| Pulse testing GUI | `python -m gui.pulse_testing_gui.main` |
+| Pulse testing GUI | `python TSP_Testing_GUI.py` or `python -m gui.pulse_testing_gui.main` |
 | Motor control | `python -m gui.motor_control_gui.main` |
 | Connection check | `python -m gui.connection_check_gui.main` |
 | TSP standalone (legacy) | `python tools/tsp_testing_gui_standalone_v1/TSP_Testing_GUI.py` |

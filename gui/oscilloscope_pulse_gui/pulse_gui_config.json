@@ -26,7 +26,7 @@
     "calc_voltage": "3.0",
     "calc_current": "0.000256118",
     "calc_result": "\u2705 Quick Test Complete!\nMeasured Current: 256.118 \u00b5A\nRecommended R_shunt: 8.20 \u03a9\nExpected Signal: 2.10 mV\n\n\u2713 Signal level looks good for scope measurement\n\nDevice: 11.71 k\u03a9 @ 3.0V (256.118 \u00b5A)\n\n10% Rule: R_shunt = 1.17 k\u03a9  \u2192  300.00 mV signal\n\nStandard Resistor Options:\n  \u2022 1.00 k\u03a9 \u2192 256.12 mV\n  \u2022 1.20 k\u03a9 \u2192 307.34 mV\n\n\u2705 Recommended: 1.20 k\u03a9",
-    "smu_status": "SMU: Connected (KEITHLEY4200A)",
+    "smu_status": "SMU: Not Connected",
     "auto_configure_scope": true,
     "record_length": "20",
     "calc_rule": "10",
@@ -56,5 +56,6 @@
     "pulse_parameters_expanded": true,
     "analysis_parameters_(critical!)_expanded": true,
     "_shunt_resistor_calculator_expanded": false,
-    "_save_options_expanded": false
+    "_save_options_expanded": false,
+    "sweep_parameters_(critical!)_expanded": true
 }

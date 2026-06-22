@@ -101,8 +101,9 @@ Keithley2450_TSP_Scripts = keithley2450_tsp_scripts.Keithley2450_TSP_Scripts if 
 # New modular pulse testing system
 from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_address, get_default_address_for_system
 from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
-from Pulse_Testing.test_definitions import TEST_FUNCTIONS, get_test_definitions_for_gui
+from Pulse_Testing.test_definitions import TEST_FUNCTIONS, get_test_definitions_for_gui, migrate_presets_dict, canonical_test_display_name
 from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
+from Pulse_Testing.pmu_channel_wiring import get_channel_wiring_hint
 
 from .ui import (
     build_connection_section,
@@ -635,11 +636,11 @@ class TSPTestingGUI(tk.Toplevel):
         tk.Label(scrollable_frame, text="3. Test Types", font=("Segoe UI", 12, "bold"), 
                 bg="#f0f0f0").pack(**pad)
         tk.Label(scrollable_frame,
-                text="• Pulse-Read-Repeat: Single pulse followed by read\n"
-                      "• Multi-Pulse-Then-Read: Multiple pulses then read\n"
-                      "• Width Sweep: Characterize pulse width dependence\n"
-                      "• Potentiation/Depression: Training cycles\n"
-                      "• Endurance Test: Long-term cycling",
+                text="• Endurance: SET/RESET cycling with reads\n"
+                      "• Retention: baseline → program → retention reads\n"
+                      "• Read → Write → Read: single switching pulse\n"
+                      "• Pulse Train → Read: multiple pulses then reads\n"
+                      "• Pulse Width Sweep: characterize timing",
                 justify="left", bg="#f0f0f0").pack(**pad)
         
         tk.Label(scrollable_frame, text="4. Features", font=("Segoe UI", 12, "bold"), 
@@ -1040,6 +1041,52 @@ class TSPTestingGUI(tk.Toplevel):
                 out[key] = g
         return out
 
+    def _log_pmu_scope_check(self, results: dict, params: dict) -> None:
+        """Summarize firmware timing vs scope — helps when scope shows long pulses but EX is correct."""
+        ts = results.get("timestamps") or []
+        vs = results.get("voltages") or []
+        cs = results.get("currents") or []
+        read_v = float(params.get("read_voltage", 0.3))
+        gp_us = [t * 1e6 for t in ts if t and abs(t) > 1e-15]
+        if gp_us:
+            self.log(f"  PMU firmware probe times: {gp_us[0]:.2f} us, {gp_us[-1]:.2f} us (total ~{gp_us[-1]:.1f} us)")
+        if gp_us and gp_us[-1] < 20.0:
+            self.log("  Firmware OK: short Read->Write->Read (~6 us). If scope shows 55+ us, fix scope setup.")
+        if vs and read_v > 0 and vs[0] < read_v * 0.6:
+            self.log(f"  Heavy load: read {vs[0]:.3f} V vs {read_v:.2f} V set — scope may show slow tails")
+        self.log("  Scope: CH1 direct, 500 ns-1 us/div, Single trigger ~200 mV")
+
+    def _log_pmu_endurance_check(self, results: dict, params: dict) -> None:
+        """Summarize PMU endurance readback for GUI log."""
+        ops = results.get("operation") or []
+        rs = results.get("resistances") or []
+        n_set = sum(1 for o in ops if o == "SET")
+        n_reset = sum(1 for o in ops if o == "RESET")
+        self.log(f"  PMU endurance: {n_set} after-SET reads, {n_reset} after-RESET reads")
+        if rs:
+            self.log(f"  Resistance range: {min(rs):.3e} - {max(rs):.3e} ohm")
+        self.log(
+            f"  Levels: SET={params.get('set_voltage', '?')} V  "
+            f"RESET={params.get('reset_voltage', '?')} V  "
+            f"read={params.get('read_voltage', '?')} V"
+        )
+
+    def _log_pmu_retention_check(self, results: dict, params: dict) -> None:
+        """Summarize PMU retention readback for GUI log."""
+        phases = results.get("phase") or []
+        n_base = sum(1 for p in phases if p == "baseline")
+        n_ret = sum(1 for p in phases if p == "retention")
+        rs = results.get("resistances") or []
+        self.log(f"  PMU retention: {n_base} baseline reads, {n_ret} retention reads")
+        if rs:
+            self.log(f"  Resistance range: {min(rs):.3e} - {max(rs):.3e} ohm")
+        self.log(
+            f"  Program: {params.get('num_program_pulses', '?')} x "
+            f"{params.get('pulse_voltage', '?')} V @ "
+            f"{params.get('pulse_width', '?')} us"
+        )
+        self.log("  Library: A_Retention / pmu_retention_dual_channel (separate from pulse-read USRLIB)")
+
     def _effective_system_name_for_ui(self):
         """System id for test list and capability checks: wrapper when connected, else Connection combo."""
         if self.system_wrapper.is_connected():
@@ -1154,6 +1201,7 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Store current selection
         current_selection = self.test_var.get()
+        current_selection = canonical_test_display_name(current_selection)
         
         # Update combobox values (this will trigger capability checking)
         self.test_combo['values'] = test_values
@@ -1199,6 +1247,13 @@ class TSPTestingGUI(tk.Toplevel):
             self.desc_text.tag_add("unsupported", "1.0", tk.END)
             self.desc_text.tag_config("unsupported", foreground="gray")
         self.desc_text.config(state=tk.DISABLED)
+
+        wiring = get_channel_wiring_hint(system_name, test_function)
+        if hasattr(self, "channel_wiring_label"):
+            if wiring:
+                self.channel_wiring_label.config(text=f"🔌 Wiring: {wiring}", fg="#004080")
+            else:
+                self.channel_wiring_label.config(text="", fg="#004080")
         
         # Disable/enable run button based on support
         if not is_supported:
@@ -1248,7 +1303,7 @@ class TSPTestingGUI(tk.Toplevel):
                           'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
                           'post_read_interval', 'reset_width', 'delay_between_voltages', 
                           'delay_between_levels']
-            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
+            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time', 'pulse_rise_time', 'pulse_fall_time']
             
             for param_name, param_info in self.param_vars.items():
                 try:
@@ -1262,21 +1317,9 @@ class TSPTestingGUI(tk.Toplevel):
                             value = float(value_str)
                             
                             # Convert from old unit to new unit
+                            # PMU read/write edge params: field values are always µs (see labels)
                             if param_name in read_pulse_params and is_4200a:
-                                # For 4200A read pulse params, they're always in µs
-                                # Convert: old_unit → seconds → µs → new_unit
-                                old_to_sec = unit_to_seconds.get(old_unit, 1e-3)
-                                sec_to_new = 1.0 / unit_to_seconds.get(new_unit, 1e-3)
-                                # If old unit was µs, value is already in µs
-                                if old_unit == 'µs':
-                                    value_in_us = value
-                                else:
-                                    # Convert from old unit to µs
-                                    value_in_seconds = value * old_to_sec
-                                    value_in_us = value_in_seconds / 1e-6
-                                # Convert from µs to new unit
-                                value_in_seconds = value_in_us * 1e-6
-                                saved_values[param_name] = value_in_seconds * sec_to_new
+                                saved_values[param_name] = value
                             elif param_name == 'delay_before_read' and is_4200a:
                                 # Similar handling for delay_before_read (always in µs for 4200A)
                                 if old_unit == 'µs':
@@ -1370,19 +1413,20 @@ class TSPTestingGUI(tk.Toplevel):
         # Default values for 4200A (in µs) - different from 2450 defaults
         # For 4200A, we want 1 µs for pulse_width and delays, not 1000 µs (1 ms)
         defaults_4200a = {
-            'pulse_width': 1.0,  # 1 µs (matches example: 1e-6 s = 1 µs)
-            'delay_between': 10.0,  # 10 µs (for pulse_read_repeat, matches example: 1e-6 s = 1 µs for pulse_delay)
-            'delay_between_cycles': 10.0,  # 10 µs
-            'delay_between_pulses': 1.0,  # 1 µs
-            'delay_between_reads': 10.0,  # 10 µs
-            'delay_before_read': 0.02,  # 0.02 µs = 20 ns (minimum allowed by 4200A)
-            'read_width': 0.5,  # 0.5 µs (matches example: 0.5e-6 s = 0.5 µs)
-            'read_delay': 1.0,  # 1 µs (matches example: 1e-6 s = 1 µs)
-            'read_rise_time': 0.1,  # 0.1 µs (matches example: 1e-7 s = 0.1 µs)
-            'post_read_interval': 1.0,  # 1 µs
-            'reset_width': 1.0,  # 1 µs
-            'delay_between_voltages': 1000.0,  # 1000 µs = 1 ms
-            'delay_between_levels': 1000.0,  # 1000 µs = 1 ms
+            'pulse_width': 1.0,  # 1 µs — scope-validated write width
+            'delay_between': 0.02,  # 20 ns minimum
+            'delay_between_cycles': 0.02,
+            'delay_between_pulses': 0.02,
+            'delay_between_reads': 0.02,
+            'delay_before_read': 0.02,
+            'read_width': 2.0,  # 2 µs read window
+            'read_delay': 0.02,
+            'read_rise_time': 0.1,  # 100 ns
+            'pulse_rise_time': 0.1,
+            'post_read_interval': 1.0,
+            'reset_width': 0.02,
+            'delay_between_voltages': 1000.0,
+            'delay_between_levels': 1000.0,
         }
 
         if hasattr(self, 'time_unit_var'):
@@ -1608,9 +1652,9 @@ class TSPTestingGUI(tk.Toplevel):
         time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
                       'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
                       'post_read_interval', 'reset_width', 'delay_between_voltages', 
-                      'delay_between_levels']
+                      'delay_between_levels', 'pulse_rise_time']
         
-        read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
+        read_pulse_params = ['read_width', 'read_delay', 'read_rise_time', 'pulse_rise_time', 'pulse_fall_time']
         laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
         # Parameters that 4200A expects in µs (not seconds)
         # These are converted to µs in the GUI, so the wrapper should NOT convert them again
@@ -1650,7 +1694,11 @@ class TSPTestingGUI(tk.Toplevel):
                 elif param_type == "float":
                     value = float(var.get())
                     if param_name in read_pulse_params and is_4200a:
-                        params[param_name] = to_microseconds(value)
+                        # Always µs — not affected by the global ns/µs/ms unit dropdown
+                        read_us = float(value)
+                        params[param_name] = read_us
+                        if read_us > 10.0:
+                            print(f"[GUI] WARNING: {param_name}={read_us} µs is unusually long for PMU — check field value")
                     elif param_name in laser_params and is_4200a:
                         # Laser parameters are labeled in µs, convert to µs for 4200A
                         params[param_name] = to_microseconds(value)
@@ -1707,6 +1755,10 @@ class TSPTestingGUI(tk.Toplevel):
             return
         
         self._apply_pulse_smu_current_range()
+
+        wiring = get_channel_wiring_hint(self.current_system_name, test_function)
+        if wiring:
+            self.log(f"🔌 {wiring}")
 
         # Get parameters
         try:
@@ -1795,8 +1847,6 @@ class TSPTestingGUI(tk.Toplevel):
         if err is not None:
             self.last_results = None
             self.log(f"❌ Test error: {err}")
-            import traceback
-            traceback.print_exc()
             self.after(0, lambda: messagebox.showerror("Test Error", str(err)))
             self.after(0, self._test_finished)
             return
@@ -1804,6 +1854,12 @@ class TSPTestingGUI(tk.Toplevel):
         elapsed = time.time() - start_time
         self.log(f"✓ Test complete in {elapsed:.2f}s")
         self.log(f"  {len(results['timestamps'])} measurements")
+        if func_name == "pulse_read_repeat" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+            self._log_pmu_scope_check(results, params)
+        if func_name == "endurance_test" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+            self._log_pmu_endurance_check(results, params)
+        if func_name == "retention_test" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+            self._log_pmu_retention_check(results, params)
 
         self.last_results = results
         self.last_results["test_name"] = self.test_var.get()
@@ -2773,7 +2829,7 @@ class TSPTestingGUI(tk.Toplevel):
             # Optical tests: user enters these in seconds (no unit selector conversion)
             params_already_seconds = ['total_time_s', 'optical_pulse_duration_s', 'optical_pulse_period_s', 
                                       'sample_interval_s', 'duration_s']
-            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time']
+            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time', 'pulse_rise_time', 'pulse_fall_time']
             laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
             if hasattr(self, 'time_unit_var'):
                 selected_unit = self.time_unit_var.get()
@@ -2790,16 +2846,8 @@ class TSPTestingGUI(tk.Toplevel):
                         value = float(val)
                         is_time_param = info.get("is_time_param", False)
                         if key in read_pulse_params and is_4200a:
-                            if selected_unit == "ns":
-                                params[key] = (value / 1000.0) * 1e-6
-                            elif selected_unit == "µs":
-                                params[key] = value * 1e-6
-                            elif selected_unit == "ms":
-                                params[key] = (value * 1000.0) * 1e-6
-                            elif selected_unit == "s":
-                                params[key] = (value * 1e6) * 1e-6
-                            else:
-                                params[key] = value * 1e-6
+                            # Field values are always µs (labels say so) — ignore global unit dropdown
+                            params[key] = float(value) * 1e-6
                         elif key in params_already_seconds:
                             params[key] = value  # already in seconds
                         elif key in laser_params or is_time_param or key in time_params:
@@ -2863,7 +2911,7 @@ class TSPTestingGUI(tk.Toplevel):
             try:
                 import json
                 with open(preset_file, 'r') as f:
-                    return json.load(f)
+                    return migrate_presets_dict(json.load(f))
             except Exception as e:
                 print(f"Error loading presets: {e}")
                 return {}
