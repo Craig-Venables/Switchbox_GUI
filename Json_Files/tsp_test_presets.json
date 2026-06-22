@@ -1,5 +1,307 @@
 {
-  "Relaxation After Multi-Pulse With Pulse Measurement": {
+  "Read → Write → Read": {
+    "DUT 1us write": {
+      "pulse_voltage": 1.0,
+      "pulse_width": 1.0,
+      "read_voltage": 0.3,
+      "delay_between": 0.02,
+      "num_cycles": 1,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_delay": 0.02,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "enable_debug_output": false
+    },
+    "DUT 100ns write": {
+      "pulse_voltage": 1.0,
+      "pulse_width": 0.1,
+      "read_voltage": 0.3,
+      "delay_between": 0.02,
+      "num_cycles": 1,
+      "clim": 0.001,
+      "read_width": 0.2,
+      "read_delay": 0.02,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "enable_debug_output": false
+    }
+  },
+  "Endurance": {
+    "DUT 10cyc @ 20ns (HW min)": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 0.02,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 0.2,
+      "read_rise_time": 0.02,
+      "pulse_rise_time": 0.02
+    },
+    "DUT 10cyc @ 100ns": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 0.1,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 0.2,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 10cyc @ 200ns": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 0.2,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 0.5,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 10cyc @ 500ns": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 0.5,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 1.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 10cyc @ 1us": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 1.0,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 10cyc @ 2us": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 2.0,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 10cyc @ 5us": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 5.0,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 10cyc @ 10us": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 10.0,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "DUT 20cyc @ 1us (max burst)": {
+      "set_voltage": 2.0,
+      "reset_voltage": -2.0,
+      "pulse_width": 1.0,
+      "read_voltage": 0.3,
+      "num_cycles": 20,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    },
+    "Limit high voltage 10cyc (3V/-3V)": {
+      "set_voltage": 3.0,
+      "reset_voltage": -3.0,
+      "pulse_width": 1.0,
+      "read_voltage": 0.3,
+      "num_cycles": 10,
+      "delay_between": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1
+    }
+  },
+  "Retention": {
+    "DUT 20 reads @ 1us program": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 20,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 1.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT 30 reads @ 1us program": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 30,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 1.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT 50 reads @ 1us (near burst limit)": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 50,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 1.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT program @ 100ns / 20 reads": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 0.1,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 20,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 0.02,
+      "clim": 0.0001,
+      "read_width": 0.2,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT program @ 10us / 30 reads": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 10.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 30,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 2.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT 3V program / 20 reads": {
+      "pulse_voltage": 3.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 20,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 1.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT 10 program / 40 reads": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 10,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 40,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 1.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT 20 program / 30 reads": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 20,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 30,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "DUT min gaps 20ns": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 20,
+      "delay_between_reads": 0.02,
+      "delay_between_pulses": 0.02,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    },
+    "Stress 100 reads (may exceed burst limit)": {
+      "pulse_voltage": 2.0,
+      "pulse_width": 1.0,
+      "num_program_pulses": 5,
+      "num_initial_reads": 2,
+      "read_voltage": 0.3,
+      "num_reads": 100,
+      "delay_between_reads": 2.0,
+      "delay_between_pulses": 1.0,
+      "clim": 0.0001,
+      "read_width": 2.0,
+      "read_rise_time": 0.1,
+      "pulse_rise_time": 0.1,
+      "pulse_fall_time": 0.1
+    }
+  },
+  "Relaxation (+ Pulse I)": {
     "Fast_no_delay": {
       "pulse_voltage": 2.5,
       "num_pulses": 10,
@@ -11,7 +313,7 @@
       "clim": 0.0001
     }
   },
-  "Relaxation After Multi-Pulse": {
+  "Relaxation": {
     "Long_Nonvolitle": {
       "pulse_voltage": 1.5,
       "num_pulses": 10,
@@ -23,7 +325,7 @@
       "clim": 0.0001
     }
   },
-  "Potentiation-Depression Cycle": {
+  "Pot / Dep Cycle": {
     "defualt": {
       "set_voltage": -2.0,
       "reset_voltage": 2.0,
@@ -34,7 +336,7 @@
       "clim": 0.0001
     }
   },
-  "Width Sweep": {
+  "Pulse Width Sweep": {
     "Wide": {
       "pulse_voltage": -2.5,
       "pulse_widths": [
@@ -54,7 +356,7 @@
       "clim": 0.0001
     }
   },
-  "Width Sweep (Full)": {
+  "Pulse Width Sweep (+ I)": {
     "Full": {
       "pulse_voltage": 1.5,
       "pulse_widths": [
@@ -75,7 +377,7 @@
       "clim": 0.0001
     }
   },
-  "Potentiation Only": {
+  "Potentiation": {
     "test": {
       "set_voltage": 1.5,
       "pulse_width": 0.001,
@@ -87,7 +389,7 @@
       "clim": 0.0001
     }
   },
-  "Multi-Pulse-Then-Read": {
+  "Pulse Train → Read": {
     "general": {
       "pulse_voltage": 1.5,
       "num_pulses_per_read": 5,
@@ -102,7 +404,7 @@
       "enable_debug_output": true
     }
   },
-  "\u26a0\ufe0f SMU Retention": {
+  "SMU: Retention": {
     "Basic": {
       "pulse_voltage": 2.0,
       "pulse_duration": 0.5,
@@ -130,7 +432,7 @@
       "enable_debug_output": false
     }
   },
-  "\u26a0\ufe0f SMU Endurance": {
+  "SMU: Endurance": {
     "deault": {
       "set_voltage": 2.5,
       "reset_voltage": -2.5,
@@ -147,7 +449,7 @@
       "enable_debug_output": true
     }
   },
-  "Pulse-Multi-Read": {
+  "Pulse → Multi-Read": {
     "simple": {
       "pulse_voltage": -3.0,
       "pulse_width": 1000.0,
@@ -159,7 +461,7 @@
       "clim": 0.0001
     }
   },
-  "\ud83d\udd26 Continuous Read with Laser Pulse Pattern": {
+  "Optical: Pattern + Read": {
     "testing_led": {
       "read_voltage": 0.5,
       "duration_s": 15.0,

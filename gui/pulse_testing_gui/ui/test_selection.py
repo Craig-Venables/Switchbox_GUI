@@ -32,6 +32,16 @@ def build_test_selection_section(parent, gui):
         side=tk.LEFT, padx=4
     )
 
+    gui.channel_wiring_label = tk.Label(
+        frame,
+        text="",
+        font=("TkDefaultFont", 8),
+        wraplength=420,
+        justify=tk.LEFT,
+        fg="#004080",
+    )
+    gui.channel_wiring_label.pack(fill=tk.X, pady=(2, 0))
+
     tk.Label(frame, text="Description:", font=("TkDefaultFont", 8, "bold")).pack(anchor="w", pady=(3, 0))
     gui.desc_text = tk.Text(frame, height=3, wrap=tk.WORD, bg="#f0f0f0", relief=tk.FLAT, font=("TkDefaultFont", 8))
     gui.desc_text.pack(fill=tk.X, pady=1)

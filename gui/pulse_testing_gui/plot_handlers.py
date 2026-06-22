@@ -24,6 +24,7 @@ def plot_by_type(gui: Any, plot_type: str) -> None:
         "width_vs_resistance": _plot_width_sweep,
         "pot_dep_cycle": _plot_pot_dep_cycle,
         "endurance": _plot_endurance,
+        "retention": _plot_retention,
         "relaxation_reads": _plot_relaxation_reads,
         "relaxation_all": _plot_relaxation_all,
         "relaxation": _plot_relaxation,
@@ -114,7 +115,7 @@ def _plot_time_series(gui):
     valid_times, valid_resistances = zip(*valid_data)
     
     # Special handling for SMU Retention: plot resistance over time (no pulse_types)
-    if test_name == "⚠️ SMU Retention":
+    if test_name in ("SMU: Retention", "⚠️ SMU Retention"):
         # Retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3...
         # Timestamps are relative to start (initial read at t=0), plot resistance over time
         if timestamps and resistances:
@@ -503,8 +504,16 @@ def _plot_pot_dep_cycle(gui):
 def _plot_endurance(gui):
     """Plot endurance test (SET/RESET cycles)"""
     operations = gui.last_results.get('operation', [])
-    cycle_numbers = gui.last_results.get('cycle_number', list(range(len(gui.last_results['resistances']))))
-    
+    cycle_numbers = (
+        gui.last_results.get('cycle_number')
+        or gui.last_results.get('cycle_numbers')
+        or list(range(len(gui.last_results['resistances'])))
+    )
+    resistances = gui.last_results['resistances']
+
+    if not operations and resistances:
+        operations = ['SET' if i % 2 == 0 else 'RESET' for i in range(len(resistances))]
+
     set_idx = [i for i, op in enumerate(operations) if op == 'SET']
     reset_idx = [i for i, op in enumerate(operations) if op == 'RESET']
     
@@ -524,6 +533,39 @@ def _plot_endurance(gui):
     gui.ax.grid(True, alpha=0.3)
     gui.ax.set_yscale('log')
     
+def _plot_retention(gui):
+    """Plot PMU retention: baseline vs post-program reads."""
+    timestamps = gui.last_results.get('timestamps', [])
+    resistances = gui.last_results.get('resistances', [])
+    phases = gui.last_results.get('phase') or []
+    if not phases and resistances:
+        n_base = int(gui.last_results.get('params', {}).get('num_initial_reads', 2))
+        phases = ['baseline' if i < n_base else 'retention' for i in range(len(resistances))]
+
+    base_idx = [i for i, p in enumerate(phases) if p == 'baseline']
+    ret_idx = [i for i, p in enumerate(phases) if p == 'retention']
+
+    if base_idx:
+        gui.ax.plot(
+            [timestamps[i] * 1e6 for i in base_idx],
+            [resistances[i] for i in base_idx],
+            'o', label='Baseline', color='green', markersize=5,
+        )
+    if ret_idx:
+        gui.ax.plot(
+            [timestamps[i] * 1e6 for i in ret_idx],
+            [resistances[i] for i in ret_idx],
+            'o-', label='After program', color='blue', markersize=4, linewidth=1.5,
+        )
+
+    gui.ax.set_xlabel('Time (µs)')
+    gui.ax.set_ylabel('Resistance (Ω)')
+    gui.ax.set_title(f'{gui.last_results["test_name"]} - PMU Retention')
+    gui.ax.legend()
+    gui.ax.grid(True, alpha=0.3)
+    if resistances and all(r > 0 for r in resistances if r == r):
+        gui.ax.set_yscale('log')
+
 def _plot_relaxation(gui):
     """Plot relaxation measurements (old plot type for backward compatibility)"""
     gui.ax.plot(gui.last_results['timestamps'], 

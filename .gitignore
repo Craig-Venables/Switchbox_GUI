@@ -9,6 +9,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv-build/
 venv/
 env/
 
@@ -18,13 +19,16 @@ env/
 *.swp
 *.swo
 
-# PyInstaller build outputs (root only — not Documents/build/ documentation)
+# PyInstaller / executable build outputs (not Documents/build/ documentation)
 dist/
 /build/
-
-# tools/LED_testing PyInstaller output
-tools/LED_testing/dist/
-tools/LED_testing/build/
+tools/**/dist/
+tools/**/build/
+Helpers/**/dist/
+Helpers/**/build/
+*.pkg
+warn-*.txt
+xref-*.html
 
 # Binaries and vendor bundles (install separately — see SETUP.md)
 *.exe

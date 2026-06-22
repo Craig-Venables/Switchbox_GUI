@@ -13,11 +13,9 @@ See also: ``Pulse_Testing/README.md`` (How to add a new test, Keithley 4200 prof
 
 IMPORTANT NOTE FOR 4200A DATA COLLECTION:
 ------------------------------------------
-There is a known issue with GP parameter numbers for data collection from 
-pmu_pulse_read_interleaved.c and pmu_potentiation_depression.c. The current 
-implementation uses GP parameters 20 (setV), 22 (setI), 25 (out1), and 31 (PulseTimes)
-as shown in the example scripts, but these may need verification. If data collection
-is not working correctly, check the GP parameter numbers in the C module output.
+GP parameters 20 (setV), 22 (setI), and 31 (PulseTimes) are verified for
+pmu_pulse_read_interleaved, pmu_endurance_interleaved, and pmu_retention_dual_channel
+(scope / smoke tests PASS where deployed).
 """
 
 from typing import Dict, List, Optional
@@ -102,7 +100,7 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'potentiation_only': True,
         'depression_only': True,
         'endurance_test': True,
-        'retention_test': False,
+        'retention_test': True,
         'pulse_multi_read': True,
         'multi_read_only': True,
         'current_range_finder': False,
@@ -270,7 +268,7 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
             'varying_width_pulses': 'Not available - use width_sweep_with_reads instead (uses pmu_pulse_read_interleaved with Python-side loop)',
             'width_sweep_with_reads': 'Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values (one call per width)',
             'width_sweep_with_all_measurements': 'Requires NEW C module with pulse peak current measurement capability (interleaved only measures during read windows)',
-            'retention_test': 'Not yet implemented - would require time-based read measurements after initial pulse',
+            'retention_test': 'PMU retention (pmu_retention_dual_channel). Preset: DUT 20 reads @ 1us program.',
             'current_range_finder': 'Requires Python-side loop over current ranges (interleaved program uses fixed i_range parameter)',
             'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module with pulse measurement capability (interleaved only measures during read windows, not during pulses)',
         },
@@ -278,7 +276,7 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
             'varying_width_pulses': 'Not available - use width_sweep_with_reads instead (uses pmu_pulse_read_interleaved with Python-side loop)',
             'width_sweep_with_reads': 'Uses pmu_pulse_read_interleaved: requires Python-side loop calling C program multiple times with different width values (one call per width)',
             'width_sweep_with_all_measurements': 'Requires NEW C module with pulse peak current measurement capability (interleaved only measures during read windows)',
-            'retention_test': 'Not yet implemented - would require time-based read measurements after initial pulse',
+            'retention_test': 'PMU retention (pmu_retention_dual_channel). Preset: DUT 20 reads @ 1us program.',
             'current_range_finder': 'Requires Python-side loop over current ranges (interleaved program uses fixed i_range parameter)',
             'relaxation_after_multi_pulse_with_pulse_measurement': 'Requires NEW C module with pulse measurement capability (interleaved only measures during read windows, not during pulses)',
         },
@@ -290,7 +288,8 @@ def get_test_explanation(system_name: str, test_function: str) -> Optional[str]:
             'potentiation_depression_cycle': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
             'potentiation_only': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
             'depression_only': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
-            'endurance_test': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
+            'endurance_test': 'PMU endurance (pmu_endurance_interleaved). Preset: DUT 10cyc @ 1us.',
+            'retention_test': 'PMU retention (pmu_retention_dual_channel). Preset: DUT 20 reads @ 1us program.',
             'pulse_multi_read': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
             'multi_read_only': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',
             'relaxation_after_multi_pulse': 'Fast PMU interleaved test. Select keithley4200_pmu in Connection.',

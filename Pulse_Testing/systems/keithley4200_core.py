@@ -192,11 +192,17 @@ class Keithley4200KXCICommon(BaseMeasurementSystem, ABC):
             print(f"  read_delay: {read_delay_us:.2f} µs → {params['read_delay']:.2e} s")
         if 'read_rise_time' in params:
             read_rise_us = params['read_rise_time']
-            if read_rise_us > 1_000_000:  # If > 1 second in µs, likely wrong unit
+            if read_rise_us > 1_000_000:
                 raise ValueError(f"read_rise_time appears to be in wrong units. Got {read_rise_us:.2f} µs "
                                f"({read_rise_us/1e6:.2e} s). Expected value should be < 1000 µs.")
             params['read_rise_time'] = read_rise_us / 1_000_000.0  # µs → s
             print(f"  read_rise_time: {read_rise_us:.2f} µs → {params['read_rise_time']:.2e} s")
+        if 'pulse_rise_time' in params:
+            pulse_rise_us = params['pulse_rise_time']
+            if pulse_rise_us > 1_000_000:
+                raise ValueError(f"pulse_rise_time appears to be in wrong units. Got {pulse_rise_us:.2f} µs")
+            params['pulse_rise_time'] = pulse_rise_us / 1_000_000.0  # µs → s
+            print(f"  pulse_rise_time: {pulse_rise_us:.2f} µs → {params['pulse_rise_time']:.2e} s")
         return self._scripts.pulse_read_repeat(**params)
     
     def pulse_then_read(self, **params) -> Dict[str, Any]:
@@ -342,18 +348,39 @@ class Keithley4200KXCICommon(BaseMeasurementSystem, ABC):
         """Pattern: (SET → Read → RESET → Read) × N cycles"""
         if not self._scripts:
             raise RuntimeError("Not connected")
-        # Convert µs to seconds (KXCI scripts expect seconds, not microseconds)
-        # GUI sends these in µs, convert to seconds for KXCI scripts
         if 'pulse_width' in params:
             params['pulse_width'] = params['pulse_width'] / 1_000_000.0  # µs → s
         if 'delay_between' in params:
             params['delay_between'] = params['delay_between'] / 1_000_000.0  # µs → s
+        if 'read_width' in params:
+            params['read_width'] = params['read_width'] / 1_000_000.0
+        if 'read_rise_time' in params:
+            params['read_rise_time'] = params['read_rise_time'] / 1_000_000.0
+        if 'pulse_rise_time' in params:
+            params['pulse_rise_time'] = params['pulse_rise_time'] / 1_000_000.0
         return self._scripts.endurance_test(**params)
     
     def retention_test(self, **params) -> Dict[str, Any]:
-        """Pattern: Pulse → Read @ t1 → Read @ t2 → Read @ t3..."""
-        # Not implemented in 4200A scripts yet
-        raise NotImplementedError("retention_test not yet implemented for 4200A")
+        """PMU retention: baseline reads → program pulses → retention reads (fast seg-arb burst)."""
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        if 'pulse_width' in params:
+            params['pulse_width'] = params['pulse_width'] / 1_000_000.0
+        if 'delay_between_pulses' in params:
+            params['delay_between_pulses'] = params['delay_between_pulses'] / 1_000_000.0
+        if 'delay_between_reads' in params:
+            params['delay_between_reads'] = params['delay_between_reads'] / 1_000_000.0
+        if 'read_width' in params:
+            params['read_width'] = params['read_width'] / 1_000_000.0
+        if 'read_rise_time' in params:
+            params['read_rise_time'] = params['read_rise_time'] / 1_000_000.0
+        if 'pulse_rise_time' in params:
+            params['pulse_rise_time'] = params['pulse_rise_time'] / 1_000_000.0
+        if 'pulse_fall_time' in params:
+            params['pulse_fall_time'] = params['pulse_fall_time'] / 1_000_000.0
+        if 'num_reads' in params:
+            params['num_reads'] = max(8, int(params['num_reads']))
+        return self._scripts.retention_test(**params)
     
     def pulse_multi_read(self, **params) -> Dict[str, Any]:
         """Pattern: N pulses then many reads"""
