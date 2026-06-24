@@ -502,78 +502,18 @@ class TSPTestingGUI(tk.Toplevel):
         build_connection_section(parent, self)
 
     def _show_help(self):
-        """Display a help window with usage instructions."""
-        help_win = tk.Toplevel(self)
-        help_win.title("TSP Pulse Testing Guide")
-        help_win.geometry(config.HELP_WINDOW_GEOMETRY)
-        help_win.configure(bg="#f0f0f0")
-        
-        # Scrollable Content
-        canvas = tk.Canvas(help_win, bg="#f0f0f0")
-        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Content
-        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
-        
-        tk.Label(scrollable_frame, text="TSP Pulse Testing Guide", 
-                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame, 
-                text="This GUI provides fast, buffer-based pulse testing with real-time visualization\n"
-                      "for Keithley instruments. Supports both Keithley 2450 (TSP-based) and\n"
-                      "Keithley 4200A-SCS (KXCI-based) systems.",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• Select your system type (2450 or 4200A)\n"
-                      "• Enter device address or use auto-detect\n"
-                      "• Choose test type from Manual Testing tab\n"
-                      "• Configure pulse parameters\n"
-                      "• Click 'Start Test' to begin\n"
-                      "• Monitor results in real-time plots",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="3. Test Types", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• Endurance: SET/RESET cycling with reads\n"
-                      "• Retention: baseline → program → retention reads\n"
-                      "• Read → Write → Read: single switching pulse\n"
-                      "• Pulse Train → Read: multiple pulses then reads\n"
-                      "• Pulse Width Sweep: characterize timing",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="4. Features", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• Automatic system detection from device address\n"
-                      "• Real-time plotting and visualization\n"
-                      "• Customizable save locations\n"
-                      "• Test parameter presets\n"
-                      "• Automated testing workflows",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="Video Tutorial", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="Video tutorials and additional resources will be added here.",
-                justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
+        """Display help window (General + 4200 PMU pulse/current guide)."""
+        from gui.pulse_testing_gui.ui.help_guide import open_help_guide
+        from gui.pulse_testing_gui.ui.instrument_current_range import is_pmu_profile
+
+        system = getattr(self, "current_system_name", None)
+        if not system and hasattr(self, "system_var"):
+            try:
+                system = self.system_var.get()
+            except Exception:
+                system = None
+        initial = "pmu" if is_pmu_profile(system) else "general"
+        open_help_guide(self, initial_tab=initial)
     
     def create_test_selection_section(self, parent):
         """Test type selection (built by ui.test_selection)."""
@@ -1902,7 +1842,7 @@ class TSPTestingGUI(tk.Toplevel):
         self.log(f"  {len(results['timestamps'])} measurements")
         if func_name == "pulse_read_repeat" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
             self._log_pmu_scope_check(results, params)
-        if func_name == "endurance_test" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+        if func_name in ("endurance_test", "endurance_burst_test") and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
             self._log_pmu_endurance_check(results, params)
         if func_name == "retention_test" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
             self._log_pmu_retention_check(results, params)

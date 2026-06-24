@@ -14,6 +14,11 @@ from Pulse_Testing.keithley4200_constants import (
 
 DEFAULT_PMU_I_RANGE_A = 1e-4
 
+PMU_PARAMS_HINT = (
+    "4200 PMU: widths/rises in us (0.1 = 100 ns). Fast writes OK; use wider Read Width for "
+    "stable R. Set PMU Current Range (A) below — details in Help > 4200 PMU tab."
+)
+
 
 def is_pmu_profile(system_name: Optional[str]) -> bool:
     return bool(system_name) and system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
@@ -73,11 +78,22 @@ def update_instrument_current_range_ui(gui: Any, system_name: Optional[str] = No
                 )
             if hint is not None:
                 if pmu:
-                    hint.config(text="(sent as EX IRange)")
+                    hint.config(
+                        text="(EX IRange - see Help > 4200 PMU tab)"
+                    )
                 else:
                     hint.config(text="[0 = auto]")
         else:
             frame.pack_forget()
+
+    hint_label = getattr(gui, "pmu_params_hint", None)
+    if hint_label is not None:
+        if pmu:
+            hint_label.config(text=PMU_PARAMS_HINT)
+            hint_label.pack(fill=tk.X, padx=3, pady=(0, 4))
+        else:
+            hint_label.config(text="")
+            hint_label.pack_forget()
 
     var = getattr(gui, "instrument_current_range_var", None) or getattr(
         gui, "smu_current_range_var", None

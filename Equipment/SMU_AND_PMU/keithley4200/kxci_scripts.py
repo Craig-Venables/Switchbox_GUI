@@ -93,7 +93,7 @@ import re
 import time
 import math
 from dataclasses import dataclass, replace
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Callable
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -318,6 +318,209 @@ PMU_DISCRETE_I_RANGES: Tuple[float, ...] = (
 # C firmware caps each probe: R_reported = min(|V/I|, 1e4 / IRange)
 PMU_MAX_RESISTANCE_PER_IRANGE = 1e4
 
+# Read-probe window in C endurance/interleaved modules (fraction of meas_width flat top).
+PMU_READ_PROBE_RATIO_LO = 0.4
+PMU_READ_PROBE_RATIO_HI = 0.9
+
+# Target fraction of full-scale for PMU current-range advice.
+_PMU_IRANGE_TARGET_LO = 0.05   # below this → quantization / stuck-looking reads
+_PMU_IRANGE_TARGET_HI = 0.80   # above this → clipping risk on low-R states
+_PMU_IRANGE_SATURATION = 1.0   # hard over-range
+
+
+def _snap_pmu_i_range_up(min_amps: float) -> float:
+    """Smallest discrete PMU range with full scale >= min_amps."""
+    for rng in PMU_DISCRETE_I_RANGES:
+        if rng >= min_amps:
+            return rng
+    return PMU_DISCRETE_I_RANGES[-1]
+
+
+def _best_pmu_i_range_for_current_band(i_min: float, i_max: float) -> Optional[float]:
+    """Discrete range fitting both currents in ~5–80% of full scale, if any."""
+    for rng in PMU_DISCRETE_I_RANGES:
+        if i_max <= _PMU_IRANGE_TARGET_HI * rng and i_min >= _PMU_IRANGE_TARGET_LO * rng:
+            return rng
+    return None
+
+
+def analyze_pmu_i_range_usage(
+    configured_i_range: float,
+    currents: Sequence[float],
+    *,
+    read_voltage: float = 0.3,
+) -> Dict[str, Any]:
+    """Analyze read currents vs configured IRange; return stats and message lines."""
+    lines: List[str] = []
+    abs_i = [abs(float(c)) for c in currents if c is not None and abs(float(c)) > 0]
+    if not abs_i:
+        return {
+            "ok": False,
+            "lines": ["No non-zero read currents returned - cannot assess current range."],
+        }
+
+    i_min = min(abs_i)
+    i_max = max(abs_i)
+    i_med = sorted(abs_i)[len(abs_i) // 2]
+    configured = max(float(configured_i_range), PMU_DISCRETE_I_RANGES[0])
+
+    pct_min = 100.0 * i_min / configured
+    pct_max = 100.0 * i_max / configured
+    pct_med = 100.0 * i_med / configured
+
+    # Range must cover the largest |I| (LRS / post-SET reads).
+    need_for_peak = _snap_pmu_i_range_up(i_max / _PMU_IRANGE_TARGET_HI)
+    ideal_band = _best_pmu_i_range_for_current_band(i_min, i_max)
+    suggested = ideal_band if ideal_band is not None else need_for_peak
+
+    # "Stuck" reads: many values identical to ADC resolution on this range.
+    rounded = [round(x, 12) for x in abs_i]
+    unique_ratio = len(set(rounded)) / len(rounded)
+    stuck_like = unique_ratio < 0.35 and len(abs_i) >= 6
+
+    swing = i_max / max(i_min, 1e-18)
+    wide_swing = swing > 80.0
+
+    ok = (
+        pct_max <= 100.0 * _PMU_IRANGE_SATURATION
+        and pct_min >= 100.0 * _PMU_IRANGE_TARGET_LO
+        and not stuck_like
+        and abs(configured - suggested) / max(suggested, 1e-12) < 0.15
+    )
+
+    lines.append(
+        f"Read |I|: min {i_min:.3e} A, median {i_med:.3e} A, max {i_max:.3e} A "
+        f"({len(abs_i)} probes)."
+    )
+    lines.append(
+        f"Configured IRange {configured:.2e} A: reads use "
+        f"{pct_min:.2f}-{pct_max:.1f}% of full scale (median {pct_med:.1f}%)."
+    )
+
+    if pct_max > 100.0 * _PMU_IRANGE_SATURATION:
+        lines.append(
+            f"WARNING: Peak read ({i_max:.3e} A) exceeds IRange - saturated / clipped. "
+            f"Use at least {_snap_pmu_i_range_up(i_max):.2e} A."
+        )
+    elif pct_max > 100.0 * _PMU_IRANGE_TARGET_HI:
+        lines.append(
+            f"WARNING: Peak read is {pct_max:.0f}% of IRange - risk of clipping on "
+            f"low-resistance (post-SET) reads. Suggest >= {need_for_peak:.2e} A."
+        )
+
+    if pct_min < 100.0 * _PMU_IRANGE_TARGET_LO:
+        lines.append(
+            f"WARNING: Weakest reads are only {pct_min:.2f}% of IRange - high-R states "
+            f"look quantized (identical nA values). Finer range helps HRS if peak still fits."
+        )
+
+    if stuck_like:
+        lines.append(
+            "WARNING: Many read currents are nearly identical - typical of IRange too "
+            "coarse for weak (high-R) reads. Lower IRange if peaks still fit."
+        )
+
+    if wide_swing:
+        lines.append(
+            f"Note: Device span ~{swing:.0f}x in read current (LRS vs HRS). One IRange "
+            f"cannot optimize both; pick range for the states you care about."
+        )
+
+    if ideal_band is not None:
+        lines.append(
+            f"Suggested IRange (fits min and max in 5-80% FS): {ideal_band:.2e} A."
+        )
+    else:
+        lines.append(
+            f"Suggested IRange (covers peak read): {need_for_peak:.2e} A "
+            f"(HRS reads may stay <5% FS - normal for wide R swing)."
+        )
+
+    if suggested != configured:
+        lines.append(
+            f"GUI: set PMU Current Range to {suggested:.2e} A "
+            f"(now {configured:.2e} A)."
+        )
+    elif ok:
+        lines.append("Current range looks reasonable for this data.")
+
+    r_cap = PMU_MAX_RESISTANCE_PER_IRANGE / configured
+    r_max_est = read_voltage / i_min if i_min > 0 else float("inf")
+    if r_max_est > r_cap * 0.95:
+        lines.append(
+            f"Note: Estimated R up to {r_max_est:.3e} ohm nears firmware cap "
+            f"{r_cap:.3e} ohm at this IRange."
+        )
+
+    return {
+        "ok": ok,
+        "lines": lines,
+        "i_min": i_min,
+        "i_max": i_max,
+        "suggested_i_range": suggested,
+        "configured_i_range": configured,
+        "wide_swing": wide_swing,
+    }
+
+
+def analyze_pmu_read_flat_top(
+    read_width_s: float,
+    read_rise_s: float,
+    *,
+    fast_edge_threshold_s: float = 5e-7,
+    min_edge_s: float = 2e-8,
+) -> Dict[str, Any]:
+    """Estimate read flat-top and C probe window; return advisory lines."""
+    lines: List[str] = []
+    read_w = max(read_width_s, min_edge_s)
+    rise = max(read_rise_s, min_edge_s)
+    probe_lo = PMU_READ_PROBE_RATIO_LO
+    probe_hi = PMU_READ_PROBE_RATIO_HI
+    probe_dur = (probe_hi - probe_lo) * read_w
+    flat_us = read_w * 1e6
+    probe_us = probe_dur * 1e6
+    rise_us = rise * 1e6
+
+    lines.append(
+        f"Read pulse: rise {rise_us:.0f} ns, flat top (meas_width) {flat_us:.2f} us, "
+        f"probe window {probe_us:.2f} us ({probe_lo:.0%}-{probe_hi:.0%} of flat)."
+    )
+
+    warn = False
+    if rise > read_w * 0.35:
+        warn = True
+        lines.append(
+            f"WARNING: Read rise ({rise_us:.0f} ns) is a large fraction of read width - "
+            f"effective flat plateau is short; increase Read Width or shorten Read Rise Time."
+        )
+
+    if read_w < 5e-7:
+        warn = True
+        lines.append(
+            f"WARNING: Read width {flat_us:.0f} ns - very little flat top for averaging. "
+            f"Try Read Width >= 1 us unless you need sub-us reads."
+        )
+
+    if probe_dur < 100e-9:
+        warn = True
+        lines.append(
+            f"WARNING: Probe window only {probe_us:.0f} ns - few ADC samples at high "
+            f"sample rate; resistance may be noisy."
+        )
+
+    if read_w <= fast_edge_threshold_s:
+        lines.append(
+            "High-speed path: widths <= 500 ns use 20-100 ns edges (PMU hardware minimum). "
+            "For more flat top at speed, widen Read Width rather than shortening below 500 ns."
+        )
+    else:
+        lines.append(
+            "For cleaner flat top: use Read Width >= 2 us with Read Rise Time ~100 ns "
+            "(default DUT-style preset)."
+        )
+
+    return {"ok": not warn, "lines": lines, "probe_duration_s": probe_dur}
+
 # Timing limits (seconds)
 MIN_RISE_TIME = 2e-8             # 20ns minimum rise/fall time
 MAX_RISE_TIME = 1.0              # 1s maximum rise/fall time
@@ -438,7 +641,9 @@ class KXCIClient:
         self._ul_mode_active = False
         return True
 
-    def _execute_ex_command(self, command: str) -> tuple[Optional[float], Optional[str]]:
+    def _execute_ex_command(
+        self, command: str, wait_seconds: Optional[float] = None
+    ) -> tuple[Optional[float], Optional[str]]:
         if self.inst is None:
             raise RuntimeError("Instrument not connected")
 
@@ -447,25 +652,21 @@ class KXCIClient:
             time.sleep(0.01)  # Small delay to ensure command is sent
             
             # Determine wait time based on command type
-            # pulse_only commands are fast (no measurement), pulse_measure needs more time
-            if "SMU_pulse_only" in command:
-                # pulse_only is fast - minimal wait needed
-                wait_time = 0.01  # 10ms should be enough for pulse_only
+            if wait_seconds is not None:
+                wait_time = max(0.02, float(wait_seconds))
+            elif "SMU_pulse_only" in command:
+                wait_time = 0.01
             elif "SMU_pulse_measure" in command:
-                # pulse_measure may need slightly more time for measurement
-                wait_time = 0.05  # 50ms for pulse_measure
+                wait_time = 0.05
             else:
-                # Other commands - use minimal wait, reading loop will handle it
-                wait_time = 0.02  # 20ms default
+                wait_time = 2.0  # PMU EX (endurance/retention) needs seconds, not ms
             
-            # Small wait for command to start processing
             time.sleep(wait_time)
             
-            # Read all available output (including printf statements from C code)
-            # The reading loop will handle waiting for the response with appropriate timeouts
             all_output = []
             return_value = None
-            max_attempts = 20  # Read up to 20 times to get all output
+            read_timeout_ms = int(max(2000, wait_time * 1000 + 500))
+            max_attempts = max(20, int(wait_time * 10) + 5)
             attempt = 0
             
             while attempt < max_attempts:
@@ -496,7 +697,7 @@ class KXCIClient:
             # Try one final read to get the return value if we haven't found it
             if return_value is None:
                 try:
-                    self.inst.timeout = 2000  # 2 second timeout for slow SMU measurements
+                    self.inst.timeout = read_timeout_ms
                     response = self.inst.read()
                     if response:
                         all_output.append(response)
@@ -971,8 +1172,8 @@ _PMU_EX_ERROR_HINTS: Dict[int, str] = {
 
 
 def estimate_endurance_seg_arb_segments(num_cycles: int) -> int:
-    """Seg-arb line segments for pmu_endurance_interleaved (initial + 17 per SET/RESET cycle)."""
-    return 6 + 17 * num_cycles
+    """Seg-arb line segments for pmu_endurance_interleaved (initial + 18 per SET/RESET cycle)."""
+    return 6 + 18 * num_cycles
 
 
 def estimate_retention_seg_arb_segments(
@@ -1111,6 +1312,88 @@ def build_endurance_ex_command(cfg: PulseReadInterleavedConfig, num_endurance_cy
         format_param(cfg.clarius_debug),
     ]
     return f"EX A_pulse_read_grouped_multi pmu_endurance_interleaved({','.join(params)})"
+
+
+PMU_ENDURANCE_BURST_TEST_LIB = "A_pulse_read_grouped_multi"
+PMU_ENDURANCE_BURST_TEST_FN = "pmu_endurance_burst_test"
+
+
+def plan_endurance_burst_sizes(total_cycles: int) -> List[int]:
+    """Mirror C-internal burst plan (for logging / dry-run).
+
+    Uses hardware seg-arb max (2048) so typical 100-cycle runs are one continuous waveform.
+    """
+    if total_cycles < 1:
+        return []
+    sizes: List[int] = []
+    remaining = total_cycles
+    burst_num = 0
+    seg_budget = _PMU_HW_MAX_SEG_ARB_SEGMENTS
+    while remaining > 0:
+        skip_initial = burst_num > 0
+        fixed = 0 if skip_initial else 6
+        per = 18
+        cap = max(1, (seg_budget - fixed) // per)
+        cap = min(cap, 1000, remaining)
+        sizes.append(cap)
+        remaining -= cap
+        burst_num += 1
+    return sizes
+
+
+def build_endurance_burst_test_ex_command(
+    cfg: PulseReadInterleavedConfig, total_cycles: int
+) -> str:
+    """Build EX for pmu_endurance_burst_test (instrument-side batching; experimental)."""
+    total_probes = endurance_total_probe_count(total_cycles)
+    common_size = total_probes
+    params = [
+        format_param(cfg.rise_time),
+        format_param(cfg.reset_v),
+        format_param(cfg.reset_width),
+        format_param(cfg.reset_delay),
+        format_param(cfg.meas_v),
+        format_param(cfg.meas_width),
+        format_param(cfg.meas_delay),
+        format_param(cfg.set_width),
+        format_param(cfg.set_fall_time),
+        format_param(cfg.set_delay),
+        format_param(cfg.set_start_v),
+        format_param(cfg.set_stop_v),
+        format_param(cfg.steps),
+        format_param(cfg.i_range),
+        format_param(cfg.max_points),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        "",
+        format_param(common_size),
+        format_param(cfg.iteration),
+        "",
+        format_param(common_size),
+        cfg.out1_name,
+        "",
+        format_param(cfg.out2_size),
+        cfg.out2_name,
+        "",
+        format_param(common_size),
+        format_param(1),
+        format_param(1),
+        format_param(total_cycles),
+        format_param(cfg.pulse_width),
+        format_param(cfg.pulse_v),
+        format_param(cfg.pulse_rise_time),
+        format_param(cfg.pulse_fall_time),
+        format_param(cfg.pulse_delay),
+        format_param(cfg.clarius_debug),
+    ]
+    return (
+        f"EX {PMU_ENDURANCE_BURST_TEST_LIB} {PMU_ENDURANCE_BURST_TEST_FN}"
+        f"({','.join(params)})"
+    )
 
 
 def build_potentiation_depression_ex_command(cfg: PulseReadInterleavedConfig) -> str:
@@ -1354,15 +1637,67 @@ class Keithley4200_KXCI_Scripts:
         else:
             print(f"[KXCI] PMU IRange (EX): {resolved:.2e} A")
         print(
-            f"[KXCI] Firmware R ceiling for this range: {max_r:.3e} Ω "
+            f"[KXCI] Firmware R ceiling for this range: {max_r:.3e} ohm "
             f"(C code caps at 1e4/IRange; higher-R states clip, no error)"
         )
         if requested > resolved * 1.05:
             print(
                 f"[KXCI] WARNING: range is high for weak reads — resistances above "
-                f"~{max_r:.3e} Ω will all report as ~{max_r:.3e} Ω"
+                f"~{max_r:.3e} ohm will all report as ~{max_r:.3e} ohm"
             )
         return resolved
+
+    def _print_pmu_read_timing_diagnostics(
+        self,
+        read_width_s: float,
+        read_rise_s: float,
+    ) -> None:
+        """Pre-run advice on read flat-top and probe window (high-speed PMU)."""
+        result = analyze_pmu_read_flat_top(read_width_s, read_rise_s)
+        print("\n[KXCI] PMU read timing (flat top / probe window):")
+        for line in result["lines"]:
+            print(f"  {line}")
+
+    def _print_pmu_i_range_diagnostics(
+        self,
+        configured_i_range: float,
+        currents: List[float],
+        *,
+        read_voltage: float,
+    ) -> None:
+        """Post-run advice on whether PMU IRange matches returned read currents."""
+        result = analyze_pmu_i_range_usage(
+            configured_i_range, currents, read_voltage=read_voltage
+        )
+        header = (
+            "[KXCI] PMU current range: OK for this run."
+            if result.get("ok")
+            else "[KXCI] PMU current range: review suggested settings."
+        )
+        print(f"\n{header}")
+        for line in result["lines"]:
+            print(f"  {line}")
+
+    def _print_pmu_measurement_diagnostics(
+        self,
+        *,
+        configured_i_range: float,
+        read_voltage: float,
+        currents: List[float],
+        read_width_s: Optional[float] = None,
+        read_rise_s: Optional[float] = None,
+    ) -> None:
+        """Post-run IRange + optional read-timing summary."""
+        self._print_pmu_i_range_diagnostics(
+            configured_i_range, currents, read_voltage=read_voltage
+        )
+        if read_width_s is not None and read_rise_s is not None:
+            result = analyze_pmu_read_flat_top(read_width_s, read_rise_s)
+            if not result.get("ok"):
+                print("\n[KXCI] PMU read timing (may affect noisy R on fast reads):")
+                for line in result["lines"]:
+                    if line.startswith("WARNING") or line.startswith("High-speed"):
+                        print(f"  {line}")
 
     def _audit_interleaved_legacy_cfg(self, cfg: "PulseReadInterleavedConfig") -> list[str]:
         """Return human-readable issues if legacy timing fields look like pre-fix defaults."""
@@ -2008,7 +2343,7 @@ class Keithley4200_KXCI_Scripts:
         rows_to_show = min(total, max_rows)
 
         print("\n[DATA] Measurement Results:")
-        header = f"{'Idx':>4} {'Time (µs)':>12} {'Voltage (V)':>14} {'Current (A)':>14} {'Resistance (Ω)':>16}"
+        header = f"{'Idx':>4} {'Time (us)':>12} {'Read V (V)':>14} {'Current (A)':>14} {'Resistance (ohm)':>16}"
         print(header)
         print("-" * len(header))
 
@@ -2081,6 +2416,57 @@ class Keithley4200_KXCI_Scripts:
                     print(f"⚠️ Failed to query GP {param} ({name}): {e}")
         return []
     
+    def _normalize_pmu_dual_channel_probes(
+        self,
+        controller: KXCIClient,
+        *,
+        total_probes: int,
+        read_voltage: float,
+        i_range: float,
+        pulse_times_gp: int = 31,
+    ) -> Tuple[List[float], List[float], List[float], List[float]]:
+        """Build table/plot arrays from PMU dual-channel EX readback.
+
+        GP setV (param 20) is measure-channel VM (~0 V on low side). For display and R
+        we use the applied read voltage (measV) and prefer C-computed resetR (GP 18).
+        """
+        set_i = self._query_gp_data(controller, 22, total_probes, "setI")
+        pulse_times = self._query_gp_data(
+            controller, pulse_times_gp, total_probes, "PulseTimes"
+        )
+        reset_r = self._query_gp_data(controller, 18, total_probes, "resetR")
+
+        if not pulse_times:
+            pulse_times = [float(i) for i in range(total_probes)]
+
+        n = min(total_probes, len(set_i), len(pulse_times))
+        if n < 1:
+            return [], [], [], []
+
+        read_v = abs(read_voltage)
+        r_cap = (1e4 / i_range) if i_range > 0 else float("inf")
+        use_reset_r = len(reset_r) >= n
+
+        voltages = [read_v] * n
+        currents = set_i[:n]
+        timestamps = pulse_times[:n]
+        resistances: List[float] = []
+
+        for idx in range(n):
+            i_val = currents[idx]
+            if use_reset_r:
+                r_val = reset_r[idx]
+                if r_val > 0:
+                    resistances.append(r_val)
+                    continue
+            if abs(i_val) < 1e-12:
+                resistances.append(r_cap)
+            else:
+                r_val = abs(read_v / i_val)
+                resistances.append(min(r_val, r_cap))
+
+        return timestamps, voltages, currents, resistances
+
     def _execute_retention(self, cfg: RetentionConfig) -> Tuple[List[float], List[float], List[float], List[float]]:
         """Execute retention measurement and return normalized data.
         
@@ -2174,33 +2560,21 @@ class Keithley4200_KXCI_Scripts:
             
             time.sleep(0.2)  # Allow data to be ready
             
-            # Query data from GP parameters
-            set_v = self._query_gp_data(controller, 20, total_probes, "setV")
-            set_i = self._query_gp_data(controller, 22, total_probes, "setI")
-            pulse_times = self._query_gp_data(controller, 30, total_probes, "PulseTimes")
+            pulse_times, set_v, set_i, resistances = self._normalize_pmu_dual_channel_probes(
+                controller,
+                total_probes=total_probes,
+                read_voltage=cfg.meas_v,
+                i_range=cfg.i_range,
+                pulse_times_gp=30,
+            )
             
-            if not pulse_times:
-                pulse_times = _compute_probe_times(cfg)
-            
-            if len(pulse_times) != total_probes:
-                pulse_times = [float(i) for i in range(total_probes)]
-            
-            # Calculate resistances
-            resistances: List[float] = []
-            for voltage, current in zip(set_v, set_i):
-                if abs(current) < 1e-12:
-                    resistances.append(float("inf"))
-                else:
-                    resistances.append(voltage / current)
-            
-            # Ensure all lists are same length
-            min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances))
-            set_v = set_v[:min_len]
-            set_i = set_i[:min_len]
-            pulse_times = pulse_times[:min_len]
-            resistances = resistances[:min_len]
-            
-            return pulse_times, set_v, set_i, resistances
+            min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances), total_probes)
+            return (
+                pulse_times[:min_len],
+                set_v[:min_len],
+                set_i[:min_len],
+                resistances[:min_len],
+            )
             
         finally:
             try:
@@ -2286,64 +2660,25 @@ class Keithley4200_KXCI_Scripts:
             
             time.sleep(0.2)  # Allow data to be ready
             
-            # Query data from GP parameters (interleaved module uses different param positions)
-            set_v = self._query_gp_data(controller, 20, total_probes, "setV")
-            set_i = self._query_gp_data(controller, 22, total_probes, "setI")
-            pulse_times = self._query_gp_data(controller, 31, total_probes, "PulseTimes")
-            
-            if not pulse_times:
-                # Generate approximate times based on waveform structure
-                pulse_times = []
-                ttime = cfg.reset_delay + cfg.rise_time
-                # Initial read
-                ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
-                pulse_times.append(ttime)
-                # Cycles
-                for _ in range(cfg.num_cycles):
-                    # Pulses
-                    for _ in range(cfg.num_pulses_per_group):
-                        ttime += cfg.pulse_rise_time + cfg.pulse_width + cfg.pulse_fall_time + cfg.pulse_delay
-                    # Reads
-                    for _ in range(cfg.num_reads):
-                        ttime += cfg.rise_time + cfg.meas_width * 0.65 + cfg.set_fall_time + cfg.rise_time + cfg.meas_delay
-                        pulse_times.append(ttime)
-            
-            if len(pulse_times) != total_probes:
-                pulse_times = [float(i) for i in range(total_probes)]
-            
-            # Calculate resistances
-            resistances: List[float] = []
-            for voltage, current in zip(set_v, set_i):
-                if abs(current) < 1e-12:
-                    resistances.append(float("inf"))
-                else:
-                    resistances.append(abs(voltage / current))
-            
-            # Ensure all lists are same length
+            pulse_times, set_v, set_i, resistances = self._normalize_pmu_dual_channel_probes(
+                controller,
+                total_probes=total_probes,
+                read_voltage=cfg.meas_v,
+                i_range=cfg.i_range,
+                pulse_times_gp=31,
+            )
+
             min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances))
-            set_v = set_v[:min_len]
-            set_i = set_i[:min_len]
-            pulse_times = pulse_times[:min_len]
-            resistances = resistances[:min_len]
             
-            # Filter out trailing zeros (from C module not filling all allocated slots)
-            # The C module allocates arrays for total_probes but may only fill validProbeCount
-            # Valid data ends when we encounter timestamp=0 AND voltage=0 AND current=0
-            # after valid data has started (skip if all data is at the start)
+            # Filter out trailing zeros (C may not fill all allocated slots)
             valid_len = min_len
             if min_len > 0:
-                # Check backwards from the end to find where valid data ends
                 for i in range(min_len - 1, -1, -1):
-                    # If timestamp is 0 and voltage/current are also 0, this is likely trailing zeros
-                    if (abs(pulse_times[i]) < 1e-12 and 
-                        abs(set_v[i]) < 1e-12 and 
-                        abs(set_i[i]) < 1e-12):
+                    if (abs(pulse_times[i]) < 1e-12 and abs(set_i[i]) < 1e-12):
                         valid_len = i
                     else:
-                        # Found valid data, stop looking
                         break
                 
-                # Trim to valid data length
                 if valid_len < min_len:
                     set_v = set_v[:valid_len]
                     set_i = set_i[:valid_len]
@@ -2405,17 +2740,90 @@ class Keithley4200_KXCI_Scripts:
                     burst_detail=burst_detail,
                 ))
             time.sleep(0.2)
-            set_v = self._query_gp_data(controller, 20, total_probes, "setV")
-            set_i = self._query_gp_data(controller, 22, total_probes, "setI")
-            pulse_times = self._query_gp_data(controller, 31, total_probes, "PulseTimes")
-            if not pulse_times:
-                pulse_times = [float(i) for i in range(total_probes)]
-            resistances: List[float] = []
-            for voltage, current in zip(set_v, set_i):
-                if abs(current) < 1e-12:
-                    resistances.append(float("inf"))
-                else:
-                    resistances.append(abs(voltage / current))
+            pulse_times, set_v, set_i, resistances = self._normalize_pmu_dual_channel_probes(
+                controller,
+                total_probes=total_probes,
+                read_voltage=cfg.meas_v,
+                i_range=cfg.i_range,
+                pulse_times_gp=31,
+            )
+            min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances), total_probes)
+            return (
+                pulse_times[:min_len],
+                set_v[:min_len],
+                set_i[:min_len],
+                resistances[:min_len],
+            )
+        finally:
+            try:
+                controller._exit_ul_mode()
+            except Exception:
+                pass
+
+    def _estimate_ex_wait_seconds(self, waveform_duration_s: float) -> float:
+        """GPIB wait after EX — scale with waveform length, not fixed 2 s."""
+        return max(2.0, waveform_duration_s * 2.0 + 1.0)
+
+    def _execute_endurance_burst_test(
+        self, cfg: PulseReadInterleavedConfig, total_cycles: int
+    ) -> Tuple[List[float], List[float], List[float], List[float]]:
+        """One EX: pmu_endurance_burst_test batches internally on the 4200 (experimental)."""
+        total_probes = endurance_total_probe_count(total_cycles)
+        burst_plan = plan_endurance_burst_sizes(total_cycles)
+        est_duration = self._estimate_endurance_total_time(cfg, min(20, total_cycles))
+        if len(burst_plan) > 1:
+            est_duration = sum(
+                self._estimate_endurance_total_time(cfg, n) for n in burst_plan
+            )
+        wait_s = self._estimate_ex_wait_seconds(est_duration)
+
+        controller = self._get_controller()
+        if not controller.connect():
+            raise RuntimeError("Unable to connect to instrument")
+        try:
+            if not controller._enter_ul_mode():
+                raise RuntimeError("Failed to enter UL mode")
+            command = build_endurance_burst_test_ex_command(cfg, total_cycles)
+            print(f"\n[KXCI] {PMU_ENDURANCE_BURST_TEST_FN} (instrument-side batching):")
+            print(command)
+            print(f"  Total cycles: {total_cycles}  Internal bursts: {burst_plan}")
+            print(f"  Expected probes: {total_probes}  Est. wait: {wait_s:.2f} s")
+            return_value, error = controller._execute_ex_command(command, wait_seconds=wait_s)
+            if error:
+                raise RuntimeError(f"EX command failed: {error}")
+
+            burst_detail = (
+                f"Total: {total_cycles} cycles in {len(burst_plan)} internal burst(s) "
+                f"({burst_plan})."
+            )
+            if return_value is not None and return_value < 0:
+                raise RuntimeError(format_pmu_ex_error(
+                    module_name=PMU_ENDURANCE_BURST_TEST_FN,
+                    return_value=return_value,
+                    test_label="Endurance Burst Test",
+                    segments_estimate=estimate_endurance_seg_arb_segments(
+                        min(20, total_cycles)
+                    ),
+                    burst_detail=burst_detail,
+                    extra_lines=[
+                        "Deploy pmu_endurance_burst_test.c to A_pulse_read_grouped_multi "
+                        "(see pmu_endurance_interleaved/README_BURST_TEST.md).",
+                    ],
+                ))
+            if return_value is None:
+                raise RuntimeError(format_pmu_ex_no_return(
+                    module_name=PMU_ENDURANCE_BURST_TEST_FN,
+                    test_label="Endurance Burst Test",
+                    burst_detail=burst_detail,
+                ))
+            time.sleep(0.2)
+            pulse_times, set_v, set_i, resistances = self._normalize_pmu_dual_channel_probes(
+                controller,
+                total_probes=total_probes,
+                read_voltage=cfg.meas_v,
+                i_range=cfg.i_range,
+                pulse_times_gp=31,
+            )
             min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances), total_probes)
             return (
                 pulse_times[:min_len],
@@ -2570,31 +2978,25 @@ class Keithley4200_KXCI_Scripts:
             
             time.sleep(0.2)
             
-            # Query data from GP parameters
-            set_v = self._query_gp_data(controller, 20, array_size, "setV")
-            set_i = self._query_gp_data(controller, 22, array_size, "setI")
-            pulse_times = self._query_gp_data(controller, 31, array_size, "PulseTimes")
-            
+            pulse_times, set_v, set_i, resistances = self._normalize_pmu_dual_channel_probes(
+                controller,
+                total_probes=array_size,
+                read_voltage=meas_v,
+                i_range=i_range,
+                pulse_times_gp=31,
+            )
             if not pulse_times:
-                # Generate approximate times
-                pulse_times = [i * (meas_width + meas_delay) for i in range(len(set_v))]
-            
-            # Calculate resistances
-            resistances: List[float] = []
-            for voltage, current in zip(set_v, set_i):
-                if abs(current) > 1e-12:
-                    resistances.append(voltage / current)
-                else:
-                    resistances.append(float('inf') if voltage > 0 else float('-inf'))
-            
-            # Ensure all lists are same length
+                pulse_times = [i * (meas_width + meas_delay) for i in range(len(set_i))]
+                set_v = [abs(meas_v)] * len(pulse_times)
+                resistances = resistances[: len(pulse_times)]
+
             min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances))
-            set_v = set_v[:min_len]
-            set_i = set_i[:min_len]
-            pulse_times = pulse_times[:min_len]
-            resistances = resistances[:min_len]
-            
-            return pulse_times, set_v, set_i, resistances
+            return (
+                pulse_times[:min_len],
+                set_v[:min_len],
+                set_i[:min_len],
+                resistances[:min_len],
+            )
             
         finally:
             try:
@@ -2692,10 +3094,18 @@ class Keithley4200_KXCI_Scripts:
         # Ensure max_points is sufficient for rate calculation (especially for long measurements)
         self._ensure_valid_interleaved_max_points(cfg)
         
+        self._print_pmu_read_timing_diagnostics(cfg.meas_width, cfg.rise_time)
         print_interleaved_timeline(cfg)
         
         timestamps, voltages, currents, resistances = self._run_interleaved_with_fallback(cfg)
         self._print_results_table(timestamps, voltages, currents, resistances)
+        self._print_pmu_measurement_diagnostics(
+            configured_i_range=pmu_i_range,
+            read_voltage=cfg.meas_v,
+            currents=currents,
+            read_width_s=cfg.meas_width,
+            read_rise_s=cfg.rise_time,
+        )
         self._print_pmu_scope_verification(cfg, timestamps, voltages, currents)
         
         return self._format_results(timestamps, voltages, currents, resistances)
@@ -3944,6 +4354,7 @@ class Keithley4200_KXCI_Scripts:
             i_range=pmu_i_range,
         )
         cfg.validate()
+        self._print_pmu_read_timing_diagnostics(cfg.meas_width, cfg.rise_time)
 
         all_timestamps: List[float] = []
         all_voltages: List[float] = []
@@ -4000,6 +4411,13 @@ class Keithley4200_KXCI_Scripts:
             remaining -= n_burst
 
         self._print_results_table(all_timestamps, all_voltages, all_currents, all_resistances)
+        self._print_pmu_measurement_diagnostics(
+            configured_i_range=pmu_i_range,
+            read_voltage=cfg.meas_v,
+            currents=all_currents,
+            read_width_s=cfg.meas_width,
+            read_rise_s=cfg.rise_time,
+        )
         print(
             f"[KXCI] Endurance: {len(all_timestamps)} reads "
             f"(1 initial + {num_cycles} cycles × SET+RESET)"
@@ -4010,6 +4428,96 @@ class Keithley4200_KXCI_Scripts:
             cycle_numbers=cycle_numbers,
             cycle_number=cycle_numbers,
             operation=operations,
+        )
+
+    def endurance_burst_test(self, set_voltage: float = 2.0,
+                             reset_voltage: float = -2.0,
+                             pulse_width: float = 100.0,
+                             read_voltage: float = 0.2,
+                             num_cycles: int = 100,
+                             delay_between: float = 10000.0,
+                             clim: float = 100e-3,
+                             i_range: Optional[float] = None,
+                             read_width: float = 2e-6,
+                             read_rise_time: float = 1e-7,
+                             pulse_rise_time: Optional[float] = None) -> Dict:
+        """Experimental: endurance via pmu_endurance_burst_test (C batches on instrument).
+
+        Same pattern as endurance_test but one EX command. Does not replace endurance_test.
+        Requires pmu_endurance_burst_test.c deployed to USRLIB.
+        """
+        pulse_width_s = max(2e-8, pulse_width)
+        delay_between_s = max(2e-8, delay_between)
+        read_width_s = max(2e-8, read_width)
+        read_rise_s = max(2e-8, read_rise_time)
+        pulse_rise_s = pulse_rise_time if pulse_rise_time is not None else read_rise_s
+
+        pmu_i_range = self._resolve_pmu_i_range(i_range)
+        cfg = self.build_pmu_endurance_burst_cfg(
+            set_voltage=set_voltage,
+            reset_voltage=reset_voltage,
+            pulse_width_s=pulse_width_s,
+            read_voltage=read_voltage,
+            read_width_s=read_width_s,
+            read_rise_s=read_rise_s,
+            delay_between_s=delay_between_s,
+            pulse_rise_s=pulse_rise_s,
+            pulse_fall_s=pulse_rise_s,
+            i_range=pmu_i_range,
+        )
+        cfg.validate()
+        self._ensure_valid_interleaved_max_points(cfg)
+        self._print_pmu_read_timing_diagnostics(cfg.meas_width, cfg.rise_time)
+        est = self._estimate_endurance_total_time(cfg, num_cycles)
+        burst_plan = plan_endurance_burst_sizes(num_cycles)
+        if len(burst_plan) > 1:
+            est = sum(self._estimate_endurance_total_time(cfg, n) for n in burst_plan)
+        cfg.max_points = max(
+            cfg.max_points,
+            self._calculate_interleaved_min_max_points(
+                est,
+                min(cfg.pulse_width, cfg.meas_width, cfg.pulse_rise_time, cfg.rise_time),
+            ),
+        )
+
+        print(
+            f"[KXCI] endurance_burst_test: {num_cycles} total cycles, "
+            f"internal burst plan {burst_plan}"
+        )
+
+        ts, v, i, r = self._execute_endurance_burst_test(cfg, num_cycles)
+
+        cycle_numbers: List[int] = []
+        operations: List[str] = []
+        for idx in range(len(ts)):
+            if idx == 0:
+                cycle_numbers.append(-1)
+                operations.append("INITIAL")
+            else:
+                cyc = (idx - 1) // 2
+                operations.append("SET" if (idx - 1) % 2 == 0 else "RESET")
+                cycle_numbers.append(cyc)
+
+        self._print_results_table(ts, v, i, r)
+        self._print_pmu_measurement_diagnostics(
+            configured_i_range=pmu_i_range,
+            read_voltage=cfg.meas_v,
+            currents=i,
+            read_width_s=cfg.meas_width,
+            read_rise_s=cfg.rise_time,
+        )
+        print(
+            f"[KXCI] Endurance burst test: {len(ts)} probes "
+            f"(expected {endurance_total_probe_count(num_cycles)})"
+        )
+
+        return self._format_results(
+            ts, v, i, r,
+            cycle_numbers=cycle_numbers,
+            cycle_number=cycle_numbers,
+            operation=operations,
+            burst_plan=burst_plan,
+            burst_test=True,
         )
 
     def retention_test(
@@ -4056,6 +4564,7 @@ class Keithley4200_KXCI_Scripts:
         )
         cfg.validate()
         self._ensure_valid_max_points(cfg)
+        self._print_pmu_read_timing_diagnostics(cfg.meas_width, cfg.rise_time)
 
         timestamps, voltages, currents, resistances = self._execute_retention(cfg)
 
@@ -4065,6 +4574,13 @@ class Keithley4200_KXCI_Scripts:
             phases.append("baseline" if idx < n_baseline else "retention")
 
         self._print_results_table(timestamps, voltages, currents, resistances)
+        self._print_pmu_measurement_diagnostics(
+            configured_i_range=pmu_i_range,
+            read_voltage=cfg.meas_v,
+            currents=currents,
+            read_width_s=cfg.meas_width,
+            read_rise_s=cfg.rise_time,
+        )
         print(
             f"[KXCI] PMU retention: {n_baseline} baseline + "
             f"{len(timestamps) - n_baseline} retention reads "

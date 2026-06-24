@@ -15,6 +15,7 @@ from .status_section import build_status_section
 from .plot_section import build_plot_section
 from .tabs_optical import build_optical_tab
 from .laser_section import build_laser_section
+from .help_guide import open_help_guide
 from .layout_classic import build_classic_ui
 from .layout_compact import build_compact_ui
 from .pulse_diagram import PulseDiagramHelper
@@ -33,5 +34,6 @@ __all__ = [
     "build_laser_section",
     "build_classic_ui",
     "build_compact_ui",
+    "open_help_guide",
     "PulseDiagramHelper",
 ]

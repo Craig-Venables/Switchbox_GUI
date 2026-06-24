@@ -42,6 +42,8 @@ class PulseDiagramHelper:
             self._draw_depression_only(params)
         elif func == "endurance_test":
             self._draw_endurance(params)
+        elif func == "endurance_burst_test":
+            self._draw_endurance(params)
         elif func == "retention_test":
             self._draw_pmu_retention(params)
         elif func == "smu_slow_pulse_measure":

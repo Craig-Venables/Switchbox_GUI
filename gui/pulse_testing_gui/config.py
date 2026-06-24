@@ -56,7 +56,7 @@ TSP_TEST_PRESETS_FILE = JSON_DIR / "tsp_test_presets.json"
 
 # Window geometry
 WINDOW_GEOMETRY = "1400x900"
-HELP_WINDOW_GEOMETRY = "800x700"
+HELP_WINDOW_GEOMETRY = "820x780"
 RANGE_FINDER_POPUP_GEOMETRY = "700x600"
 
 # UI layout modes: "classic" (default) or "compact"

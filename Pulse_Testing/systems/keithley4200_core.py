@@ -359,6 +359,22 @@ class Keithley4200KXCICommon(BaseMeasurementSystem, ABC):
         if 'pulse_rise_time' in params:
             params['pulse_rise_time'] = params['pulse_rise_time'] / 1_000_000.0
         return self._scripts.endurance_test(**params)
+
+    def endurance_burst_test(self, **params) -> Dict[str, Any]:
+        """Experimental: instrument-side burst batching (pmu_endurance_burst_test)."""
+        if not self._scripts:
+            raise RuntimeError("Not connected")
+        if 'pulse_width' in params:
+            params['pulse_width'] = params['pulse_width'] / 1_000_000.0
+        if 'delay_between' in params:
+            params['delay_between'] = params['delay_between'] / 1_000_000.0
+        if 'read_width' in params:
+            params['read_width'] = params['read_width'] / 1_000_000.0
+        if 'read_rise_time' in params:
+            params['read_rise_time'] = params['read_rise_time'] / 1_000_000.0
+        if 'pulse_rise_time' in params:
+            params['pulse_rise_time'] = params['pulse_rise_time'] / 1_000_000.0
+        return self._scripts.endurance_burst_test(**params)
     
     def retention_test(self, **params) -> Dict[str, Any]:
         """PMU retention: baseline reads → program pulses → retention reads (fast seg-arb burst)."""

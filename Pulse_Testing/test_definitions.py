@@ -21,6 +21,7 @@ def _get_supported_tests(system_name: str) -> List[str]:
 # Dropdown order (by backend function name). Endurance + retention first for PMU workflow.
 TEST_DISPLAY_ORDER: List[str] = [
     "endurance_test",
+    "endurance_burst_test",
     "retention_test",
     "pulse_read_repeat",
     "multi_pulse_then_read",
@@ -285,6 +286,36 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_voltage": {"default": 0.3, "label": "Read Voltage (V)", "type": "float"},
             "num_cycles": {"default": 10, "label": "Number of Cycles", "type": "int"},
             "delay_between": {"default": 1.0, "label": "Delay Between (µs) [PMU] / (ms) [SMU]", "type": "float"},
+            "clim": {"default": 1e-3, "label": "Current Limit (A)", "type": "float"},
+            "read_width": {"default": 2.0, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "pulse_rise_time": {"default": 0.1, "label": "Write Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "plot_y_axis": {
+                "default": "resistance",
+                "label": "Plot Y-Axis",
+                "type": "choice",
+                "choices": ["resistance", "current"],
+                "gui_only": True,
+            },
+        },
+        "plot_type": "endurance",
+    },
+    "Endurance Burst Test": {
+        "function": "endurance_burst_test",
+        "only_for_systems": ["keithley4200_pmu", "keithley4200a", "keithley4200_custom"],
+        "description": (
+            "EXPERIMENTAL — validates instrument-side burst batching (pmu_endurance_burst_test).\n"
+            "Same pattern as Endurance but one EX command; C batches internally (~20 cycles/burst).\n"
+            "Requires redeploy: add pmu_endurance_burst_test.c to A_pulse_read_grouped_multi.\n"
+            "Use this to prove 100+ cycles before changing the main Endurance test."
+        ),
+        "params": {
+            "set_voltage": {"default": 2.0, "label": "SET Voltage (V)", "type": "float"},
+            "reset_voltage": {"default": -2.0, "label": "RESET Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Pulse Width (µs)", "type": "float"},
+            "read_voltage": {"default": 0.3, "label": "Read Voltage (V)", "type": "float"},
+            "num_cycles": {"default": 100, "label": "Total Cycles (batched on 4200)", "type": "int"},
+            "delay_between": {"default": 1.0, "label": "Delay Between (µs)", "type": "float"},
             "clim": {"default": 1e-3, "label": "Current Limit (A)", "type": "float"},
             "read_width": {"default": 2.0, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
