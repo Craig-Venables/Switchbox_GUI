@@ -311,6 +311,12 @@ DEFAULT_READ_VOLTAGE = 0.3       # 0.3V default (NOTE: C module uses 0.3V, not u
 MIN_CURRENT_RANGE = 100e-9       # 100nA minimum current range
 MAX_CURRENT_RANGE = 0.8          # 0.8A maximum current range
 DEFAULT_CURRENT_RANGE = 1e-4      # 0.1mA default (NOTE: C module uses 1e-4, not converted clim)
+# RPM 10V valid I ranges (retention_pulse_ilimit_dual_channel.c); driver snaps to nearest.
+PMU_DISCRETE_I_RANGES: Tuple[float, ...] = (
+    100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 0.01, 0.2, 0.8,
+)
+# C firmware caps each probe: R_reported = min(|V/I|, 1e4 / IRange)
+PMU_MAX_RESISTANCE_PER_IRANGE = 1e4
 
 # Timing limits (seconds)
 MIN_RISE_TIME = 2e-8             # 20ns minimum rise/fall time
@@ -1328,8 +1334,35 @@ class Keithley4200_KXCI_Scripts:
     _DEFAULT_EDGE_TIME = 1e-7  # 100 ns legacy default
     _FAST_EDGE_THRESHOLD = 5e-7  # ≤500 ns pulses/read windows → use fast edge
     # Working-example default from pmu_pulse_read_interleaved / scope smoke test.
-    # Do NOT pass converted clim here — wrong IRange changes PMU range behaviour.
-    _SCOPE_VALIDATED_I_RANGE = 1e-4
+    _DEFAULT_PMU_I_RANGE = 1e-4
+    _SCOPE_VALIDATED_I_RANGE = _DEFAULT_PMU_I_RANGE  # alias
+
+    def _resolve_pmu_i_range(self, i_range: Optional[float] = None) -> float:
+        """Snap user IRange to nearest PMU hardware range; log caps and mismatches."""
+        requested = DEFAULT_CURRENT_RANGE if i_range is None or i_range <= 0 else float(i_range)
+        clamped = max(MIN_CURRENT_RANGE, min(MAX_CURRENT_RANGE, requested))
+        resolved = min(
+            PMU_DISCRETE_I_RANGES,
+            key=lambda x: abs(math.log10(x) - math.log10(clamped)),
+        )
+        max_r = PMU_MAX_RESISTANCE_PER_IRANGE / resolved
+        if abs(resolved - requested) / max(requested, MIN_CURRENT_RANGE) > 0.05:
+            print(
+                f"[KXCI] PMU IRange: requested {requested:.2e} A → "
+                f"nearest hardware range {resolved:.2e} A"
+            )
+        else:
+            print(f"[KXCI] PMU IRange (EX): {resolved:.2e} A")
+        print(
+            f"[KXCI] Firmware R ceiling for this range: {max_r:.3e} Ω "
+            f"(C code caps at 1e4/IRange; higher-R states clip, no error)"
+        )
+        if requested > resolved * 1.05:
+            print(
+                f"[KXCI] WARNING: range is high for weak reads — resistances above "
+                f"~{max_r:.3e} Ω will all report as ~{max_r:.3e} Ω"
+            )
+        return resolved
 
     def _audit_interleaved_legacy_cfg(self, cfg: "PulseReadInterleavedConfig") -> list[str]:
         """Return human-readable issues if legacy timing fields look like pre-fix defaults."""
@@ -1387,7 +1420,7 @@ class Keithley4200_KXCI_Scripts:
             num_cycles=num_cycles,
             pulse_rise_s=pulse_edge,
             pulse_fall_s=pulse_fall,
-            i_range=i_range if i_range is not None else self._SCOPE_VALIDATED_I_RANGE,
+            i_range=i_range if i_range is not None else self._DEFAULT_PMU_I_RANGE,
             max_points=max_points,
             clarius_debug=clarius_debug,
         )
@@ -1437,7 +1470,7 @@ class Keithley4200_KXCI_Scripts:
             set_start_v=read_voltage,
             set_stop_v=reset_voltage,
             steps=0,
-            i_range=i_range if i_range is not None else self._SCOPE_VALIDATED_I_RANGE,
+            i_range=i_range if i_range is not None else self._DEFAULT_PMU_I_RANGE,
             max_points=max_points,
             iteration=1,
             num_cycles=1,
@@ -1490,7 +1523,7 @@ class Keithley4200_KXCI_Scripts:
             set_start_v=read_voltage,
             set_stop_v=read_voltage,
             steps=0,
-            i_range=i_range if i_range is not None else self._SCOPE_VALIDATED_I_RANGE,
+            i_range=i_range if i_range is not None else self._DEFAULT_PMU_I_RANGE,
             max_points=max_points,
             iteration=1,
             num_pulses=retention_reads,
@@ -2639,13 +2672,8 @@ class Keithley4200_KXCI_Scripts:
             raise ValueError(f"read_width appears to be in wrong units. Got {read_width_s*1e6:.2f} µs ({read_width_s:.2e} s). "
                            f"Expected value should be < 1000 µs. Check unit conversion.")
         
-        # Use interleaved module: Pattern is Initial Read → (Pulse → Read) × N cycles
-        # Same builder as pmu_scope_smoke_test.py (i_range=1e-4, legacy fields at 20 ns)
-        if clim != self._SCOPE_VALIDATED_I_RANGE:
-            print(
-                f"[KXCI] Note: clim={clim:.2e} A is not sent as EX IRange "
-                f"(using {self._SCOPE_VALIDATED_I_RANGE:.2e} A like scope smoke test)."
-            )
+        # PMU interleaved: IRange comes from i_range (GUI settings), not clim.
+        pmu_i_range = self._resolve_pmu_i_range(i_range)
         cfg = self.build_pmu_pulse_read_burst_cfg(
             pulse_voltage=pulse_voltage,
             pulse_width_s=pulse_width_s,
@@ -2656,6 +2684,7 @@ class Keithley4200_KXCI_Scripts:
             num_cycles=num_cycles,
             pulse_rise_s=pulse_rise_s,
             pulse_fall_s=pulse_rise_s,
+            i_range=pmu_i_range,
             clarius_debug=1 if enable_debug_output else 0,
         )
         cfg.validate()
@@ -2681,6 +2710,7 @@ class Keithley4200_KXCI_Scripts:
                              num_cycles: int = 20,
                              delay_between_cycles: float = 10000.0,
                              clim: float = 100e-3,
+                             i_range: Optional[float] = None,
                              enable_debug_output: bool = True) -> Dict:
         """Multiple pulses then multiple reads per cycle.
         
@@ -2734,7 +2764,7 @@ class Keithley4200_KXCI_Scripts:
             meas_v=read_voltage,
             meas_width=0.5e-6,  # Measurement window
             meas_delay=delay_between_reads_s,  # Delay between reads
-            i_range=1e-4,
+            i_range=self._resolve_pmu_i_range(i_range),
             max_points=10000,  # Will be updated by _ensure_valid_interleaved_max_points
             iteration=1,
             clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -2764,6 +2794,7 @@ class Keithley4200_KXCI_Scripts:
                          num_cycles: int = 1,
                          delay_between_cycles: float = 0.0,
                          clim: float = 100e-3,
+                         i_range: Optional[float] = None,
                          enable_debug_output: bool = True) -> Dict:
         """Repeated SET pulses with reads. Can be repeated multiple cycles.
         
@@ -2827,7 +2858,7 @@ class Keithley4200_KXCI_Scripts:
                 meas_v=read_voltage,
                 meas_width=meas_width_s,  # Measurement window
                 meas_delay=post_read_interval_s if num_post_reads > 0 else meas_delay_s,  # Delay after read
-                i_range=1e-4,
+                i_range=self._resolve_pmu_i_range(i_range),
                 max_points=10000,
                 iteration=1,
                 clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -2861,7 +2892,7 @@ class Keithley4200_KXCI_Scripts:
                     meas_v=read_voltage,
                     meas_width=meas_width_s,
                     meas_delay=post_read_interval_s if num_post_reads > 0 else meas_delay_s,
-                    i_range=1e-4,
+                    i_range=self._resolve_pmu_i_range(i_range),
                     max_points=10000,
                     iteration=1,
                     clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -2897,6 +2928,7 @@ class Keithley4200_KXCI_Scripts:
                        num_cycles: int = 1,
                        delay_between_cycles: float = 0.0,
                        clim: float = 100e-3,
+                       i_range: Optional[float] = None,
                        enable_debug_output: bool = True) -> Dict:
         """Repeated RESET pulses with reads. Can be repeated multiple cycles.
         
@@ -2955,7 +2987,7 @@ class Keithley4200_KXCI_Scripts:
                 meas_v=read_voltage,
                 meas_width=meas_width_s,  # Measurement window
                 meas_delay=post_read_interval_s if num_post_reads > 0 else meas_delay_s,  # Delay after read
-                i_range=1e-4,
+                i_range=self._resolve_pmu_i_range(i_range),
                 max_points=10000,
                 iteration=1,
                 clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -2989,7 +3021,7 @@ class Keithley4200_KXCI_Scripts:
                     meas_v=read_voltage,
                     meas_width=meas_width_s,
                     meas_delay=post_read_interval_s if num_post_reads > 0 else meas_delay_s,
-                    i_range=1e-4,
+                    i_range=self._resolve_pmu_i_range(i_range),
                     max_points=10000,
                     iteration=1,
                     clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -3022,7 +3054,8 @@ class Keithley4200_KXCI_Scripts:
                                           post_read_interval: float = 1000.0,
                                           num_cycles: int = 5,
                                           delay_between_cycles: float = 0.0,
-                                          clim: float = 100e-3) -> Dict:
+                                          clim: float = 100e-3,
+                                          i_range: Optional[float] = None) -> Dict:
         """Alternating potentiation and depression cycles.
         
         Pattern: (Potentiation → Depression) × N cycles
@@ -3119,6 +3152,7 @@ class Keithley4200_KXCI_Scripts:
                         delay_between_reads: float = 100e-6,
                         read_width: float = 0.5e-6,
                         clim: float = 100e-3,
+                        i_range: Optional[float] = None,
                         enable_debug_output: bool = True) -> Dict:
         """Pulse then multiple reads to monitor relaxation.
         
@@ -3187,7 +3221,7 @@ class Keithley4200_KXCI_Scripts:
             meas_width=read_width_s,  # Measurement window
             meas_delay=delay_between_reads_s,  # Delay between reads
             rise_time=read_edge,
-            i_range=1e-4,
+            i_range=self._resolve_pmu_i_range(i_range),
             max_points=10000,  # Will be updated by _ensure_valid_interleaved_max_points
             iteration=1,
             clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -3253,6 +3287,7 @@ class Keithley4200_KXCI_Scripts:
                                     delay_between_reads: float = 100.0,
                                     read_width: float = 0.5e-6,
                                     clim: float = 100e-3,
+                                    i_range: Optional[float] = None,
                                     enable_debug_output: bool = True) -> Dict:
         """Monitor relaxation after cumulative pulsing.
         
@@ -3309,7 +3344,7 @@ class Keithley4200_KXCI_Scripts:
             meas_width=read_width_s,  # Measurement window
             meas_delay=delay_between_reads_s,  # Delay between reads
             rise_time=read_edge,
-            i_range=1e-4,
+            i_range=self._resolve_pmu_i_range(i_range),
             max_points=10000,  # Will be updated by _ensure_valid_interleaved_max_points
             iteration=1,
             clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -3390,7 +3425,7 @@ class Keithley4200_KXCI_Scripts:
                 meas_v=read_voltage,
                 meas_width=0.5e-6,  # Measurement window
                 meas_delay=1e-6,  # Delay after read
-                i_range=1e-4,
+                i_range=self._resolve_pmu_i_range(i_range),
                 max_points=10000,  # Will be updated by _ensure_valid_interleaved_max_points
                 iteration=1,
                 clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -3423,7 +3458,7 @@ class Keithley4200_KXCI_Scripts:
                     meas_v=read_voltage,
                     meas_width=0.5e-6,
                     meas_delay=1e-6,
-                    i_range=1e-4,
+                    i_range=self._resolve_pmu_i_range(i_range),
                     max_points=10000,  # Will be updated by _ensure_valid_interleaved_max_points
                     iteration=1,
                     clarius_debug=1 if enable_debug_output else 0,  # Enable/disable debug output
@@ -3450,7 +3485,8 @@ class Keithley4200_KXCI_Scripts:
                                reset_voltage: float = -1.0,
                                reset_width: float = 1000.0,
                                delay_between_voltages: float = 1.0,
-                               clim: float = 100e-3) -> Dict:
+                               clim: float = 100e-3,
+                               i_range: Optional[float] = None) -> Dict:
         """Voltage amplitude sweep: Test different pulse voltages.
         
         Pattern: For each voltage: Initial Read → (Pulse → Read) × N → Reset
@@ -3561,6 +3597,7 @@ class Keithley4200_KXCI_Scripts:
                                      delay_before_read: float = 0.02e-6,  # seconds (default 0.02 µs = 20 ns)
                                      read_width: float = 0.5e-6,  # seconds (default 0.5 µs)
                                      clim: float = 100e-3,
+                                     i_range: Optional[float] = None,
                                      enable_debug_output: bool = True) -> Dict:
         """Potentiation-depression cycle using pmu_potentiation_depression module.
         
@@ -3882,6 +3919,7 @@ class Keithley4200_KXCI_Scripts:
                       num_cycles: int = 1000,
                       delay_between: float = 10000.0,
                       clim: float = 100e-3,
+                      i_range: Optional[float] = None,
                       read_width: float = 2e-6,
                       read_rise_time: float = 1e-7,
                       pulse_rise_time: Optional[float] = None) -> Dict:
@@ -3892,6 +3930,7 @@ class Keithley4200_KXCI_Scripts:
         read_rise_s = max(2e-8, read_rise_time)
         pulse_rise_s = pulse_rise_time if pulse_rise_time is not None else read_rise_s
 
+        pmu_i_range = self._resolve_pmu_i_range(i_range)
         cfg = self.build_pmu_endurance_burst_cfg(
             set_voltage=set_voltage,
             reset_voltage=reset_voltage,
@@ -3902,7 +3941,7 @@ class Keithley4200_KXCI_Scripts:
             delay_between_s=delay_between_s,
             pulse_rise_s=pulse_rise_s,
             pulse_fall_s=pulse_rise_s,
-            i_range=self._SCOPE_VALIDATED_I_RANGE,
+            i_range=pmu_i_range,
         )
         cfg.validate()
 
@@ -3939,9 +3978,15 @@ class Keithley4200_KXCI_Scripts:
                 burst_cfg, n_burst
             )
 
-            for idx in range(1, len(ts_b)):
-                cyc = global_cycle + (idx - 1) // 2
-                op = 'SET' if (idx - 1) % 2 == 0 else 'RESET'
+            for idx in range(len(ts_b)):
+                if idx == 0:
+                    if global_cycle != 0:
+                        continue  # batched bursts: only keep the first initial read
+                    cyc = -1
+                    op = 'INITIAL'
+                else:
+                    cyc = global_cycle + (idx - 1) // 2
+                    op = 'SET' if (idx - 1) % 2 == 0 else 'RESET'
                 all_timestamps.append(ts_b[idx] + time_offset)
                 all_voltages.append(v_b[idx])
                 all_currents.append(i_b[idx])
@@ -3955,7 +4000,10 @@ class Keithley4200_KXCI_Scripts:
             remaining -= n_burst
 
         self._print_results_table(all_timestamps, all_voltages, all_currents, all_resistances)
-        print(f"[KXCI] Endurance: {len(all_timestamps)} reads ({num_cycles} cycles, SET+RESET per cycle)")
+        print(
+            f"[KXCI] Endurance: {len(all_timestamps)} reads "
+            f"(1 initial + {num_cycles} cycles × SET+RESET)"
+        )
 
         return self._format_results(
             all_timestamps, all_voltages, all_currents, all_resistances,
@@ -3979,6 +4027,7 @@ class Keithley4200_KXCI_Scripts:
         pulse_rise_time: Optional[float] = None,
         pulse_fall_time: Optional[float] = None,
         clim: float = 100e-3,
+        i_range: Optional[float] = None,
         clarius_debug: int = 0,
     ) -> Dict:
         """PMU retention: baseline reads → program pulse train → fast retention reads (pmu_retention_dual_channel)."""
@@ -3988,6 +4037,7 @@ class Keithley4200_KXCI_Scripts:
         pulse_rise_s = pulse_rise_time if pulse_rise_time is not None else read_rise_s
         pulse_fall_s = pulse_fall_time if pulse_fall_time is not None else pulse_rise_s
 
+        pmu_i_range = self._resolve_pmu_i_range(i_range)
         cfg = self.build_pmu_retention_burst_cfg(
             pulse_voltage=pulse_voltage,
             pulse_width_s=pulse_width_s,
@@ -4001,7 +4051,7 @@ class Keithley4200_KXCI_Scripts:
             pulse_rise_s=pulse_rise_s,
             pulse_fall_s=pulse_fall_s,
             delay_between_pulses_s=max(2e-8, delay_between_pulses),
-            i_range=self._SCOPE_VALIDATED_I_RANGE,
+            i_range=pmu_i_range,
             clarius_debug=clarius_debug,
         )
         cfg.validate()

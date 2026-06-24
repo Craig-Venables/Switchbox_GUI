@@ -110,7 +110,9 @@ Output: `dist/Switchbox_GUI/Switchbox_GUI.exe`
 **Pulse Testing GUI only** (standalone exe, no full Switchbox app):
 
 ```bash
-python build_pulse_testing_gui.py
+python build_pulse_testing_gui.py          # classic only
+python build_pulse_testing_gui.py --all    # classic + compact
+python build_pulse_testing_gui.py --compact  # compact only
 ```
 
 Requires **Python 3.10.11+** for PyInstaller (3.10.0 fails during analysis). If your `.venv` is still on 3.10.0, use a separate build env:
@@ -118,10 +120,13 @@ Requires **Python 3.10.11+** for PyInstaller (3.10.0 fails during analysis). If 
 ```bash
 py -3.10 -m venv .venv-build
 .venv-build\Scripts\pip install -r requirements.txt pyinstaller
-.venv-build\Scripts\python build_pulse_testing_gui.py
+.venv-build\Scripts\python build_pulse_testing_gui.py --all
 ```
 
-Output: `dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe` — distribute the whole `dist/Pulse_Testing_GUI/` folder.
+Outputs (distribute each whole folder):
+
+- `dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe` — classic layout (`TSP_Testing_GUI.py`)
+- `dist/Pulse_Testing_GUI_Compact/Pulse_Testing_GUI_Compact.exe` — compact layout
 
 ## 8. Standalone tool launchers
 
@@ -129,7 +134,7 @@ Output: `dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe` — distribute the whole 
 |------|---------|
 | Main app | `python main.py` |
 | Laser FG Scope | `python Laser_FG_Scope_GUI.py` |
-| Pulse testing GUI | `python TSP_Testing_GUI.py` or `python -m gui.pulse_testing_gui.main` |
+| Pulse testing GUI | `python TSP_Testing_GUI.py` or `python Pulse_Testing_GUI_compact.py` |
 | Motor control | `python -m gui.motor_control_gui.main` |
 | Connection check | `python -m gui.connection_check_gui.main` |
 | TSP standalone (legacy) | `python tools/tsp_testing_gui_standalone_v1/TSP_Testing_GUI.py` |

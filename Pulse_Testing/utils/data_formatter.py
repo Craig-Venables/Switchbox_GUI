@@ -81,11 +81,12 @@ def normalize_data(data: Dict[str, Any]) -> Dict[str, Any]:
     voltages = normalized['voltages']
     currents = normalized['currents']
     
-    # Calculate resistances: R = V/I, handle division by zero
+    # Magnitude R = |V|/|I| — PMU current sign follows instrument convention;
+    # signed V/I would flip negative and break log-scale plots.
     with np.errstate(divide='ignore', invalid='ignore'):
         resistances = np.where(
             np.abs(currents) > 1e-12,
-            voltages / currents,
+            np.abs(voltages / currents),
             1e12  # Large resistance for open circuit / zero current
         )
     

@@ -6,15 +6,18 @@ Shortcut launcher for the Pulse Testing GUI.
 
 Usage:
     python TSP_Testing_GUI.py
+    python TSP_Testing_GUI.py --layout compact
+    python TSP_Testing_GUI.py --layout classic
 
-Or double-click the file to open the GUI directly.
+Or double-click the file to open the GUI directly (classic layout).
 
-This file provides a quick way to launch the Pulse Testing GUI
-without needing to navigate through other parts of the application.
+Compact layout shortcut:
+    python Pulse_Testing_GUI_compact.py
 """
 
 from __future__ import annotations
 
+import argparse
 import tkinter as tk
 import sys
 from pathlib import Path
@@ -33,13 +36,20 @@ __all__ = ['TSPTestingGUI']
 
 def main():
     """Launch the TSP Testing GUI"""
+    parser = argparse.ArgumentParser(description="Multi-System Pulse Testing GUI")
+    parser.add_argument(
+        "--layout",
+        choices=("classic", "compact"),
+        default=None,
+        help="UI layout (default: from Json_Files/tsp_gui_config.json or classic)",
+    )
+    args = parser.parse_args()
+
     root = tk.Tk()
     root.withdraw()  # Hide root window
-    
-    # Create and show the GUI
-    app = TSPTestingGUI(root)
-    
-    # Start the event loop
+
+    app = TSPTestingGUI(root, layout=args.layout)
+
     root.mainloop()
 
 

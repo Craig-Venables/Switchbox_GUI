@@ -1,36 +1,30 @@
 """
-Build Pulse Testing GUI using PyInstaller and ``build_pulse_testing_gui.spec``.
+Build Pulse Testing GUI executables using PyInstaller.
 
 Usage (from repository root)::
 
-    python build_pulse_testing_gui.py
+    python build_pulse_testing_gui.py           # classic (TSP_Testing_GUI)
+    python build_pulse_testing_gui.py --compact # compact layout only
+    python build_pulse_testing_gui.py --all     # both classic and compact
 
-Output (onedir)::
+Outputs (onedir)::
 
     dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe
+    dist/Pulse_Testing_GUI_Compact/Pulse_Testing_GUI_Compact.exe
 
-Distribute the entire ``dist/Pulse_Testing_GUI/`` folder (including ``_internal``).
+Distribute each entire folder (including ``_internal``).
 Editable JSON configs are created beside the executable on first run.
 """
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
 
 
-def main() -> int:
-    root = Path(__file__).resolve().parent
-    spec = root / "build_pulse_testing_gui.spec"
-    entry = root / "TSP_Testing_GUI.py"
-    if not spec.is_file():
-        print(f"Error: missing {spec}")
-        return 1
-    if not entry.is_file():
-        print(f"Error: missing {entry}")
-        return 1
-
+def _check_python_version() -> int | None:
     if sys.version_info[:3] == (3, 10, 0):
         print(
             "Error: Python 3.10.0 breaks PyInstaller analysis (dis.get_instructions bug).\n"
@@ -40,7 +34,10 @@ def main() -> int:
             "or recreate your main .venv with Python 3.10.11+."
         )
         return 1
+    return None
 
+
+def _ensure_pyinstaller(root: Path) -> None:
     try:
         import PyInstaller  # noqa: F401
     except ImportError:
@@ -50,6 +47,10 @@ def main() -> int:
             cwd=root,
         )
 
+
+def _run_spec(root: Path, spec: Path) -> None:
+    if not spec.is_file():
+        raise FileNotFoundError(f"missing {spec}")
     cmd = [
         sys.executable,
         "-m",
@@ -60,9 +61,71 @@ def main() -> int:
     ]
     print("Running:", " ".join(cmd))
     subprocess.check_call(cmd, cwd=root)
-    out = root / "dist" / "Pulse_Testing_GUI" / "Pulse_Testing_GUI.exe"
-    print(f"\nBuild complete: {out}")
-    print("Copy the whole dist/Pulse_Testing_GUI/ folder when distributing.")
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(description="Build Pulse Testing GUI executables")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--compact",
+        action="store_true",
+        help="Build compact layout only (Pulse_Testing_GUI_Compact.exe)",
+    )
+    group.add_argument(
+        "--all",
+        action="store_true",
+        help="Build both classic and compact executables",
+    )
+    args = parser.parse_args()
+
+    err = _check_python_version()
+    if err:
+        return err
+
+    classic_spec = root / "build_pulse_testing_gui.spec"
+    compact_spec = root / "build_pulse_testing_gui_compact.spec"
+    classic_entry = root / "TSP_Testing_GUI.py"
+    compact_entry = root / "Pulse_Testing_GUI_compact.py"
+
+    if args.compact:
+        targets = [("compact", compact_spec, compact_entry)]
+    elif args.all:
+        targets = [
+            ("classic", classic_spec, classic_entry),
+            ("compact", compact_spec, compact_entry),
+        ]
+    else:
+        targets = [("classic", classic_spec, classic_entry)]
+
+    for _name, spec, entry in targets:
+        if not entry.is_file():
+            print(f"Error: missing {entry}")
+            return 1
+
+    _ensure_pyinstaller(root)
+
+    outputs: list[Path] = []
+    try:
+        for name, spec, _entry in targets:
+            print(f"\n=== Building {name} ===")
+            _run_spec(root, spec)
+            if name == "classic":
+                outputs.append(root / "dist" / "Pulse_Testing_GUI" / "Pulse_Testing_GUI.exe")
+            else:
+                outputs.append(
+                    root / "dist" / "Pulse_Testing_GUI_Compact" / "Pulse_Testing_GUI_Compact.exe"
+                )
+    except subprocess.CalledProcessError:
+        return 1
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    print("\nBuild complete:")
+    for out in outputs:
+        print(f"  {out}")
+    print("\nCopy each dist/.../ folder when distributing.")
     return 0
 
 

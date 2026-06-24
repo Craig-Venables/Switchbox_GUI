@@ -112,7 +112,6 @@ from .ui import (
     build_parameters_section,
     build_status_section,
     build_plot_section,
-    build_optical_tab,
     build_laser_section,
 )
 from .ui.pulse_diagram import PulseDiagramHelper
@@ -168,9 +167,14 @@ class TSPTestingGUI(tk.Toplevel):
         sample_name: Optional[str] = None,
         device_label: Optional[str] = None,
         custom_save_base: Optional[Union[str, Path]] = None,
+        layout: Optional[str] = None,
     ):
         super().__init__(master)
-        self.title("Multi-System Pulse Testing")
+        self.layout_mode = config.resolve_layout(explicit=layout)
+        title = "Multi-System Pulse Testing"
+        if self.layout_mode == "compact":
+            title = "Pulse Testing (Compact)"
+        self.title(title)
         self.geometry(config.WINDOW_GEOMETRY)
         self.resizable(True, True)
         
@@ -216,12 +220,15 @@ class TSPTestingGUI(tk.Toplevel):
             self.use_simple_save_var.set(False)
             self.simple_save_path = None
             self.simple_save_path_var.set("")
+
+        self._ensure_default_save_base()
         
         # Internal scheduling handles
         self._context_poll_job = None
 
         # Shared SMU current measurement range (A), 0 = auto — mirrored across Connection, Parameters, etc.
-        self.smu_current_range_var = tk.DoubleVar(value=0.0)
+        self.instrument_current_range_var = tk.DoubleVar(value=1e-4)
+        self.smu_current_range_var = self.instrument_current_range_var  # alias
         
         # Create UI
         self.create_ui()
@@ -231,135 +238,19 @@ class TSPTestingGUI(tk.Toplevel):
         # Auto-connect disabled - user must manually connect
     
     def create_ui(self):
-        """Create the main UI layout with tabbed interface"""
-        # Main container
-        main_frame = tk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Create PanedWindow for adjustable 40/60 split
-        paned = tk.PanedWindow(main_frame, orient=tk.HORIZONTAL, sashwidth=5, 
-                               sashrelief=tk.RAISED, bg="#d0d0d0")
-        paned.pack(fill=tk.BOTH, expand=True)
-        
-        # Left panel: Controls with scrollbar (40% of window width)
-        try:
-            win_w, _ = config.WINDOW_GEOMETRY.lower().split("x")
-            total_w = int(win_w)
-        except (ValueError, AttributeError):
-            total_w = 1400
-        left_width = max(350, int(total_w * 0.40))
-        left_container = tk.Frame(paned, width=left_width)
-        left_container.pack_propagate(False)
-        
-        # Create scrollable canvas for left panel
-        left_canvas = tk.Canvas(left_container, highlightthickness=0)
-        left_scrollbar = ttk.Scrollbar(left_container, orient="vertical", command=left_canvas.yview)
-        left_panel = tk.Frame(left_canvas)
-        
-        # Create window in canvas for the frame
-        left_canvas_window = left_canvas.create_window((0, 0), window=left_panel, anchor="nw")
-        left_canvas.configure(yscrollcommand=left_scrollbar.set)
-        
-        # Configure scrollable region and update canvas window width
-        def update_scroll_region(event=None):
-            left_canvas.configure(scrollregion=left_canvas.bbox("all"))
-            # Update canvas window width to match canvas width
-            canvas_width = left_canvas.winfo_width()
-            if canvas_width > 1:  # Only update if canvas has been rendered
-                left_canvas.itemconfig(left_canvas_window, width=canvas_width)
-        
-        left_panel.bind("<Configure>", update_scroll_region)
-        left_canvas.bind("<Configure>", lambda e: left_canvas.itemconfig(left_canvas_window, width=e.width))
-        
-        # Pack scrollbar and canvas
-        left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Bind mousewheel to canvas (for Windows)
-        def _on_mousewheel(event):
-            left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        left_canvas.bind("<MouseWheel>", _on_mousewheel)
-        # Also bind to the frame for better responsiveness
-        left_panel.bind("<MouseWheel>", lambda e: left_canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
-        
-        # Right panel: Visualizations (60% width target)
-        right_panel = tk.Frame(paned)
-        
-        # Add panels to PanedWindow with size constraints (left = 40% of screen)
-        paned.add(left_container, minsize=350, width=left_width)
-        paned.add(right_panel, minsize=400)
-        
-        # Top bar with help button
-        top_bar = tk.Frame(left_panel, bg="#e6f3ff", pady=5, padx=10)
-        top_bar.pack(fill=tk.X, pady=(0, 5))
-        top_bar.columnconfigure(0, weight=1)
-        
-        title_label = tk.Label(
-            top_bar,
-            text="TSP Pulse Testing",
-            font=("Segoe UI", 11, "bold"),
-            bg="#e6f3ff",
-            fg="#1565c0"
-        )
-        title_label.grid(row=0, column=0, sticky="w")
-        
-        help_btn = tk.Button(
-            top_bar,
-            text="Help / Guide",
-            command=self._show_help,
-            bg="#1565c0",
-            fg="white",
-            font=("Segoe UI", 9, "bold"),
-            padx=10,
-            pady=2
-        )
-        help_btn.grid(row=0, column=1, sticky="e", padx=(10, 0))
-        
-        # Connection section at top (always visible)
-        self.create_connection_section(left_panel)
-        # Match parameter defaults / units to selected system before Manual tab builds widgets
-        if not self.system_wrapper.is_connected():
-            self.current_system_name = self.system_var.get()
-
-        # Laser control section (collapsible, integrated for optical testing)
-        self.create_laser_section(left_panel)
-        
-        # Create tabbed notebook for different testing modes
-        self.notebook = ttk.Notebook(left_panel)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Create tabs
-        self.manual_tab = tk.Frame(self.notebook)
-        self.automated_tab = tk.Frame(self.notebook)
-        self.optical_tab = tk.Frame(self.notebook)
-        self.notebook.add(self.manual_tab, text="  Manual Testing  ")
-        self.notebook.add(self.automated_tab, text="  Automated Testing  ")
-        self.notebook.add(self.optical_tab, text="  Optical  ")
-        # Populate tabs
-        self.create_manual_testing_tab(self.manual_tab)
-        self.create_automated_testing_tab(self.automated_tab)
-        build_optical_tab(self.optical_tab, self)
-        
-        # Right panel sections
-        self.create_pulse_diagram_section(right_panel)
-        self.create_plot_section(right_panel)
-        
-        # Bottom control bar under right panel (under live plot)
-        self.create_bottom_control_bar(right_panel)
-
-        # Test list filtered by Connection system (even when not connected)
-        self._update_test_list_capabilities()
+        """Create UI using classic or compact layout module."""
+        if self.layout_mode == "compact":
+            from .ui.layout_compact import build_compact_ui
+            build_compact_ui(self)
+        else:
+            from .ui.layout_classic import build_classic_ui
+            build_classic_ui(self)
     
     def create_manual_testing_tab(self, parent):
-        """Create the manual testing tab with test selection, parameters, and controls"""
-        # Parameters section MUST be created first (before test_selection calls on_test_selected)
-        self.create_parameters_section(parent)
-        
-        # Test selection section (this calls on_test_selected which needs params_frame)
-        self.create_test_selection_section(parent)
-        
-        # Status section (control buttons moved to bottom bar)
-        self.create_status_section(parent)
+        """Create the manual testing tab: test selection, then parameters, then status."""
+        from .ui.manual_test_sections import build_manual_test_sections
+
+        build_manual_test_sections(parent, self, compact=False)
     
     def create_automated_testing_tab(self, parent):
         """Create the automated testing tab for automated pulse characterization"""
@@ -438,8 +329,11 @@ class TSPTestingGUI(tk.Toplevel):
         
         smu_cr_auto = tk.Frame(ranges_frame)
         smu_cr_auto.pack(fill=tk.X, pady=2)
-        tk.Label(smu_cr_auto, text="SMU current range (A) [0=auto]:", width=20, anchor="w").pack(side=tk.LEFT)
-        tk.Entry(smu_cr_auto, textvariable=self.smu_current_range_var, width=12).pack(side=tk.LEFT, padx=5)
+        auto_cr_label = tk.Label(smu_cr_auto, text="Current range (A):", width=20, anchor="w")
+        auto_cr_label.pack(side=tk.LEFT)
+        tk.Entry(smu_cr_auto, textvariable=self.instrument_current_range_var, width=12).pack(side=tk.LEFT, padx=5)
+        from gui.pulse_testing_gui.ui.instrument_current_range import register_current_range_row
+        register_current_range_row(self, smu_cr_auto, auto_cr_label, None)
         
         # Test matrix preview
         matrix_frame = tk.LabelFrame(parent, text="Test Matrix Preview", padx=5, pady=5)
@@ -565,21 +459,43 @@ class TSPTestingGUI(tk.Toplevel):
         self.notes_text.pack(side=tk.LEFT, padx=0)
         self.notes_text.insert(1.0, "Add notes...")
         
-        # Bind tab change to update button states
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        # Bind tab change to update button states (classic layout only)
+        if hasattr(self, "notebook") and self.notebook is not None:
+            self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
     
     def _on_tab_changed(self, event=None):
-        """Update bottom bar controls based on active tab"""
+        """Update bottom bar controls based on active tab (classic layout)."""
+        if not hasattr(self, "notebook") or self.notebook is None:
+            return
         current_tab = self.notebook.index(self.notebook.select())
         
         if current_tab == 0:  # Manual Testing tab
-            # Show manual testing controls
             self.run_btn.config(text="▶ RUN", command=self.run_test)
         elif current_tab == 1:  # Automated Testing tab
-            # Show automated testing controls
             self.run_btn.config(text="▶ START AUTO TEST", command=self._run_automated_test)
 
+    @staticmethod
+    def _test_needs_laser_panel(test_function: str) -> bool:
+        return test_function == "laser_and_read" or test_function.startswith("optical_")
 
+    def _update_compact_laser_visibility(self) -> None:
+        """Show laser section in compact layout only for optical-capable tests."""
+        if self.layout_mode != "compact":
+            return
+        if not hasattr(self, "laser_section_frame"):
+            return
+        show = False
+        if hasattr(self, "test_var"):
+            test_name = self.test_var.get()
+            if test_name in TEST_FUNCTIONS:
+                show = self._test_needs_laser_panel(TEST_FUNCTIONS[test_name]["function"])
+        if show:
+            self.laser_section_frame.pack(fill=tk.X, padx=5, pady=(3, 3))
+            if getattr(self, "laser_collapsed", None) and self.laser_collapsed.get():
+                from .ui.laser_section import toggle_laser_section
+                toggle_laser_section(self)
+        else:
+            self.laser_section_frame.pack_forget()
 
     def create_connection_section(self, parent):
         """Connection controls (built by ui.connection)."""
@@ -848,6 +764,23 @@ class TSPTestingGUI(tk.Toplevel):
             print(f"Could not load save location config: {e}")
         return None  # None means use default
     
+    def _ensure_default_save_base(self) -> None:
+        """Standalone: Documents/Data_folder/Pulse_Testing/{sample_name} when no custom path set."""
+        if self.provider is not None or self._custom_base_from_provider:
+            return
+        if self.custom_base_path is None:
+            self.custom_base_path = config.resolve_pulse_testing_save_base(self.sample_name)
+        try:
+            self.custom_base_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"Could not create pulse testing save folder: {exc}")
+
+    def _refresh_save_base_for_sample(self) -> None:
+        """Update save base when sample name changes (standalone only)."""
+        if self.provider is not None or self._custom_base_from_provider:
+            return
+        self.custom_base_path = config.resolve_pulse_testing_save_base(self.sample_name)
+    
     def load_default_terminals(self) -> str:
         """Load default terminal setting from config file"""
         config_file = config.TSP_GUI_CONFIG_FILE
@@ -953,6 +886,8 @@ class TSPTestingGUI(tk.Toplevel):
     
     def _refresh_devices(self):
         """Refresh the device dropdown list"""
+        if not hasattr(self, "addr_combo") or self.addr_combo is None:
+            return
         available_devices = self._get_available_devices()
         current_selection = self.addr_var.get()
         
@@ -979,14 +914,21 @@ class TSPTestingGUI(tk.Toplevel):
     def _on_system_changed(self):
         """When system changes, update device address to system default"""
         system_name = self.system_var.get()
+        from gui.pulse_testing_gui.ui.instrument_current_range import (
+            update_instrument_current_range_ui,
+        )
+
+        update_instrument_current_range_ui(self, system_name)
         default_addr = get_default_address_for_system(system_name)
         if default_addr:
             self.addr_var.set(default_addr)
-            # Update available devices list
-            available_devices = self._get_available_devices()
-            if default_addr not in available_devices:
-                available_devices.insert(0, default_addr)
-            self.addr_combo['values'] = available_devices
+            if hasattr(self, "addr_combo") and self.addr_combo is not None:
+                available_devices = self._get_available_devices()
+                if default_addr not in available_devices:
+                    available_devices.insert(0, default_addr)
+                self.addr_combo["values"] = available_devices
+            if hasattr(self, "compact_addr_label"):
+                self.compact_addr_label.config(text=f"Address: {default_addr}")
             self.log(f"🔧 Auto-populated device address for {system_name}: {default_addr}")
         
         # Update current_system_name for parameter unit conversion
@@ -1005,16 +947,30 @@ class TSPTestingGUI(tk.Toplevel):
         # User can use the "🔍 Auto" button if they want auto-detection
         pass
 
+    def _get_pmu_current_range_a(self) -> float:
+        """PMU EX IRange in amperes (100 nA – 0.8 A); default 100 µA if unset."""
+        from gui.pulse_testing_gui.ui.instrument_current_range import DEFAULT_PMU_I_RANGE_A
+
+        try:
+            v = float(self.instrument_current_range_var.get())
+        except Exception:
+            v = DEFAULT_PMU_I_RANGE_A
+        if v <= 0:
+            return DEFAULT_PMU_I_RANGE_A
+        return max(100e-9, min(0.8, v))
+
     def _get_pulse_smu_current_range_a(self) -> float:
         """SMU current measurement range in amperes (0 = auto)."""
         try:
-            v = float(self.smu_current_range_var.get())
+            v = float(self.instrument_current_range_var.get())
         except Exception:
             v = 0.0
         return max(0.0, v)
 
-    def _apply_pulse_smu_current_range(self) -> None:
-        """Apply global current range to the connected SMU when supported."""
+    def _apply_instrument_current_range(self) -> None:
+        """Apply SMU hardware range when supported; PMU range is sent per EX command."""
+        if self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+            return
         if not self.system_wrapper.is_connected():
             return
         try:
@@ -1022,24 +978,42 @@ class TSPTestingGUI(tk.Toplevel):
         except Exception as e:
             self.log(f"Note: could not apply SMU current range: {e}")
 
-    def _merge_default_smu_current_range_into_params(self, params: dict) -> dict:
-        """Fill i_range / current_range_a / current_measure_rng from the global GUI value when missing."""
+    def _apply_pulse_smu_current_range(self) -> None:
+        """Backward-compatible alias."""
+        self._apply_instrument_current_range()
+
+    def _merge_instrument_current_range_into_params(self, params: dict) -> dict:
+        """Inject PMU IRange or SMU range defaults from settings / test schema."""
         test_name = self.test_var.get()
         if test_name not in TEST_FUNCTIONS:
             return params
         schema = TEST_FUNCTIONS[test_name]["params"]
-        is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
-        g = self._get_pulse_smu_current_range_a()
         out = dict(params)
+        is_pmu = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
+
+        if is_pmu:
+            if "i_range" in out:
+                try:
+                    v = float(out["i_range"])
+                except (TypeError, ValueError):
+                    v = 1e-4
+                out["i_range"] = max(100e-9, min(0.8, v)) if v > 0 else 1e-4
+            return out
+
+        g = self._get_pulse_smu_current_range_a()
         for key in ("i_range", "current_range_a", "current_measure_rng"):
             if key not in schema:
                 continue
             pinfo = schema[key]
-            if pinfo.get("4200a_only") and not is_4200a:
+            if pinfo.get("4200a_only") and not is_pmu:
                 continue
             if key not in out:
                 out[key] = g
         return out
+
+    def _merge_default_smu_current_range_into_params(self, params: dict) -> dict:
+        """Backward-compatible alias."""
+        return self._merge_instrument_current_range_into_params(params)
 
     def _log_pmu_scope_check(self, results: dict, params: dict) -> None:
         """Summarize firmware timing vs scope — helps when scope shows long pulses but EX is correct."""
@@ -1159,7 +1133,11 @@ class TSPTestingGUI(tk.Toplevel):
             self.on_test_selected(None)
             
             self.run_btn.config(state=tk.NORMAL)
-            self._apply_pulse_smu_current_range()
+            from gui.pulse_testing_gui.ui.instrument_current_range import (
+                update_instrument_current_range_ui,
+            )
+            update_instrument_current_range_ui(self, connected_system)
+            self._apply_instrument_current_range()
             
         except Exception as e:
             self.conn_status_var.set("Connection Failed")
@@ -1211,10 +1189,9 @@ class TSPTestingGUI(tk.Toplevel):
             self.test_var.set(current_selection)
         elif test_values:
             self.test_var.set(test_values[0])
-        
-        # Update enabled state and appearance based on capabilities
-        # Note: Tkinter combobox doesn't support individual item styling easily,
-        # so we'll handle capability checking in on_test_selected instead
+
+        if hasattr(self, "test_var") and self.test_var.get():
+            self.on_test_selected(None)
     
     def on_test_selected(self, event):
         """Update UI when test is selected"""
@@ -1267,6 +1244,7 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Update pulse diagram
         self.update_pulse_diagram()
+        self._update_compact_laser_visibility()
     
     def _on_unit_changed(self):
         """Handle unit dropdown changes - preserve current values and convert units"""
@@ -1367,17 +1345,17 @@ class TSPTestingGUI(tk.Toplevel):
     def populate_parameters(self):
         """Populate parameter inputs based on selected test"""
         # Check if test_var exists yet (might not during initial UI creation)
-        if not hasattr(self, 'test_var'):
+        if not hasattr(self, 'test_var') or not hasattr(self, 'params_frame'):
             return
-        
+
+        test_name = self.test_var.get()
+        if not test_name or test_name not in TEST_FUNCTIONS:
+            return
+
         # Clear existing
         for widget in self.params_frame.winfo_children():
             widget.destroy()
         self.param_vars.clear()
-        
-        test_name = self.test_var.get()
-        if test_name not in TEST_FUNCTIONS:
-            return
         
         params = TEST_FUNCTIONS[test_name]["params"]
         row = 0
@@ -1473,12 +1451,15 @@ class TSPTestingGUI(tk.Toplevel):
         read_keywords = ['read', 'meas']
         general_keywords = ['num_cycles', 'num_pulses', 'num_reads', 'steps', 'delay_between_cycles', 
                            'delay_between_widths', 'delay_between_voltages', 'delay_between_levels']
-        other_keywords = ['clim', 'enable_debug', 'sample_rate', 'volts_source', 'current_measure', 
-                         'pulse_widths', 'pulse_voltage_step']
+        other_keywords = ['clim', 'i_range', 'enable_debug', 'sample_rate', 'volts_source', 'current_measure', 
+                         'pulse_widths', 'pulse_voltage_step', 'plot_y_axis']
         
         for param_name, param_info in params.items():
             # Skip 4200A-only parameters if not using 4200A
             if param_info.get("4200a_only", False) and not is_4200a:
+                continue
+            # PMU uses IRange from settings; clim is for 2450 TSP only
+            if is_4200a and param_name == "clim":
                 continue
             
             section = param_info.get("section")
@@ -1517,6 +1498,35 @@ class TSPTestingGUI(tk.Toplevel):
                     "type": "bool",
                     "is_time_param": False,
                     "original_label": param_info["label"]
+                }
+                return current_row + 1
+
+            if param_info.get("type") == "choice":
+                choices = list(param_info.get("choices") or [])
+                default_value = param_info.get("default", choices[0] if choices else "")
+                var = tk.StringVar(value=str(default_value))
+                tk.Label(self.params_frame, text=param_info["label"], anchor="w").grid(
+                    row=current_row, column=0, sticky="w", padx=5, pady=2)
+                combo = ttk.Combobox(
+                    self.params_frame,
+                    textvariable=var,
+                    values=choices,
+                    state="readonly",
+                    width=18,
+                )
+                combo.grid(row=current_row, column=1, sticky="ew", padx=5, pady=2)
+
+                def _on_choice_change(*_args, _gui_only=param_info.get("gui_only", False)):
+                    self.update_pulse_diagram()
+                    if _gui_only:
+                        self._refresh_plot_from_params()
+
+                var.trace_add("write", _on_choice_change)
+                self.param_vars[param_name] = {
+                    "var": var,
+                    "type": "choice",
+                    "is_time_param": False,
+                    "original_label": param_info["label"],
                 }
                 return current_row + 1
             
@@ -1645,6 +1655,9 @@ class TSPTestingGUI(tk.Toplevel):
         # Update preset dropdown for new test type
         if hasattr(self, 'preset_dropdown'):
             self.update_preset_dropdown()
+
+        if hasattr(self, "refresh_params_canvas"):
+            self.refresh_params_canvas()
     
     def get_test_parameters(self):
         """Extract and validate parameters"""
@@ -1723,6 +1736,8 @@ class TSPTestingGUI(tk.Toplevel):
                         params[param_name] = value
                 elif param_type == "list":
                     params[param_name] = [float(x.strip()) for x in var.get().split(",")]
+                elif param_type == "choice":
+                    params[param_name] = var.get().strip()
                 elif param_type == "str":
                     params[param_name] = var.get().strip()
                 else:
@@ -1731,6 +1746,32 @@ class TSPTestingGUI(tk.Toplevel):
                 raise ValueError(f"Invalid value for {param_name}: {e}")
         
         return params
+
+    def _instrument_params(self, test_name: str, params: dict) -> dict:
+        """Drop GUI-only and PMU-irrelevant parameters before sending a test to hardware."""
+        if test_name not in TEST_FUNCTIONS:
+            return dict(params)
+        definitions = TEST_FUNCTIONS[test_name]["params"]
+        is_pmu = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
+        filtered = {}
+        for key, value in params.items():
+            if definitions.get(key, {}).get("gui_only"):
+                continue
+            if is_pmu and key == "clim":
+                continue
+            filtered[key] = value
+        return filtered
+
+    def _refresh_plot_from_params(self):
+        """Re-plot last results when a GUI-only display option changes."""
+        if not self.last_results:
+            return
+        try:
+            self.last_results["params"] = self.get_test_parameters()
+            self.plot_results()
+        except Exception:
+            pass
+
     def run_test(self):
         """Start test in background thread"""
         if not self.system_wrapper.is_connected():
@@ -1754,7 +1795,7 @@ class TSPTestingGUI(tk.Toplevel):
             )
             return
         
-        self._apply_pulse_smu_current_range()
+        self._apply_instrument_current_range()
 
         wiring = get_channel_wiring_hint(self.current_system_name, test_function)
         if wiring:
@@ -1763,7 +1804,8 @@ class TSPTestingGUI(tk.Toplevel):
         # Get parameters
         try:
             params = self.get_test_parameters()
-            params = self._merge_default_smu_current_range_into_params(params)
+            params = self._merge_instrument_current_range_into_params(params)
+            instrument_params = self._instrument_params(test_name, params)
         except Exception as e:
             messagebox.showerror("Parameter Error", str(e))
             return
@@ -1808,10 +1850,10 @@ class TSPTestingGUI(tk.Toplevel):
         
         # Run in thread
         self.test_thread = threading.Thread(target=self._run_test_thread, 
-                                             args=(test_info, params), daemon=True)
+                                             args=(test_info, params, instrument_params), daemon=True)
         self.test_thread.start()
     
-    def _run_test_thread(self, test_info, params):
+    def _run_test_thread(self, test_info, params, instrument_params):
         """Execute test in background using logic.run_test_worker; schedule GUI updates on main thread."""
         from gui.pulse_testing_gui import logic
 
@@ -1827,6 +1869,10 @@ class TSPTestingGUI(tk.Toplevel):
             except Exception:
                 pass
 
+        if self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+            ir = params.get("i_range")
+            if ir:
+                self.log(f"  PMU current range (IRange): {float(ir):.2e} A")
         self.log(f"Executing {func_name} on {self.current_system_name}...")
         start_time = time.time()
         if func_name in ("optical_binary_sweep", "optical_pattern_repeat"):
@@ -1838,7 +1884,7 @@ class TSPTestingGUI(tk.Toplevel):
             results, err = optical_runner.run_optical_test(self, func_name, params)
         else:
             results, err = logic.run_test_worker(
-                self.system_wrapper, func_name, params,
+                self.system_wrapper, func_name, instrument_params,
                 progress_callback=progress_callback if func_name in (
                     "smu_endurance", "smu_retention", "smu_retention_with_pulse_measurement"
                 ) else None,
@@ -2971,6 +3017,8 @@ class TSPTestingGUI(tk.Toplevel):
                     params[param_name] = float(var.get())
                 elif param_type == "list":
                     params[param_name] = var.get()
+                elif param_type == "choice":
+                    params[param_name] = var.get().strip()
                 else:
                     params[param_name] = var.get()
             except Exception as e:
