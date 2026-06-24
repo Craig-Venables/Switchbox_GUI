@@ -19,7 +19,29 @@ The Pulse Testing GUI provides a specialized interface for pulse-based measureme
 
 ## Entry Points
 
-### Standalone Mode
+### Standalone Mode — Classic (default)
+```bash
+python TSP_Testing_GUI.py
+python TSP_Testing_GUI.py --layout classic
+```
+
+### Standalone Mode — Compact layout
+```bash
+python Pulse_Testing_GUI_compact.py
+python TSP_Testing_GUI.py --layout compact
+```
+
+Set a persistent default in `Json_Files/tsp_gui_config.json`:
+```json
+{
+  "default_terminals": "front",
+  "layout": "compact"
+}
+```
+
+Classic and compact share the same test backend, presets, and save logic; only the widget layout differs. Close the GUI and relaunch with the other script to switch layouts.
+
+### Programmatic
 ```python
 import tkinter as tk
 from gui.pulse_testing_gui import TSPTestingGUI

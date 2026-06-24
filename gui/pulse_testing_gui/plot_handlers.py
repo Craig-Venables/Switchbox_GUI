@@ -501,6 +501,66 @@ def _plot_pot_dep_cycle(gui):
     gui.ax.grid(True, alpha=0.3)
     gui.ax.set_yscale('log')
     
+def _endurance_plot_x(cycle: float, operation: str) -> float:
+    """Horizontal offset so SET and RESET in the same cycle don't stack."""
+    c = float(cycle)
+    if operation == 'SET':
+        return c - 0.2
+    if operation == 'RESET':
+        return c + 0.2
+    return c
+
+
+def _resistance_for_log_plot(value: float) -> float:
+    """Positive finite magnitude for log-scale scatter plots."""
+    try:
+        r = float(value)
+    except (TypeError, ValueError):
+        return float('nan')
+    if not math.isfinite(r) or r == 0:
+        return float('nan')
+    return abs(r)
+
+
+def _plot_y_axis_mode(last_results: dict) -> str:
+    mode = (last_results.get('params') or {}).get('plot_y_axis', 'resistance')
+    if isinstance(mode, str) and mode.strip().lower() == 'current':
+        return 'current'
+    return 'resistance'
+
+
+def _plot_y_label(mode: str) -> str:
+    return 'Current (A)' if mode == 'current' else 'Resistance (Ω)'
+
+
+def _plot_y_value(last_results: dict, index: int, mode: str) -> float:
+    if mode == 'current':
+        currents = last_results.get('currents') or []
+        if index >= len(currents):
+            return float('nan')
+        try:
+            value = float(currents[index])
+        except (TypeError, ValueError):
+            return float('nan')
+        return value if math.isfinite(value) else float('nan')
+    resistances = last_results.get('resistances') or []
+    if index >= len(resistances):
+        return float('nan')
+    return _resistance_for_log_plot(resistances[index])
+
+
+def _configure_measurement_y_scale(ax, values: list[float], mode: str) -> None:
+    finite = [v for v in values if math.isfinite(v)]
+    if not finite:
+        return
+    if mode == 'current':
+        ax.set_yscale('linear')
+        return
+    positive = [abs(v) for v in finite if v != 0]
+    if positive:
+        ax.set_yscale('log')
+
+
 def _plot_endurance(gui):
     """Plot endurance test (SET/RESET cycles)"""
     operations = gui.last_results.get('operation', [])
@@ -510,33 +570,45 @@ def _plot_endurance(gui):
         or list(range(len(gui.last_results['resistances'])))
     )
     resistances = gui.last_results['resistances']
+    y_mode = _plot_y_axis_mode(gui.last_results)
 
     if not operations and resistances:
         operations = ['SET' if i % 2 == 0 else 'RESET' for i in range(len(resistances))]
 
+    initial_idx = [i for i, op in enumerate(operations) if op == 'INITIAL']
     set_idx = [i for i, op in enumerate(operations) if op == 'SET']
     reset_idx = [i for i, op in enumerate(operations) if op == 'RESET']
-    
-    if set_idx:
-        gui.ax.plot([cycle_numbers[i] for i in set_idx],
-                    [gui.last_results['resistances'][i] for i in set_idx],
-                    'o', label='SET (LRS)', color='green', markersize=3)
-    if reset_idx:
-        gui.ax.plot([cycle_numbers[i] for i in reset_idx],
-                    [gui.last_results['resistances'][i] for i in reset_idx],
-                    'o', label='RESET (HRS)', color='red', markersize=3)
-    
+
+    plotted_y: list[float] = []
+
+    def _scatter(indices, marker, label, color, size):
+        xs, ys = [], []
+        for i in indices:
+            y = _plot_y_value(gui.last_results, i, y_mode)
+            if math.isfinite(y):
+                xs.append(_endurance_plot_x(cycle_numbers[i], operations[i]))
+                ys.append(y)
+                plotted_y.append(y)
+        if xs:
+            gui.ax.plot(xs, ys, marker, label=label, color=color, markersize=size)
+
+    _scatter(initial_idx, 's', 'Initial', 'blue', 4)
+    _scatter(set_idx, 'o', 'SET (LRS)', 'green', 3)
+    _scatter(reset_idx, 'o', 'RESET (HRS)', 'red', 3)
+
     gui.ax.set_xlabel('Cycle Number')
-    gui.ax.set_ylabel('Resistance (Ω)')
-    gui.ax.set_title(f'{gui.last_results["test_name"]} - Endurance')
+    gui.ax.set_ylabel(_plot_y_label(y_mode))
+    y_suffix = 'Current' if y_mode == 'current' else 'Resistance'
+    gui.ax.set_title(f'{gui.last_results["test_name"]} - Endurance ({y_suffix})')
     gui.ax.legend()
     gui.ax.grid(True, alpha=0.3)
-    gui.ax.set_yscale('log')
+    _configure_measurement_y_scale(gui.ax, plotted_y, y_mode)
     
 def _plot_retention(gui):
     """Plot PMU retention: baseline vs post-program reads."""
     timestamps = gui.last_results.get('timestamps', [])
     resistances = gui.last_results.get('resistances', [])
+    y_mode = _plot_y_axis_mode(gui.last_results)
     phases = gui.last_results.get('phase') or []
     if not phases and resistances:
         n_base = int(gui.last_results.get('params', {}).get('num_initial_reads', 2))
@@ -544,27 +616,32 @@ def _plot_retention(gui):
 
     base_idx = [i for i, p in enumerate(phases) if p == 'baseline']
     ret_idx = [i for i, p in enumerate(phases) if p == 'retention']
+    plotted_y: list[float] = []
 
     if base_idx:
+        ys = [_plot_y_value(gui.last_results, i, y_mode) for i in base_idx]
+        plotted_y.extend(y for y in ys if math.isfinite(y))
         gui.ax.plot(
             [timestamps[i] * 1e6 for i in base_idx],
-            [resistances[i] for i in base_idx],
+            ys,
             'o', label='Baseline', color='green', markersize=5,
         )
     if ret_idx:
+        ys = [_plot_y_value(gui.last_results, i, y_mode) for i in ret_idx]
+        plotted_y.extend(y for y in ys if math.isfinite(y))
         gui.ax.plot(
             [timestamps[i] * 1e6 for i in ret_idx],
-            [resistances[i] for i in ret_idx],
+            ys,
             'o-', label='After program', color='blue', markersize=4, linewidth=1.5,
         )
 
     gui.ax.set_xlabel('Time (µs)')
-    gui.ax.set_ylabel('Resistance (Ω)')
-    gui.ax.set_title(f'{gui.last_results["test_name"]} - PMU Retention')
+    gui.ax.set_ylabel(_plot_y_label(y_mode))
+    y_suffix = 'Current' if y_mode == 'current' else 'Resistance'
+    gui.ax.set_title(f'{gui.last_results["test_name"]} - PMU Retention ({y_suffix})')
     gui.ax.legend()
     gui.ax.grid(True, alpha=0.3)
-    if resistances and all(r > 0 for r in resistances if r == r):
-        gui.ax.set_yscale('log')
+    _configure_measurement_y_scale(gui.ax, plotted_y, y_mode)
 
 def _plot_relaxation(gui):
     """Plot relaxation measurements (old plot type for backward compatibility)"""

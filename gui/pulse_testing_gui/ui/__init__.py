@@ -6,7 +6,8 @@ UI builders for connection, test selection, parameters, plot, pulse diagram, tab
 Used by TSPTestingGUI (main.py) to build the layout.
 """
 
-from .connection import build_connection_section, toggle_connection_section
+from .connection import build_connection_section, toggle_connection_section, update_terminals_visibility
+from .connection_compact import build_connection_bar
 from .test_selection import build_test_selection_section
 from .diagram_section import build_pulse_diagram_section
 from .parameters import build_parameters_section
@@ -14,11 +15,15 @@ from .status_section import build_status_section
 from .plot_section import build_plot_section
 from .tabs_optical import build_optical_tab
 from .laser_section import build_laser_section
+from .layout_classic import build_classic_ui
+from .layout_compact import build_compact_ui
 from .pulse_diagram import PulseDiagramHelper
 
 __all__ = [
     "build_connection_section",
+    "build_connection_bar",
     "toggle_connection_section",
+    "update_terminals_visibility",
     "build_test_selection_section",
     "build_pulse_diagram_section",
     "build_parameters_section",
@@ -26,5 +31,7 @@ __all__ = [
     "build_plot_section",
     "build_optical_tab",
     "build_laser_section",
+    "build_classic_ui",
+    "build_compact_ui",
     "PulseDiagramHelper",
 ]

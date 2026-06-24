@@ -25,13 +25,15 @@ def toggle_laser_section(gui):
         gui.laser_collapsed.set(True)
 
 
-def build_laser_section(parent, gui):
+def build_laser_section(parent, gui, *, start_hidden: bool = False, show_smu_range: bool = True):
     """
     Build collapsible Laser Control section for manual tab.
     Sets gui.laser, gui.laser_* vars. Runs pulse train in a thread.
     """
     frame = tk.LabelFrame(parent, text="Laser Control (Optical)", padx=3, pady=3)
-    frame.pack(fill=tk.X, padx=5, pady=(3, 3))
+    gui.laser_section_frame = frame
+    if not start_hidden:
+        frame.pack(fill=tk.X, padx=5, pady=(3, 3))
     
     # Initialize laser attributes
     gui.laser = None
@@ -41,7 +43,7 @@ def build_laser_section(parent, gui):
     header_frame = tk.Frame(frame)
     header_frame.pack(fill=tk.X, pady=(0, 3))
     
-    gui.laser_collapsed = tk.BooleanVar(value=True)  # Start collapsed by default
+    gui.laser_collapsed = tk.BooleanVar(value=start_hidden)
     gui.laser_collapse_btn = tk.Button(header_frame, text="▶", width=3,
                                        command=lambda: toggle_laser_section(gui),
                                        font=("TkDefaultFont", 8), relief=tk.FLAT)
@@ -78,19 +80,20 @@ def build_laser_section(parent, gui):
     tk.Entry(row1, textvariable=gui.laser_baud_var, width=8).pack(side=tk.LEFT, padx=2)
 
     smu_cr_row = tk.Frame(gui.laser_inner_frame)
-    smu_cr_row.pack(fill=tk.X, pady=(2, 0))
-    tk.Label(
-        smu_cr_row,
-        text="SMU current range (A) [0=auto]:",
-        font=("TkDefaultFont", 8),
-        anchor="w",
-        width=22,
-    ).pack(side=tk.LEFT)
-    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
-        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
-    tk.Entry(smu_cr_row, textvariable=gui.smu_current_range_var, width=10, font=("TkDefaultFont", 8)).pack(
-        side=tk.LEFT, padx=2
-    )
+    if show_smu_range:
+        smu_cr_row.pack(fill=tk.X, pady=(2, 0))
+        tk.Label(
+            smu_cr_row,
+            text="SMU current range (A) [0=auto]:",
+            font=("TkDefaultFont", 8),
+            anchor="w",
+            width=22,
+        ).pack(side=tk.LEFT)
+        if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+            gui.smu_current_range_var = tk.DoubleVar(value=0.0)
+        tk.Entry(smu_cr_row, textvariable=gui.smu_current_range_var, width=10, font=("TkDefaultFont", 8)).pack(
+            side=tk.LEFT, padx=2
+        )
 
     btn_row = tk.Frame(gui.laser_inner_frame)
     btn_row.pack(fill=tk.X, pady=2)

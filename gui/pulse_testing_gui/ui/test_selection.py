@@ -9,7 +9,7 @@ from tkinter import ttk
 from Pulse_Testing.test_definitions import get_test_definitions_for_gui
 
 
-def build_test_selection_section(parent, gui):
+def build_test_selection_section(parent, gui, *, show_smu_range: bool = False, defer_populate: bool = False):
     """Build Test Selection (dropdown + description). Sets gui.test_var, gui.test_combo, gui.desc_text."""
     frame = tk.LabelFrame(parent, text="Test Selection", padx=5, pady=5)
     frame.pack(fill=tk.X, padx=5, pady=5)
@@ -23,14 +23,15 @@ def build_test_selection_section(parent, gui):
     gui.test_combo.bind("<<ComboboxSelected>>", gui.on_test_selected)
     gui.test_combo.current(0)
 
-    smu_row = tk.Frame(frame)
-    smu_row.pack(fill=tk.X, pady=(4, 0))
-    tk.Label(smu_row, text="SMU current range (A) [0=auto]:", font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
-    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
-        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
-    tk.Entry(smu_row, textvariable=gui.smu_current_range_var, width=12, font=("TkDefaultFont", 8)).pack(
-        side=tk.LEFT, padx=4
-    )
+    if show_smu_range:
+        smu_row = tk.Frame(frame)
+        smu_row.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(smu_row, text="SMU current range (A) [0=auto]:", font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
+        if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
+            gui.smu_current_range_var = tk.DoubleVar(value=0.0)
+        tk.Entry(smu_row, textvariable=gui.smu_current_range_var, width=12, font=("TkDefaultFont", 8)).pack(
+            side=tk.LEFT, padx=4
+        )
 
     gui.channel_wiring_label = tk.Label(
         frame,
@@ -47,4 +48,5 @@ def build_test_selection_section(parent, gui):
     gui.desc_text.pack(fill=tk.X, pady=1)
     gui.desc_text.config(state=tk.DISABLED)
 
-    gui.on_test_selected(None)
+    if not defer_populate:
+        gui.on_test_selected(None)

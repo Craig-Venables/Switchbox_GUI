@@ -289,6 +289,13 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_width": {"default": 2.0, "label": "Read Width (µs) [4200A only]", "type": "float", "4200a_only": True},
             "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
             "pulse_rise_time": {"default": 0.1, "label": "Write Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "plot_y_axis": {
+                "default": "resistance",
+                "label": "Plot Y-Axis",
+                "type": "choice",
+                "choices": ["resistance", "current"],
+                "gui_only": True,
+            },
         },
         "plot_type": "endurance",
     },
@@ -315,6 +322,13 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "read_rise_time": {"default": 0.1, "label": "Read Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
             "pulse_rise_time": {"default": 0.1, "label": "Program Rise Time (µs) [4200A only]", "type": "float", "4200a_only": True},
             "pulse_fall_time": {"default": 0.1, "label": "Program Fall Time (µs) [4200A only]", "type": "float", "4200a_only": True},
+            "plot_y_axis": {
+                "default": "resistance",
+                "label": "Plot Y-Axis",
+                "type": "choice",
+                "choices": ["resistance", "current"],
+                "gui_only": True,
+            },
         },
         "plot_type": "retention",
     },
@@ -585,6 +599,24 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         "plot_type": "time_series",
     },
 }
+
+# PMU interleaved tests: per-test IRange (EX parameter), shown when keithley4200_pmu is selected.
+_PMU_I_RANGE_PARAM: Dict[str, Any] = {
+    "default": 1e-4,
+    "label": "PMU Current Range (A)",
+    "type": "float",
+    "4200a_only": True,
+}
+
+try:
+    from Pulse_Testing.pmu_channel_wiring import PMU_INTERLEAVED_DUT_2CH
+
+    for _defn in TEST_FUNCTIONS.values():
+        _func = _defn.get("function", "")
+        if _func in PMU_INTERLEAVED_DUT_2CH and "i_range" not in _defn.get("params", {}):
+            _defn.setdefault("params", {})["i_range"] = dict(_PMU_I_RANGE_PARAM)
+except ImportError:
+    pass
 
 
 def get_test_definitions_for_gui(

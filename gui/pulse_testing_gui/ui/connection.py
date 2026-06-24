@@ -7,7 +7,35 @@ import tkinter as tk
 from tkinter import ttk
 
 from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
+from gui.pulse_testing_gui.ui.instrument_current_range import (
+    register_current_range_row,
+    update_instrument_current_range_ui,
+)
 from Pulse_Testing.system_wrapper import detect_system_from_address, get_default_address_for_system
+
+# Keithley 2450 TSP only — other systems ignore terminals on connect
+TERMINAL_SYSTEMS = frozenset({"keithley2450", "keithley2450_sim"})
+
+
+def system_supports_terminals(system_name: str) -> bool:
+    return system_name in TERMINAL_SYSTEMS
+
+
+def ensure_terminals_var(gui) -> None:
+    if not hasattr(gui, "terminals_var") or gui.terminals_var is None:
+        gui.terminals_var = tk.StringVar(value=gui.load_default_terminals())
+
+
+def update_terminals_visibility(gui) -> None:
+    """Show Front/Rear only for 2450 systems."""
+    if not hasattr(gui, "terminals_frame"):
+        return
+    system = gui.system_var.get() if hasattr(gui, "system_var") else ""
+    if system_supports_terminals(system):
+        if hasattr(gui, "_terminals_show"):
+            gui._terminals_show()
+    elif hasattr(gui, "_terminals_hide"):
+        gui._terminals_hide()
 
 
 def _update_pmu_hint(gui) -> None:
@@ -95,7 +123,10 @@ def build_connection_section(parent, gui):
         justify=tk.LEFT,
     )
     gui.pmu_hint_label.pack(fill=tk.X, padx=2, pady=(0, 2))
-    gui.system_var.trace_add("write", lambda *args: (_update_pmu_hint(gui), gui._on_system_changed()))
+    gui.system_var.trace_add(
+        "write",
+        lambda *args: (_update_pmu_hint(gui), update_terminals_visibility(gui), gui._on_system_changed()),
+    )
     _update_pmu_hint(gui)
 
     addr_frame = tk.Frame(gui.conn_inner_frame)
@@ -117,20 +148,31 @@ def build_connection_section(parent, gui):
     gui.addr_var.trace_add("write", lambda *args: gui._update_system_detection())
 
     term_frame = tk.Frame(gui.conn_inner_frame)
-    term_frame.pack(fill=tk.X, pady=(3, 1))
+    gui.terminals_frame = term_frame
     tk.Label(term_frame, text="Terminals:").pack(side=tk.LEFT)
-    gui.terminals_var = tk.StringVar()
+    ensure_terminals_var(gui)
     default_terminals = gui.load_default_terminals()
     gui.terminals_var.set(default_terminals)
     tk.Radiobutton(term_frame, text="Front", variable=gui.terminals_var, value="front", command=gui.save_terminal_default).pack(side=tk.LEFT, padx=5)
     tk.Radiobutton(term_frame, text="Rear", variable=gui.terminals_var, value="rear", command=gui.save_terminal_default).pack(side=tk.LEFT, padx=5)
+    gui._terminals_show = lambda: term_frame.pack(fill=tk.X, pady=(3, 1))
+    gui._terminals_hide = lambda: term_frame.pack_forget()
+    update_terminals_visibility(gui)
 
     cr_frame = tk.Frame(gui.conn_inner_frame)
     cr_frame.pack(fill=tk.X, pady=(3, 1))
-    tk.Label(cr_frame, text="Current range (A) [0=auto]:", font=("TkDefaultFont", 8)).pack(side=tk.LEFT)
-    if not hasattr(gui, "smu_current_range_var") or gui.smu_current_range_var is None:
-        gui.smu_current_range_var = tk.DoubleVar(value=0.0)
-    tk.Entry(cr_frame, textvariable=gui.smu_current_range_var, width=12, font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=5)
+    cr_label = tk.Label(cr_frame, text="Current range (A):", font=("TkDefaultFont", 8))
+    cr_label.pack(side=tk.LEFT)
+    cr_hint = tk.Label(cr_frame, text="", font=("TkDefaultFont", 8), fg="gray")
+    cr_hint.pack(side=tk.LEFT, padx=(2, 0))
+    if not hasattr(gui, "instrument_current_range_var") or gui.instrument_current_range_var is None:
+        gui.instrument_current_range_var = tk.DoubleVar(value=1e-4)
+        gui.smu_current_range_var = gui.instrument_current_range_var
+    tk.Entry(cr_frame, textvariable=gui.instrument_current_range_var, width=12, font=("TkDefaultFont", 8)).pack(
+        side=tk.LEFT, padx=5
+    )
+    register_current_range_row(gui, cr_frame, cr_label, cr_hint)
+    update_instrument_current_range_ui(gui, gui.system_var.get())
 
     btn_frame = tk.Frame(gui.conn_inner_frame)
     btn_frame.pack(fill=tk.X, pady=3)

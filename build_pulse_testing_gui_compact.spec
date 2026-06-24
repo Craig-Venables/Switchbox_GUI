@@ -1,14 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for Pulse Testing GUI (windowed, onedir).
+PyInstaller spec for Pulse Testing GUI — compact layout (windowed, onedir).
 
 Build from repository root::
 
-    python build_pulse_testing_gui.py
+    python build_pulse_testing_gui.py --compact
 
 Output::
 
-    dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe
+    dist/Pulse_Testing_GUI_Compact/Pulse_Testing_GUI_Compact.exe
 """
 import os
 
@@ -31,15 +31,12 @@ hiddenimports = [
     "gui.sample_gui.config",
 ]
 
-# Rely on import tracing from TSP_Testing_GUI.py (see build_exe.spec notes on
-# collect_submodules + Python 3.10.0 modulegraph failures).
-
 datas = [
     (os.path.join(SPECDIR, "Json_Files"), "Json_Files"),
 ]
 
 a = Analysis(
-    [os.path.join(SPECDIR, "TSP_Testing_GUI.py")],
+    [os.path.join(SPECDIR, "Pulse_Testing_GUI_compact.py")],
     pathex=[SPECDIR],
     binaries=[],
     datas=datas,
@@ -61,7 +58,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Pulse_Testing_GUI",
+    name="Pulse_Testing_GUI_Compact",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -82,5 +79,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="Pulse_Testing_GUI",
+    name="Pulse_Testing_GUI_Compact",
 )
