@@ -1321,14 +1321,14 @@ PMU_ENDURANCE_BURST_TEST_FN = "pmu_endurance_burst_test"
 def plan_endurance_burst_sizes(total_cycles: int) -> List[int]:
     """Mirror C-internal burst plan (for logging / dry-run).
 
-    Uses hardware seg-arb max (2048) so typical 100-cycle runs are one continuous waveform.
+    Uses the practical per-EX segment ceiling (~350), not the 2048 hardware max.
     """
     if total_cycles < 1:
         return []
     sizes: List[int] = []
     remaining = total_cycles
     burst_num = 0
-    seg_budget = _PMU_HW_MAX_SEG_ARB_SEGMENTS
+    seg_budget = _PMU_OBSERVED_SINGLE_BURST_SEGMENTS
     while remaining > 0:
         skip_initial = burst_num > 0
         fixed = 0 if skip_initial else 6
@@ -2401,20 +2401,78 @@ class Keithley4200_KXCI_Scripts:
         print("    4. Clear persistence / run Single sweep after each GUI run")
         print("  Software EX params and GP times above are authoritative for pulse width.")
     
-    def _query_gp_data(self, controller: KXCIClient, param: int, count: int, 
-                      name: str = "") -> List[float]:
+    def _query_gp_data(
+        self,
+        controller: KXCIClient,
+        param: int,
+        count: int,
+        name: str = "",
+        *,
+        reject_all_zero: bool = False,
+    ) -> List[float]:
         """Query GP parameter with retry logic."""
-        for attempt in range(3):
+        for attempt in range(5 if reject_all_zero else 3):
             try:
                 data = controller._query_gp(param, count)
-                if data:
-                    return data
+                if not data:
+                    time.sleep(0.15 * (attempt + 1))
+                    continue
+                if reject_all_zero and count > 1 and all(v == 0.0 for v in data):
+                    time.sleep(0.2 * (attempt + 1))
+                    continue
+                return data
             except Exception as e:
-                if attempt < 2:
-                    time.sleep(0.5)
+                if attempt < 4:
+                    time.sleep(0.25 * (attempt + 1))
                 else:
-                    print(f"⚠️ Failed to query GP {param} ({name}): {e}")
+                    print(f"Warning: failed to query GP {param} ({name}): {e}")
         return []
+
+    @staticmethod
+    def _pmu_probe_timestamps_populated(pulse_times: List[float], n: int) -> bool:
+        if n < 1 or not pulse_times:
+            return False
+        return any(abs(t) > 1e-15 for t in pulse_times[:n])
+
+    def _validate_pmu_probe_readback(
+        self,
+        controller: KXCIClient,
+        *,
+        set_i: List[float],
+        pulse_times: List[float],
+        total_probes: int,
+        test_label: str,
+        module_name: str,
+    ) -> None:
+        """Raise if EX returned success but probe arrays were never populated."""
+        n = min(total_probes, len(set_i), len(pulse_times))
+        if n < 1:
+            raise RuntimeError(
+                f"{test_label}: no probe arrays returned from instrument "
+                f"(expected {total_probes})."
+            )
+        if self._pmu_probe_timestamps_populated(pulse_times, n):
+            return
+
+        # One longer retry — GP can lag briefly after long EX calls.
+        time.sleep(0.5)
+        retry_times = self._query_gp_data(
+            controller, 31, total_probes, "PulseTimes", reject_all_zero=True
+        )
+        if self._pmu_probe_timestamps_populated(retry_times, n):
+            return
+
+        sample_i = set_i[:3]
+        sample_t = pulse_times[:3]
+        raise RuntimeError(
+            f"{test_label}: probe readback is all zeros (PulseTimes/setI never written). "
+            f"Sample setI={sample_i}, PulseTimes={sample_t}. "
+            f"The {module_name} EX likely failed inside retention_pulse_ilimit_dual_channel "
+            f"but an older pmu_endurance_burst_test.c returned success anyway. "
+            f"Redeploy pmu_endurance_burst_test.c and pmu_burst_common.h "
+            f"(PMU_MAX_SEG_PER_BURST=350) to A_pulse_read_grouped_multi, rebuild USRLIB, "
+            f"then retry. Set ClariusDebug=1 on the test to see C printf on the 4200."
+        )
     
     def _normalize_pmu_dual_channel_probes(
         self,
@@ -2430,9 +2488,9 @@ class Keithley4200_KXCI_Scripts:
         GP setV (param 20) is measure-channel VM (~0 V on low side). For display and R
         we use the applied read voltage (measV) and prefer C-computed resetR (GP 18).
         """
-        set_i = self._query_gp_data(controller, 22, total_probes, "setI")
+        set_i = self._query_gp_data(controller, 22, total_probes, "setI", reject_all_zero=True)
         pulse_times = self._query_gp_data(
-            controller, pulse_times_gp, total_probes, "PulseTimes"
+            controller, pulse_times_gp, total_probes, "PulseTimes", reject_all_zero=True
         )
         reset_r = self._query_gp_data(controller, 18, total_probes, "resetR")
 
@@ -2770,7 +2828,7 @@ class Keithley4200_KXCI_Scripts:
         """One EX: pmu_endurance_burst_test batches internally on the 4200 (experimental)."""
         total_probes = endurance_total_probe_count(total_cycles)
         burst_plan = plan_endurance_burst_sizes(total_cycles)
-        est_duration = self._estimate_endurance_total_time(cfg, min(20, total_cycles))
+        est_duration = self._estimate_endurance_total_time(cfg, total_cycles)
         if len(burst_plan) > 1:
             est_duration = sum(
                 self._estimate_endurance_total_time(cfg, n) for n in burst_plan
@@ -2801,13 +2859,12 @@ class Keithley4200_KXCI_Scripts:
                     module_name=PMU_ENDURANCE_BURST_TEST_FN,
                     return_value=return_value,
                     test_label="Endurance Burst Test",
-                    segments_estimate=estimate_endurance_seg_arb_segments(
-                        min(20, total_cycles)
-                    ),
+                    segments_estimate=estimate_endurance_seg_arb_segments(total_cycles),
                     burst_detail=burst_detail,
                     extra_lines=[
-                        "Deploy pmu_endurance_burst_test.c to A_pulse_read_grouped_multi "
-                        "(see pmu_endurance_interleaved/README_BURST_TEST.md).",
+                        "Burst test batches internally inside one EX (~19 cycles per sub-burst).",
+                        "If you still see -90: redeploy pmu_burst_common.h (PMU_MAX_SEG_PER_BURST=350) "
+                        "and pmu_endurance_burst_test.c to A_pulse_read_grouped_multi.",
                     ],
                 ))
             if return_value is None:
@@ -2823,6 +2880,14 @@ class Keithley4200_KXCI_Scripts:
                 read_voltage=cfg.meas_v,
                 i_range=cfg.i_range,
                 pulse_times_gp=31,
+            )
+            self._validate_pmu_probe_readback(
+                controller,
+                set_i=set_i,
+                pulse_times=pulse_times,
+                total_probes=total_probes,
+                test_label="Endurance Burst Test",
+                module_name=PMU_ENDURANCE_BURST_TEST_FN,
             )
             min_len = min(len(set_v), len(set_i), len(pulse_times), len(resistances), total_probes)
             return (

@@ -18,8 +18,8 @@ plan_endurance_burst_sizes = _mod.plan_endurance_burst_sizes
 endurance_total_probe_count = _mod.endurance_total_probe_count
 
 
-def test_plan_100_cycles_single_continuous_waveform():
-    assert plan_endurance_burst_sizes(100) == [100]
+def test_plan_100_cycles_batches_internally():
+    assert plan_endurance_burst_sizes(100) == [19, 19, 19, 19, 19, 5]
 
 
 def test_plan_10_cycles_single_burst():

@@ -128,6 +128,18 @@ PMU_HELP_SECTIONS: List[HelpSection] = [
         "by excessive DUT capacitance.",
     ),
     (
+        "Endurance Burst Test (100+ cycles)",
+        "One Python/EX call; the 4200 runs several INTERNAL sub-bursts (~19 cycles each, "
+        "~350 seg-arb segments per sub-burst). Pulses inside a sub-burst are continuous; "
+        "there is a short hardware gap while the PMU reloads the next sub-burst waveform "
+        "(not a 1 s Python delay; typically tens to hundreds of ms after re-arm tuning).\n\n"
+        "Sub-burst 2+ skips the initial read and keeps RPM/PMU armed (not_init path) to "
+        "minimize the gap. Scope: gaps are between sub-bursts, not between every cycle.\n\n"
+        "To reduce gaps further: fewer/larger sub-bursts only if your USRLIB tolerates "
+        "more segments (raise PMU_MAX_SEG_PER_BURST cautiously); or use classic Endurance "
+        "with fewer cycles per EX from Python.",
+    ),
+    (
         "Troubleshooting",
         "• Identical nA on every read — IRange too high; lower PMU current range.\n"
         "• R too low / flat after SET — range too low (clipping); raise IRange.\n"

@@ -27,6 +27,8 @@ EX A_pulse_read_grouped_multi pmu_endurance_burst_test(<42 parameters>)
 
 Clarius requires the full `ARGUMENTS:` table in the `.c` file USRLIB header (same 42 parms as `pmu_endurance_interleaved`). `NumPulses` = **total** cycles (1–1000).
 
+**Segment batching:** `retention_pulse_ilimit_dual_channel` accepts ~350 seg-arb segments per call (not the 2048 hardware max). For 100 cycles (~1806 segments), `pmu_endurance_burst_test` runs **6 internal sub-bursts** (e.g. 19+19+19+19+19+5 cycles) inside **one EX**. There is a short PMU re-arm gap between sub-bursts (waveform reload), not a Python sleep. Sub-burst 2+ keeps RPM/PMU armed to shorten that gap. Redeploy `pmu_burst_common.h` and `retention_pulse_ilimit_dual_channel.c` when updating batching behavior.
+
 ## Clarius build error "parsing parameter …"
 
 If you see a garbled parameter name, the USRLIB `ARGUMENTS:` block was incomplete. Use the repo version of `pmu_endurance_burst_test.c` with all 42 lines — not placeholder text like "(same signature as …)".
