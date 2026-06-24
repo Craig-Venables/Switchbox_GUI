@@ -233,6 +233,7 @@ double *MpulseI = NULL;
 double *MpulseT = NULL;
 
 static int not_init = 1;
+static int last_pulse_sample_rate = 0;
 
 void ret_AllocateMemoryILimit(int npts);
 void ret_AllocateMeasArraysILimit(int npts);
@@ -343,9 +344,11 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
       if(debug)printf("%s: PMU is initialized!\n", mod);
   }
 
-  if(iFLimit == 0.0)
+  if(not_init)
+  {
+    if(iFLimit == 0.0)
     {
-    OpenLimit(InstId);
+      OpenLimit(InstId);
     }
     else
     {
@@ -354,18 +357,19 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
               mod, ForceCh, iFLimit, status);
       if(status) { stat = -141; goto RETURN; }
     }
-  if(ForceCh != MeasureCh && MeasureCh > 0)
-  {
-    if(iMLimit == 0.0)
+    if(ForceCh != MeasureCh && MeasureCh > 0)
     {
+      if(iMLimit == 0.0)
+      {
         OpenLimit(InstId);
-    }
-    else
-    {
+      }
+      else
+      {
         status = Set_RPM_ICompliance( InstId, MeasureCh, iMLimit);
-         if(debug)printf("%s: called Set_RPM_ICompliance for channel:%d and limit %g. Returned:%d\n",
+        if(debug)printf("%s: called Set_RPM_ICompliance for channel:%d and limit %g. Returned:%d\n",
          mod, MeasureCh, iMLimit, status);
-         if(status) { stat = -142; goto RETURN; }
+        if(status) { stat = -142; goto RETURN; }
+      }
     }
   }
   //setup loads
@@ -379,11 +383,14 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
       if(debug)printf("%s: pulse_load set\n", mod);
   } 
 
-  status = pulse_ranges(InstId, ForceCh, 
-            ForceVRange, PULSE_MEAS_FIXED, 
-            ForceVRange, PULSE_MEAS_FIXED, 
-            ForceIRange);
-  if(status) { stat = -8; goto RETURN; }
+  if(not_init)
+  {
+    status = pulse_ranges(InstId, ForceCh, 
+              ForceVRange, PULSE_MEAS_FIXED, 
+              ForceVRange, PULSE_MEAS_FIXED, 
+              ForceIRange);
+    if(status) { stat = -8; goto RETURN; }
+  }
 
   if(not_init)
   {
@@ -404,11 +411,14 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
           if(status) if(status) { stat = -11; goto RETURN; }
       }
 
-      status = pulse_ranges(InstId, MeasureCh, 
-              MeasureVRange, PULSE_MEAS_FIXED, 
-              MeasureVRange, PULSE_MEAS_FIXED, 
-              MeasureIRange);
-      if(status) { stat = -12; goto RETURN; }
+      if(not_init)
+      {
+        status = pulse_ranges(InstId, MeasureCh, 
+                MeasureVRange, PULSE_MEAS_FIXED, 
+                MeasureVRange, PULSE_MEAS_FIXED, 
+                MeasureIRange);
+        if(status) { stat = -12; goto RETURN; }
+      }
 
 // ****************************************
  if (debug) printf(" Made it here 0\n");
@@ -423,8 +433,14 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
       }
     }
     
-  status = pulse_sample_rate(InstId, used_rate);      
-  if(status) if(status) { stat = -15; goto RETURN; }
+  if(used_rate != last_pulse_sample_rate)
+  {
+    status = pulse_sample_rate(InstId, used_rate);      
+    if(status) if(status) { stat = -15; goto RETURN; }
+    last_pulse_sample_rate = used_rate;
+  }
+  else if(debug)
+    printf("%s: re-arm burst — skip pulse_sample_rate (%d Hz)\n", mod, used_rate);
 
 // ****************************************************
   if (debug) printf(" Made it here 1\n");
@@ -593,11 +609,11 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
   // Execute the pulse
   status = pulse_exec(0);
 
-  // wait till execution completion
+  // wait till execution completion (1 ms poll — faster re-arm between internal bursts)
   i = 0;
-  while(pulse_exec_status(&t) == 1 && i < 100)
+  while(pulse_exec_status(&t) == 1 && i < 5000)
     {
-      Sleep(20);
+      Sleep(1);
       i++;
     }
 

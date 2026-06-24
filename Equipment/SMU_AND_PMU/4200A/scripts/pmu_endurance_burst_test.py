@@ -95,6 +95,18 @@ def main() -> int:
         print(f"Burst plan used: {results.get('burst_plan', burst_plan)}")
 
         if n >= expected_probes and n_set >= args.cycles and n_reset >= args.cycles:
+            currents = results.get("currents") or []
+            times = results.get("timestamps") or []
+            has_time = any(abs(t) > 1e-15 for t in times[: min(20, len(times))])
+            has_i = any(abs(c) > 1e-15 for c in currents[: min(20, len(currents))])
+            if not has_time:
+                print("FAIL: probe PulseTimes are all zero — C module did not write readback")
+                return 3
+            if not has_i:
+                print(
+                    "WARN: probe count OK but all read currents are zero "
+                    "(open DUT, wrong IRange, or measure path issue)"
+                )
             print("PASS")
             return 0
         print("WARN: probe/cycle counts below expected")

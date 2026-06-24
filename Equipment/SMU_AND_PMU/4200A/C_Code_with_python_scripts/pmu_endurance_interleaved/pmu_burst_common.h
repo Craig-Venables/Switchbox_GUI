@@ -7,9 +7,10 @@
 /* Practical conservative ceiling for pmu_endurance_interleaved (~20 cycles at 1 us). */
 #define PMU_ENDURANCE_CONSERVATIVE_SEG_PER_BURST 350
 
-/* 4225-PMU hardware seg-arb limit per channel. Burst test uses this so cycles run as
- * one continuous waveform (e.g. 100 cycles = 1806 segments, no inter-burst idle). */
-#define PMU_MAX_SEG_PER_BURST 2048
+/* 4225-PMU hardware seg-arb limit per channel (spec); retention_pulse_ilimit_dual_channel
+ * fails around ~350 segments in practice (-90), so batch internally below that. */
+#define PMU_HW_MAX_SEG_ARB_SEGMENTS 2048
+#define PMU_MAX_SEG_PER_BURST PMU_ENDURANCE_CONSERVATIVE_SEG_PER_BURST
 
 /* Endurance: Initial Read (~6 segs) + 17 segs per SET/RESET cycle. */
 #define PMU_ENDURANCE_SEG_FIXED 6

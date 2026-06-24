@@ -76,9 +76,9 @@ extern int retention_pulse_ilimit_dual_channel(char* InstrName, long ForceCh, do
 Module: pmu_endurance_burst_test
 ==================
 Experimental: same EX signature as pmu_endurance_interleaved but NumPulses is TOTAL
-cycles (1-1000). Builds one continuous seg-arb waveform when segment budget allows
-(up to 2048 segments, ~113 cycles); larger counts split with burst 2+ continuing
-immediately after burst 1 (no Initial Read repeat, minimal PMU re-arm gap).
+cycles (1-1000). Builds one continuous seg-arb waveform when segment count allows
+(up to ~350 segments per retention_pulse call, ~19 cycles); larger counts split into
+back-to-back internal sub-bursts within the same EX (burst 2+ skips Initial Read).
 	END USRLIB MODULE HELP DESCRIPTION */
 /* USRLIB MODULE PARAMETER LIST */
 #include "keithley.h"
@@ -327,21 +327,32 @@ static int execute_burst_extract_probes(
     return -204;
 
   used_rate = ret_getRate(burstTtime, p->max_points, &used_pts, &npts);
+  if (used_rate <= 0)
+    return -207;
   if (debug)
-    printf("%s: burst duration %g s, used_pts %d\n", mod, burstTtime, used_pts);
+    printf("%s: sub-burst duration %g s, used_pts %d, rate %d Hz, re-arm=%s\n",
+           mod, burstTtime, used_pts, used_rate, outProbeOffset > 0 ? "yes" : "first");
 
   AllocateArraysInterleaved(used_pts);
   if (VFret == NULL || IFret == NULL || VMret == NULL || IMret == NULL || Tret == NULL)
     return -207;
 
-  stat = retention_pulse_ilimit_dual_channel(
-      inst,
-      (long)1, forceVRange, p->IRange,
-      0.0, 0.0,
-      (long)2, measVRange, p->IRange, p->max_points, 0.0,
-      volts, NewVoltsSize, times, NewVoltsSize - 1,
-      VFret, used_pts, IFret, used_pts, VMret, used_pts,
-      IMret, used_pts, Tret, used_pts, &numpts);
+  {
+    int eff_max_pts = used_pts + 64;
+    if (eff_max_pts < 256)
+      eff_max_pts = 256;
+    if (eff_max_pts > p->max_points)
+      eff_max_pts = p->max_points;
+
+    stat = retention_pulse_ilimit_dual_channel(
+        inst,
+        (long)1, forceVRange, p->IRange,
+        0.0, 0.0,
+        (long)2, measVRange, p->IRange, eff_max_pts, 0.0,
+        volts, NewVoltsSize, times, NewVoltsSize - 1,
+        VFret, used_pts, IFret, used_pts, VMret, used_pts,
+        IMret, used_pts, Tret, used_pts, &numpts);
+  }
 
   if (stat < 0)
   {
@@ -455,9 +466,10 @@ int pmu_endurance_burst_test(
   }
 
   totalProbes = 1 + 2 * totalCycles;
-  if (PulseTimes == NULL || setV == NULL || setI == NULL)
+  if (PulseTimes == NULL || setV == NULL || setI == NULL || resetR == NULL)
     return -202;
-  if (PulseTimesSize < totalProbes || setV_size < totalProbes || setI_size < totalProbes)
+  if (PulseTimesSize < totalProbes || setV_size < totalProbes || setI_size < totalProbes
+      || resetR_size < totalProbes)
     return -204;
 
   if (PulseWidth < 2e-8 || PulseRiseTime < 2e-8 || PulseFallTime < 2e-8 || PulseDelay < 2e-8)
@@ -543,8 +555,11 @@ int pmu_endurance_burst_test(
         setV, setI, resetR, PulseTimes, totalProbes,
         forceVRange, measVRange, ttime, &lastPulseTime);
 
+    if (stat < 0)
+      goto CLEAN_BURST;
+
     burstNum = 1;
-    probeIdx = recordedProbeCount;
+    probeIdx = stat;
     cyclesDone = nBurst;
     goto FINISH_BURST_TEST;
   }
@@ -573,7 +588,7 @@ int pmu_endurance_burst_test(
     }
 
     if (debug)
-      printf("%s: burst %d cycles %d..%d nBurst=%d skipInitial=%d probes=%d\n",
+      printf("%s: internal sub-burst %d: cycles %d..%d nBurst=%d skipInitial=%d probes=%d\n",
              mod, burstNum + 1, cyclesDone + 1, cyclesDone + nBurst, nBurst, skipInitial, burstMeasCap);
 
     recordedProbeCount = build_endurance_burst_waveform(
@@ -616,17 +631,31 @@ int pmu_endurance_burst_test(
   }
 
 FINISH_BURST_TEST:
+  if (times != NULL)
+    free(times);
+  if (volts != NULL)
+    free(volts);
+  if (measMinTime != NULL)
+    free(measMinTime);
+  if (measMaxTime != NULL)
+    free(measMaxTime);
+  times = NULL;
+  volts = NULL;
+  measMinTime = NULL;
+  measMaxTime = NULL;
+
   if (debug)
-    printf("%s: complete %d burst(s), %d probes, return 1\n", mod, burstNum, probeIdx);
+    printf("%s: complete %d burst(s), %d probes (expected %d), stat=%d\n",
+           mod, burstNum, probeIdx, totalProbes, stat);
 
-  if (probeIdx != totalProbes)
-  {
-    if (debug)
-      printf("%s: WARNING probe count %d != expected %d\n", mod, probeIdx, totalProbes);
-  }
+  if (stat < 0)
+    return stat;
+  if (probeIdx < 1)
+    return -90;
+  if (probeIdx != totalProbes && debug)
+    printf("%s: WARNING probe count %d != expected %d\n", mod, probeIdx, totalProbes);
 
-  stat = 1;
-  return stat;
+  return 1;
 
 CLEAN_BURST:
   if (times != NULL)
