@@ -75,6 +75,16 @@ def init_parameters_section(parent, gui, *, compact: bool = False) -> None:
         side=tk.LEFT, padx=2
     )
 
+    gui.pmu_params_hint = tk.Label(
+        gui.params_content_frame,
+        text="",
+        font=("TkDefaultFont", 8),
+        fg="#004080",
+        wraplength=420,
+        justify=tk.LEFT,
+    )
+    gui.pmu_params_hint.pack(fill=tk.X, padx=3, pady=(0, 4))
+
     if not compact:
         pass  # current range: connection bar (classic) or settings (compact)
 

@@ -279,9 +279,12 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
      stat = -3; goto RETURN;
    }
 
- if(debug) printf("Note: In the following segments, TTime is the time at the end of the segment so a probe measurement needs to be before this time\n");
+  if(debug) printf("Note: In the following segments, TTime is the time at the end of the segment so a probe measurement needs to be before this time\n");
    //Define Seqments:
   ttime = ret_Define_SegmentsILimit(Volts, Times, volts_size - 1, MeasureBias);
+
+  /* Do not force not_init=1 here — keeps PMU armed between back-to-back bursts in the
+   * same EX (pmu_endurance_burst_test). First call uses static not_init==1 for full init. */
 
   // Find minimum segment time for optimal rate selection
   double min_seg_time_found = 1.0;  // Start with a large value
@@ -322,10 +325,6 @@ int retention_pulse_ilimit_dual_channel( char *InstrName, long ForceCh, double F
   getinstid(InstrName, &InstId);
   if(-1 == InstId) {stat = -5; goto RETURN;}
   if(debug) printf("%s: Instrument ID:%d\n", mod, InstId);
-
-  not_init = 1;
-  
-  //initialize PMU
   if(not_init)
   {
       // NK added 24/10/2024
