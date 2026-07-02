@@ -31,13 +31,18 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Tuple
 
-# Import the controller from the same folder
+# Ensure this folder is on sys.path (standalone / future exe)
+_SCRIPT_DIR = Path(__file__).parent.absolute()
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+
 try:
     from hp4140b_controller import HP4140BController
 except ImportError:
-    # Fallback: try to import from parent project structure
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from Equipment.SMU_AND_PMU.HP4140B import HP4140BController
+    sys.path.insert(0, str(_SCRIPT_DIR.parent.parent))
+    from Equipment.SMU_AND_PMU.hp4140b import HP4140BController
+
+from hp4140b_iv_saver import save_measurement_artifacts
 
 
 class HP4140BGUI:
@@ -60,6 +65,7 @@ class HP4140BGUI:
         # Measurement data storage
         self.voltage_data: List[float] = []
         self.current_data: List[float] = []
+        self.loop_data: List[Tuple[List[float], List[float]]] = []
         
         # Measurement control flags
         self.measuring = False
@@ -143,10 +149,22 @@ class HP4140BGUI:
         tk.Radiobutton(sweep_frame, text="Full", variable=self.sweep_type_var, value="Full", font=('Arial', 9)).pack(side=tk.LEFT)
         tk.Radiobutton(sweep_frame, text="Half", variable=self.sweep_type_var, value="Half", font=('Arial', 9)).pack(side=tk.LEFT, padx=10)
         
+        # Loop count
+        tk.Label(control_frame, text="Loop Count:", font=('Arial', 10)).grid(row=6, column=0, sticky=tk.W, pady=5)
+        self.loop_count_var = tk.IntVar(value=getattr(self, '_saved_loop_count', 1))
+        loop_entry = tk.Entry(control_frame, textvariable=self.loop_count_var, width=15)
+        loop_entry.grid(row=6, column=1, pady=5, padx=5)
+        
+        # Delay between loops
+        tk.Label(control_frame, text="Loop Delay (s):", font=('Arial', 10)).grid(row=7, column=0, sticky=tk.W, pady=5)
+        self.loop_delay_var = tk.DoubleVar(value=getattr(self, '_saved_loop_delay', 1.0))
+        loop_delay_entry = tk.Entry(control_frame, textvariable=self.loop_delay_var, width=15)
+        loop_delay_entry.grid(row=7, column=1, pady=5, padx=5)
+        
         # Info label about direction
         info_label = tk.Label(control_frame, text="Note: Direction depends on step sign\n(+ = up, - = down)", 
                              font=('Arial', 8), fg='gray', justify=tk.LEFT)
-        info_label.grid(row=6, column=0, columnspan=3, pady=5, sticky=tk.W)
+        info_label.grid(row=8, column=0, columnspan=3, pady=5, sticky=tk.W)
         
         # Measure button (big and prominent)
         measure_btn = tk.Button(control_frame, text="START MEASUREMENT", 
@@ -154,7 +172,7 @@ class HP4140BGUI:
                                bg='#FF5722', fg='white', 
                                font=('Arial', 14, 'bold'),
                                width=20, height=2)
-        measure_btn.grid(row=7, column=0, columnspan=3, pady=20)
+        measure_btn.grid(row=9, column=0, columnspan=3, pady=20)
         
         # Stop button
         stop_btn = tk.Button(control_frame, text="STOP", 
@@ -162,7 +180,7 @@ class HP4140BGUI:
                             bg='#F44336', fg='white',
                             font=('Arial', 12, 'bold'),
                             width=15)
-        stop_btn.grid(row=8, column=0, columnspan=3, pady=5)
+        stop_btn.grid(row=10, column=0, columnspan=3, pady=5)
         
         # Clear plots button
         clear_btn = tk.Button(control_frame, text="Clear Plots", 
@@ -170,7 +188,7 @@ class HP4140BGUI:
                              bg='#9E9E9E', fg='white',
                              font=('Arial', 10),
                              width=15)
-        clear_btn.grid(row=9, column=0, columnspan=3, pady=5)
+        clear_btn.grid(row=11, column=0, columnspan=3, pady=5)
         
         # Plot frame (right side)
         plot_frame = tk.Frame(self.root)
@@ -209,6 +227,8 @@ class HP4140BGUI:
     
     def _load_config(self):
         """Load configuration from file."""
+        self._saved_loop_count = 1
+        self._saved_loop_delay = 1.0
         try:
             if self.config_file.exists():
                 with open(self.config_file, 'r') as f:
@@ -216,10 +236,14 @@ class HP4140BGUI:
                     self.current_save_dir = Path(config.get('save_dir', str(self.default_save_dir)))
                     self.sample_number = config.get('sample_number', 1)
                     self.gpib_address = config.get('gpib_address', "GPIB0::17::INSTR")
+                    self._saved_loop_count = config.get('loop_count', 1)
+                    self._saved_loop_delay = config.get('loop_delay_s', 1.0)
         except Exception as e:
             print(f"Could not load config: {e}")
             self.current_save_dir = self.default_save_dir
             self.sample_number = 1
+            self._saved_loop_count = 1
+            self._saved_loop_delay = 1.0
     
     def _save_config(self):
         """Save configuration to file."""
@@ -228,7 +252,9 @@ class HP4140BGUI:
             config = {
                 'save_dir': str(self.current_save_dir),
                 'sample_number': self.sample_number,
-                'gpib_address': self.gpib_address
+                'gpib_address': self.gpib_address,
+                'loop_count': int(self.loop_count_var.get()),
+                'loop_delay_s': float(self.loop_delay_var.get()),
             }
             with open(self.config_file, 'w') as f:
                 json.dump(config, f, indent=2)
@@ -319,156 +345,192 @@ class HP4140BGUI:
         """Clear the plot data."""
         self.voltage_data.clear()
         self.current_data.clear()
+        self.loop_data.clear()
         self._update_plots()
         self.progress_label.config(text="Plots cleared", fg='blue')
     
-    def _run_sweep(self):
-        """Run the voltage sweep measurement."""
+    def _build_voltage_list(self, voltage: float, step: float, sweep_type: str) -> List[float]:
+        """Build the voltage point list for one sweep."""
+        if step == 0:
+            raise ValueError("Step size cannot be zero")
+        
+        voltage_magnitude = abs(voltage)
+        
+        if sweep_type == "Full":
+            if step > 0:
+                voltages_up = list(np.arange(0, voltage_magnitude + step / 2, step))
+                if len(voltages_up) > 2:
+                    voltages_down = list(reversed(voltages_up[1:-1])) + [0.0]
+                elif len(voltages_up) > 1:
+                    voltages_down = [0.0]
+                else:
+                    voltages_down = []
+                voltages = voltages_up + voltages_down
+            else:
+                step_abs = abs(step)
+                voltages_down = list(np.arange(0, -voltage_magnitude - step_abs / 2, step))
+                if len(voltages_down) > 2:
+                    voltages_up = list(reversed(voltages_down[1:-1])) + [0.0]
+                elif len(voltages_down) > 1:
+                    voltages_up = [0.0]
+                else:
+                    voltages_up = []
+                voltages = voltages_down + voltages_up
+        elif step > 0:
+            voltages = list(np.arange(0, voltage_magnitude + step / 2, step))
+        else:
+            step_abs = abs(step)
+            voltages = list(np.arange(0, -voltage_magnitude - step_abs / 2, step))
+        
+        seen = set()
+        voltages_unique = []
+        for v in voltages:
+            v_rounded = round(v, 6)
+            if v_rounded not in seen:
+                seen.add(v_rounded)
+                voltages_unique.append(v)
+        return voltages_unique
+    
+    def _measure_at_voltage(
+        self,
+        v_target: float,
+        point_index: int,
+        voltages: List[float],
+        current_limit: float,
+        dvdt: float,
+    ) -> Optional[Tuple[float, float]]:
+        """Ramp/set voltage and return measured (V, I), or None on failure."""
+        if dvdt > 0 and point_index > 0:
+            try:
+                v_current = self.instrument.measure_voltage(channel=1)
+                if not np.isfinite(v_current):
+                    v_current = voltages[point_index - 1]
+            except Exception:
+                v_current = voltages[point_index - 1]
+            
+            dv = abs(v_target - v_current)
+            if dv > 0.001:
+                ramp_time = dv / dvdt
+                steps = max(2, int(ramp_time * 10))
+                self.instrument.voltage_ramp(
+                    target_voltage_v=v_target,
+                    steps=steps,
+                    pause_s=0.1,
+                    compliance_a=current_limit,
+                    channel=1,
+                )
+        else:
+            self.instrument.set_voltage(voltage=v_target, Icc=current_limit, channel=1)
+            time.sleep(0.2)
+        
         try:
-            # Get parameters
+            v_measured = self.instrument.measure_voltage(channel=1)
+            time.sleep(0.05)
+            i_measured = self.instrument.measure_current(channel=1)
+            if np.isfinite(v_measured) and np.isfinite(i_measured):
+                return v_measured, i_measured
+        except Exception as e:
+            print(f"Measurement error at {v_target}V: {e}")
+        return None
+    
+    def _perform_single_sweep(
+        self,
+        voltages: List[float],
+        current_limit: float,
+        dvdt: float,
+        loop_index: int,
+        loop_count: int,
+    ) -> Tuple[List[float], List[float]]:
+        """Run one voltage sweep and return measured V/I lists."""
+        loop_v: List[float] = []
+        loop_i: List[float] = []
+        
+        for i, v_target in enumerate(voltages):
+            if self.stop_flag:
+                break
+            
+            self.root.after(
+                0,
+                lambda v=v_target, idx=i, total=len(voltages), li=loop_index, lc=loop_count: self.progress_label.config(
+                    text=f"Loop {li}/{lc}  {v:.4f} V ({idx + 1}/{total})",
+                    fg='blue',
+                ),
+            )
+            
+            result = self._measure_at_voltage(v_target, i, voltages, current_limit, dvdt)
+            if result:
+                v_measured, i_measured = result
+                loop_v.append(v_measured)
+                loop_i.append(i_measured)
+                self.voltage_data.append(v_measured)
+                self.current_data.append(i_measured)
+                self.root.after(0, self._update_plots)
+            
+            time.sleep(0.05)
+        
+        return loop_v, loop_i
+    
+    def _run_sweep(self):
+        """Run the voltage sweep measurement (optionally repeated for multiple loops)."""
+        try:
             voltage = float(self.voltage_var.get())
             step = float(self.step_var.get())
             current_limit = float(self.current_limit_var.get())
             dvdt = float(self.dvdt_var.get())
             sweep_type = self.sweep_type_var.get()
+            loop_count = max(1, int(self.loop_count_var.get()))
+            loop_delay = max(0.0, float(self.loop_delay_var.get()))
             
-            # Clear previous data
             self.voltage_data.clear()
             self.current_data.clear()
+            self.loop_data.clear()
             
-            # Determine sweep direction and range based on step sign
-            if step == 0:
-                self.root.after(0, lambda: messagebox.showerror("Error", "Step size cannot be zero!"))
+            try:
+                voltages = self._build_voltage_list(voltage, step, sweep_type)
+            except ValueError as exc:
+                self.root.after(0, lambda: messagebox.showerror("Error", str(exc)))
                 return
             
-            # Determine sweep direction from step sign
-            # Voltage parameter represents the magnitude (always positive in GUI)
-            # Step sign determines direction:
-            #   Positive step (+): 0 → +voltage (upward)
-            #   Negative step (-): 0 → -voltage (downward)
-            voltage_magnitude = abs(voltage)  # Use absolute value of voltage parameter
+            self.root.after(
+                0,
+                lambda: self.progress_label.config(
+                    text=f"Starting: {loop_count} loop(s), {len(voltages)} points each",
+                    fg='blue',
+                ),
+            )
             
-            if sweep_type == "Full":
-                # Full sweep: start at 0, go to target, then back to 0
-                if step > 0:
-                    # Positive step: 0 → +voltage → 0 (triangle up)
-                    # Up sweep: 0 to voltage
-                    voltages_up = list(np.arange(0, voltage_magnitude + step/2, step))
-                    # Down sweep: voltage back to 0 (reverse, skip first 0 and last voltage to avoid duplicates)
-                    if len(voltages_up) > 2:
-                        # Skip first (0) and last (voltage) from up sweep, then reverse and add 0 at end
-                        voltages_down = list(reversed(voltages_up[1:-1])) + [0.0]
-                    elif len(voltages_up) > 1:
-                        # Only two points: just add 0 at end
-                        voltages_down = [0.0]
-                    else:
-                        voltages_down = []
-                    voltages = voltages_up + voltages_down
-                else:
-                    # Negative step: 0 → -voltage → 0 (triangle down)
-                    step_abs = abs(step)
-                    # Down sweep: 0 to -voltage
-                    voltages_down = list(np.arange(0, -voltage_magnitude - step_abs/2, step))
-                    # Up sweep: -voltage back to 0 (reverse, skip first 0 and last -voltage to avoid duplicates)
-                    if len(voltages_down) > 2:
-                        # Skip first (0) and last (-voltage) from down sweep, then reverse and add 0 at end
-                        voltages_up = list(reversed(voltages_down[1:-1])) + [0.0]
-                    elif len(voltages_down) > 1:
-                        # Only two points: just add 0 at end
-                        voltages_up = [0.0]
-                    else:
-                        voltages_up = []
-                    voltages = voltages_down + voltages_up
-            else:
-                # Half sweep: start at 0, go to target (direction based on step sign)
-                if step > 0:
-                    # Positive step = upward sweep (0 to +voltage)
-                    voltages = list(np.arange(0, voltage_magnitude + step/2, step))
-                else:
-                    # Negative step = downward sweep (0 to -voltage)
-                    step_abs = abs(step)
-                    voltages = list(np.arange(0, -voltage_magnitude - step_abs/2, step))
-            
-            # Remove duplicates while preserving order
-            seen = set()
-            voltages_unique = []
-            for v in voltages:
-                v_rounded = round(v, 6)  # Round to avoid floating point issues
-                if v_rounded not in seen:
-                    seen.add(v_rounded)
-                    voltages_unique.append(v)
-            voltages = voltages_unique
-            
-            self.root.after(0, lambda: self.progress_label.config(
-                text=f"Starting sweep: {len(voltages)} points", fg='blue'
-            ))
-            
-            # Enable output
             self.instrument.enable_output(enable=True, channel=1)
             time.sleep(0.1)
             
-            # Perform sweep
-            for i, v_target in enumerate(voltages):
+            for loop_idx in range(1, loop_count + 1):
                 if self.stop_flag:
                     break
                 
-                # Update progress
-                self.root.after(0, lambda v=v_target, idx=i, total=len(voltages): 
-                               self.progress_label.config(
-                                   text=f"Measuring: {v:.4f} V ({idx+1}/{total})", 
-                                   fg='blue'
-                               ))
+                loop_v, loop_i = self._perform_single_sweep(
+                    voltages, current_limit, dvdt, loop_idx, loop_count
+                )
+                if loop_v and loop_i:
+                    self.loop_data.append((loop_v, loop_i))
                 
-                # Ramp to target voltage (using dV/dt)
-                if dvdt > 0 and i > 0:
-                    try:
-                        v_current = self.instrument.measure_voltage(channel=1)
-                        if not np.isfinite(v_current):
-                            v_current = voltages[i-1] if i > 0 else 0.0
-                    except Exception:
-                        v_current = voltages[i-1] if i > 0 else 0.0
-                    
-                    dv = abs(v_target - v_current)
-                    if dv > 0.001:  # Only ramp if significant change
-                        ramp_time = dv / dvdt
-                        steps = max(2, int(ramp_time * 10))  # 10 steps per second minimum
-                        self.instrument.voltage_ramp(
-                            target_voltage_v=v_target,
-                            steps=steps,
-                            pause_s=0.1,
-                            compliance_a=current_limit,
-                            channel=1
-                        )
-                else:
-                    # Direct set for first point or if dV/dt is 0
-                    self.instrument.set_voltage(
-                        voltage=v_target,
-                        Icc=current_limit,
-                        channel=1
+                if self.stop_flag:
+                    break
+                
+                if loop_idx < loop_count:
+                    self.root.after(
+                        0,
+                        lambda li=loop_idx, lc=loop_count: self.progress_label.config(
+                            text=f"Loop {li}/{lc} complete — waiting {loop_delay:.1f}s",
+                            fg='blue',
+                        ),
                     )
-                    time.sleep(0.2)  # Settling time
-                
-                # Measure voltage and current
-                try:
-                    v_measured = self.instrument.measure_voltage(channel=1)
-                    time.sleep(0.05)
-                    i_measured = self.instrument.measure_current(channel=1)
-                    
-                    if np.isfinite(v_measured) and np.isfinite(i_measured):
-                        self.voltage_data.append(v_measured)
-                        self.current_data.append(i_measured)
-                        
-                        # Update plots in real-time
-                        self.root.after(0, self._update_plots)
-                        
-                except Exception as e:
-                    print(f"Measurement error at {v_target}V: {e}")
-                    continue
-                
-                # Small delay between points
-                time.sleep(0.05)
+                    try:
+                        self.instrument.voltage_ramp(
+                            0.0, steps=20, pause_s=0.05, compliance_a=current_limit, channel=1
+                        )
+                    except Exception as e:
+                        print(f"Error ramping to zero between loops: {e}")
+                    time.sleep(loop_delay)
             
-            # Ramp to zero
             if not self.stop_flag:
                 self.root.after(0, lambda: self.progress_label.config(
                     text="Ramping to zero...", fg='blue'
@@ -478,18 +540,17 @@ class HP4140BGUI:
                 except Exception as e:
                     print(f"Error ramping to zero: {e}")
             
-            # Disable output
             try:
                 self.instrument.disable_output(channel=1)
             except Exception as e:
                 print(f"Error disabling output: {e}")
             
-            # Save data automatically
-            if self.voltage_data and not self.stop_flag:
+            if self.loop_data and not self.stop_flag:
+                saved_sample = self.sample_number
                 self.root.after(0, self._save_data)
                 self.root.after(0, lambda: self.progress_label.config(
-                    text=f"Measurement complete! Saved as sample {self.sample_number-1}", 
-                    fg='green'
+                    text=f"Complete! Saved sample {saved_sample} ({len(self.loop_data)} loop(s))",
+                    fg='green',
                 ))
             else:
                 self.root.after(0, lambda: self.progress_label.config(
@@ -544,29 +605,54 @@ class HP4140BGUI:
         self.canvas.draw()
     
     def _save_data(self):
-        """Save measurement data to file."""
-        if not self.voltage_data or not self.current_data:
+        """Save measurement data and IV plot PNGs."""
+        if not self.loop_data:
             return
         
         try:
-            # Ensure save directory exists
             self.current_save_dir.mkdir(parents=True, exist_ok=True)
+            saved_sample = self.sample_number
             
-            # Create filename with sample number
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"sample_{self.sample_number:04d}_{timestamp}.txt"
-            filepath = self.current_save_dir / filename
+            metadata = {
+                "Sweep Type": self.sweep_type_var.get(),
+                "Target Voltage (V)": float(self.voltage_var.get()),
+                "Step (V)": float(self.step_var.get()),
+                "Current Limit (A)": float(self.current_limit_var.get()),
+                "dV/dt (V/s)": float(self.dvdt_var.get()),
+                "Loop Count": len(self.loop_data),
+                "GPIB Address": self.gpib_address,
+            }
             
-            # Save data
-            data = np.column_stack((self.voltage_data, self.current_data))
-            header = f"HP4140B Measurement - Sample {self.sample_number}\nVoltage (V)\tCurrent (A)"
-            np.savetxt(filepath, data, fmt="%.6e\t%.6e", header=header, comments='')
+            saved = save_measurement_artifacts(
+                self.current_save_dir,
+                saved_sample,
+                self.loop_data,
+                metadata=metadata,
+            )
             
-            # Increment sample number
             self.sample_number += 1
             self._save_config()
             
-            messagebox.showinfo("Data Saved", f"Data saved to:\n{filepath}\n\nNext sample number: {self.sample_number}")
+            data_path = saved.get("data")
+            plots = saved.get("plots", {})
+            plot_lines = []
+            images_folder = plots.get("folder")
+            for label, path in [
+                ("Combined summary", plots.get("combined")),
+                ("All IV", plots.get("all_iv")),
+                ("All log", plots.get("all_log")),
+                ("Final IV", plots.get("final_iv")),
+                ("Final log", plots.get("final_log")),
+            ]:
+                if path:
+                    if images_folder and path.parent == images_folder:
+                        plot_lines.append(f"{label}: images/{path.name}")
+                    else:
+                        plot_lines.append(f"{label}: {path.name}")
+            
+            msg = f"Data saved to:\n{data_path}\n\nPlots:\n" + "\n".join(plot_lines)
+            msg += f"\n\nNext sample number: {self.sample_number}"
+            messagebox.showinfo("Data Saved", msg)
             
         except Exception as e:
             messagebox.showerror("Save Error", f"Could not save data:\n{str(e)}")
