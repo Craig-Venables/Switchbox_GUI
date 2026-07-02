@@ -97,17 +97,33 @@ Batch device testing workflows.
 - `gui.measurement_gui.plot_panels`: Plotting components
 - `gui.measurement_gui.plot_updaters`: Real-time plot updates
 
+## Architecture
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for tab registry, callbacks, and tool integration.
+
 ## File Structure
 
 ```
 measurement_gui/
-├── README.md                    # This file
-├── __init__.py                  # Package exports (MeasurementGUI)
-├── main.py                      # MeasurementGUI class (~3658 lines)
-├── layout_builder.py            # UI layout construction (includes pulse parameters UI)
-├── plot_panels.py               # Plotting components
-├── plot_updaters.py             # Real-time plot updates
-└── custom_measurements_builder.py  # Custom measurement UI builder
+├── README.md
+├── ARCHITECTURE.md
+├── __init__.py
+├── main.py                      # Orchestrator (connections, threads, callbacks)
+├── layout_builder.py
+├── layout/                      # tab_registry, help_dialog, tab_*.py
+├── child_gui_registry.py        # Top-bar button specs
+├── child_gui_launchers.py       # open_* implementations
+├── tool_registry.py             # Hardware Tools menu (Display, LED)
+├── save_path_controller.py      # Data paths, custom save config
+├── sample_gui_sync.py           # SampleGUI notifications, plot overlay
+├── connection_controller.py     # SMU/PSU/temp connect, auto-connect
+├── system_config_controller.py  # system_configs.json load/save, optical
+├── lifecycle_controller.py      # atexit instrument shutdown
+├── custom_measurement_runner.py # Custom measurement plan thread body
+├── smu_adapter.py               # IV controller wrapper for child tools
+├── gui_state.py                 # runtime_state + plot_state
+├── plot_panels.py
+└── plot_updaters.py
 ```
 
 ## Main Class

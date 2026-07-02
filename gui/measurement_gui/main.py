@@ -118,7 +118,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]  # gui/measurement_gui/main.
 # Third-party imports
 import numpy as np
 import tkinter as tk
-from telegram import PassportData
 from tkinter import messagebox, simpledialog, ttk
 
 # Local application imports
@@ -304,91 +303,7 @@ logging.getLogger("pymeasure").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("asyncio").setLevel(logging.WARNING)
 
-class SMUAdapter:
-	"""Light adapter wrapping an IV controller manager to a minimal SMU-like API.
-
-	This adapter provides a small, stable surface for consumers that expect a
-	simple instrument object with methods such as `set_voltage`, `set_current`,
-	`measure_current`, `measure_voltage`, `enable_output` and `close`.
-
-	Attributes:
-		_iv: underlying IV controller/manager instance (typed object)
-		device: optional device identifier exposed by some instrument drivers
-
-	Notes:
-		The adapter performs small normalization steps (e.g. tuple -> float)
-		so callers can assume simple return types. A NotImplementedError is raised
-		when a fast-path API (like `run_tsp_sweep`) is not implemented by the
-		underlying instrument.
-	"""
-
-	def __init__(self, iv_manager: Any) -> None:
-		self._iv = iv_manager
-		# For ad-hoc TSP fallback, expose an attribute named 'device' if available
-		self.device = None
-		try:
-			inst = getattr(self._iv, 'instrument', None)
-			if inst is not None and hasattr(inst, 'device'):
-				self.device = inst.device
-		except Exception:
-			self.device = None
-
-	def safe_init(self) -> None:
-		return None
-
-	def set_voltage(self, voltage: float, Icc: Optional[float] = None) -> None:
-		if Icc is None:
-			# Use a reasonable default if not specified
-			Icc = 1e-3
-		return self._iv.set_voltage(voltage, Icc)
-
-	def set_current(self, current: float, Vcc: Optional[float] = None) -> None:
-		if Vcc is None:
-			Vcc = 10.0
-		return self._iv.set_current(current, Vcc)
-
-	def measure_voltage(self) -> float:
-		val = self._iv.measure_voltage()
-		try:
-			# Some controllers return tuples; normalize to float
-			if isinstance(val, (list, tuple)):
-				return float(val[0] if len(val) > 0 else 0.0)
-			return float(val)
-		except Exception:
-			return 0.0
-
-	def measure_current(self) -> float:
-		val = self._iv.measure_current()
-		try:
-			# Manager may return tuple (None, current)
-			if isinstance(val, (list, tuple)):
-				return float(val[-1])
-			return float(val)
-		except Exception:
-			return 0.0
-
-	def enable_output(self, enable: bool) -> None:
-		return self._iv.enable_output(bool(enable))
-
-	def close(self) -> None:
-		try:
-			return self._iv.close()
-		except Exception:
-			return None
-
-	# Optional fast-path: if underlying controller implements run_tsp_sweep, expose it
-	def run_tsp_sweep(self, start_v: float, stop_v: float, step_v: float,
-					 icc_start: float, icc_factor: float = 10.0,
-					 icc_max: Optional[float] = None, delay_s: float = 0.005,
-					 burn_abort_A: Optional[float] = None) -> Any:
-		inst = getattr(self._iv, 'instrument', None)
-		if inst is not None and hasattr(inst, 'run_tsp_sweep'):
-			return inst.run_tsp_sweep(start_v=start_v, stop_v=stop_v, step_v=step_v,
-									  icc_start=icc_start, icc_factor=icc_factor,
-									  icc_max=icc_max, delay_s=delay_s,
-									  burn_abort_A=burn_abort_A)
-		raise NotImplementedError("Underlying instrument does not support run_tsp_sweep")
-
+from gui.measurement_gui.smu_adapter import SMUAdapter  # re-exported for legacy imports
 
 class MeasurementGUI:
     """Graphical control panel for running and monitoring measurements.
@@ -417,6 +332,152 @@ class MeasurementGUI:
     Note: many instance attributes are created at runtime and are documented
     inline where they are defined to avoid a huge upfront attribute block.
     """
+
+    # Runtime flags delegate to self.runtime_state (set in __init__)
+    @property
+    def tests_running(self) -> bool:
+        return self.runtime_state.tests_running
+
+    @tests_running.setter
+    def tests_running(self, value: bool) -> None:
+        self.runtime_state.tests_running = value
+
+    @property
+    def abort_tests_flag(self) -> bool:
+        return self.runtime_state.abort_tests_flag
+
+    @abort_tests_flag.setter
+    def abort_tests_flag(self, value: bool) -> None:
+        self.runtime_state.abort_tests_flag = value
+
+    @property
+    def stop_measurement_flag(self) -> bool:
+        return self.runtime_state.stop_measurement_flag
+
+    @stop_measurement_flag.setter
+    def stop_measurement_flag(self, value: bool) -> None:
+        self.runtime_state.stop_measurement_flag = value
+
+    @property
+    def measuring(self) -> bool:
+        return self.runtime_state.measuring
+
+    @measuring.setter
+    def measuring(self, value: bool) -> None:
+        self.runtime_state.measuring = value
+
+    @property
+    def pause_requested(self) -> bool:
+        return self.runtime_state.pause_requested
+
+    @pause_requested.setter
+    def pause_requested(self, value: bool) -> None:
+        self.runtime_state.pause_requested = value
+
+    @property
+    def sweep_runtime_overrides(self) -> dict:
+        return self.runtime_state.sweep_runtime_overrides
+
+    @sweep_runtime_overrides.setter
+    def sweep_runtime_overrides(self, value: dict) -> None:
+        self.runtime_state.sweep_runtime_overrides = value
+
+    @property
+    def pulse_history(self) -> list:
+        return self.plot_state.pulse_history
+
+    @pulse_history.setter
+    def pulse_history(self, value: list) -> None:
+        self.plot_state.pulse_history = value
+
+    @property
+    def v_arr_disp(self) -> list:
+        return self.plot_state.v_arr_disp
+
+    @v_arr_disp.setter
+    def v_arr_disp(self, value: list) -> None:
+        self.plot_state.v_arr_disp = value
+
+    @property
+    def v_arr_disp_abs(self) -> list:
+        return self.plot_state.v_arr_disp_abs
+
+    @v_arr_disp_abs.setter
+    def v_arr_disp_abs(self, value: list) -> None:
+        self.plot_state.v_arr_disp_abs = value
+
+    @property
+    def v_arr_disp_abs_log(self) -> list:
+        return self.plot_state.v_arr_disp_abs_log
+
+    @v_arr_disp_abs_log.setter
+    def v_arr_disp_abs_log(self, value: list) -> None:
+        self.plot_state.v_arr_disp_abs_log = value
+
+    @property
+    def c_arr_disp(self) -> list:
+        return self.plot_state.c_arr_disp
+
+    @c_arr_disp.setter
+    def c_arr_disp(self, value: list) -> None:
+        self.plot_state.c_arr_disp = value
+
+    @property
+    def c_arr_disp_log(self) -> list:
+        return self.plot_state.c_arr_disp_log
+
+    @c_arr_disp_log.setter
+    def c_arr_disp_log(self, value: list) -> None:
+        self.plot_state.c_arr_disp_log = value
+
+    @property
+    def c_arr_disp_abs(self) -> list:
+        return self.plot_state.c_arr_disp_abs
+
+    @c_arr_disp_abs.setter
+    def c_arr_disp_abs(self, value: list) -> None:
+        self.plot_state.c_arr_disp_abs = value
+
+    @property
+    def c_arr_disp_abs_log(self) -> list:
+        return self.plot_state.c_arr_disp_abs_log
+
+    @c_arr_disp_abs_log.setter
+    def c_arr_disp_abs_log(self, value: list) -> None:
+        self.plot_state.c_arr_disp_abs_log = value
+
+    @property
+    def r_arr_disp(self) -> list:
+        return self.plot_state.r_arr_disp
+
+    @r_arr_disp.setter
+    def r_arr_disp(self, value: list) -> None:
+        self.plot_state.r_arr_disp = value
+
+    @property
+    def t_arr_disp(self) -> list:
+        return self.plot_state.t_arr_disp
+
+    @t_arr_disp.setter
+    def t_arr_disp(self, value: list) -> None:
+        self.plot_state.t_arr_disp = value
+
+    @property
+    def temp_time_disp(self) -> list:
+        return self.plot_state.temp_time_disp
+
+    @temp_time_disp.setter
+    def temp_time_disp(self, value: list) -> None:
+        self.plot_state.temp_time_disp = value
+
+    @property
+    def _last_combined_summary_path(self) -> Optional[str]:
+        return self.plot_state.last_combined_summary_path
+
+    @_last_combined_summary_path.setter
+    def _last_combined_summary_path(self, value: Optional[str]) -> None:
+        self.plot_state.last_combined_summary_path = value
+
     def __init__(self, master: tk.Misc, sample_type: str, section: str,
                  device_list: List[str], sample_gui: Any) -> None:
         # Commonly accessed attributes with explicit types for clarity
@@ -464,8 +525,10 @@ class MeasurementGUI:
         self.axis_font_size = 8
         self.title_font_size = 10
         self.sequential_number_of_sweeps = 100
-        self.tests_running = False
-        self.abort_tests_flag = False
+        from gui.measurement_gui.gui_state import MeasurementRuntimeState, PlotDisplayState
+
+        self.runtime_state = MeasurementRuntimeState()
+        self.plot_state = PlotDisplayState()
         self.test_log_queue = queue.Queue()
         self.live_plot_enabled = tk.BooleanVar(value=True)
 
@@ -485,8 +548,6 @@ class MeasurementGUI:
         self.psu_connected = False
         self.adaptive_measurement = None
         self.single_device_flag = True
-        self.stop_measurement_flag = False
-        self.measuring = False
         self.not_at_tempriture = False
         self.itc_connected = False
         self.lakeshore = None
@@ -495,31 +556,14 @@ class MeasurementGUI:
         self.single_runner = SingleMeasurementRunner(self)
         self.pulsed_runner = PulsedMeasurementRunner(self)
         self.special_runner = SpecialMeasurementRunner(self)
-        self._last_combined_summary_path: Optional[str] = None
-        # Runtime controls for custom sweeps
-        self.pause_requested = False
-        self.sweep_runtime_overrides = {}
-
-        # Data storage
+        # Data storage (plot buffers live in plot_state; accessed via properties)
         self.measurement_data = {}  # Store measurement results
-        self.v_arr_disp = []
-        self.v_arr_disp_abs = []
-        self.v_arr_disp_abs_log = []
-        self.c_arr_disp = []
-        self.c_arr_disp_log = []
-        self.t_arr_disp = []
-        self.c_arr_disp_abs = []
-        self.c_arr_disp_abs_log = []
-        self.r_arr_disp = []
-        self.temp_time_disp = []
-        
-        # Pulse history storage
-        self.pulse_history = []  # List of dicts with pulse data
 
         # Central measurement engine
+        from gui.measurement_gui.save_path_controller import SavePathController, resolve_default_save_root
+
         self.measurement_service = MeasurementService()
-        # Shared persistence helper with updated default storage root
-        self.default_save_root = self._resolve_default_save_root()
+        self.default_save_root = resolve_default_save_root()
         self.data_saver = MeasurementDataSaver(default_base=self.default_save_root)
         # Instrument connection manager (handles SMU/PSU/temp lifecycles)
         self.connections = InstrumentConnectionManager(status_logger=self.log_terminal)
@@ -532,7 +576,25 @@ class MeasurementGUI:
 
         # Initialize system configurations
         self.system_configs = {}
-        self.systems = self.load_systems()
+        from gui.measurement_gui.system_config_controller import SystemConfigController
+
+        self.system_config_ctrl = SystemConfigController(self)
+        self.systems = self.system_config_ctrl.load_systems()
+
+        # Grouped state and external tool registry
+        from gui.measurement_gui.child_gui_registry import ChildGuiRegistry
+        from gui.measurement_gui.connection_controller import ConnectionController
+        from gui.measurement_gui.sample_gui_sync import SampleGuiSyncController
+        from gui.measurement_gui.tool_registry import GuiToolRegistry
+
+        self.tool_registry = GuiToolRegistry()
+        self.child_gui_registry = ChildGuiRegistry()
+        self.save_path_ctrl = SavePathController(self)
+        self.sample_sync = SampleGuiSyncController(self)
+        self.connection_ctrl = ConnectionController(self)
+        from gui.measurement_gui.lifecycle_controller import LifecycleController
+
+        self.lifecycle_ctrl = LifecycleController(self)
 
         # === NEW MODERN LAYOUT INITIALIZATION ===
         # Create layout builder with callbacks
@@ -550,6 +612,8 @@ class MeasurementGUI:
                 "browse_save": self._browse_save_location,
                 "open_motor_control": self.open_motor_control,
                 "check_connection": self.check_connection,
+                "open_pulse_testing": self.open_pulse_testing_gui,
+                "open_device_visualizer": self.open_device_visualizer,
                 "start_manual_endurance": self.start_manual_endurance,
                 "start_manual_retention": self.start_manual_retention,
                 "toggle_manual_led": self.toggle_manual_led,
@@ -645,85 +709,7 @@ class MeasurementGUI:
 
 
     def cleanup(self) -> None:
-        """Attempt to gracefully shutdown connected instruments and clear flags.
-
-        This method is registered with `atexit` to ensure the SMU/PSU/temp
-        controllers are left in a safe state when the GUI exits. It performs
-        best-effort cleanup and swallows exceptions so shutdown proceeds.
-        """
-
-        try:
-            if hasattr(self, "plot_updaters"):
-                self.plot_updaters.stop_all_threads()
-        except Exception:
-            pass
-
-        #  self.keithley.shutdown()
-        # # todo send comand to temp if connected to cool down to 0
-        # if self.itc_connected:
-        #     self.itc.set_temperature(0) # set temp controller tp 0 deg
-        # if self.psu_connected:
-        #     self.psu.disable_channel(1)
-        #     self.psu.disable_channel(2)
-        #     self.psu.close()
-        try:
-            if getattr(self, 'keithley', None):
-                self.keithley.shutdown()
-        except Exception:
-            # Don't raise during process exit; just log to stdout where possible
-            print("Warning: keithley.shutdown() failed during cleanup")
-
-        # Clean up analysis stats window
-        try:
-            if hasattr(self, 'analysis_stats_window') and self.analysis_stats_window:
-                self.analysis_stats_window.destroy()
-        except Exception:
-            pass
-        
-        # If a temperature controller is connected, try to set it to 0°C
-        try:
-            if getattr(self, 'itc_connected', False) and getattr(self, 'itc', None):
-                self.itc.set_temperature(0)
-        except Exception:
-            print("Warning: could not reset temperature controller during cleanup")
-
-        # Disable and close PSU channels if a PSU was connected
-        try:
-            if getattr(self, 'psu_connected', False) and getattr(self, 'psu', None):
-                self.psu.disable_channel(1)
-                self.psu.disable_channel(2)
-                self.psu.close()
-        except Exception:
-            pass
-
-        # Disconnect laser/optical system if connected
-        try:
-            if hasattr(self, 'optical') and self.optical is not None:
-                # Disable optical source first
-                try:
-                    self.optical.set_enabled(False)
-                except Exception:
-                    pass
-                # Close connection properly (restores laser to manual control mode)
-                try:
-                    self.optical.close()
-                    print("[OPTICAL] Laser/optical system disconnected and restored to manual control")
-                except Exception as e:
-                    print(f"[OPTICAL] Warning: Failed to close optical system: {e}")
-        except Exception:
-            print("Warning: Optical system cleanup failed")
-
-        # Also try disconnect_laser method if it exists (for backward compatibility)
-        try:
-            if hasattr(self, 'disconnect_laser'):
-                self.disconnect_laser()
-        except Exception:
-            pass
-
-        print("safely turned everything off")
-        # Reset runtime test flags
-        self.tests_running = False
-        self.abort_tests_flag = False
+        self.lifecycle_ctrl.cleanup()
 
     def _on_analysis_enabled_changed(self, *args) -> None:
         """
@@ -3178,101 +3164,16 @@ class MeasurementGUI:
             return None
 
     def open_pulse_testing_gui(self) -> None:
-        """Launch the pulse testing GUI with current sample/context info."""
-        sample_name = None
-        if hasattr(self, "sample_name_var"):
-            try:
-                sample_name = self.sample_name_var.get().strip()
-            except Exception:
-                sample_name = None
-        if not sample_name and hasattr(self, "sample_gui") and self.sample_gui:
-            for attr in ("current_device_name", "current_sample_name", "sample_name"):
-                fallback = getattr(self.sample_gui, attr, None)
-                if fallback:
-                    sample_name = str(fallback).strip()
-                    break
-
-        device_label = getattr(self, "device_section_and_number", None)
-        custom_path = None
-        use_custom_var = getattr(self, "use_custom_save_var", None)
-        if use_custom_var and use_custom_var.get():
-            custom_loc = getattr(self, "custom_save_location", None)
-            if custom_loc:
-                custom_path = str(custom_loc)
-
-        address = getattr(self, "keithley_address", None)
-        if (not address) and hasattr(self, "keithley_address_var"):
-            try:
-                address = self.keithley_address_var.get().strip()
-            except Exception:
-                address = None
-
-        try:
-            TSPTestingGUI(
-                self.master,
-                device_address=address or "GPIB0::17::INSTR",
-                provider=self,
-                sample_name=sample_name,
-                device_label=device_label,
-                custom_save_base=custom_path,
-            )
-        except Exception as exc:
-            messagebox.showerror("Pulse Testing", f"Could not open Pulse Testing GUI:\n{exc}")
+        from gui.measurement_gui.child_gui_launchers import open_pulse_testing_gui
+        open_pulse_testing_gui(self)
 
     def open_laser_fg_scope_gui(self) -> None:
-        """Launch the Laser FG Scope experiment GUI.
-
-        Passes self as provider so the GUI can resolve the sample/device
-        save path from the main Measurement GUI's context.
-        """
-        try:
-            from gui.laser_fg_scope_gui import LaserFGScopeGUI
-            LaserFGScopeGUI(self.master, provider=self)
-        except Exception as exc:
-            messagebox.showerror(
-                "Laser FG Scope GUI",
-                f"Could not open Laser FG Scope GUI:\n{exc}",
-            )
+        from gui.measurement_gui.child_gui_launchers import open_laser_fg_scope_gui
+        open_laser_fg_scope_gui(self)
 
     def open_device_visualizer(self) -> None:
-        """Launch the Device Analysis Visualizer with current sample/context info."""
-        # Get sample name (same logic as open_pulse_testing_gui)
-        sample_name = None
-        if hasattr(self, "sample_name_var"):
-            try:
-                sample_name = self.sample_name_var.get().strip()
-            except Exception:
-                sample_name = None
-        
-        # Fallback to sample_gui if available
-        if not sample_name and hasattr(self, "sample_gui") and self.sample_gui:
-            for attr in ("current_device_name", "current_sample_name", "sample_name"):
-                fallback = getattr(self.sample_gui, attr, None)
-                if fallback:
-                    sample_name = str(fallback).strip()
-                    break
-        
-        # Get sample save directory path
-        sample_path = None
-        if sample_name:
-            try:
-                sample_path = self._get_sample_save_directory(sample_name)
-            except Exception:
-                sample_path = None
-        
-        # Launch the visualizer
-        try:
-            from tools.device_visualizer.device_visualizer_app import launch_visualizer
-            # Note: launch_visualizer creates its own QApplication, so this will
-            # run in a separate process/event loop
-            launch_visualizer(sample_path=sample_path)
-        except Exception as exc:
-            import traceback
-            traceback.print_exc()
-            messagebox.showerror(
-                "Device Visualizer", 
-                f"Could not open Device Visualizer:\n{exc}"
-            )
+        from gui.measurement_gui.child_gui_launchers import open_device_visualizer
+        open_device_visualizer(self)
 
     def _start_custom_measurement_thread(self) -> None:
         """Start the custom measurement workflow in a background thread."""
@@ -3905,750 +3806,44 @@ class MeasurementGUI:
         self.temp_connect_button.grid(row=3, column=2)
 
     def set_default_system(self) -> None:
-        """Set default system to 'Please Select System' without auto-connecting"""
-        systems = self.systems
-        default = "Please Select System"
-        # Set to "Please Select System" without triggering auto-connect
-        self.system_var.set(default)
-        # Don't call _handle_system_selection to avoid auto-connection
+        self.system_config_ctrl.set_default_system()
 
     def load_systems(self) -> List[str]:
-        """Load system configurations from JSON file"""
-        config_file = str(_PROJECT_ROOT / "Json_Files" / "system_configs.json")
-
-        try:
-            with open(config_file, 'r') as f:
-                self.system_configs = json.load(f)
-            systems_list = list(self.system_configs.keys())
-            # Prepend "Please Select System" to the list
-            return ["Please Select System"] + systems_list
-        except (FileNotFoundError, json.JSONDecodeError):
-            return ["Please Select System", "No systems available"]
+        return self.system_config_ctrl.load_systems()
 
     def _get_smu_current_range_a(self) -> float:
-        """Return configured SMU current measurement range in A (0 = auto)."""
-        raw_value = 0.0
-        try:
-            if hasattr(self, "smu_current_range_var"):
-                raw_value = float(self.smu_current_range_var.get())
-            else:
-                raw_value = float(getattr(self, "smu_current_range_a", 0.0))
-        except Exception:
-            raw_value = 0.0
-        if raw_value < 0:
-            return 0.0
-        return raw_value
+        return self.system_config_ctrl.get_smu_current_range_a()
 
     def _apply_smu_current_range(self) -> None:
-        """
-        Apply current measurement range to active SMU if supported.
-        0 means auto range.
-        """
-        current_range_a = self._get_smu_current_range_a()
-        self.smu_current_range_a = current_range_a
-        try:
-            if getattr(self, "keithley", None) is not None and hasattr(self.keithley, "set_current_measurement_range"):
-                self.keithley.set_current_measurement_range(current_range_a)
-        except Exception as e:
-            print(f"Warning: Could not apply SMU current range ({current_range_a} A): {e}")
+        self.system_config_ctrl.apply_smu_current_range()
 
     def load_system(self) -> None:
-        """Load the selected system configuration and populate all fields"""
-        selected_system = getattr(self, 'system_var', None)
-        if not selected_system:
-            return
-        
-        system_name = selected_system.get() if hasattr(selected_system, 'get') else str(selected_system)
-        if not system_name or system_name == "No systems available" or system_name == "Please Select System":
-            return
-        
-        if not hasattr(self, 'system_configs') or system_name not in self.system_configs:
-            # Reload systems
-            self.load_systems()
-            if system_name not in self.system_configs:
-                messagebox.showwarning("System Not Found", f"System '{system_name}' not found in configuration file.")
-                return
-        
-        config = self.system_configs[system_name]
-        
-        # Update SMU section
-        smu_type = config.get("SMU Type", "")
-        smu_address = config.get("SMU_address", "")
-        smu_current_range_a = float(config.get("SMU_current_range_a", 0.0) or 0.0)
-        if hasattr(self, 'smu_type_var'):
-            self.smu_type_var.set(smu_type)
-        if hasattr(self, 'keithley_address_var'):
-            self.keithley_address_var.set(smu_address)
-        if hasattr(self, "smu_current_range_var"):
-            self.smu_current_range_var.set(smu_current_range_a)
-        # Ensure address is in combobox values if using combobox
-        if hasattr(self, 'iv_address_combo') and smu_address:
-            current_values = list(self.iv_address_combo['values'])
-            if smu_address not in current_values:
-                self.iv_address_combo['values'] = tuple([smu_address] + list(current_values))
-        self.SMU_type = smu_type
-        self.keithley_address = smu_address
-        self.iv_address = smu_address
-        self.smu_current_range_a = smu_current_range_a
-        
-        # Update PSU section
-        psu_type = config.get("psu_type", "None")
-        psu_address = config.get("psu_address", "")
-        if hasattr(self, 'psu_type_var'):
-            self.psu_type_var.set(psu_type if psu_type else "None")
-        if hasattr(self, 'psu_address_var'):
-            self.psu_address_var.set(psu_address)
-        # Ensure address is in combobox values if using combobox
-        if hasattr(self, 'psu_address_combo') and psu_address:
-            current_values = list(self.psu_address_combo['values'])
-            if psu_address not in current_values:
-                self.psu_address_combo['values'] = tuple([psu_address] + list(current_values))
-        self.psu_visa_address = psu_address
-        
-        # Update Temp section
-        temp_type = config.get("temp_controller")
-        if not temp_type or temp_type.strip() == "":
-            temp_type = "None"
-        temp_address = config.get("temp_address", "")
-        if temp_type == "None":
-            temp_address = ""
-        if hasattr(self, 'temp_type_var'):
-            self.temp_type_var.set(temp_type)
-        if hasattr(self, 'temp_address_var'):
-            self.temp_address_var.set(temp_address)
-        # Ensure address is in combobox values if using combobox
-        if hasattr(self, 'temp_address_combo') and temp_address:
-            current_values = list(self.temp_address_combo['values'])
-            if temp_address not in current_values:
-                self.temp_address_combo['values'] = tuple([temp_address] + list(current_values))
-        self.temp_controller_type = temp_type if temp_type != "None" else ""
-        self.temp_controller_address = temp_address
-        self.controller_type = temp_type
-        self.controller_address = temp_address
-        
-        # Update optical section
-        optical_config = config.get("optical")
-        if optical_config and hasattr(self, 'optical_type_var'):
-            opt_type = optical_config.get("type", "None")
-            self.optical_type_var.set(opt_type)
-            
-            # Expand optical section if configured
-            if opt_type != "None" and hasattr(self, 'optical_config_frame'):
-                if hasattr(self, 'optical_expanded_var') and not self.optical_expanded_var.get():
-                    if hasattr(self, 'optical_toggle_button'):
-                        self.layout_builder._toggle_optical_section(self, self.optical_config_frame, self.optical_toggle_button)
-            
-            if opt_type == "LED":
-                if hasattr(self, 'optical_led_units_var'):
-                    self.optical_led_units_var.set(optical_config.get("units", "mA"))
-                if hasattr(self, 'optical_led_channels_var'):
-                    channels = optical_config.get("channels", {})
-                    channels_str = ",".join([f"{k}:{v}" for k, v in channels.items()])
-                    self.optical_led_channels_var.set(channels_str)
-                limits = optical_config.get("limits", {})
-                if hasattr(self, 'optical_led_min_var'):
-                    self.optical_led_min_var.set(str(limits.get("min", "0.0")))
-                if hasattr(self, 'optical_led_max_var'):
-                    self.optical_led_max_var.set(str(limits.get("max", "30.0")))
-                defaults = optical_config.get("defaults", {})
-                if hasattr(self, 'optical_led_default_channel_var'):
-                    self.optical_led_default_channel_var.set(defaults.get("channel", "380nm"))
-                # Update UI
-                if hasattr(self, 'optical_config_frame'):
-                    self.layout_builder._update_optical_ui(self, self.optical_config_frame)
-                    
-            elif opt_type == "Laser":
-                if hasattr(self, 'optical_laser_driver_var'):
-                    self.optical_laser_driver_var.set(optical_config.get("driver", "Oxxius"))
-                if hasattr(self, 'optical_laser_address_var'):
-                    self.optical_laser_address_var.set(optical_config.get("address", "COM4"))
-                if hasattr(self, 'optical_laser_baud_var'):
-                    self.optical_laser_baud_var.set(str(optical_config.get("baud", "19200")))
-                if hasattr(self, 'optical_laser_units_var'):
-                    self.optical_laser_units_var.set(optical_config.get("units", "mW"))
-                if hasattr(self, 'optical_laser_wavelength_var'):
-                    self.optical_laser_wavelength_var.set(str(optical_config.get("wavelength_nm", "405")))
-                limits = optical_config.get("limits", {})
-                if hasattr(self, 'optical_laser_min_var'):
-                    self.optical_laser_min_var.set(str(limits.get("min", "0.0")))
-                if hasattr(self, 'optical_laser_max_var'):
-                    self.optical_laser_max_var.set(str(limits.get("max", "10.0")))
-                defaults = optical_config.get("defaults", {})
-                if hasattr(self, 'optical_laser_default_var'):
-                    self.optical_laser_default_var.set(str(defaults.get("level", 1.0)))
-                # Update UI
-                if hasattr(self, 'optical_config_frame'):
-                    self.layout_builder._update_optical_ui(self, self.optical_config_frame)
-        elif hasattr(self, 'optical_type_var'):
-            self.optical_type_var.set("None")
-        
-        # Try to create optical object; reuse existing laser connection to avoid "port in use"
-        opt_cfg = config.get("optical") or {}
-        opt_type = (opt_cfg.get("type") or "").strip().lower()
-        existing = getattr(self, "optical", None)
-        if opt_type == "laser" and existing is not None:
-            try:
-                caps = getattr(existing, "capabilities", {}) or {}
-                if caps.get("type") == "Laser":
-                    default_mw = 1.0
-                    if hasattr(self, "optical_laser_default_var"):
-                        try:
-                            default_mw = float(self.optical_laser_default_var.get())
-                        except (ValueError, AttributeError):
-                            pass
-                    existing.set_level(default_mw, "mW")
-                    _opt_status = getattr(self, "optical_laser_status_var", None)
-                    if _opt_status is not None:
-                        _opt_status.set("Connected")
-                    # Skip create_optical - we already have the laser
-                    return
-            except Exception:
-                pass
-        try:
-            self.optical = create_optical_from_system_config(config)
-            if self.optical is not None and hasattr(self.optical, "set_level"):
-                default_mw = 1.0
-                if hasattr(self, "optical_laser_default_var"):
-                    try:
-                        default_mw = float(self.optical_laser_default_var.get())
-                    except (ValueError, AttributeError):
-                        pass
-                self.optical.set_level(default_mw, "mW")
-            _opt_status = getattr(self, "optical_laser_status_var", None)
-            if _opt_status is not None:
-                _opt_status.set("Connected" if self.optical is not None else "Not connected")
-        except Exception:
-            self.optical = None
-            _opt_status = getattr(self, "optical_laser_status_var", None)
-            if _opt_status is not None:
-                _opt_status.set("Not connected")
+        self.system_config_ctrl.load_system()
 
     def connect_optical_laser(self) -> None:
-        """Connect to laser from current Setup tab optical settings. Sets default power to 1 mW (or Default (mW) value)."""
-        if getattr(self, "optical_type_var", None) is None or self.optical_type_var.get() != "Laser":
-            messagebox.showwarning("Laser", "Select Optical type 'Laser' and configure Address/Baud first.")
-            return
-        config = self._build_optical_config_from_ui()
-        if config is None:
-            return
-        try:
-            if getattr(self, "optical", None) is not None:
-                try:
-                    self.optical.close()
-                except Exception:
-                    pass
-                self.optical = None
-            self.optical = create_optical_from_system_config(config)
-            if self.optical is None:
-                messagebox.showerror("Laser", "Could not connect to laser. Check Address (e.g. COM4), Baud, and that the port is not in use by another app.")
-            else:
-                default_mw = 1.0
-                if hasattr(self, "optical_laser_default_var"):
-                    try:
-                        default_mw = float(self.optical_laser_default_var.get())
-                    except (ValueError, AttributeError):
-                        pass
-                self.optical.set_level(default_mw, "mW")
-                messagebox.showinfo("Laser", f"Connected. Default power set to {default_mw} mW.")
-        except Exception as e:
-            self.optical = None
-            messagebox.showerror("Laser", f"Connection failed: {e}")
-        status_var = getattr(self, "optical_laser_status_var", None)
-        if status_var is not None:
-            status_var.set("Connected" if self.optical is not None else "Not connected")
-        if hasattr(self, "_refresh_led_laser_controls"):
-            self._refresh_led_laser_controls()
+        self.system_config_ctrl.connect_optical_laser()
 
     def disconnect_optical_laser(self) -> None:
-        """Disconnect laser and restore to manual control."""
-        if getattr(self, "optical", None) is None:
-            status_var = getattr(self, "optical_laser_status_var", None)
-            if status_var is not None:
-                status_var.set("Not connected")
-            return
-        try:
-            self.optical.close()
-        except Exception:
-            pass
-        self.optical = None
-        status_var = getattr(self, "optical_laser_status_var", None)
-        if status_var is not None:
-            status_var.set("Not connected")
-        if hasattr(self, "_refresh_led_laser_controls"):
-            self._refresh_led_laser_controls()
+        self.system_config_ctrl.disconnect_optical_laser()
 
     def _build_optical_config_from_ui(self):
-        """Build full system config dict with optical section from current UI (for connect_optical_laser)."""
-        opt_type = getattr(self, "optical_type_var", None)
-        if opt_type is None or opt_type.get() != "Laser":
-            return None
-        config = {"optical": {"type": "Laser"}}
-        opt = config["optical"]
-        opt["driver"] = getattr(self, "optical_laser_driver_var", None) and self.optical_laser_driver_var.get() or "Oxxius"
-        opt["address"] = getattr(self, "optical_laser_address_var", None) and self.optical_laser_address_var.get() or "COM4"
-        try:
-            opt["baud"] = int(getattr(self, "optical_laser_baud_var", None) and self.optical_laser_baud_var.get() or 19200)
-        except ValueError:
-            opt["baud"] = 19200
-        opt["units"] = getattr(self, "optical_laser_units_var", None) and self.optical_laser_units_var.get() or "mW"
-        try:
-            opt["wavelength_nm"] = int(getattr(self, "optical_laser_wavelength_var", None) and self.optical_laser_wavelength_var.get() or 405)
-        except ValueError:
-            opt["wavelength_nm"] = 405
-        limits = {}
-        try:
-            limits["min"] = float(getattr(self, "optical_laser_min_var", None) and self.optical_laser_min_var.get() or 0.0)
-        except ValueError:
-            limits["min"] = 0.0
-        try:
-            limits["max"] = float(getattr(self, "optical_laser_max_var", None) and self.optical_laser_max_var.get() or 10.0)
-        except ValueError:
-            limits["max"] = 10.0
-        opt["limits"] = limits
-        defaults = {}
-        try:
-            defaults["level"] = float(getattr(self, "optical_laser_default_var", None) and self.optical_laser_default_var.get() or 1.0)
-        except ValueError:
-            defaults["level"] = 1.0
-        opt["defaults"] = defaults
-        return config
+        return self.system_config_ctrl.build_optical_config_from_ui()
 
     def save_system(self) -> None:
-        """Save current configuration as a new system"""
-        # Get system name from user
-        system_name = simpledialog.askstring("Save System", "Enter system name:")
-        if not system_name:
-            return
-        
-        # Build configuration dictionary
-        config = {}
-        
-        # SMU configuration
-        if hasattr(self, 'smu_type_var'):
-            config["SMU Type"] = self.smu_type_var.get()
-        elif hasattr(self, 'SMU_type'):
-            config["SMU Type"] = self.SMU_type
-        else:
-            config["SMU Type"] = "Keithley 2401"
-        
-        if hasattr(self, 'keithley_address_var'):
-            config["SMU_address"] = self.keithley_address_var.get()
-        elif hasattr(self, 'keithley_address'):
-            config["SMU_address"] = self.keithley_address
-        else:
-            config["SMU_address"] = ""
-        config["SMU_current_range_a"] = self._get_smu_current_range_a()
-        
-        # PSU configuration
-        if hasattr(self, 'psu_type_var'):
-            psu_type = self.psu_type_var.get()
-            if psu_type and psu_type != "None":
-                config["psu_type"] = psu_type
-                if hasattr(self, 'psu_address_var'):
-                    config["psu_address"] = self.psu_address_var.get()
-                elif hasattr(self, 'psu_visa_address'):
-                    config["psu_address"] = self.psu_visa_address
-                else:
-                    config["psu_address"] = ""
-        
-        # Temperature controller configuration
-        if hasattr(self, 'temp_type_var'):
-            temp_type = self.temp_type_var.get()
-            if temp_type and temp_type != "None" and temp_type != "Auto-Detect":
-                config["temp_controller"] = temp_type
-                if hasattr(self, 'temp_address_var'):
-                    config["temp_address"] = self.temp_address_var.get()
-                elif hasattr(self, 'temp_controller_address'):
-                    config["temp_address"] = self.temp_controller_address
-                else:
-                    config["temp_address"] = ""
-        
-        # Optical configuration
-        if hasattr(self, 'optical_type_var'):
-            opt_type = self.optical_type_var.get()
-            if opt_type and opt_type != "None":
-                optical_config = {"type": opt_type}
-                
-                if opt_type == "LED":
-                    if hasattr(self, 'optical_led_units_var'):
-                        optical_config["units"] = self.optical_led_units_var.get()
-                    else:
-                        optical_config["units"] = "mA"
-                    
-                    # Parse channels string
-                    if hasattr(self, 'optical_led_channels_var'):
-                        channels_str = self.optical_led_channels_var.get()
-                        channels = {}
-                        for pair in channels_str.split(','):
-                            if ':' in pair:
-                                key, val = pair.strip().split(':', 1)
-                                try:
-                                    channels[key] = int(val)
-                                except ValueError:
-                                    pass
-                        optical_config["channels"] = channels
-                    
-                    # Limits
-                    limits = {}
-                    if hasattr(self, 'optical_led_min_var'):
-                        try:
-                            limits["min"] = float(self.optical_led_min_var.get())
-                        except ValueError:
-                            limits["min"] = 0.0
-                    if hasattr(self, 'optical_led_max_var'):
-                        try:
-                            limits["max"] = float(self.optical_led_max_var.get())
-                        except ValueError:
-                            limits["max"] = 30.0
-                    optical_config["limits"] = limits
-                    
-                    # Defaults
-                    defaults = {}
-                    if hasattr(self, 'optical_led_default_channel_var'):
-                        defaults["channel"] = self.optical_led_default_channel_var.get()
-                    optical_config["defaults"] = defaults
-                    
-                elif opt_type == "Laser":
-                    if hasattr(self, 'optical_laser_driver_var'):
-                        optical_config["driver"] = self.optical_laser_driver_var.get()
-                    else:
-                        optical_config["driver"] = "Oxxius"
-                    
-                    if hasattr(self, 'optical_laser_address_var'):
-                        optical_config["address"] = self.optical_laser_address_var.get()
-                    else:
-                        optical_config["address"] = "COM4"
-                    
-                    if hasattr(self, 'optical_laser_baud_var'):
-                        try:
-                            optical_config["baud"] = int(self.optical_laser_baud_var.get())
-                        except ValueError:
-                            optical_config["baud"] = 19200
-                    else:
-                        optical_config["baud"] = 19200
-                    
-                    if hasattr(self, 'optical_laser_units_var'):
-                        optical_config["units"] = self.optical_laser_units_var.get()
-                    else:
-                        optical_config["units"] = "mW"
-                    
-                    if hasattr(self, 'optical_laser_wavelength_var'):
-                        try:
-                            optical_config["wavelength_nm"] = int(self.optical_laser_wavelength_var.get())
-                        except ValueError:
-                            optical_config["wavelength_nm"] = 405
-                    else:
-                        optical_config["wavelength_nm"] = 405
-                    
-                    # Limits
-                    limits = {}
-                    if hasattr(self, 'optical_laser_min_var'):
-                        try:
-                            limits["min"] = float(self.optical_laser_min_var.get())
-                        except ValueError:
-                            limits["min"] = 0.0
-                    if hasattr(self, 'optical_laser_max_var'):
-                        try:
-                            limits["max"] = float(self.optical_laser_max_var.get())
-                        except ValueError:
-                            limits["max"] = 10.0
-                    optical_config["limits"] = limits
-                    # Defaults: default power 1 mW (or value from Default (mW) field)
-                    defaults = {}
-                    if hasattr(self, 'optical_laser_default_var'):
-                        try:
-                            defaults["level"] = float(self.optical_laser_default_var.get())
-                        except ValueError:
-                            defaults["level"] = 1.0
-                    else:
-                        defaults["level"] = 1.0
-                    optical_config["defaults"] = defaults
-                
-                config["optical"] = optical_config
-        
-        # Load existing configs
-        config_file = str(_PROJECT_ROOT / "Json_Files" / "system_configs.json")
-        try:
-            with open(config_file, 'r') as f:
-                all_configs = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            all_configs = {}
-        
-        # Add/update system
-        all_configs[system_name] = config
-        
-        # Save to file
-        try:
-            with open(config_file, 'w') as f:
-                json.dump(all_configs, f, indent=4)
-            
-            # Update local configs
-            self.system_configs = all_configs
-            
-            # Update system combo
-            if hasattr(self, 'system_combo'):
-                systems = list(all_configs.keys())
-                self.system_combo['values'] = systems
-                self.system_var.set(system_name)
-            
-            messagebox.showinfo("System Saved", f"System '{system_name}' saved successfully.")
-        except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save system: {e}")
-    
+        self.system_config_ctrl.save_system()
+
     def on_system_change(self, selected_system: str) -> None:
-        """Update addresses when system selection changes (legacy method)"""
-        if selected_system == "Please Select System" or not selected_system:
-            # Don't update addresses if no system selected
-            return
-            
-        if selected_system in self.system_configs:
-            config = self.system_configs[selected_system]
-
-            # Update IV section
-            iv_address = config.get("SMU_address", "")
-            smu_current_range_a = float(config.get("SMU_current_range_a", 0.0) or 0.0)
-            self.iv_address = iv_address
-            self.keithley_address = iv_address
-            self.smu_current_range_a = smu_current_range_a
-            
-            # Update the StringVar (this should sync with combobox if bound)
-            if hasattr(self, 'keithley_address_var'):
-                self.keithley_address_var.set(iv_address)
-            if hasattr(self, "smu_current_range_var"):
-                self.smu_current_range_var.set(smu_current_range_a)
-            
-            # Also explicitly update combobox if it exists (in case it's not bound properly)
-            if hasattr(self, 'iv_address_combo'):
-                # Ensure address is in combobox values first
-                current_values = list(self.iv_address_combo['values'])
-                if iv_address and iv_address not in current_values:
-                    self.iv_address_combo['values'] = tuple([iv_address] + list(current_values))
-                # Then set the value
-                self.iv_address_combo.set(iv_address)
-            
-            self.update_component_state("iv", iv_address)
-
-            # Update PSU section
-            psu_address = config.get("psu_address", "")
-            if hasattr(self, 'psu_address_var'):
-                self.psu_address_var.set(psu_address)
-            self.psu_visa_address = psu_address
-            self.update_component_state("psu", psu_address)
-
-            # Update Temp section
-            temp_type = config.get("temp_controller")
-            if not temp_type or temp_type.strip() == "":
-                temp_type = "None"
-            temp_address = config.get("temp_address", "")
-            if temp_type == "None":
-                temp_address = ""
-            if hasattr(self, 'temp_type_var'):
-                self.temp_type_var.set(temp_type)
-            if hasattr(self, 'temp_address_var'):
-                self.temp_address_var.set(temp_address)
-            self.temp_controller_address = temp_address
-            self.update_component_state("temp", temp_address)
-
-            # updater controller type
-            self.temp_controller_type = temp_type if temp_type != "None" else ""
-            self.controller_type = temp_type
-            self.controller_address = temp_address
-
-            # smu type
-            self.SMU_type = config.get("SMU Type", "")
-            print(self.SMU_type)
-
-            # Optical: reuse existing laser connection when config has Laser (avoids "port in use")
-            opt_cfg = config.get("optical") or {}
-            opt_type = (opt_cfg.get("type") or "").strip().lower()
-            existing = getattr(self, "optical", None)
-            if opt_type == "laser" and existing is not None:
-                try:
-                    caps = getattr(existing, "capabilities", {}) or {}
-                    if caps.get("type") == "Laser":
-                        default_mw = 1.0
-                        if hasattr(self, "optical_laser_default_var"):
-                            try:
-                                default_mw = float(self.optical_laser_default_var.get())
-                            except (ValueError, AttributeError):
-                                pass
-                        existing.set_level(default_mw, "mW")
-                        _s = getattr(self, "optical_laser_status_var", None)
-                        if _s is not None:
-                            _s.set("Connected")
-                        # Skip create_optical - already connected
-                    else:
-                        existing = None
-                except Exception:
-                    existing = None
-            if opt_type != "laser" or existing is None:
-                try:
-                    self.optical = create_optical_from_system_config(config)
-                    if self.optical is not None and hasattr(self.optical, "set_level"):
-                        default_mw = 1.0
-                        if hasattr(self, "optical_laser_default_var"):
-                            try:
-                                default_mw = float(self.optical_laser_default_var.get())
-                            except (ValueError, AttributeError):
-                                pass
-                        self.optical.set_level(default_mw, "mW")
-                    _s = getattr(self, "optical_laser_status_var", None)
-                    if _s is not None:
-                        _s.set("Connected" if self.optical is not None else "Not connected")
-                except Exception:
-                    self.optical = None
-                    _s = getattr(self, "optical_laser_status_var", None)
-                    if _s is not None:
-                        _s.set("Not connected")
+        self.system_config_ctrl.on_system_change(selected_system)
 
     def _handle_system_selection(self, selected_system: str) -> None:
-        """Callback for legacy system dropdown - only connects if a valid system is selected."""
-        # Don't auto-connect if "Please Select System" is selected
-        if selected_system == "Please Select System" or not selected_system:
-            self.on_system_change(selected_system)
-            return
-        
-        self.on_system_change(selected_system)
-        # Don't auto-connect - user must click Connect button manually
-        # self.auto_connect_current_system()  # Removed auto-connect
-
+        self.system_config_ctrl.handle_system_selection(selected_system)
 
     def update_component_state(self, component_type: str, address: str) -> None:
-        """Enable/disable and style components based on address availability"""
-        has_address = bool(address and address.strip())
-
-        # Build components list - labels may not exist in modern layout
-        if component_type == "iv":
-            label = getattr(self, "iv_label", None)
-            entry = getattr(self, "iv_address_entry", None)
-            button = getattr(self, "iv_connect_button", None)
-        elif component_type == "psu":
-            label = getattr(self, "psu_label", None)
-            entry = getattr(self, "psu_address_entry", None)
-            button = getattr(self, "psu_connect_button", None)
-        elif component_type == "temp":
-            label = getattr(self, "temp_label", None)
-            entry = getattr(self, "temp_address_entry", None)
-            button = getattr(self, "temp_connect_button", None)
-        else:
-            return
-
-        # Skip if required components don't exist
-        if entry is None or button is None:
-            return
-
-        # Update label color if it exists
-        if label is not None:
-            if has_address:
-                label.configure(fg="black")
-            else:
-                label.configure(fg="grey")
-
-        # Update entry state
-        # Check if it's a ttk widget (ttk widgets don't support bg/fg options)
-        # Ttk widgets have class names starting with "T" (e.g., "TEntry", "TCombobox")
-        # Regular tk widgets have class names without "T" prefix (e.g., "Entry", "Button")
-        widget_class = entry.winfo_class()
-        is_ttk_widget = widget_class.startswith("T")
-        
-        try:
-            if has_address:
-                if is_ttk_widget:
-                    entry.configure(state="normal")
-                else:
-                    entry.configure(state="normal", bg="white", fg="black")
-            else:
-                if is_ttk_widget:
-                    entry.configure(state="disabled")
-                else:
-                    entry.configure(state="disabled", bg="lightgrey", fg="grey")
-        except Exception:
-            # Fallback: if bg/fg options aren't supported, just update state
-            entry.configure(state="normal" if has_address else "disabled")
-
-        # Update button state
-        if has_address:
-            button.configure(state="normal")
-        else:
-            button.configure(state="disabled")
+        self.system_config_ctrl.update_component_state(component_type, address)
 
     def auto_connect_current_system(self) -> bool:
-        """Attempt to connect to the currently selected SMU and update status label."""
-        keithley_address = ""
-        if hasattr(self, "keithley_address_var"):
-            try:
-                keithley_address = self.keithley_address_var.get().strip()
-            except Exception:
-                keithley_address = ""
-        if not keithley_address:
-            keithley_address = getattr(self, "keithley_address", "").strip()
+        return self.connection_ctrl.auto_connect_current_system()
 
-        smu_type = getattr(self, "SMU_type", "")
-        if not smu_type and hasattr(self, "smu_type_var"):
-            try:
-                smu_type = self.smu_type_var.get()
-            except Exception:
-                smu_type = ""
-        smu_type = smu_type or "Keithley 2401"
-
-        status_label = getattr(self, "connection_status_label", None)
-        success_color = getattr(self.layout_builder, "COLOR_SUCCESS", "green") if hasattr(self, "layout_builder") else "green"
-        error_color = getattr(self.layout_builder, "COLOR_ERROR", "red") if hasattr(self, "layout_builder") else "red"
-        warning_color = getattr(self.layout_builder, "COLOR_WARNING", "orange") if hasattr(self, "layout_builder") else "orange"
-
-        if not keithley_address:
-            print("⚠️  No SMU address configured; skipping auto-connect.")
-            if status_label:
-                status_label.config(text="● Address Required", fg=warning_color)
-            return False
-
-        if status_label:
-            status_label.config(text="● Connecting...", fg=warning_color)
-
-        print(f"Connecting to {smu_type} @ {keithley_address}...")
-        self.connect_keithley()
-
-        connected = getattr(self, "connected", False)
-        if connected:
-            idn = ""
-            try:
-                if hasattr(self.keithley, "get_idn"):
-                    idn = self.keithley.get_idn()
-            except Exception as exc:
-                print(f"⚠️  Warning: Unable to query IDN: {exc}")
-            
-            # Extract model number from IDN string
-            model_number = smu_type  # Default fallback
-            if idn:
-                # IDN format is typically: "Manufacturer,MODEL XXXX,Serial,Firmware"
-                # Try to extract model number
-                parts = idn.split(',')
-                for part in parts:
-                    part = part.strip()
-                    # Look for "MODEL" keyword or common model patterns
-                    if 'MODEL' in part.upper():
-                        # Extract model number (e.g., "MODEL 2401" -> "2401")
-                        model_match = part.upper().replace('MODEL', '').strip()
-                        if model_match:
-                            model_number = model_match
-                            break
-                    # Also check if part looks like a model number (e.g., "2401", "2450", "4200A")
-                    elif any(char.isdigit() for char in part) and len(part) <= 10:
-                        # Check if it's likely a model number (contains digits and is short)
-                        if any(x in part.upper() for x in ['2400', '2450', '2600', '4200', '2636']):
-                            model_number = part
-                            break
-            
-            status_text = model_number
-            print(f"✓ Connected: {idn or f'{smu_type} @ {keithley_address}'}")
-            if status_label:
-                status_label.config(text=f"● Connected: {status_text}", fg=success_color)
-            return True
-
-        print(f"❌ Connection failed for {smu_type} @ {keithley_address}")
-        if status_label:
-            status_label.config(text="● Connection Failed", fg=error_color)
-        return False
     def create_mode_selection(self,parent: tk.Misc) -> None:
         """Legacy wrapper retained for backward compatibility."""
         pass
@@ -5641,76 +4836,13 @@ class MeasurementGUI:
         ttk.Button(footer, text="Apply", command=apply_changes).grid(row=0, column=1, sticky="e")
 
     def reconnect_temperature_controller(self) -> None:
-        """Reconnect temperature controller based on GUI selection."""
-        controller_type = getattr(self, "controller_type", "Auto-Detect")
-        if hasattr(self, "controller_type_var"):
-            try:
-                controller_type = self.controller_type_var.get()
-            except Exception:
-                controller_type = getattr(self, "controller_type", "Auto-Detect")
-        address = getattr(self, "controller_address", self.temp_controller_address)
-        if hasattr(self, "controller_address_var"):
-            try:
-                address = self.controller_address_var.get()
-            except Exception:
-                address = getattr(self, "controller_address", self.temp_controller_address)
-        self.controller_type = controller_type or "Auto-Detect"
-        self.controller_address = address
-
-        # Close existing connection
-        try:
-            if self.temp_controller:
-                self.temp_controller.close()
-        except Exception:
-            pass
-
-        if controller_type == "Auto-Detect":
-            self.temp_controller = self.connections.create_temperature_controller(auto_detect=True)
-        elif controller_type == "None":
-            self.temp_controller = None
-            self.update_controller_status()
-            return
-        else:
-            if address == "Auto":
-                default_addresses = {
-                    "Lakeshore 335": "12",
-                    "Oxford ITC4": "ASRL12::INSTR",
-                }
-                address = default_addresses.get(controller_type, "12")
-            self.temp_controller = self.connections.create_temperature_controller(
-                auto_detect=False,
-                controller_type=controller_type,
-                address=address,
-            )
-
-        self.update_controller_status()
+        self.connection_ctrl.reconnect_temperature_controller()
 
     def reconnect_Kieithley_controller(self) -> None:
-        """Reconnect temperature controller based on GUI selection."""
-        self.reconnect_temperature_controller()
+        self.connection_ctrl.reconnect_keithley_controller()
 
     def update_controller_status(self) -> None:
-        """Update controller status indicator."""
-        info = self.connections.get_temperature_info()
-        label = getattr(self, "controller_status_label", None)
-        entry = getattr(self, "target_temp_entry", None)
-        btn = getattr(self, "target_temp_button", None)
-        if label:
-            if info:
-                label.config(
-                    text=f"● Connected: {info['type']}",
-                    fg="green"
-                )
-            else:
-                label.config(
-                    text="● Disconnected",
-                    fg="red"
-                )
-        state = "normal" if info else "disabled"
-        if entry:
-            entry.configure(state=state)
-        if btn:
-            btn.configure(state=state)
+        self.connection_ctrl.update_controller_status()
 
     def sequential_measure(self) -> None:
         """Delegate sequential measurement logic to the runner module."""
@@ -5820,929 +4952,8 @@ class MeasurementGUI:
 
     # Old measure method removed; logic centralized in MeasurementService
     def run_custom_measurement(self) -> None:
-        """Execute a custom measurement plan from the loaded JSON file.
-
-        The JSON (loaded into `self.custom_sweeps`) contains an ordered set of
-        named sweeps. For each sweep the method configures instrument options
-        (LED, PSU, pulse parameters, etc.) and delegates the actual work to
-        `MeasurementService`. Per-sweep overrides made at runtime via the
-        sweep editor popup are applied on-the-fly.
-
-        The GUI's `stop_measurement_flag` is checked frequently to allow
-        cooperative abort. Results are saved per-sweep in the default `Data_folder`
-        basic summary plots are produced.
-        """
-
-
-        if not self.connected:
-            messagebox.showwarning("Warning", "Not connected to Keithley!")
-            return
-
-        # Reset graphs/buffers between runs
-        self._reset_plots_for_new_run(self)
-
-        if self.single_device_flag:
-            response = messagebox.askquestion(
-                "Did you choose the correct device?",
-                "Please make sure the correct device is selected.\nClick 'Yes' if you are sure.\nIf not you will be "
-                "saving over old data")
-            if response != 'yes':
-                return
-        self.measuring = True
-        self._set_measurement_feedback(True, "Acquiring data from instrument")
-
-        self.stop_measurement_flag = False
-
-        # make sure it is on the top
-        self.bring_to_top()
-
-        # checks for sample name if not prompts user
-        # Skip sample name check if custom save location is enabled (custom path takes priority)
-        if not (self.use_custom_save_var.get() and self.custom_save_location):
-            self.check_for_sample_name()
-
-        selected_measurement = self.custom_measurement_var.get()
-        # Reset any prior sweep edits from the popup for a fresh run
-        try:
-            self.sweep_runtime_overrides = {}
-        except Exception:
-            pass
-        print(f"Running custom measurement: {selected_measurement}")
-
-        if self.telegram.is_enabled():
-            var = self.custom_measurement_var.get()
-            sample_name = self.sample_name_var.get()
-            section = self.device_section_and_number
-            text = f"Starting Measurements on {sample_name} device {section} ({var})"
-            self.telegram.send_message(text)
-
-        if selected_measurement in self.custom_sweeps:
-            if self.current_device in self.device_list:
-                start_index = self.device_list.index(self.current_device)
-            else:
-                start_index = 0  # Default to the first device if current one is not found
-
-            device_count = len(self.device_list)
-
-            # looping through each device.
-            for i in range(device_count):  # Ensure we process each device exactly once
-                device = self.device_list[(start_index + i) % device_count]  # Wrap around when reaching the end
-
-                self.master.update()
-                time.sleep(1)
-
-                # Ensure Kiethley set correctly
-                self.keithley.set_voltage(0, self.icc.get())  # Start at 0V
-                self.keithley.enable_output(True)  # Enable output
-
-                start = time.time()
-                start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                sweeps = self.custom_sweeps[selected_measurement]["sweeps"]
-                # Store total count before loop (sweeps dict may be shadowed inside loop)
-                total_sweeps_count = len(sweeps)
-                # Initial merge disabled; we now apply live edits per-sweep inside the loop
-                code_name = self.custom_sweeps[selected_measurement].get("code_name", "unknown")
-                
-                # === CUSTOM MEASUREMENT ANALYSIS TRACKING ===
-                # Track device memristive status across sweeps
-                device_is_memristive = None  # Unknown until first sweep analyzed
-                sequence_analysis_results = []  # Collect all analysis results
-                sweep_classifications = {}  # Track score per sweep
-
-                # checks psu connection only if any sweep explicitly requires LED
-                def _is_truthy(val) -> bool:
-                    try:
-                        # numeric truthiness: non-zero => True
-                        if isinstance(val, (int, float)):
-                            return float(val) != 0.0
-                    except Exception:
-                        pass
-                    if isinstance(val, str):
-                        return val.strip().lower() in {"1", "true", "on", "yes", "y"}
-                    return bool(val)
-
-                any_led_required = any(_is_truthy(params.get("LED_ON", 0)) for _k, params in sweeps.items())
-                if any_led_required and not self.psu_connected:
-                    print("LED required by at least one sweep; connecting PSU")
-                    messagebox.showwarning("Warning", "Not connected to PSU! Connecting now for LED use...")
-                    time.sleep(1)
-                    self.connect_keithley_psu()
-
-                # Initialize save_key once before the loop to ensure sequential numbering
-                # This ensures each sweep gets a unique number and graphs are saved properly
-                save_dir = self._get_save_directory(self.sample_name_var.get(), 
-                                                   self.final_device_letter, 
-                                                   self.final_device_number)
-                # make directory if doesn't exist
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir)
-                
-                # Find the largest existing file number to continue from the most recent
-                from Measurements.single_measurement_runner import find_largest_number_in_folder
-                key_num = find_largest_number_in_folder(save_dir)
-                save_key = 0 if key_num is None else key_num + 1
-                
-                # Track if this is the first sweep in the sequence
-                first_sweep_in_sequence = True
-
-                for key, params in sweeps.items():
-                    # Apply live edits for this sweep (skip/stop_v) so mid-run changes take effect
-                    try:
-                        live_edits = getattr(self, 'sweep_runtime_overrides', {}) or {}
-                        per = live_edits.get(str(key), {})
-                        if per.get('skip'):
-                            continue
-                        if 'stop_v' in per:
-                            try:
-                                params['stop_v'] = float(per['stop_v'])
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
-                    if self.stop_measurement_flag:  # Check if stop was pressed
-                        print("Measurement interrupted!")
-                        break  # Exit measurement loop immediately
-
-                    self.measurment_number = key
-                    print("Working on device -", device, ": Measurement -", key)
-
-                    # Runtime: pause between sweeps if requested
-                    while getattr(self, 'pause_requested', False) and not self.stop_measurement_flag:
-                        time.sleep(0.1)
-
-                    # Runtime: skip forward to a specific sweep number, if set
-                    skip_to = getattr(self, 'skip_to_sweep_target', None)
-                    if skip_to is not None:
-                        try:
-                            current_idx = int(str(key))
-                            if current_idx < int(skip_to):
-                                continue
-                            else:
-                                # Clear the target once reached
-                                self.skip_to_sweep_target = None
-                        except Exception:
-                            pass
-
-                    # default values
-                    start_v = params.get("start_v", 0)
-                    stop_v = params.get("stop_v", 1)
-                    # Runtime: override stop_v for a configured sweep range
-                    override = getattr(self, 'override_range', None)
-                    if override is not None:
-                        try:
-                            cur_idx = int(str(key))
-                            if override["start"] <= cur_idx <= override["end"]:
-                                stop_v = float(override["stop_v"])
-                        except Exception:
-                            pass
-                    num_sweeps_in_measurement = params.get("sweeps", 1)  # Renamed to avoid shadowing outer 'sweeps' dict
-                    step_v = params.get("step_v", 0.1)
-                    step_delay = params.get("step_delay", 0.05)
-                    sweep_type = params.get("Sweep_type", "FS")
-                    pause = params.get('pause', 0)
-
-                    # LED control
-                    led = _is_truthy(params.get("LED_ON", 0))
-                    power = params.get("power", 1)  # Power Refers to voltage
-                    sequence = params.get("sequence", 0)
-
-
-                    # retention
-                    set_voltage = params.get("set_voltage", 10)
-                    reset_voltage = params.get("reset_voltage", 10)
-                    repeat_delay = params.get("repeat_delay", 500) #ms
-                    number = params.get("number", 100)
-                    set_time = params.get("set_time",100)
-                    read_voltage = params.get("read_voltage",0.15)
-                    #led = params.get("LED_ON", 0)
-                    # sequence
-                    led_time = params.get("led_time", "100") # in seconds
-
-
-                    if sequence == 0:
-                        sequence = None
-
-                    if led:
-                        if not self.psu_connected:
-                            messagebox.showwarning("Warning", "Not connected to PSU!")
-                            self.connect_keithley_psu()
-                        self.psu_needed = True
-                    else:
-                        self.psu_needed = False
-
-                    # add checker step where it checks if the devices current state and if ts ohmic or capacaive it stops
-
-                    # Read measurement_type (new unified field)
-                    measurement_type = str(params.get("measurement_type", "IV"))
-                    
-                    # Backward compatibility: check old "mode" and "excitation" fields
-                    if "mode" in params:
-                        measurement_type = params["mode"]  # Endurance, Retention
-                    elif "excitation" in params:
-                        # Map old excitation names to measurement_type
-                        excitation_map = {
-                            "DC Triangle IV": "IV",
-                            "SMU Pulsed IV": "PulsedIV",
-                            "SMU Fast Pulses": "FastPulses",
-                            "SMU Fast Hold": "Hold"
-                        }
-                        measurement_type = excitation_map.get(params["excitation"], "IV")
-                    
-                    # Read source mode (NEW)
-                    source_mode_str = params.get("source_mode", "voltage")
-                    from Measurements.source_modes import SourceMode
-                    source_mode = SourceMode.CURRENT if source_mode_str == "current" else SourceMode.VOLTAGE
-                    
-                    # Read compliance per sweep (NEW - optional, defaults to GUI value)
-                    icc_val = params.get("icc", None)
-                    if icc_val is None:
-                        icc_val = float(self.icc.get())  # Use GUI value
-                    else:
-                        icc_val = float(icc_val)  # Use JSON value
-                    self._apply_smu_current_range()
-                    
-                    # Read metadata/notes (NEW - optional)
-                    sweep_notes = params.get("notes", None)
-                    if sweep_notes:
-                        print(f"Sweep {key} notes: {sweep_notes}")
-                    
-                    # Read temperature (NEW - OPTIONAL, defaults to OFF)
-                    # Temperature control is ONLY activated if temperature_C is explicitly set in JSON
-                    if "temperature_C" in params:
-                        target_temp = params["temperature_C"]
-                        if hasattr(self, 'temp_controller') and self.temp_controller is not None:
-                            try:
-                                print(f"Setting temperature to {target_temp}°C")
-                                self.temp_controller.set_temperature(float(target_temp))
-                                
-                                # Optional: wait for stabilization (only if specified)
-                                stabilization_time = params.get("temp_stabilization_s", 0)
-                                if stabilization_time > 0:
-                                    print(f"Waiting {stabilization_time}s for temperature stabilization...")
-                                    time.sleep(float(stabilization_time))
-                            except Exception as e:
-                                print(f"Temperature setting failed: {e}")
-                                # Continue with measurement even if temp control fails
-                        else:
-                            print("Warning: temperature_C specified but no temp controller connected")
-                    # If "temperature_C" not in params, temperature control is completely skipped
-
-                    # Helpers for SMU_AND_PMU timing defaults
-                    def _min_pw_ms() -> float:
-                        try:
-                            smu_type_loc = getattr(self, 'SMU_type', 'Keithley 2401')
-                            return float(self.measurement_service.get_smu_limits(smu_type_loc).get("min_pulse_width_ms", 1.0))
-                        except Exception:
-                            return 1.0
-
-                    # Route to appropriate measurement based on measurement_type
-                    if measurement_type == "IV":
-                        # Check if this is a cyclical sweep (4200A only)
-                        if sweep_type == "CYCLICAL":
-                            if KXCIClient is None or build_ex_command is None:
-                                print("ERROR: Cyclical sweep requires KXCI client, but module is not available")
-                                messagebox.showerror("Module Not Available", 
-                                                    "Cyclical sweep requires the KXCI module.\n"
-                                                    "Please ensure the 4200A C module is properly installed.")
-                                continue
-                            
-                            smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
-                            if smu_type != 'Keithley 4200A':
-                                print(f"ERROR: Cyclical sweep (CYCLICAL) is only available for Keithley 4200A, not {smu_type}")
-                                messagebox.showerror("Invalid SMU Type", 
-                                                    f"Cyclical sweep is only available for Keithley 4200A.\n"
-                                                    f"Current SMU: {smu_type}\n"
-                                                    f"Please change SMU type or select a different sweep type.")
-                                continue
-                            
-                            # Get cyclical parameters from GUI variables or params
-                            if hasattr(self, 'cyclical_vpos'):
-                                vpos = self.cyclical_vpos.get()
-                                vneg = self.cyclical_vneg.get()
-                                num_cycles = self.cyclical_num_cycles.get()
-                                settle_time = self.cyclical_settle_time.get()
-                                ilimit = self.cyclical_ilimit.get()
-                                integration_time = self.cyclical_integration_time.get()
-                                debug = 1 if self.cyclical_debug.get() else 0
-                            else:
-                                # Fallback to params if GUI vars don't exist
-                                vpos = float(params.get("vpos", stop_v if stop_v > 0 else 2.0))
-                                vneg = float(params.get("vneg", 0.0))
-                                num_cycles = int(params.get("num_cycles", 1))
-                                settle_time = float(params.get("settle_time", step_delay if step_delay > 0 else 0.001))
-                                ilimit = float(params.get("ilimit", icc_val if icc_val > 0 else 0.1))
-                                integration_time = float(params.get("integration_time", 0.01))
-                                debug = 1 if _is_truthy(params.get("debug", True)) else 0
-                            
-                            # Flag to track if graphs have been cleared for this measurement
-                            _graphs_cleared_for_this_measurement = False
-                            
-                            def _on_point(v, i, t_s):
-                                nonlocal _graphs_cleared_for_this_measurement
-                                # Clear graphs on first data point (right before plotting new data)
-                                if not _graphs_cleared_for_this_measurement:
-                                    _graphs_cleared_for_this_measurement = True
-                                    if hasattr(self, 'master') and hasattr(self, '_reset_plots_for_new_sweep'):
-                                        # Ensure reset completes before first point append to avoid
-                                        # async reset wiping newly appended data.
-                                        try:
-                                            _reset_done = threading.Event()
-                                            def _do_reset():
-                                                try:
-                                                    self._reset_plots_for_new_sweep(self)
-                                                finally:
-                                                    _reset_done.set()
-                                            self.master.after(0, _do_reset)
-                                            _reset_done.wait(timeout=1.0)
-                                        except Exception:
-                                            self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
-                                
-                                self.v_arr_disp.append(v)
-                                self.c_arr_disp.append(i)
-                                self.t_arr_disp.append(t_s)
-                            
-                            # Execute cyclical sweep via 4200A system wrapper (manager pattern)
-                            v_arr, c_arr, timestamps = self._run_cyclical_iv_sweep_via_manager(
-                                vpos=vpos,
-                                vneg=vneg,
-                                num_cycles=num_cycles,
-                                settle_time=settle_time,
-                                ilimit=ilimit,
-                                integration_time=integration_time,
-                                debug=debug,
-                                on_point=_on_point
-                            )
-                        else:
-                            # Standard triangle IV sweep (FS/PS/NS)
-                            # Optional per-sweep negative stop voltage: params override UI field
-                            neg_stop_v_param = None
-                            try:
-                                if 'neg_stop_v' in params:
-                                    neg_stop_v_param = float(params.get('neg_stop_v'))
-                                elif 'Vneg' in params:
-                                    neg_stop_v_param = float(params.get('Vneg'))
-                                else:
-                                    raw_neg = self.voltage_low_str.get().strip() if hasattr(self, 'voltage_low_str') else ""
-                                    if raw_neg != "":
-                                        neg_stop_v_param = float(raw_neg)
-                            except Exception:
-                                neg_stop_v_param = None
-                            voltage_range = self.measurement_service.compute_voltage_range(
-                                start_v=start_v,
-                                stop_v=stop_v,
-                                step_v=step_v,
-                                sweep_type=sweep_type,
-                                mode=VoltageRangeMode.FIXED_STEP,
-                                neg_stop_v=neg_stop_v_param,
-                            )
-                            
-                            # Flag to track if graphs have been cleared for this measurement
-                            _graphs_cleared_for_this_measurement = False
-                            
-                            def _on_point(v, i, t_s):
-                                nonlocal _graphs_cleared_for_this_measurement
-                                # Clear graphs on first data point (right before plotting new data)
-                                if not _graphs_cleared_for_this_measurement:
-                                    _graphs_cleared_for_this_measurement = True
-                                    if hasattr(self, 'master') and hasattr(self, '_reset_plots_for_new_sweep'):
-                                        # Ensure reset completes before first point append to avoid
-                                        # async reset wiping newly appended data.
-                                        try:
-                                            _reset_done = threading.Event()
-                                            def _do_reset():
-                                                try:
-                                                    self._reset_plots_for_new_sweep(self)
-                                                finally:
-                                                    _reset_done.set()
-                                            self.master.after(0, _do_reset)
-                                            _reset_done.wait(timeout=1.0)
-                                        except Exception:
-                                            self.master.after(0, lambda: self._reset_plots_for_new_sweep(self))
-                                
-                                self.v_arr_disp.append(v)
-                                self.c_arr_disp.append(i)
-                                self.t_arr_disp.append(t_s)
-                            
-                            v_arr, c_arr, timestamps = self.measurement_service.run_iv_sweep(
-                                keithley=self.keithley,
-                                start_v=start_v,
-                                stop_v=stop_v,
-                                step_v=step_v,
-                                sweeps=num_sweeps_in_measurement,
-                                step_delay=step_delay,
-                                sweep_type=sweep_type,
-                                icc=icc_val,
-                                psu=getattr(self, 'psu', None),
-                                led=led,
-                                power=power,
-                                optical=getattr(self, 'optical', None),
-                                sequence=sequence,
-                                pause_s=pause,
-                                smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                                source_mode=source_mode,
-                                should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                                on_point=_on_point
-                            )
-
-                    elif measurement_type == "Endurance":
-                        # Read from JSON params first, fallback to GUI variables
-                        set_v = float(params.get("set_v", self.end_set_v.get()))
-                        reset_v = float(params.get("reset_v", self.end_reset_v.get()))
-                        pulse_ms = float(params.get("pulse_ms", self.end_pulse_ms.get()))
-                        cycles = int(params.get("cycles", self.end_cycles.get()))
-                        read_v = float(params.get("read_v", self.end_read_v.get()))
-                        # Get read pulse width and inter cycle delay - properly read from GUI
-                        read_pulse_ms = params.get("read_pulse_ms", None)
-                        if read_pulse_ms is None:
-                            ret_read_pulse = getattr(self, 'end_read_pulse_ms', None)
-                            if ret_read_pulse is not None and hasattr(ret_read_pulse, 'get'):
-                                read_pulse_ms = ret_read_pulse.get()
-                            else:
-                                read_pulse_ms = 100.0
-                        read_pulse_ms = float(read_pulse_ms)
-                        
-                        inter_cycle_delay_s = params.get("inter_cycle_delay_s", None)
-                        print(f"DEBUG: inter_cycle_delay_s from params: {inter_cycle_delay_s}")
-                        if inter_cycle_delay_s is None:
-                            # Try to get from GUI variable
-                            ret_delay = getattr(self, 'end_inter_cycle_delay_s', None)
-                            print(f"DEBUG: ret_delay from GUI: {ret_delay}, type: {type(ret_delay)}")
-                            if ret_delay is not None and hasattr(ret_delay, 'get'):
-                                try:
-                                    inter_cycle_delay_s = ret_delay.get()
-                                    print(f"DEBUG: Got value from GUI variable: {inter_cycle_delay_s}")
-                                except Exception as e:
-                                    print(f"DEBUG: Error reading GUI variable: {e}")
-                                    inter_cycle_delay_s = 0.0
-                            else:
-                                inter_cycle_delay_s = 0.0
-                                print(f"DEBUG: GUI variable not found, using default 0.0")
-                        else:
-                            print(f"DEBUG: Using value from params: {inter_cycle_delay_s}")
-                        inter_cycle_delay_s = float(inter_cycle_delay_s)
-                        
-                        print(f"Endurance params FINAL: inter_cycle_delay_s={inter_cycle_delay_s}, read_pulse_ms={read_pulse_ms}")
-                        
-                        def _on_point(v, i, t_s):
-                            self.v_arr_disp.append(v)
-                            self.c_arr_disp.append(i)
-                            self.t_arr_disp.append(t_s)
-                        
-                        v_arr, c_arr, timestamps = self.measurement_service.run_endurance(
-                            keithley=self.keithley,
-                            set_voltage=set_v,
-                            reset_voltage=reset_v,
-                            pulse_width_s=pulse_ms/1000,
-                            num_cycles=cycles,
-                            read_voltage=read_v,
-                            read_pulse_width_s=read_pulse_ms/1000,
-                            inter_cycle_delay_s=inter_cycle_delay_s,
-                            icc=icc_val,
-                            psu=getattr(self, 'psu', None),
-                            led=led,
-                            power=power,
-                            optical=getattr(self, 'optical', None),
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=_on_point
-                        )
-                        print("endurance")
-
-                    elif measurement_type == "Retention":
-                        # Read from JSON params first, fallback to GUI variables
-                        set_v = float(params.get("set_v", self.ret_set_v.get()))
-                        set_ms = float(params.get("set_ms", self.ret_set_ms.get()))
-                        read_v = float(params.get("read_v", self.ret_read_v.get()))
-                        
-                        def _on_point(v, i, t_s):
-                            self.v_arr_disp.append(v)
-                            self.c_arr_disp.append(i)
-                            self.t_arr_disp.append(t_s)
-                        
-                        # Get read pulse width and number of reads - prioritize new parameters
-                        read_pulse_ms = float(params.get("read_pulse_ms", 
-                            getattr(self, 'ret_read_pulse_ms', None)))
-                        if read_pulse_ms is None or (hasattr(read_pulse_ms, 'get') and read_pulse_ms.get() is None):
-                            read_pulse_ms = 100.0
-                        elif hasattr(read_pulse_ms, 'get'):
-                            read_pulse_ms = read_pulse_ms.get()
-                        
-                        number_reads = params.get("number_reads", None)
-                        if number_reads is None:
-                            ret_num = getattr(self, 'ret_number_reads', None)
-                            if ret_num is not None and hasattr(ret_num, 'get'):
-                                number_reads = ret_num.get()
-                            else:
-                                number_reads = 30
-                        number_reads = int(number_reads)
-                        
-                        repeat_delay = params.get("repeat_delay_s", None)
-                        if repeat_delay is None:
-                            ret_delay = getattr(self, 'ret_measure_delay', None)
-                            if ret_delay is not None and hasattr(ret_delay, 'get'):
-                                repeat_delay = ret_delay.get()
-                            else:
-                                repeat_delay = 10.0
-                        repeat_delay = float(repeat_delay)
-                        
-                        print(f"Retention params: number_reads={number_reads}, read_pulse_ms={read_pulse_ms}, repeat_delay={repeat_delay}")
-                        
-                        v_arr, c_arr, timestamps = self.measurement_service.run_retention(
-                            keithley=self.keithley,
-                            set_voltage=set_v,
-                            set_time_s=set_ms/1000,
-                            read_voltage=read_v,
-                            read_pulse_width_s=read_pulse_ms/1000,
-                            repeat_delay_s=repeat_delay,
-                            number=number_reads,
-                            icc=icc_val,
-                            psu=getattr(self, 'psu', None),
-                            led=led,
-                            optical=getattr(self, 'optical', None),
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=_on_point
-                        )
-                        print("retention")
-
-                    elif measurement_type == "PulsedIV":
-                        # Parameters
-                        start_amp = float(params.get("start_v", 0.0))
-                        stop_amp = float(params.get("stop_v", 0.2))
-                        step_amp = float(params.get("step_v", 0.0)) if params.get("step_v") is not None else None
-                        num_steps = int(params.get("num_steps", 0)) or None
-                        pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
-                        vbase = float(params.get("vbase", 0.2))
-                        inter_step = float(params.get("inter_delay", 0.0))
-
-                        v_arr, c_arr, timestamps, _ = self.measurement_service.run_pulsed_iv_sweep(
-                            keithley=self.keithley,
-                            start_v=start_amp,
-                            stop_v=stop_amp,
-                            step_v=step_amp,
-                            num_steps=num_steps,
-                            pulse_width_ms=max(_min_pw_ms(), pulse_ms),
-                            vbase=vbase,
-                            inter_step_delay_s=inter_step,
-                            icc=icc_val,
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=None,
-                            validate_timing=True,
-                        )
-                        
-                    elif measurement_type == "FastPulses":
-                        pulse_v = float(params.get("pulse_v", 0.2))
-                        pulse_ms = float(params.get("pulse_ms", _min_pw_ms()))
-                        num_pulses = int(params.get("num", 10))
-                        inter_delay = float(params.get("inter_delay", 0.0))
-                        vbase = float(params.get("vbase", 0.2))
-                        
-                        v_arr, c_arr, timestamps = self.measurement_service.run_pulse_measurement(
-                            keithley=self.keithley,
-                            pulse_voltage=pulse_v,
-                            pulse_width_ms=max(_min_pw_ms(), pulse_ms),
-                            num_pulses=max(1, num_pulses),
-                            read_voltage=vbase,
-                            inter_pulse_delay_s=max(0.0, inter_delay),
-                            icc=icc_val,
-                            smu_type=getattr(self, 'SMU_type', 'Keithley 2401'),
-                            psu=getattr(self, 'psu', None),
-                            led=False,
-                            power=1.0,
-                            optical=getattr(self, 'optical', None),
-                            sequence=None,
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                            on_point=None,
-                            validate_timing=True,
-                        )
-                        
-                    elif measurement_type == "Hold":
-                        hold_v = float(params.get("hold_v", 0.2))
-                        duration = float(params.get("duration_s", 5.0))
-                        sample_dt = float(params.get("sample_dt_s", 0.01))
-                        
-                        v_arr, c_arr, timestamps = self.measurement_service.run_dc_capture(
-                            keithley=self.keithley,
-                            voltage_v=hold_v,
-                            capture_time_s=duration,
-                            sample_dt_s=sample_dt,
-                            icc=icc_val,
-                            on_point=None,
-                            should_stop=lambda: getattr(self, 'stop_measurement_flag', False),
-                        )
-                        
-                    else:
-                        print(f"Unknown measurement_type: {measurement_type}")
-                        continue
-
-                    # this isnt being used yet i dont think
-                    if device not in self.measurement_data:
-                        self.measurement_data[device] = {}
-
-                    self.measurement_data[device][key] = (v_arr, c_arr, timestamps)
-
-                    # todo wrap this into a function for use on other method!!!
-
-                    #self.keithley.beep(600, 1)
-
-                    # data arry to save
-                    data = np.column_stack((v_arr, c_arr, timestamps))
-
-                    # save_dir and save_key are now initialized before the loop
-                    # Increment save_key for this sweep to ensure unique filenames
-                    current_save_key = save_key
-                    save_key += 1  # Increment for next sweep
-
-                    if self.additional_info_var != "":
-                        #extra_info = "-" + str(self.additional_info_entry.get())
-                        # or
-                        extra_info = "-" + self.additional_info_entry.get().strip()
-                    else:
-                        extra_info = ""
-
-                    name = f"{current_save_key}-{sweep_type}-{stop_v}v-{step_v}sv-{step_delay}sd-Py-{code_name}{extra_info}"
-                    file_path = f"{save_dir}\\{name}.txt"
-
-                    try:
-                        np.savetxt(file_path, data, fmt="%0.3E\t%0.3E\t%0.3E", header="Voltage Current Time", comments="")
-                        abs_path = os.path.abspath(file_path)
-                        print(f"[SAVE] File saved to: {abs_path}")
-                        self.log_terminal(f"File saved: {abs_path}")
-                    except Exception as e:
-                        print(f"[SAVE ERROR] Failed to save file: {e}")
-
-                    # show graphs on main display (must run on main thread for reliable redraw)
-                    v_list = list(v_arr)
-                    c_list = list(c_arr)
-                    self.master.after(0, lambda: self.graphs_show(v_list, c_list, key, stop_v))
-                    
-                    # === PER-SWEEP ANALYSIS FOR CUSTOM SEQUENCES ===
-                    try:
-                        # Build metadata for this sweep
-                        sweep_metadata = {}
-                        if hasattr(self, 'optical') and self.optical is not None:
-                            try:
-                                caps = getattr(self.optical, 'capabilities', {})
-                                if caps.get('type'):
-                                    sweep_metadata['led_type'] = str(caps.get('type', ''))
-                            except Exception:
-                                pass
-                        
-                        # Use sweep-specific filename (should match the actual saved file: current_save_key-based)
-                        sweep_file_name = name  # Use the actual filename that was saved
-                        
-                        # Run analysis with conditional logic
-                        analysis_result = self._run_analysis_if_enabled(
-                            voltage=list(v_arr),
-                            current=list(c_arr),
-                            timestamps=list(timestamps) if timestamps is not None else None,
-                            save_dir=save_dir,
-                            file_name=sweep_file_name,
-                            metadata=sweep_metadata,
-                            is_custom_sequence=True,
-                            sweep_number=int(str(current_save_key)),  # Use current_save_key for consistency
-                            device_memristive_flag=device_is_memristive
-                        )
-                        
-                        # Update memristive flag after first sweep
-                        # Since analysis now runs in background, check for pending results
-                        if first_sweep_in_sequence:  # First sweep in the sequence
-                            # Wait a bit for analysis to complete (with timeout)
-                            max_wait = 10.0  # 10 seconds max
-                            wait_start = time.time()
-                            while time.time() - wait_start < max_wait:
-                                if hasattr(self, '_pending_analysis_results'):
-                                    result_key = f"{sweep_file_name}_sweep_{current_save_key}"
-                                    if result_key in self._pending_analysis_results:
-                                        result = self._pending_analysis_results[result_key]
-                                        device_is_memristive = result.get('is_memristive', False)
-                                        analysis_result = result
-                                        print(f"[CUSTOM ANALYSIS] First sweep complete: memristive={device_is_memristive}")
-                                        break
-                                time.sleep(0.1)
-                            else:
-                                print(f"[CUSTOM ANALYSIS] Timeout waiting for first sweep analysis result")
-                                analysis_result = None
-                            
-                            # Mark that we've processed the first sweep
-                            first_sweep_in_sequence = False
-
-                        # === AUTOMATIC PLOTTING FOR ALL SWEEPS ===
-                        # Plot IV dashboard for EVERY sweep (memristive or not)
-                        # Only include conduction/SCLC plots if device is memristive
-                        try:
-                            # Determine if memristive from analysis result (if available)
-                            is_memristive_for_plot = False
-                            if analysis_result and hasattr(analysis_result, 'get'):
-                                analysis_data = analysis_result.get('analysis_data') or analysis_result
-                                if analysis_data:
-                                    classification = analysis_data.get('classification', {})
-                                    is_memristive_for_plot = classification.get('memristivity_score', 0) > 60
-                            else:
-                                # No analysis result - use device flag from first sweep
-                                is_memristive_for_plot = device_is_memristive if device_is_memristive is not None else False
-                            
-                            # ALWAYS plot (dashboard always, conduction/SCLC only if memristive)
-                            # Pass measurement_type and params for conditional plotting
-                            self._plot_measurement_in_background(
-                                voltage=v_arr,
-                                current=c_arr,
-                                timestamps=timestamps,
-                                save_dir=save_dir,
-                                device_name=f"{self.final_device_letter}{self.final_device_number}",
-                                sweep_number=current_save_key,  # Use current_save_key for consistency
-                                is_memristive=is_memristive_for_plot,
-                                filename=name,  # Use actual saved filename (includes extra_info if present)
-                                measurement_type=measurement_type,  # Pass measurement type for conditional plotting
-                                measurement_params=params  # Pass params for read_voltage, etc.
-                            )
-                            debug_print(f"[PLOT] Queued plots for sweep {current_save_key}: {name} (memristive={is_memristive_for_plot})")
-                        except Exception as plot_exc:
-                            print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
-                        
-                        # Collect analysis data (if available)
-                        if analysis_result and hasattr(analysis_result, 'get'):
-                            try:
-                                analysis_data = analysis_result.get('analysis_data') or analysis_result
-                                sequence_analysis_results.append({
-                                    'sweep_number': current_save_key,  # Use current_save_key for consistency
-                                    'voltage': stop_v,
-                                    'analysis': analysis_data
-                                })
-                                
-                                # Update live display (separate try-except to not block data collection)
-                                try:
-                                    classification = analysis_data.get('classification', {})
-                                    self._update_live_classification_display(
-                                        sweep_num=current_save_key,  # Use current_save_key for consistency
-                                        total_sweeps=total_sweeps_count,
-                                        classification_data=classification
-                                    )
-                                except Exception as display_exc:
-                                    print(f"[LIVE DISPLAY ERROR] Failed to update display: {display_exc}")
-                                
-                                # Store classification for summary
-                                try:
-                                    sweep_classifications[int(str(key))] = {
-                                        'score': classification.get('memristivity_score', 0),
-                                        'device_type': classification.get('device_type', 'unknown')
-                                    }
-                                except Exception as class_exc:
-                                    print(f"[CLASSIFICATION ERROR] Failed to store classification: {class_exc}")
-                            except Exception as data_exc:
-                                print(f"[DATA COLLECTION ERROR] Failed to collect analysis data: {data_exc}")
-                    except Exception as exc:
-                        # Don't interrupt measurement flow if analysis fails
-                        print(f"[CUSTOM ANALYSIS] Failed to run per-sweep analysis: {exc}")
-
-                    # Handle inter-sweep delay (NEW - optional)
-                    delay_after_sweep = params.get("delay_after_sweep_s", None)
-                    if delay_after_sweep is not None:
-                        try:
-                            delay_time = float(delay_after_sweep)
-                            if delay_time > 0:
-                                print(f"Waiting {delay_time}s after sweep {key}...")
-                                time.sleep(delay_time)
-                        except (ValueError, TypeError):
-                            print(f"Invalid delay_after_sweep_s value: {delay_after_sweep}")
-                    
-                    # Default sleep between measurements (if no specific delay set)
-                    if delay_after_sweep is None:
-                        time.sleep(2)
-                try:
-                    if hasattr(self, 'optical') and self.optical is not None and bool(led):
-                        self.optical.set_enabled(False)
-                    elif getattr(self, 'psu_needed', False) and hasattr(self, 'psu'):
-                        self.psu.led_off_380()
-                except Exception:
-                    # Do not skip the rest of the per-device finalization
-                    pass
-                try:
-                    custom_label = f"custom_{selected_measurement}"
-                    safe_label = sanitize_summary_artifact_label(custom_label)
-                    unique_label = resolve_unique_summary_artifact_label(save_dir, safe_label)
-                    self._save_summary_artifacts(save_dir, artifact_label=unique_label)
-                except Exception as exc:
-                    print(f"[SAVE ERROR] Failed to save summary plots: {exc}")
-                    self._last_combined_summary_path = None
-                
-                # Run IV analysis on combined data from all sweeps if enabled
-                try:
-                    if hasattr(self, 'v_arr_disp') and hasattr(self, 'c_arr_disp'):
-                        v_arr = list(self.v_arr_disp) if self.v_arr_disp else []
-                        c_arr = list(self.c_arr_disp) if self.c_arr_disp else []
-                        
-                        if len(v_arr) > 0 and len(c_arr) > 0:
-                            # Get timestamps if available
-                            t_arr = None
-                            if hasattr(self, 't_arr_disp') and self.t_arr_disp:
-                                t_arr = list(self.t_arr_disp)
-                            
-                            # Build metadata
-                            metadata = {}
-                            if hasattr(self, 'optical') and self.optical is not None:
-                                try:
-                                    caps = getattr(self.optical, 'capabilities', {})
-                                    if caps.get('type'):
-                                        metadata['led_type'] = str(caps.get('type', ''))
-                                except Exception:
-                                    pass
-                            
-                            # Use measurement name as filename
-                            file_name = f"custom_{selected_measurement}"
-                            
-                            # Call analysis helper
-                            # NOTE: Pass is_custom_sequence=True to suppress automatic plotting
-                            # (Individual sweeps already have plots, this is just for combined stats)
-                            self._run_analysis_if_enabled(
-                                voltage=v_arr,
-                                current=c_arr,
-                                timestamps=t_arr,
-                                save_dir=save_dir,
-                                file_name=file_name,
-                                metadata=metadata,
-                                is_custom_sequence=True,  # Suppress automatic plotting
-                                sweep_number=9999,  # Dummy value (will be ignored for combined analysis)
-                                device_memristive_flag=True  # Allow analysis to run (combined data)
-                            )
-                except Exception as exc:
-                    # Don't interrupt measurement flow if analysis fails
-                    print(f"[ANALYSIS] Failed to run analysis in custom measurement: {exc}")
-                
-                self.ax_all_iv.clear()
-                self.ax_all_logiv.clear()
-                self.keithley.enable_output(False)
-
-                end = time.time()
-                print("total time for ", selected_measurement, "=", end - start, " - ")
-
-                self.data_saver.log_measurement_event(
-                    save_dir,
-                    filename=f"custom_{selected_measurement}",
-                    file_path=save_dir,
-                    measurement_type=selected_measurement,
-                    status="saved",
-                    sample_name=self.sample_name_var.get(),
-                    section=self.final_device_letter,
-                    device_number=self.final_device_number,
-                )
-                
-                # === GENERATE SEQUENCE SUMMARY ===
-                # Wrap in try-except to ensure measurement flow is never interrupted
-                try:
-                    if sequence_analysis_results:
-                        device_id = f"{self.sample_name_var.get()}_{self.final_device_letter}_{self.final_device_number}"
-                        self._generate_sequence_summary(
-                            device_id=device_id,
-                            sequence_name=selected_measurement,
-                            sequence_results=sequence_analysis_results,
-                            save_dir=save_dir,
-                            total_sweeps=total_sweeps_count
-                        )
-                except Exception as exc:
-                    # Don't interrupt measurement flow if summary generation fails
-                    debug_print(f"[SUMMARY ERROR] Failed to generate sequence summary: {exc}")
-                    import traceback
-                    traceback.print_exc()
-                
-                # === AUTOMATIC COMPREHENSIVE ANALYSIS AFTER CUSTOM MEASUREMENT ===
-                # DISABLED: Auto analysis should only run after the very last sample is measured
-                # This will be a later feature - for now, only dashboard/general graphs are plotted
-                # (Dashboard graphs are handled by the plotting system automatically)
-                pass
-
-                debug_print(self.single_device_flag,device_count)
-                
-                if self.single_device_flag:
-                    debug_print("Measuring one device only")
-                    # Stop iterating further devices by exiting the device loop
-                    
-                    break
-                if not self.single_device_flag:
-                    # Check if in manual mode - skip automatic advancement
-                    if hasattr(self.sample_gui, 'multiplexer_type') and self.sample_gui.multiplexer_type == "Manual":
-                        debug_print("Manual mode: Skipping automatic device advancement - user must manually advance")
-                        self.log_terminal("Manual mode: Measurement complete. Please manually advance to next device using GUI buttons.")
-                    else:
-                        self.sample_gui.next_device()
-                        time.sleep(0.1)
-                        self.sample_gui.change_relays()
-                        print("Switching Device")
-
-
-            # Always mark measurement complete in GUI
-            self.measuring = False
-            self._set_measurement_feedback(False)
-            if self.telegram.is_enabled():
-                combined = getattr(self, '_last_combined_summary_path', None)
-                self.telegram.start_post_measurement_worker(save_dir, combined)
-            else:
-                # Only show blocking popup when bot is disabled
-                messagebox.showinfo("Complete", "Measurements finished.")
-        else:
-            print("Selected measurement not found in JSON file.")
+        from gui.measurement_gui.custom_measurement_runner import run_custom_measurement as _run
+        _run(self)
 
     def _show_message_async(self, kind: str, *args: Any, **kwargs: Any) -> None:
         try:
@@ -7133,88 +5344,18 @@ class MeasurementGUI:
     # Connect
     ###################################################################
     def connect_keithley(self) -> None:
-        """Connect to the selected IV controller via the connection manager."""
-        address = self.keithley_address_var.get()
-        smu_type = getattr(self, 'SMU_type', 'Keithley 2401')
-        try:
-            instrument = self.connections.connect_keithley(smu_type, address)
-            self.keithley = instrument
-            self.connected = self.connections.is_connected("keithley")
-            self._update_conditional_testing_button_state()
-            self._apply_smu_current_range()
-            if hasattr(self.keithley, 'beep'):
-                self.keithley.beep(4000, 0.2)
-                time.sleep(0.2)
-                self.keithley.beep(5000, 0.5)
-        except RuntimeError as exc:
-            self.connected = False
-            self._update_conditional_testing_button_state()
-            error_str = str(exc)
-            print(f"❌ ERROR: Unable to connect to SMU ({smu_type} @ {address})")
-            print(f"   {error_str}")
-            # Show a more user-friendly error message
-            if "IVControllerManager dependency not available" in error_str:
-                detailed_msg = (
-                    f"Could not connect to IV Controller Manager.\n\n"
-                    f"The required dependencies are not available.\n\n"
-                    f"Please check:\n"
-                    f"• That Equipment/managers/iv_controller.py exists\n"
-                    f"• That all required dependencies are installed\n"
-                    f"• Try restarting Python/your IDE\n\n"
-                    f"Original error:\n{exc}"
-                )
-            else:
-                detailed_msg = f"Could not connect to device ({smu_type} @ {address}):\n\n{exc}"
-            messagebox.showerror("Connection Error", detailed_msg)
-        except Exception as exc:
-            self.connected = False
-            print(f"❌ ERROR: Unable to connect to SMU ({smu_type} @ {address}): {exc}")
-            messagebox.showerror("Connection Error", f"Could not connect to device ({smu_type} @ {address}):\n\n{exc}")
+        self.connection_ctrl.connect_keithley()
 
     def connect_keithley_psu(self) -> None:
-        try:
-            self.psu = self.connections.connect_psu(self.psu_visa_address)
-            self.psu_connected = self.connections.is_connected("psu")
-            if self.keithley and hasattr(self.keithley, 'beep'):
-                self.keithley.beep(5000, 0.2)
-                time.sleep(0.2)
-                self.keithley.beep(6000, 0.2)
-            if self.psu:
-                self.psu.reset()
-        except Exception as exc:
-            self.psu_connected = False
-            print("unable to connect to psu please check")
-            messagebox.showerror("Error", f"Could not connect to device: {exc}")
+        self.connection_ctrl.connect_keithley_psu()
 
     def connect_temp_controller(self) -> None:
-        """Connect to the Oxford ITC4 temperature controller."""
-        address = self.temp_controller_address
-        try:
-            self.itc = self.connections.connect_oxford_itc4(address)
-            self.itc_connected = self.connections.is_connected("itc")
-            print("connected too Temp controller")
-            if self.keithley and hasattr(self.keithley, 'beep'):
-                self.keithley.beep(7000, 0.2)
-                time.sleep(0.2)
-                self.keithley.beep(8000, 0.2)
-        except Exception as exc:
-            self.itc_connected = False
-            print("unable to connect to Temp please check")
-            messagebox.showerror("Error", f"Could not connect to temp device: {exc}")
+        self.connection_ctrl.connect_temp_controller()
 
     def init_temperature_controller(self) -> None:
-        """Initialize temperature controller with auto-detection."""
-        self.temp_controller = self.connections.create_temperature_controller(auto_detect=True)
-        info = self.connections.get_temperature_info()
-        if info:
-            self.log_terminal(f"Temperature Controller: {info['type']} at {info['address']}")
-            self.log_terminal(f"Current temperature: {info['temperature']:.1f}°C")
-        else:
-            self.log_terminal("No temperature controller detected - using 25°C default")
+        self.connection_ctrl.init_temperature_controller()
 
-    ###################################################################
     # Temp logging
-    ###################################################################
 
     def create_temperature_log(self) -> None:
         """Create a temperature log that records during measurements."""
@@ -7415,57 +5556,12 @@ class MeasurementGUI:
             self.final_device_number = number
 
     def open_oscilloscope_pulse(self) -> None:
-        """Open the Oscilloscope Pulse Capture GUI with current context."""
-        try:
-            # 1. Prepare Adapter
-            adapter = None
-            if self.keithley:
-                 adapter = SMUAdapter(self.keithley)
-            
-            # 2. Get sample name - prioritize sample_name_var, then sample_gui.current_device_name
-            sample_name = None
-            if hasattr(self, 'sample_name_var') and self.sample_name_var.get().strip():
-                sample_name = self.sample_name_var.get().strip()
-            elif hasattr(self, 'sample_gui') and hasattr(self.sample_gui, 'current_device_name') and self.sample_gui.current_device_name:
-                sample_name = self.sample_gui.current_device_name
-            
-            if not sample_name:
-                sample_name = "Unknown"
-            
-            # 3. Get device label - use device_section_and_number (e.g., "B9") not current_device (e.g., "device_19")
-            device_label = getattr(self, 'device_section_and_number', None) or getattr(self, 'current_device', "Stand-alone")
-            
-            # 4. Prepare Context
-            context = {
-                'device_label': device_label,
-                'sample_name': sample_name,
-                'save_directory': self.default_save_root,
-                'smu_ports': [self.keithley_address], # Currently connected
-                'known_systems': self.systems if hasattr(self, 'systems') and isinstance(self.systems, list) else (list(self.systems.keys()) if hasattr(self, 'systems') else []),
-                'system': self.controller_type,
-                'provider': self  # Pass self as provider so oscilloscope GUI can access measurement GUI attributes
-            }
-            
-            # 5. Launch
-            OscilloscopePulseGUI(self.master, smu_instance=adapter, context=context)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to open Oscilloscope Pulse GUI:\n{e}")
+        from gui.measurement_gui.child_gui_launchers import open_oscilloscope_pulse
+        open_oscilloscope_pulse(self)
 
     def open_motor_control(self) -> None:
-        """Launch or raise the motor control GUI."""
-        try:
-            existing = getattr(self, "motor_control_window", None)
-            if existing is not None and existing.winfo_exists():
-                existing.lift()
-                return
-        except Exception:
-            pass
-
-        try:
-            window = MotorControlWindow()
-            self.motor_control_window = window
-        except Exception as exc:
-            messagebox.showerror("Motor Control", f"Unable to open motor control GUI:\n{exc}")
+        from gui.measurement_gui.child_gui_launchers import open_motor_control
+        open_motor_control(self)
 
     def _collect_summary_plot_data(self) -> SummaryPlotData:
         """Gather plot data for summary image generation."""
@@ -7518,663 +5614,45 @@ class MeasurementGUI:
         self._last_combined_summary_path = combined
 
     def _on_custom_save_toggle(self):
-        """Handle checkbox toggle for custom save location"""
-        if self.use_custom_save_var.get():
-            # Always prompt for location when enabling (don't use saved default)
-            self._prompt_save_location()
-        else:
-            self.save_path_entry.config(state="disabled")
-            # Disable browse button
-            for widget in self.save_path_entry.master.winfo_children():
-                if isinstance(widget, tk.Button):
-                    widget.config(state="disabled")
-            self.custom_save_location = None
-            self.custom_save_location_var.set("")
-        
-        # Save preference (but don't auto-load saved path on next enable)
-        self._save_save_location_config()
-    
+        self.save_path_ctrl.on_custom_save_toggle()
+
     def _prompt_save_location(self):
-        """Prompt user to choose a save location (folder) or cancel"""
-        from tkinter import filedialog
-        folder = filedialog.askdirectory(
-            title="Choose Custom Data Save Location",
-            mustexist=False  # Allow creating new folder
-        )
-        if folder:
-            self.custom_save_location = Path(folder)
-            self.custom_save_location_var.set(str(self.custom_save_location))
-            self.save_path_entry.config(state="normal")
-            # Enable browse button
-            for widget in self.save_path_entry.master.winfo_children():
-                if isinstance(widget, tk.Button):
-                    widget.config(state="normal")
-        else:
-            # User cancelled - uncheck the box
-            self.use_custom_save_var.set(False)
-            self.save_path_entry.config(state="disabled")
-            for widget in self.save_path_entry.master.winfo_children():
-                if isinstance(widget, tk.Button):
-                    widget.config(state="disabled")
-    
+        self.save_path_ctrl.prompt_save_location()
+
     def _browse_save_location(self):
-        """Open folder picker to change custom save location"""
-        from tkinter import filedialog
-        folder = filedialog.askdirectory(
-            title="Choose Data Save Location",
-            mustexist=False  # Allow creating new folder
-        )
-        if folder:
-            self.custom_save_location = Path(folder)
-            self.custom_save_location_var.set(str(self.custom_save_location))
-            # Save preference (as reference, but won't auto-enable)
-            self._save_save_location_config()
-    
+        self.save_path_ctrl.browse_save_location()
+
     def _load_save_location_config(self):
-        """Load save location preference from config file (but don't auto-enable)"""
-        config_file = _PROJECT_ROOT / "Json_Files" / "save_location_config.json"
-        try:
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-                    # Don't auto-load the saved path - user must choose each time
-                    # Just keep the checkbox unchecked by default
-                    self.use_custom_save_var.set(False)
-                    # Store the last path for reference, but don't use it automatically
-                    custom_path = config.get('custom_save_path', '')
-                    if custom_path:
-                        # Store in entry but leave disabled (just shows last used path)
-                        self.custom_save_location_var.set(custom_path)
-                    else:
-                        self.custom_save_location_var.set("")
-                    # Restore analysis checkbox state (default False for first-time/shipping)
-                    if hasattr(self, 'analysis_enabled'):
-                        self.analysis_enabled.set(config.get('analysis_enabled', False))
-        except Exception as e:
-            print(f"Could not load save location config: {e}")
-    
+        self.save_path_ctrl.load_config()
+
     def _save_save_location_config(self):
-        """Save save location preference to config file"""
-        config_file = _PROJECT_ROOT / "Json_Files" / "save_location_config.json"
-        try:
-            config = {}
-            if config_file.exists():
-                with open(config_file, 'r') as f:
-                    config = json.load(f)
-            
-            config['use_custom_save'] = self.use_custom_save_var.get()
-            config['custom_save_path'] = str(self.custom_save_location) if self.custom_save_location else ""
-            config['analysis_enabled'] = self.analysis_enabled.get() if hasattr(self, 'analysis_enabled') else False
-            
-            config_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(config_file, 'w') as f:
-                json.dump(config, f, indent=2)
-        except Exception as e:
-            print(f"Could not save save location config: {e}")
-    
+        self.save_path_ctrl.save_config()
+
     def _resolve_default_save_root(self) -> Path:
-        """
-        Determine the default base directory for measurement data.
-
-        Preference order:
-        1. OneDrive commercial root (environment-provided) ➜ Documents ➜ Data_folder
-        2. Explicit `%USERPROFILE%/OneDrive - The University of Nottingham/Documents/Data_folder`
-        3. Local `%USERPROFILE%/Documents/Data_folder`
-
-        The folder is created on demand. If none of the OneDrive locations
-        exist, the method falls back to the local Documents directory.
-        """
-        home = Path.home()
-        candidates: List[Path] = []
-
-        for env_key in ("OneDriveCommercial", "OneDrive"):
-            env_path = os.environ.get(env_key)
-            if env_path:
-                root = Path(env_path)
-                candidates.append(root / "Documents")
-
-        candidates.append(home / "OneDrive - The University of Nottingham" / "Documents")
-        candidates.append(home / "Documents")
-
-        for documents_path in candidates:
-            try:
-                root_exists = documents_path.parent.exists()
-                if not root_exists:
-                    continue
-                documents_path.mkdir(parents=True, exist_ok=True)
-                target = documents_path / "Data_folder"
-                target.mkdir(parents=True, exist_ok=True)
-                return target
-            except Exception:
-                continue
-
-        fallback = home / "Documents" / "Data_folder"
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
+        from gui.measurement_gui.save_path_controller import resolve_default_save_root
+        return resolve_default_save_root()
 
     def _get_base_save_path(self) -> str:
-        """Get base save path (custom if enabled, default root otherwise)."""
-        if self.use_custom_save_var.get() and self.custom_save_location:
-            return str(self.custom_save_location)
-        return str(self.default_save_root)
-    
+        return self.save_path_ctrl.get_base_save_path()
+
     def _get_save_directory(self, sample_name: str, device_letter: str, device_number: str) -> str:
-        """
-        Get save directory path, using custom base if configured.
-        
-        Args:
-            sample_name: Sample name (only used with default base)
-            device_letter: Device letter (e.g., "A")
-            device_number: Device number (e.g., "1")
-        
-        Returns:
-            String path to save directory
-        """
-        base_path = Path(self._get_base_save_path())
-        device_path = base_path / sample_name / device_letter / str(device_number)
-        device_path.mkdir(parents=True, exist_ok=True)
-        return str(device_path)
-    
+        return self.save_path_ctrl.get_save_directory(sample_name, device_letter, device_number)
+
     def _get_sample_save_directory(self, sample_name: str) -> str:
-        """
-        Get sample-level save directory (for tracking/research that should be at sample level).
-        
-        Args:
-            sample_name: Sample name
-        
-        Returns:
-            String path to sample-level directory (e.g., base/test/)
-        """
-        base_path = Path(self._get_base_save_path())
-        sample_path = base_path / sample_name
-        sample_path.mkdir(parents=True, exist_ok=True)
-        return str(sample_path)
-    
+        return self.save_path_ctrl.get_sample_save_directory(sample_name)
+
     def check_for_sample_name(self) -> None:
-        """Check if sample name is set, prompt if not (thread-safe)."""
-        sample_name = self.sample_name_var.get().strip()
+        self.sample_sync.check_for_sample_name()
 
-        if not sample_name:
-            # Must run dialog on main thread - schedule it
-            result_holder = [None]  # Mutable container to store result across thread boundary
-            
-            def ask_on_main_thread():
-                """Run the dialog on the main GUI thread."""
-                new_name = simpledialog.askstring(
-                    "Sample Name Required", 
-                    "Enter sample name (or cancel for 'undefined'):", 
-                    parent=self.master
-                )
-                
-                # Clean and validate the entered name
-                if new_name:
-                    cleaned_name = new_name.strip()
-                    # Remove/replace invalid file path characters
-                    invalid_chars = '<>:"|?*\\/[]'
-                    for char in invalid_chars:
-                        cleaned_name = cleaned_name.replace(char, '_')
-                    
-                    if cleaned_name:
-                        self.sample_name_var.set(cleaned_name)
-                    else:
-                        self.sample_name_var.set("undefined")
-                else:
-                    self.sample_name_var.set("undefined")
-                
-                result_holder[0] = True  # Signal completion
-            
-            # If we're on the main thread, just call it directly
-            try:
-                if threading.current_thread() == threading.main_thread():
-                    ask_on_main_thread()
-                else:
-                    # Schedule on main thread and wait
-                    self.master.after(0, ask_on_main_thread)
-                    # Wait for dialog to complete (with timeout)
-                    timeout = 60  # 60 seconds
-                    elapsed = 0
-                    while result_holder[0] is None and elapsed < timeout:
-                        time.sleep(0.1)
-                        elapsed += 0.1
-                    
-                    if result_holder[0] is None:
-                        # Timeout - just set undefined
-                        self.sample_name_var.set("undefined")
-            except Exception as e:
-                print(f"Error in sample name dialog: {e}")
-                self.sample_name_var.set("undefined")
-    
     def _update_overlay_from_current_state(self) -> None:
-        """Helper method to update the orange overlay box with current state."""
-        if not hasattr(self, 'plot_panels') or not hasattr(self.plot_panels, 'update_overlay'):
-            return
-        
-        # Get sample name - prioritize in this order:
-        # 1. sample_name_var (user-entered or set from device)
-        # 2. current_device_name from sample_gui (saved device)
-        # 3. sample_type_var from sample_gui (selected sample type, even if no saved device)
-        sample_name = "—"
-        
-        # First try sample_name_var
-        if hasattr(self, 'sample_name_var'):
-            try:
-                name = self.sample_name_var.get().strip()
-                if name:
-                    sample_name = name
-            except Exception:
-                pass
-        
-        # If still empty, try current_device_name (saved device)
-        if sample_name == "—" or not sample_name:
-            if hasattr(self.sample_gui, 'current_device_name') and self.sample_gui.current_device_name:
-                sample_name = self.sample_gui.current_device_name
-        
-        # If still empty, fall back to sample_type_var (selected sample type)
-        # This ensures it updates even when no saved device is selected
-        if sample_name == "—" or not sample_name:
-            if hasattr(self.sample_gui, 'sample_type_var'):
-                try:
-                    sample_type = self.sample_gui.sample_type_var.get()
-                    if sample_type:
-                        sample_name = sample_type
-                except Exception:
-                    pass
-        
-        # Get device label
-        device_label = "—"
-        try:
-            # Try to get from device_section_and_number
-            if hasattr(self, 'device_section_and_number') and self.device_section_and_number:
-                device_label = self.device_section_and_number
-            # Fallback: get from sample_gui's current device selection
-            elif hasattr(self.sample_gui, 'device_var'):
-                try:
-                    device = self.sample_gui.device_var.get()
-                    if device:
-                        device_label = device
-                except Exception:
-                    pass
-            # Another fallback: use current_index to get device label
-            if device_label == "—" and hasattr(self, 'current_index') and hasattr(self.sample_gui, 'device_list'):
-                if 0 <= self.current_index < len(self.sample_gui.device_list):
-                    device_key = self.sample_gui.device_list[self.current_index]
-                    if hasattr(self.sample_gui, 'get_device_label'):
-                        device_label = self.sample_gui.get_device_label(device_key)
-                    else:
-                        device_label = str(device_key)
-        except Exception:
-            pass
-        
-        # Get current voltage
-        current_voltage = getattr(self, 'current_voltage', '0V')
-        if current_voltage == '0V' and hasattr(self, 'v_arr_disp') and self.v_arr_disp:
-            try:
-                v_now = float(self.v_arr_disp[-1])
-                current_voltage = f"{v_now:.3f}V"
-            except Exception:
-                pass
-        
-        # Get current loop
-        current_loop = getattr(self, 'current_loop', '#1')
-        if current_loop == '#1':
-            loop_val = None
-            if getattr(self, 'sweep_num', None) is not None:
-                loop_val = self.sweep_num
-            elif getattr(self, 'measurment_number', None) is not None:
-                loop_val = self.measurment_number
-            if loop_val is not None:
-                current_loop = f"#{loop_val}"
-        
-        # Update the overlay
-        self.plot_panels.update_overlay(
-            sample_name=sample_name,
-            device=device_label,
-            voltage=current_voltage,
-            loop=current_loop
-        )
-    
+        self.sample_sync.update_overlay_from_current_state()
+
     def on_sample_gui_change(self, change_type: str, **kwargs) -> None:
-        """Handle notifications from SampleGUI about changes.
-        
-        Args:
-            change_type: Type of change ('sample_type', 'section', 'device_name', 'device_selection')
-            **kwargs: Additional data about the change
-        """
-        try:
-            if change_type == 'device_name':
-                device_name = kwargs.get('device_name')
-                # Update sample_name_var if it exists
-                if hasattr(self, 'sample_name_var'):
-                    if device_name:
-                        self.sample_name_var.set(device_name)
-                    else:
-                        # If device name is cleared, try to get sample type as fallback
-                        if hasattr(self.sample_gui, 'sample_type_var'):
-                            try:
-                                sample_type = self.sample_gui.sample_type_var.get()
-                                if sample_type:
-                                    self.sample_name_var.set(sample_type)
-                            except Exception:
-                                pass
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-            
-            elif change_type == 'sample_type':
-                sample_type = kwargs.get('sample_type')
-                # Update sample_name_var if device_name is not set
-                if hasattr(self, 'sample_name_var'):
-                    current_name = self.sample_name_var.get().strip()
-                    # Only update if current name is empty or matches old sample type
-                    if not current_name or (hasattr(self.sample_gui, 'sample_type_var') and 
-                                           current_name == getattr(self.sample_gui, 'sample_type_var', None)):
-                        if sample_type:
-                            self.sample_name_var.set(sample_type)
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-            
-            elif change_type == 'section':
-                section = kwargs.get('section')
-                device = kwargs.get('device')
-                # Update current_index if device changed
-                if device and hasattr(self.sample_gui, 'device_list'):
-                    try:
-                        device_key = self.sample_gui.get_device_key_from_label(device)
-                        if device_key and device_key in self.sample_gui.device_list:
-                            new_index = self.sample_gui.device_list.index(device_key)
-                            if new_index != self.current_index:
-                                self.current_index = new_index
-                                # Update device-related attributes
-                                if hasattr(self, 'device_list') and self.current_index < len(self.device_list):
-                                    self.current_device = self.device_list[self.current_index]
-                                    self.device_section_and_number = self.convert_to_name(self.current_index)
-                                    self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
-                    except Exception:
-                        pass
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-            
-            elif change_type == 'device_selection':
-                selected_devices = kwargs.get('selected_devices', [])
-                selected_indices = kwargs.get('selected_indices', [])
-                # Update device_list if provided
-                if selected_devices:
-                    self.device_list = selected_devices.copy()
-                    # Update current_index if it's out of bounds
-                    if self.current_index >= len(self.device_list):
-                        self.current_index = 0 if self.device_list else 0
-                    # Update current_device and device_section_and_number
-                    if self.device_list and self.current_index < len(self.device_list):
-                        self.current_device = self.device_list[self.current_index]
-                        self.device_section_and_number = self.convert_to_name(self.current_index)
-                        self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-        except Exception as e:
-            print(f"Error handling sample_gui change notification ({change_type}): {e}")
-    
+        self.sample_sync.on_sample_gui_change(change_type, **kwargs)
+
     def check_connection(self) -> None:
-        self.connect_keithley()
-        time.sleep(0.1)
-        self.Check_connection_gui = CheckConnection(self.master, self.keithley)
-
-    def _start_plot_threads(self) -> None:
-        """Compatibility shim: delegate to PlotUpdaters."""
-        if hasattr(self, "plot_updaters"):
-            self.plot_updaters.start_all_threads()
-
-    def _start_temperature_thread(self) -> None:
-        """Compatibility shim for legacy callers."""
-        if hasattr(self, "plot_updaters"):
-            self.plot_updaters.start_temperature_thread(self.itc_connected)
-    def _get_sample_save_directory(self, sample_name: str) -> str:
-        """
-        Get sample-level save directory (for tracking/research that should be at sample level).
-        
-        Args:
-            sample_name: Sample name
-        
-        Returns:
-            String path to sample-level directory (e.g., base/test/)
-        """
-        base_path = Path(self._get_base_save_path())
-        sample_path = base_path / sample_name
-        sample_path.mkdir(parents=True, exist_ok=True)
-        return str(sample_path)
-    
-    def check_for_sample_name(self) -> None:
-        """Check if sample name is set, prompt if not (thread-safe)."""
-        sample_name = self.sample_name_var.get().strip()
-
-        if not sample_name:
-            # Must run dialog on main thread - schedule it
-            result_holder = [None]  # Mutable container to store result across thread boundary
-            
-            def ask_on_main_thread():
-                """Run the dialog on the main GUI thread."""
-                new_name = simpledialog.askstring(
-                    "Sample Name Required", 
-                    "Enter sample name (or cancel for 'undefined'):", 
-                    parent=self.master
-                )
-                
-                # Clean and validate the entered name
-                if new_name:
-                    cleaned_name = new_name.strip()
-                    # Remove/replace invalid file path characters
-                    invalid_chars = '<>:"|?*\\/[]'
-                    for char in invalid_chars:
-                        cleaned_name = cleaned_name.replace(char, '_')
-                    
-                    if cleaned_name:
-                        self.sample_name_var.set(cleaned_name)
-                    else:
-                        self.sample_name_var.set("undefined")
-                else:
-                    self.sample_name_var.set("undefined")
-                
-                result_holder[0] = True  # Signal completion
-            
-            # If we're on the main thread, just call it directly
-            try:
-                if threading.current_thread() == threading.main_thread():
-                    ask_on_main_thread()
-                else:
-                    # Schedule on main thread and wait
-                    self.master.after(0, ask_on_main_thread)
-                    # Wait for dialog to complete (with timeout)
-                    timeout = 60  # 60 seconds
-                    elapsed = 0
-                    while result_holder[0] is None and elapsed < timeout:
-                        time.sleep(0.1)
-                        elapsed += 0.1
-                    
-                    if result_holder[0] is None:
-                        # Timeout - just set undefined
-                        self.sample_name_var.set("undefined")
-            except Exception as e:
-                print(f"Error in sample name dialog: {e}")
-                self.sample_name_var.set("undefined")
-    
-    def _update_overlay_from_current_state(self) -> None:
-        """Helper method to update the orange overlay box with current state."""
-        if not hasattr(self, 'plot_panels') or not hasattr(self.plot_panels, 'update_overlay'):
-            return
-        
-        # Get sample name - prioritize in this order:
-        # 1. sample_name_var (user-entered or set from device)
-        # 2. current_device_name from sample_gui (saved device)
-        # 3. sample_type_var from sample_gui (selected sample type, even if no saved device)
-        sample_name = "—"
-        
-        # First try sample_name_var
-        if hasattr(self, 'sample_name_var'):
-            try:
-                name = self.sample_name_var.get().strip()
-                if name:
-                    sample_name = name
-            except Exception:
-                pass
-        
-        # If still empty, try current_device_name (saved device)
-        if sample_name == "—" or not sample_name:
-            if hasattr(self.sample_gui, 'current_device_name') and self.sample_gui.current_device_name:
-                sample_name = self.sample_gui.current_device_name
-        
-        # If still empty, fall back to sample_type_var (selected sample type)
-        # This ensures it updates even when no saved device is selected
-        if sample_name == "—" or not sample_name:
-            if hasattr(self.sample_gui, 'sample_type_var'):
-                try:
-                    sample_type = self.sample_gui.sample_type_var.get()
-                    if sample_type:
-                        sample_name = sample_type
-                except Exception:
-                    pass
-        
-        # Get device label
-        device_label = "—"
-        try:
-            # Try to get from device_section_and_number
-            if hasattr(self, 'device_section_and_number') and self.device_section_and_number:
-                device_label = self.device_section_and_number
-            # Fallback: get from sample_gui's current device selection
-            elif hasattr(self.sample_gui, 'device_var'):
-                try:
-                    device = self.sample_gui.device_var.get()
-                    if device:
-                        device_label = device
-                except Exception:
-                    pass
-            # Another fallback: use current_index to get device label
-            if device_label == "—" and hasattr(self, 'current_index') and hasattr(self.sample_gui, 'device_list'):
-                if 0 <= self.current_index < len(self.sample_gui.device_list):
-                    device_key = self.sample_gui.device_list[self.current_index]
-                    if hasattr(self.sample_gui, 'get_device_label'):
-                        device_label = self.sample_gui.get_device_label(device_key)
-                    else:
-                        device_label = str(device_key)
-        except Exception:
-            pass
-        
-        # Get current voltage
-        current_voltage = getattr(self, 'current_voltage', '0V')
-        if current_voltage == '0V' and hasattr(self, 'v_arr_disp') and self.v_arr_disp:
-            try:
-                v_now = float(self.v_arr_disp[-1])
-                current_voltage = f"{v_now:.3f}V"
-            except Exception:
-                pass
-        
-        # Get current loop
-        current_loop = getattr(self, 'current_loop', '#1')
-        if current_loop == '#1':
-            loop_val = None
-            if getattr(self, 'sweep_num', None) is not None:
-                loop_val = self.sweep_num
-            elif getattr(self, 'measurment_number', None) is not None:
-                loop_val = self.measurment_number
-            if loop_val is not None:
-                current_loop = f"#{loop_val}"
-        
-        # Update the overlay
-        self.plot_panels.update_overlay(
-            sample_name=sample_name,
-            device=device_label,
-            voltage=current_voltage,
-            loop=current_loop
-        )
-    
-    def on_sample_gui_change(self, change_type: str, **kwargs) -> None:
-        """Handle notifications from SampleGUI about changes.
-        
-        Args:
-            change_type: Type of change ('sample_type', 'section', 'device_name', 'device_selection')
-            **kwargs: Additional data about the change
-        """
-        try:
-            if change_type == 'device_name':
-                device_name = kwargs.get('device_name')
-                # Update sample_name_var if it exists
-                if hasattr(self, 'sample_name_var'):
-                    if device_name:
-                        self.sample_name_var.set(device_name)
-                    else:
-                        # If device name is cleared, try to get sample type as fallback
-                        if hasattr(self.sample_gui, 'sample_type_var'):
-                            try:
-                                sample_type = self.sample_gui.sample_type_var.get()
-                                if sample_type:
-                                    self.sample_name_var.set(sample_type)
-                            except Exception:
-                                pass
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-            
-            elif change_type == 'sample_type':
-                sample_type = kwargs.get('sample_type')
-                # Update sample_name_var if device_name is not set
-                if hasattr(self, 'sample_name_var'):
-                    current_name = self.sample_name_var.get().strip()
-                    # Only update if current name is empty or matches old sample type
-                    if not current_name or (hasattr(self.sample_gui, 'sample_type_var') and 
-                                           current_name == getattr(self.sample_gui, 'sample_type_var', None)):
-                        if sample_type:
-                            self.sample_name_var.set(sample_type)
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-            
-            elif change_type == 'section':
-                section = kwargs.get('section')
-                device = kwargs.get('device')
-                # Update current_index if device changed
-                if device and hasattr(self.sample_gui, 'device_list'):
-                    try:
-                        device_key = self.sample_gui.get_device_key_from_label(device)
-                        if device_key and device_key in self.sample_gui.device_list:
-                            new_index = self.sample_gui.device_list.index(device_key)
-                            if new_index != self.current_index:
-                                self.current_index = new_index
-                                # Update device-related attributes
-                                if hasattr(self, 'device_list') and self.current_index < len(self.device_list):
-                                    self.current_device = self.device_list[self.current_index]
-                                    self.device_section_and_number = self.convert_to_name(self.current_index)
-                                    self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
-                    except Exception:
-                        pass
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-            
-            elif change_type == 'device_selection':
-                selected_devices = kwargs.get('selected_devices', [])
-                selected_indices = kwargs.get('selected_indices', [])
-                # Update device_list if provided
-                if selected_devices:
-                    self.device_list = selected_devices.copy()
-                    # Update current_index if it's out of bounds
-                    if self.current_index >= len(self.device_list):
-                        self.current_index = 0 if self.device_list else 0
-                    # Update current_device and device_section_and_number
-                    if self.device_list and self.current_index < len(self.device_list):
-                        self.current_device = self.device_list[self.current_index]
-                        self.device_section_and_number = self.convert_to_name(self.current_index)
-                        self.display_index_section_number = f"{self.device_section_and_number} ({self.current_device})"
-                
-                # Update overlay
-                self._update_overlay_from_current_state()
-        except Exception as e:
-            print(f"Error handling sample_gui change notification ({change_type}): {e}")
-    
-    def check_connection(self) -> None:
-        self.connect_keithley()
-        time.sleep(0.1)
-        self.Check_connection_gui = CheckConnection(self.master, self.keithley)
+        from gui.measurement_gui.child_gui_launchers import check_connection
+        check_connection(self)
 
     def _start_plot_threads(self) -> None:
         """Compatibility shim: delegate to PlotUpdaters."""

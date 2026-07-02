@@ -77,10 +77,6 @@ import os
 import csv
 
 from gui.measurement_gui import MeasurementGUI
-from Equipment.Multiplexers.Multiplexer_10_OUT.Multiplexer_Class import MultiplexerController
-
-# Import new multiplexer manager
-from Equipment.managers.multiplexer import MultiplexerManager
 
 try:
     from Equipment.SMU_AND_PMU import Keithley2400Controller
@@ -115,6 +111,14 @@ from gui.sample_gui.config import (
     resolve_default_save_root,
     sample_config,
 )
+from gui.sample_gui.quick_scan_controller import QuickScanController
+from gui.sample_gui.device_manager_controller import DeviceManagerController
+from gui.sample_gui.terminal_log_controller import TerminalLogController
+from gui.sample_gui.device_status_controller import DeviceStatusController
+from gui.sample_gui.telegram_controller import TelegramController
+from gui.sample_gui.routing_controller import RoutingController
+from gui.sample_gui.selection_controller import SelectionController
+from gui.sample_gui.status_store import StatusStore
 
 
 class SampleGUI:
@@ -187,6 +191,16 @@ class SampleGUI:
         self.telegram_bot_name_var = tk.StringVar(value="")
         self.telegram_bot: Optional[Any] = None
         self.telegram_bots: Dict[str, Dict[str, str]] = {}  # {name: {token, chatid}}
+
+        # Domain controllers (logic extracted from this orchestrator)
+        self.status_store = StatusStore(self)
+        self.selection = SelectionController(self)
+        self.routing = RoutingController(self)
+        self.quick_scan_ctrl = QuickScanController(self)
+        self.device_status_ctrl = DeviceStatusController(self)
+        self.device_mgr = DeviceManagerController(self)
+        self.terminal_log = TerminalLogController(self)
+        self.telegram_ctrl = TelegramController(self)
         self._load_telegram_bots()
 
         # =========================
@@ -267,16 +281,7 @@ class SampleGUI:
             print(f"Warning during dropdown init: {e}")
 
     def _update_quick_scan_background(self, image: Image.Image) -> None:
-        """Update the base image shown on the quick scan canvas."""
-        if not hasattr(self, 'quick_scan_canvas') or self.quick_scan_canvas is None:
-            return
-        self.quick_scan_canvas.delete("all")
-        # Resize image to match quick scan canvas size (600x500) - zoomed in
-        quick_scan_img = image.resize((600, 500))
-        self.quick_scan_base_image = quick_scan_img.copy()
-        self.quick_scan_canvas_image = ImageTk.PhotoImage(self.quick_scan_base_image)
-        self.quick_scan_canvas.create_image(0, 0, anchor="nw", image=self.quick_scan_canvas_image)
-        self._redraw_quick_scan_overlay()
+        self.quick_scan_ctrl.update_background(image)
 
     def _lerp_current(self, ratio: float) -> float:
         """Return a current value between min and max using logarithmic interpolation."""
@@ -288,919 +293,102 @@ class SampleGUI:
         return 10 ** (log_min + ratio_clamped * (log_max - log_min))
 
     def _current_to_color(self, current_a: float) -> str:
-        """Map a measured current to a color between dark red and green."""
-        min_i = max(self.quick_scan_min_current, 1e-20)
-        max_i = max(self.quick_scan_max_current, min_i * 10)
-        log_min = math.log10(min_i)
-        log_max = math.log10(max_i)
-        denom = log_max - log_min if log_max != log_min else 1e-9
-        if current_a <= 0:
-            ratio = 0.0
-        else:
-            ratio = (math.log10(max(current_a, min_i)) - log_min) / denom
-        ratio = max(0.0, min(1.0, ratio))
-        # Bright gradient: red -> orange -> green
-        if ratio <= 0.5:
-            local = ratio / 0.5
-            start = (255, 0, 0)       # red
-            end = (255, 140, 0)       # orange
-        else:
-            local = (ratio - 0.5) / 0.5
-            start = (255, 140, 0)     # orange
-            end = (0, 255, 0)         # green
-        r = int(start[0] + (end[0] - start[0]) * local)
-        g = int(start[1] + (end[1] - start[1]) * local)
-        b = int(start[2] + (end[2] - start[2]) * local)
-        return f"#{r:02x}{g:02x}{b:02x}"
+        return self.quick_scan_ctrl.current_to_color(current_a)
 
     def _redraw_quick_scan_overlay(self) -> None:
-        """Draw or update current overlays for the quick scan canvases."""
-        self._draw_quick_scan_overlay_on(
-            self.quick_scan_canvas if hasattr(self, "quick_scan_canvas") else None,
-            "overlay",
-            canvas_width=600,  # Original canvas width
-            canvas_height=500
-        )
-        self._draw_quick_scan_overlay_on(
-            self.canvas if hasattr(self, "canvas") else None,
-            "quick_scan_overlay",
-            canvas_width=600,
-            canvas_height=500
-        )
-        self._draw_status_overlay_on(
-            self.canvas if hasattr(self, "canvas") else None,
-            "status_overlay",
-            canvas_width=600,
-            canvas_height=500
-        )
+        self.quick_scan_ctrl.redraw_overlay()
 
-    def _draw_quick_scan_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str, 
+    def _draw_quick_scan_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str,
                                     canvas_width: int, canvas_height: int) -> None:
-        """Draw quick scan overlay rectangles on the provided canvas."""
-        if target_canvas is None:
-            return
-        target_canvas.delete(tag)
-        
-        # Check if quick scan overlay is enabled
-        if not self.show_quick_scan_overlay.get():
-            return
-            
-        if not getattr(self, "original_image", None):
-            return
-            
-        orig_width, orig_height = self.original_image.size
-        scale_x = orig_width / canvas_width
-        scale_y = orig_height / canvas_height
-
-        for device, bounds in self.device_mapping.items():
-            current = self.quick_scan_results.get(device)
-            if current is None:
-                continue
-            if isinstance(current, float) and math.isnan(current):
-                continue
-            x_min = bounds["x_min"] / scale_x
-            x_max = bounds["x_max"] / scale_x
-            y_min = bounds["y_min"] / scale_y
-            y_max = bounds["y_max"] / scale_y
-            color = self._current_to_color(current)
-            target_canvas.create_rectangle(
-                x_min,
-                y_min,
-                x_max,
-                y_max,
-                fill=color,
-                outline="",
-                stipple="gray50",  # Semi-transparent effect
-                tags=tag
-            )
+        self.quick_scan_ctrl._draw_quick_scan_overlay_on(target_canvas, tag)
 
     def _draw_status_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str,
                                 canvas_width: int, canvas_height: int) -> None:
-        """Draw device status overlay on the canvas."""
-        if target_canvas is None:
-            return
-        target_canvas.delete(tag)
-        
-        # Check if status overlay is enabled
-        if not self.show_status_overlay.get():
-            return
-            
-        if not getattr(self, "original_image", None):
-            return
-            
-        orig_width, orig_height = self.original_image.size
-        scale_x = orig_width / canvas_width
-        scale_y = orig_height / canvas_height
-
-        for device, bounds in self.device_mapping.items():
-            status_info = self.device_status.get(device, {})
-            manual_status = status_info.get("manual_status", "undefined")
-            
-            # Only draw for manually classified devices
-            if manual_status == "undefined":
-                continue
-                
-            x_min = bounds["x_min"] / scale_x
-            x_max = bounds["x_max"] / scale_x
-            y_min = bounds["y_min"] / scale_y
-            y_max = bounds["y_max"] / scale_y
-            
-            # Solid color for manual classification
-            if manual_status == "working":
-                color = "#4CAF50"  # Green
-            elif manual_status == "broken":
-                color = "#F44336"  # Red
-            else:
-                continue
-                
-            target_canvas.create_rectangle(
-                x_min,
-                y_min,
-                x_max,
-                y_max,
-                fill=color,
-                outline="",
-                stipple="gray75",  # Semi-transparent effect
-                tags=tag
-            )
+        self.quick_scan_ctrl._draw_status_overlay_on(target_canvas, tag)
 
     def start_quick_scan(self) -> None:
-        """Start the quick scan routine across all devices."""
-        if self.quick_scan_running:
-            return
-        if self.mpx_manager is None:
-            messagebox.showwarning("Multiplexer", "Multiplexer manager not initialized.")
-            return
-        if not getattr(self, "device_list", None):
-            messagebox.showwarning("Devices", "No devices available to scan.")
-            return
-        try:
-            voltage = float(self.quick_scan_voltage_var.get())
-        except (tk.TclError, ValueError, TypeError):
-            messagebox.showerror("Quick Scan", "Voltage value is invalid.")
-            return
-
-        try:
-            settle_time = max(0.0, float(self.quick_scan_settle_var.get()))
-        except (tk.TclError, ValueError, TypeError):
-            messagebox.showerror("Quick Scan", "Settle time value is invalid.")
-            return
-
-        self.quick_scan_abort.clear()
-        self.quick_scan_running = True
-        self.quick_scan_results.clear()
-        self._redraw_quick_scan_overlay()
-        self._set_quick_scan_buttons(running=True)
-        self._set_quick_scan_status("Running")
-        self._log_quick_scan("Starting quick scan...")
-
-        self.quick_scan_thread = threading.Thread(
-            target=self._quick_scan_worker,
-            args=(voltage, settle_time),
-            daemon=True
-        )
-        self.quick_scan_thread.start()
+        self.quick_scan_ctrl.start()
 
     def stop_quick_scan(self) -> None:
-        if self.quick_scan_running:
-            self.quick_scan_abort.set()
-            self._log_quick_scan("Stop requested. Finishing current device...")
+        self.quick_scan_ctrl.stop()
 
     def _quick_scan_worker(self, voltage: float, settle_time: float) -> None:
-        controller = None
-        instrument_ready = False
-        if Keithley2400Controller is not None:
-            try:
-                controller = Keithley2400Controller()
-                if getattr(controller, "device", None):
-                    instrument_ready = True
-                    self._run_on_ui(lambda: self._log_quick_scan("Keithley 2400 connected for quick scan."))
-                else:
-                    controller = None
-            except Exception as exc:
-                controller = None
-                self._run_on_ui(lambda: self._log_quick_scan(f"Instrument unavailable, using simulation. ({exc})"))
-        else:
-            self._run_on_ui(lambda: self._log_quick_scan("Instrument driver not available, using simulation."))
-
-        if not instrument_ready:
-            controller = None
-
-        if controller:
-            try:
-                controller.set_voltage(0.0)
-            except Exception:
-                pass
-
-        for idx, device in enumerate(self.device_list):
-            if self.quick_scan_abort.is_set():
-                break
-
-            self._run_on_ui(lambda d=device, i=idx: self._highlight_quick_scan_device(d, i))
-
-            try:
-                routed = self.mpx_manager.route_to_device(device, idx)
-            except Exception as exc:
-                self._run_on_ui(lambda msg=f"Routing failed for {self.get_device_label(device)}: {exc}": self._log_quick_scan(msg))
-                continue
-
-            if not routed:
-                self._run_on_ui(lambda msg=f"Routing failed for {self.get_device_label(device)}.": self._log_quick_scan(msg))
-                continue
-
-            time.sleep(settle_time)  # Allow time for relays to settle
-
-            if self.quick_scan_abort.is_set():
-                break
-
-            if controller:
-                current = self._measure_device_current(controller, voltage)
-            else:
-                current = self._simulate_quick_scan_current(device, voltage)
-
-            self._run_on_ui(lambda d=device, value=current: self._store_quick_scan_result(d, value))
-            label = self.get_device_label(device)
-            self._run_on_ui(lambda l=label, value=current: self._log_quick_scan(f"{l}: {self._format_current(value)}"))
-
-        aborted = self.quick_scan_abort.is_set()
-
-        if controller:
-            try:
-                controller.set_voltage(0.0)
-                time.sleep(0.05)
-                controller.enable_output(False)
-            except Exception:
-                pass
-
-        self._run_on_ui(lambda: self._finalize_quick_scan(aborted))
+        self.quick_scan_ctrl._worker(voltage, settle_time)
 
     def _measure_device_current(self, controller: "Keithley2400Controller", voltage: float) -> Optional[float]:
-        try:
-            controller.set_voltage(voltage)
-            time.sleep(0.1)
-            current = controller.measure_current()
-            controller.set_voltage(0.0)
-            return float(current) if current is not None else None
-        except Exception as exc:
-            self._run_on_ui(lambda msg=f"Measurement error: {exc}": self._log_quick_scan(msg))
-            return None
+        return self.quick_scan_ctrl._measure_device_current(controller, voltage)
 
     def _simulate_quick_scan_current(self, device: str, voltage: float) -> float:
-        rng = random.Random()
-        rng.seed(f"{device}:{round(voltage, 3)}")
-        failure_floor = min(self.quick_scan_min_current * 0.1, 1e-11)
-
-        if rng.random() < 0.25:
-            return rng.uniform(failure_floor, self.quick_scan_min_current * 0.25)
-
-        log_min = math.log10(max(self.quick_scan_min_current, 1e-12))
-        log_max = math.log10(max(self.quick_scan_max_current, log_min + 1e-6))
-        span = log_max - log_min
-        biased = rng.random() ** 0.5
-        return 10 ** (log_min + span * biased)
+        return self.quick_scan_ctrl._simulate_current(device, voltage)
 
     def _highlight_quick_scan_device(self, device: str, idx: int) -> None:
-        label = self.get_device_label(device)
-        self.current_index = idx
-        self.device_var.set(label)
-        self.info_box.config(text=f"Current Device: {label}")
-        try:
-            self.update_highlight(device)
-        except Exception:
-            pass
-        self._set_quick_scan_status(f"Scanning {label}")
+        self.quick_scan_ctrl._highlight_device(device, idx)
 
     def _store_quick_scan_result(self, device: str, current: Optional[float]) -> None:
-        self.quick_scan_results[device] = current
-        self._redraw_quick_scan_overlay()
-
-    # ==========================
-    # TELEGRAM INTEGRATION
-    # ==========================
+        self.quick_scan_ctrl._store_result(device, current)
 
     def _load_telegram_bots(self) -> None:
-        """Load Telegram bot configurations via secure messaging config (local file + env)."""
-        from gui.messaging_config import load_messaging_config
-
-        self.telegram_bots = {}
-        for name, info in load_messaging_config().items():
-            token = (info.get("token") or "").strip()
-            chatid = (info.get("chatid") or "").strip()
-            if token and chatid:
-                self.telegram_bots[name] = {"token": token, "chatid": chatid}
+        self.telegram_ctrl.load_bots()
 
     def _update_telegram_bot(self) -> None:
-        """Update or create Telegram bot instance based on current settings."""
-        if not self.telegram_enabled.get():
-            self.telegram_bot = None
-            return
-        
-        bot_name = self.telegram_bot_name_var.get().strip()
-        if not bot_name or bot_name not in self.telegram_bots:
-            self.telegram_bot = None
-            return
-        
-        bot_config = self.telegram_bots[bot_name]
-        token = bot_config.get("token", "").strip()
-        chat_id = bot_config.get("chatid", "").strip()
-        
-        if not token or not chat_id:
-            self.telegram_bot = None
-            return
-        
-        try:
-            from Notifications import TelegramBot
-            self.telegram_bot = TelegramBot(token, chat_id)
-            self._log_quick_scan(f"Telegram bot '{bot_name}' initialized")
-        except Exception as e:
-            self.telegram_bot = None
-            self._log_quick_scan(f"Failed to initialize Telegram bot '{bot_name}': {e}")
+        self.telegram_ctrl.update_bot()
 
     def _capture_canvas_image(self) -> Optional[Path]:
-        """Capture the quick scan canvas with heat map overlay as an image file."""
-        if not hasattr(self, 'quick_scan_base_image') or self.quick_scan_base_image is None:
-            return None
-        
-        try:
-            # Start with the base image
-            canvas_image = self.quick_scan_base_image.copy()
-            
-            # Convert to RGBA if needed for transparency
-            if canvas_image.mode != 'RGBA':
-                canvas_image = canvas_image.convert('RGBA')
-            
-            # Create overlay layer
-            overlay = Image.new('RGBA', canvas_image.size, (0, 0, 0, 0))
-            draw = ImageDraw.Draw(overlay)
-            
-            # Get scaling factors
-            # Device bounds are in original image coordinates, need to scale to quick scan canvas (600x500)
-            orig_width, orig_height = self.original_image.size if hasattr(self, 'original_image') and self.original_image else (600, 500)
-            quick_scan_width = 600
-            quick_scan_height = 500
-            scale_x = orig_width / quick_scan_width
-            scale_y = orig_height / quick_scan_height
-            
-            # Draw quick scan overlay if enabled
-            if self.show_quick_scan_overlay.get() and hasattr(self, 'device_mapping'):
-                for device, bounds in self.device_mapping.items():
-                    current = self.quick_scan_results.get(device)
-                    if current is None or (isinstance(current, float) and math.isnan(current)):
-                        continue
-                    
-                    # Calculate device bounds on canvas
-                    x_min_raw = bounds["x_min"] / scale_x
-                    x_max_raw = bounds["x_max"] / scale_x
-                    y_min_raw = bounds["y_min"] / scale_y
-                    y_max_raw = bounds["y_max"] / scale_y
-                    
-                    # Ensure min < max (handle cases where coordinates might be reversed)
-                    x_min = int(min(x_min_raw, x_max_raw))
-                    x_max = int(max(x_min_raw, x_max_raw))
-                    y_min = int(min(y_min_raw, y_max_raw))
-                    y_max = int(max(y_min_raw, y_max_raw))
-                    
-                    # Skip if invalid bounds
-                    if x_min >= x_max or y_min >= y_max:
-                        continue
-                    
-                    # Clamp to image bounds
-                    x_min = max(0, min(x_min, canvas_image.width - 1))
-                    x_max = max(1, min(x_max, canvas_image.width))
-                    y_min = max(0, min(y_min, canvas_image.height - 1))
-                    y_max = max(1, min(y_max, canvas_image.height))
-                    
-                    # Get color for this current value
-                    color = self._current_to_color(current)
-                    # Convert hex color to RGBA
-                    r = int(color[1:3], 16)
-                    g = int(color[3:5], 16)
-                    b = int(color[5:7], 16)
-                    overlay_color = (r, g, b, 128)  # Semi-transparent
-                    
-                    # Draw rectangle on overlay
-                    draw.rectangle([x_min, y_min, x_max, y_max], fill=overlay_color)
-            
-            # Draw device status overlay if enabled
-            if self.show_status_overlay.get() and hasattr(self, 'device_mapping'):
-                for device, bounds in self.device_mapping.items():
-                    status_info = self.device_status.get(device, {})
-                    manual_status = status_info.get("manual_status", "undefined")
-                    
-                    if manual_status == "undefined":
-                        continue
-                    
-                    # Calculate device bounds on canvas
-                    x_min_raw = bounds["x_min"] / scale_x
-                    x_max_raw = bounds["x_max"] / scale_x
-                    y_min_raw = bounds["y_min"] / scale_y
-                    y_max_raw = bounds["y_max"] / scale_y
-                    
-                    # Ensure min < max (handle cases where coordinates might be reversed)
-                    x_min = int(min(x_min_raw, x_max_raw))
-                    x_max = int(max(x_min_raw, x_max_raw))
-                    y_min = int(min(y_min_raw, y_max_raw))
-                    y_max = int(max(y_min_raw, y_max_raw))
-                    
-                    # Skip if invalid bounds
-                    if x_min >= x_max or y_min >= y_max:
-                        continue
-                    
-                    # Clamp to image bounds
-                    x_min = max(0, min(x_min, canvas_image.width - 1))
-                    x_max = max(1, min(x_max, canvas_image.width))
-                    y_min = max(0, min(y_min, canvas_image.height - 1))
-                    y_max = max(1, min(y_max, canvas_image.height))
-                    
-                    if manual_status == "working":
-                        overlay_color = (76, 175, 80, 192)  # Green, more opaque
-                    elif manual_status == "broken":
-                        overlay_color = (244, 67, 54, 192)  # Red, more opaque
-                    else:
-                        continue
-                    
-                    draw.rectangle([x_min, y_min, x_max, y_max], fill=overlay_color)
-            
-            # Composite overlay onto base image
-            final_image = Image.alpha_composite(canvas_image, overlay)
-            # Convert back to RGB for saving
-            final_image = final_image.convert('RGB')
-            
-            # Create file path
-            save_root = resolve_default_save_root()
-            if self.current_device_name:
-                device_folder = self.get_device_folder()
-                device_folder.mkdir(parents=True, exist_ok=True)
-                image_path = device_folder / f"quick_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            else:
-                sample = self.sample_type_var.get()
-                sample_dir = save_root / sample
-                sample_dir.mkdir(parents=True, exist_ok=True)
-                image_path = sample_dir / f"quick_scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            
-            # Save image
-            final_image.save(image_path, 'PNG')
-            
-            return image_path
-            
-        except Exception as e:
-            self._log_quick_scan(f"Failed to capture canvas image: {e}")
-            return None
+        return self.telegram_ctrl.capture_canvas_image()
 
     def _send_telegram_notification(self, aborted: bool) -> None:
-        """Send Telegram notification when quick scan completes."""
-        if not self.telegram_enabled.get() or self.telegram_bot is None:
-            return
-        
-        try:
-            sample = self.sample_type_var.get()
-            device_name = self.current_device_name or "Unknown Device"
-            voltage = self.quick_scan_voltage_var.get()
-            
-            status = "Aborted" if aborted else "Complete"
-            device_count = len(self.quick_scan_results)
-            
-            # Count working vs non-working devices
-            working_count = 0
-            non_working_count = 0
-            for device, current in self.quick_scan_results.items():
-                if current is None or (isinstance(current, float) and math.isnan(current)):
-                    continue
-                if current >= self.quick_scan_threshold:
-                    working_count += 1
-                else:
-                    non_working_count += 1
-            
-            # Escape markdown special characters to avoid parsing errors
-            def escape_markdown(text: str) -> str:
-                """Escape markdown special characters that cause parsing issues."""
-                # Only escape characters that commonly cause issues in our messages
-                # Underscores are the main culprit (e.g., "Cross_bar")
-                # Don't escape dots/minuses in numbers (e.g., "1.000e-07")
-                text = text.replace('_', '\\_')  # Underscore for italics
-                text = text.replace('*', '\\*')  # Asterisk for bold
-                text = text.replace('[', '\\[')  # Square brackets for links
-                text = text.replace(']', '\\]')
-                return text
-            
-            message = (
-                f"Quick Scan {status}\n\n"
-                f"Device: {escape_markdown(device_name)}\n"
-                f"Sample Type: {escape_markdown(sample)}\n"
-                f"Voltage: {voltage} V\n"
-                f"Threshold: {escape_markdown(f'{self.quick_scan_threshold:.3e}')} A\n"
-                f"Devices Scanned: {device_count}\n"
-                f"Working: {working_count}\n"
-                f"Non-Working: {non_working_count}"
-            )
-            
-            self.telegram_bot.send_message(message)
-            
-            # Capture and send canvas image
-            image_path = self._capture_canvas_image()
-            if image_path and image_path.exists():
-                caption = f"Quick Scan Heat Map - {escape_markdown(device_name)} ({escape_markdown(sample)})"
-                self.telegram_bot.send_image(str(image_path), caption)
-                self._log_quick_scan("Sent Telegram notification with image")
-            else:
-                self._log_quick_scan("Sent Telegram notification (image capture failed)")
-                
-        except Exception as e:
-            self._log_quick_scan(f"Failed to send Telegram notification: {e}")
+        self.telegram_ctrl.send_quick_scan_notification(aborted)
 
     def _finalize_quick_scan(self, aborted: bool) -> None:
-        self.quick_scan_running = False
-        status = "Aborted" if aborted else "Complete"
-        self._set_quick_scan_status(status)
-        self._set_quick_scan_buttons(running=False)
-        if self.quick_scan_results:
-            self.quick_scan_save_button.config(state=tk.NORMAL)
-            
-            # Automatically update device status for undefined devices
-            voltage = self.quick_scan_voltage_var.get()
-            updated_count = 0
-            for device, current in self.quick_scan_results.items():
-                if current is None or (isinstance(current, float) and math.isnan(current)):
-                    continue
-                    
-                # Get or create device status
-                if device not in self.device_status:
-                    self.device_status[device] = {
-                        "auto_classification": "unknown",
-                        "manual_status": "undefined",
-                        "last_current_a": None,
-                        "test_voltage_v": None,
-                        "last_tested": None,
-                        "notes": "",
-                        "measurement_count": 0,
-                        "quick_scan_history": []
-                    }
-                
-                # Update auto classification based on threshold
-                auto_class = "working" if current >= self.quick_scan_threshold else "not-working"
-                self.device_status[device]["auto_classification"] = auto_class
-                self.device_status[device]["last_current_a"] = current
-                self.device_status[device]["test_voltage_v"] = voltage
-                self.device_status[device]["last_tested"] = datetime.now().isoformat(timespec='seconds')
-                
-                # Add to quick scan history
-                history_entry = {
-                    "timestamp": datetime.now().isoformat(timespec='seconds'),
-                    "current_a": current,
-                    "voltage_v": voltage
-                }
-                if "quick_scan_history" not in self.device_status[device]:
-                    self.device_status[device]["quick_scan_history"] = []
-                self.device_status[device]["quick_scan_history"].append(history_entry)
-                
-                updated_count += 1
-            
-            if updated_count > 0:
-                self._save_device_status()
-                self._log_quick_scan(f"Updated status for {updated_count} device(s)")
-        
-        self._log_quick_scan(f"Quick scan {status.lower()}.")
-        
-        # Send Telegram notification if enabled
-        if not aborted:  # Only send on completion, not abort
-            self._send_telegram_notification(aborted)
+        self.quick_scan_ctrl._finalize(aborted)
 
     def _set_quick_scan_buttons(self, running: bool) -> None:
-        run_state = tk.DISABLED if running else tk.NORMAL
-        stop_state = tk.NORMAL if running else tk.DISABLED
-        self.quick_scan_run_button.config(state=run_state)
-        self.quick_scan_stop_button.config(state=stop_state)
-        if running:
-            self.quick_scan_save_button.config(state=tk.DISABLED)
-        elif self.quick_scan_results:
-            self.quick_scan_save_button.config(state=tk.NORMAL)
-        else:
-            self.quick_scan_save_button.config(state=tk.DISABLED)
+        self.quick_scan_ctrl._set_buttons(running)
 
     def _set_quick_scan_status(self, text: str) -> None:
-        self.quick_scan_status.config(text=f"Status: {text}")
+        self.quick_scan_ctrl._set_status(text)
 
     def _log_quick_scan(self, message: str) -> None:
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.quick_scan_log.config(state=tk.NORMAL)
-        self.quick_scan_log.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.quick_scan_log.config(state=tk.DISABLED)
-        self.quick_scan_log.see(tk.END)
+        self.quick_scan_ctrl._log(message)
 
     def _format_current(self, current: Optional[float]) -> str:
-        if current is None or (isinstance(current, float) and math.isnan(current)):
-            return "n/a"
-        return f"{current:.3e} A"
+        return QuickScanController._format_current(current)
 
     def save_quick_scan_results(self) -> None:
-        if self.quick_scan_running:
-            messagebox.showinfo("Quick Scan", "Please wait for the scan to finish before saving.")
-            return
-        if not self.quick_scan_results:
-            messagebox.showwarning("Quick Scan", "No quick scan data to save.")
-            return
-
-        sample = self.sample_type_var.get()
-        if not sample:
-            messagebox.showwarning("Quick Scan", "Select a sample before saving.")
-            return
-
-        storage_dir = self._get_quick_scan_storage_dir(sample)
-        storage_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().isoformat(timespec='seconds')
-        voltage = float(self.quick_scan_voltage_var.get())
-
-        payload = {
-            "sample": sample,
-            "voltage_v": voltage,
-            "timestamp": timestamp,
-            "device_count": len(self.quick_scan_results),
-            "results": []
-        }
-
-        for device_key in self.device_list:
-            current = self.quick_scan_results.get(device_key)
-            if current is not None and isinstance(current, float) and math.isnan(current):
-                current = None
-            payload["results"].append({
-                "device_key": device_key,
-                "device_label": self.get_device_label(device_key),
-                "current_a": current
-            })
-
-        json_path = storage_dir / "quick_scan.json"
-        csv_path = storage_dir / "quick_scan.csv"
-
-        try:
-            with json_path.open("w", encoding="utf-8") as fp:
-                json.dump(payload, fp, indent=2)
-        except Exception as exc:
-            messagebox.showerror("Quick Scan", f"Failed to save JSON: {exc}")
-            return
-
-        try:
-            import csv
-            with csv_path.open("w", newline="", encoding="utf-8") as fp:
-                writer = csv.writer(fp)
-                writer.writerow(["device_key", "device_label", "current_a", "voltage_v", "timestamp"])
-                for entry in payload["results"]:
-                    writer.writerow([
-                        entry["device_key"],
-                        entry["device_label"],
-                        "" if entry["current_a"] is None else f"{entry['current_a']:.6e}",
-                        f"{voltage:.6f}",
-                        timestamp
-                    ])
-        except Exception as exc:
-            messagebox.showerror("Quick Scan", f"Failed to save CSV: {exc}")
-            return
-
-        self.quick_scan_metadata = {
-            "sample": sample,
-            "voltage_v": voltage,
-            "timestamp": timestamp,
-            "paths": {"json": str(json_path), "csv": str(csv_path)}
-        }
-        self._log_quick_scan(f"Saved quick scan to {json_path.name} and {csv_path.name}.")
-        self._set_quick_scan_status("Saved")
+        self.quick_scan_ctrl.save_results()
 
     def load_quick_scan_results(self) -> None:
-        sample = self.sample_type_var.get()
-        if not sample:
-            messagebox.showwarning("Quick Scan", "Select a sample before loading data.")
-            return
-        if not self._load_quick_scan_for_sample(sample, silent=False):
-            messagebox.showinfo("Quick Scan", f"No saved quick scan data for sample '{sample}'.")
+        self.quick_scan_ctrl.load_results()
 
     def _load_quick_scan_for_sample(self, sample: str, silent: bool = True) -> bool:
-        storage_dir = self._get_quick_scan_storage_dir(sample)
-        json_path = storage_dir / "quick_scan.json"
-        if not json_path.exists():
-            if not silent:
-                self._log_quick_scan("No saved quick scan data found.")
-            return False
-
-        try:
-            with json_path.open("r", encoding="utf-8") as fp:
-                payload = json.load(fp)
-        except Exception as exc:
-            if not silent:
-                messagebox.showerror("Quick Scan", f"Failed to load quick scan JSON: {exc}")
-            return False
-
-        results = {}
-        for entry in payload.get("results", []):
-            key = entry.get("device_key")
-            current = entry.get("current_a")
-            if key is not None:
-                results[key] = current
-
-        self.quick_scan_results = results
-        self.quick_scan_metadata = {
-            "sample": payload.get("sample", sample),
-            "voltage_v": payload.get("voltage_v"),
-            "timestamp": payload.get("timestamp"),
-            "paths": {"json": str(json_path)}
-        }
-        if payload.get("voltage_v") is not None:
-            try:
-                self.quick_scan_voltage_var.set(float(payload["voltage_v"]))
-            except Exception:
-                pass
-        self._redraw_quick_scan_overlay()
-        self._set_quick_scan_buttons(running=False)
-        if results:
-            self.quick_scan_save_button.config(state=tk.NORMAL)
-        status_label = payload.get("timestamp", "Loaded")
-        self._set_quick_scan_status(f"Loaded {status_label}")
-        if not silent:
-            self._log_quick_scan(f"Loaded quick scan data from {json_path.name}.")
-        return True
+        return self.quick_scan_ctrl.load_for_sample(sample, silent=silent)
 
     def _get_quick_scan_storage_dir(self, sample: str) -> Path:
-        # Use device folder if device is set
-        if self.current_device_name:
-            try:
-                return self.get_device_folder()
-            except ValueError:
-                pass
-        
-        # Fallback to old behavior
-        return BASE_DIR / "Data_maps" / sample
+        return self.status_store.get_quick_scan_storage_dir(sample)
 
     def update_device_checkboxes(self) -> None:
-        """Update the device checkboxes based on current device list with status indicators."""
-        # Clear existing checkboxes
-        for widget in self.scrollable_frame.winfo_children():
-            widget.destroy()
-
-        self.device_checkboxes.clear()
-        self.checkbox_vars.clear()
-        self.device_status_labels.clear()
-
-        # Create new checkboxes with status indicators
-        for i, device in enumerate(self.device_list):
-            label = self.get_device_label(device)
-            var = tk.BooleanVar(value=True)  # Default to selected
-            
-            # Create frame for checkbox + status
-            row_frame = ttk.Frame(self.scrollable_frame)
-            row_frame.grid(row=i, column=0, sticky='w', pady=1)
-            
-            cb = tk.Checkbutton(
-                row_frame,
-                text=label,
-                variable=var,
-                command=self.update_selected_devices
-            )
-            cb.pack(side="left")
-            
-            # Status indicator label
-            status_info = self.device_status.get(device, {})
-            manual_status = status_info.get("manual_status", "undefined")
-            icon = self.status_icons.get(manual_status, "?")
-            
-            status_label = tk.Label(
-                row_frame,
-                text=icon,
-                font=("Segoe UI", 10, "bold"),
-                fg=self._get_status_color(manual_status),
-                width=2
-            )
-            status_label.pack(side="left", padx=(5, 0))
-            
-            # Bind right-click to status menu
-            cb.bind("<Button-3>", lambda e, d=device: self.show_device_status_menu(e, d))
-            status_label.bind("<Button-3>", lambda e, d=device: self.show_device_status_menu(e, d))
-
-            self.device_checkboxes[device] = cb
-            self.checkbox_vars[device] = var
-            self.device_status_labels[device] = status_label
-            self.selected_devices.add(device)
-
-        self.update_selected_devices()
+        self.selection.update_device_checkboxes()
 
     def select_all_devices(self) -> None:
-        """Select all devices"""
-        for var in self.checkbox_vars.values():
-            var.set(True)
-        self.update_selected_devices()
+        self.selection.select_all_devices()
 
     def deselect_all_devices(self) -> None:
-        """Deselect all devices"""
-        for var in self.checkbox_vars.values():
-            var.set(False)
-        self.update_selected_devices()
+        self.selection.deselect_all_devices()
 
     def invert_selection(self) -> None:
-        """Invert device selection"""
-        for var in self.checkbox_vars.values():
-            var.set(not var.get())
-        self.update_selected_devices()
+        self.selection.invert_selection()
 
     def update_selected_devices(self) -> None:
-        """Update the list of selected devices"""
-        self.selected_devices.clear()
-        self.selected_indices.clear()
-
-        for device, var in self.checkbox_vars.items():
-            if var.get():
-                self.selected_devices.add(device)
-                # Find index of device in device_list
-                if device in self.device_list:
-                    self.selected_indices.append(self.device_list.index(device))
-
-        # Sort indices
-        self.selected_indices.sort()
-
-        # Update status
-        total = len(self.device_list)
-        selected = len(self.selected_devices)
-        self.selection_status.config(text=f"Selected: {selected}/{total}")
-
-        # Update canvas highlights
-        self.update_canvas_selection_highlights()
-        
-        # Update status bar and measure button
-        self._update_status_bar()
-
-        # Log selection
-        friendly_selected = [self.get_device_label(self.device_list[idx]) for idx in self.selected_indices]
-        selection_text = ", ".join(friendly_selected[:5])  # Show first 5
-        if len(friendly_selected) > 5:
-            selection_text += f" ... (+{len(friendly_selected)-5} more)"
-        if not selection_text:
-            selection_text = "None"
-        self.log_terminal(f"Selected devices: {selection_text}", "INFO")
-        
-        # Notify child GUIs of device selection change
-        selected_device_list = [self.device_list[i] for i in self.selected_indices]
-        self._notify_child_guis('device_selection', selected_devices=selected_device_list, selected_indices=self.selected_indices.copy())
+        self.selection.update_selected_devices()
 
     def _update_status_bar(self) -> None:
-        """Update the status bar with current device counts."""
-        total = len(self.device_list) if hasattr(self, 'device_list') else 0
-        selected = len(self.selected_devices)
-        
-        # Update device count label
-        if hasattr(self, 'device_count_label'):
-            self.device_count_label.config(text=f"Devices: {selected} selected / {total} total")
-        
-        # Update measure button text
-        if hasattr(self, 'measure_button'):
-            if selected > 0:
-                self.measure_button.config(text=f"Measure {selected} Selected Device{'s' if selected != 1 else ''}")
-            else:
-                self.measure_button.config(text="Measure Selected Devices")
+        self.selection._update_status_bar()
 
     def update_canvas_selection_highlights(self) -> None:
-        """Update visual indicators on canvas for selected devices"""
-        # Remove existing selection highlights
-        self.canvas.delete("selection")
-
-        if not hasattr(self, 'original_image') or self.original_image is None:
-            return
-            
-        orig_width, orig_height = self.original_image.size
-        scale_x = orig_width / 600
-        scale_y = orig_height / 500
-
-        for device, bounds in self.device_mapping.items():
-            if device in self.selected_devices:
-                x_min = bounds["x_min"] / scale_x
-                x_max = bounds["x_max"] / scale_x
-                y_min = bounds["y_min"] / scale_y
-                y_max = bounds["y_max"] / scale_y
-
-                # Draw green rectangle for selected devices
-                self.canvas.create_rectangle(
-                    x_min, y_min, x_max, y_max,
-                    outline="#4CAF50", width=2, tags="selection"
-                )
+        self.selection.update_canvas_selection_highlights()
 
     def canvas_ctrl_click(self, event: Any) -> None:
-        """Handle Ctrl+Click for device selection toggle"""
-        if not hasattr(self, 'original_image') or self.original_image is None:
-            return
-            
-        orig_width, orig_height = self.original_image.size
-        scale_x = orig_width / 600
-        scale_y = orig_height / 500
-
-        for device, bounds in self.device_mapping.items():
-            x_min = bounds["x_min"] / scale_x
-            x_max = bounds["x_max"] / scale_x
-            y_min = bounds["y_min"] / scale_y
-            y_max = bounds["y_max"] / scale_y
-
-            if x_min <= event.x <= x_max and y_min <= event.y <= y_max:
-                # Toggle device selection
-                if device in self.checkbox_vars:
-                    current_value = self.checkbox_vars[device].get()
-                    self.checkbox_vars[device].set(not current_value)
-                    self.update_selected_devices()
-                break
+        self.selection.canvas_ctrl_click(event)
 
     def canvas_right_click(self, event: Any) -> None:
         """Handle right-click for device status menu"""
@@ -1226,673 +414,81 @@ class SampleGUI:
     # ==========================
 
     def _get_status_color(self, status: str) -> str:
-        """Get color for device status."""
-        colors = {
-            "working": "#4CAF50",  # Green
-            "broken": "#F44336",   # Red
-            "undefined": "#888888"  # Gray
-        }
-        return colors.get(status, "#888888")
+        return DeviceStatusController.status_color(status)
 
     def show_device_status_menu(self, event: Any, device: str) -> None:
-        """Show context menu for device status marking."""
-        menu = tk.Menu(self.root, tearoff=0)
-        label = self.get_device_label(device)
-        
-        menu.add_command(
-            label=f"Device {label}",
-            state=tk.DISABLED,
-            font=("Segoe UI", 9, "bold")
-        )
-        menu.add_separator()
-        
-        menu.add_command(
-            label="✓ Mark as Working",
-            command=lambda: self.mark_device_status(device, "working", quick=True)
-        )
-        menu.add_command(
-            label="✗ Mark as Broken",
-            command=lambda: self.mark_device_status(device, "broken", quick=True)
-        )
-        menu.add_command(
-            label="? Mark as Undefined",
-            command=lambda: self.mark_device_status(device, "undefined", quick=True)
-        )
-        menu.add_separator()
-        menu.add_command(
-            label="Add/Edit Note...",
-            command=lambda: self.mark_device_status(device, None, quick=False)
-        )
-        menu.add_separator()
-        menu.add_command(
-            label="View Status Info",
-            command=lambda: self.show_device_status_info(device)
-        )
-        
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+        self.device_status_ctrl.show_menu(event, device)
 
     def mark_selected_devices(self, status: str) -> None:
-        """Mark all selected devices with given status."""
-        if not self.selected_devices:
-            messagebox.showwarning("No Selection", "No devices selected.")
-            return
-        
-        for device in self.selected_devices:
-            self.mark_device_status(device, status, quick=True)
-        
-        count = len(self.selected_devices)
-        self.log_terminal(f"Marked {count} device(s) as {status}", "SUCCESS")
+        self.device_status_ctrl.mark_selected(status)
 
     def mark_device_status(self, device: str, status: Optional[str], quick: bool = True) -> None:
-        """Mark device with manual status. If quick=False, open dialog for notes."""
-        label = self.get_device_label(device)
-        
-        if not quick:
-            # Open dialog for detailed marking with notes
-            dialog = tk.Toplevel(self.root)
-            dialog.title(f"Device Status: {label}")
-            dialog.geometry("400x300")
-            dialog.transient(self.root)
-            dialog.grab_set()
-            
-            ttk.Label(dialog, text=f"Device: {label}", font=("Segoe UI", 10, "bold")).pack(pady=10)
-            
-            # Status selection
-            status_frame = ttk.Frame(dialog)
-            status_frame.pack(pady=10)
-            
-            ttk.Label(status_frame, text="Status:").grid(row=0, column=0, padx=5)
-            status_var = tk.StringVar(value=status or "undefined")
-            ttk.Radiobutton(status_frame, text="✓ Working", variable=status_var, value="working").grid(row=0, column=1, padx=5)
-            ttk.Radiobutton(status_frame, text="✗ Broken", variable=status_var, value="broken").grid(row=0, column=2, padx=5)
-            ttk.Radiobutton(status_frame, text="? Undefined", variable=status_var, value="undefined").grid(row=0, column=3, padx=5)
-            
-            # Notes
-            ttk.Label(dialog, text="Notes:").pack(anchor="w", padx=20)
-            notes_text = tk.Text(dialog, height=8, width=45, wrap=tk.WORD)
-            notes_text.pack(padx=20, pady=5)
-            
-            # Pre-fill existing notes
-            existing_notes = self.device_status.get(device, {}).get("notes", "")
-            if existing_notes:
-                notes_text.insert("1.0", existing_notes)
-            
-            # Buttons
-            button_frame = ttk.Frame(dialog)
-            button_frame.pack(pady=10)
-            
-            def save_status():
-                final_status = status_var.get()
-                notes = notes_text.get("1.0", tk.END).strip()
-                self._update_device_status(device, final_status, notes=notes)
-                dialog.destroy()
-            
-            ttk.Button(button_frame, text="Save", command=save_status, width=12).pack(side="left", padx=5)
-            ttk.Button(button_frame, text="Cancel", command=dialog.destroy, width=12).pack(side="left", padx=5)
-            
-            dialog.wait_window()
-        else:
-            # Quick mark without notes
-            if status:
-                self._update_device_status(device, status)
+        self.device_status_ctrl.mark_device(device, status, quick=quick)
 
     def _update_device_status(self, device: str, manual_status: str, notes: str = "") -> None:
-        """Update device status in the database and UI."""
-        label = self.get_device_label(device)
-        
-        # Get or create status entry
-        if device not in self.device_status:
-            self.device_status[device] = {
-                "auto_classification": "unknown",
-                "manual_status": "undefined",
-                "last_current_a": None,
-                "test_voltage_v": None,
-                "last_tested": None,
-                "notes": "",
-                "measurement_count": 0,
-                "quick_scan_history": []
-            }
-        
-        # Update status
-        self.device_status[device]["manual_status"] = manual_status
-        if notes:
-            self.device_status[device]["notes"] = notes
-        
-        # Update timestamp
-        self.device_status[device]["last_tested"] = datetime.now().isoformat(timespec='seconds')
-        
-        # Update UI
-        if device in self.device_status_labels:
-            icon = self.status_icons.get(manual_status, "?")
-            color = self._get_status_color(manual_status)
-            self.device_status_labels[device].config(text=icon, fg=color)
-        
-        # Save to disk (auto-saves notes and status to JSON and Excel)
-        self._save_device_status()
-        
-        # Log the update
-        if notes:
-            self.log_terminal(f"Device {label}: Status updated to '{manual_status}' with notes (auto-saved)", "SUCCESS")
-        else:
-            self.log_terminal(f"Device {label}: Status updated to '{manual_status}' (auto-saved)", "SUCCESS")
-        
-        # Update overlays
-        self._redraw_quick_scan_overlay()
+        self.device_status_ctrl.update_device(device, manual_status, notes=notes)
 
     def show_device_status_info(self, device: str) -> None:
-        """Show detailed status information for a device."""
-        label = self.get_device_label(device)
-        status_info = self.device_status.get(device, {})
-        
-        auto_class = status_info.get("auto_classification", "unknown")
-        manual_status = status_info.get("manual_status", "undefined")
-        last_current = status_info.get("last_current_a")
-        test_voltage = status_info.get("test_voltage_v")
-        last_tested = status_info.get("last_tested", "Never")
-        notes = status_info.get("notes", "No notes")
-        meas_count = status_info.get("measurement_count", 0)
-        
-        info_text = (
-            f"Device: {label}\n\n"
-            f"Auto Classification: {auto_class}\n"
-            f"Manual Status: {manual_status}\n"
-            f"Last Current: {f'{last_current:.3e} A' if last_current else 'N/A'}\n"
-            f"Test Voltage: {f'{test_voltage} V' if test_voltage else 'N/A'}\n"
-            f"Last Tested: {last_tested}\n"
-            f"Measurement Count: {meas_count}\n\n"
-            f"Notes:\n{notes}"
-        )
-        
-        messagebox.showinfo(f"Device Status: {label}", info_text)
+        self.device_status_ctrl.show_info(device)
 
     def apply_threshold_to_undefined(self) -> None:
-        """Apply current threshold to classify undefined devices based on quick scan results."""
-        classified_count = 0
-        
-        for device in self.device_list:
-            status_info = self.device_status.get(device, {})
-            manual_status = status_info.get("manual_status", "undefined")
-            
-            # Only affect undefined devices
-            if manual_status == "undefined":
-                current = self.quick_scan_results.get(device)
-                if current is not None:
-                    auto_class = "working" if current >= self.quick_scan_threshold else "not-working"
-                    
-                    # Update auto classification only
-                    if device not in self.device_status:
-                        self.device_status[device] = {
-                            "auto_classification": auto_class,
-                            "manual_status": "undefined",
-                            "last_current_a": current,
-                            "test_voltage_v": self.quick_scan_voltage_var.get(),
-                            "last_tested": datetime.now().isoformat(timespec='seconds'),
-                            "notes": "",
-                            "measurement_count": 0,
-                            "quick_scan_history": []
-                        }
-                    else:
-                        self.device_status[device]["auto_classification"] = auto_class
-                        self.device_status[device]["last_current_a"] = current
-                        self.device_status[device]["test_voltage_v"] = self.quick_scan_voltage_var.get()
-                    
-                    classified_count += 1
-        
-        if classified_count > 0:
-            self._save_device_status()
-            self._redraw_quick_scan_overlay()
-            self.log_terminal(f"Applied threshold to {classified_count} undefined device(s)", "SUCCESS")
-        else:
-            messagebox.showinfo("Threshold", "No undefined devices to classify.")
+        self.device_status_ctrl.apply_threshold_to_undefined()
 
     def _save_device_status(self) -> None:
-        """Save device status to JSON and Excel files."""
-        # Use device folder if device is set, otherwise use sample folder
-        if self.current_device_name:
-            try:
-                save_dir = self.get_device_folder()
-            except ValueError:
-                return
-        else:
-            sample = self.sample_type_var.get()
-            if not sample:
-                return
-            save_root = resolve_default_save_root()
-            save_dir = save_root / sample
-        
-        save_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save JSON
-        json_path = save_dir / "device_status.json"
-        try:
-            with json_path.open("w", encoding="utf-8") as f:
-                json.dump(self.device_status, f, indent=2)
-        except Exception as e:
-            self.log_terminal(f"Failed to save device status JSON: {e}", "ERROR")
-        
-        # Save Excel
-        self._save_device_status_excel(save_dir / "device_status.xlsx")
+        self.status_store.save_device_status()
 
     def _save_device_status_excel(self, path: Path) -> None:
-        """Save device status to Excel file using csv module (readable by Excel)."""
-        try:
-            with path.open("w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    "Device", "Auto Classification", "Manual Status", "Last Current (A)",
-                    "Test Voltage (V)", "Last Tested", "Measurement Count", "Notes"
-                ])
-                
-                for device in self.device_list:
-                    label = self.get_device_label(device)
-                    status_info = self.device_status.get(device, {})
-                    
-                    writer.writerow([
-                        label,
-                        status_info.get("auto_classification", "unknown"),
-                        status_info.get("manual_status", "undefined"),
-                        f"{status_info.get('last_current_a', 0):.3e}" if status_info.get("last_current_a") else "",
-                        status_info.get("test_voltage_v", ""),
-                        status_info.get("last_tested", ""),
-                        status_info.get("measurement_count", 0),
-                        status_info.get("notes", "")
-                    ])
-        except Exception as e:
-            self.log_terminal(f"Failed to save Excel: {e}", "ERROR")
+        self.status_store.save_device_status_excel(path)
 
     def _load_device_status(self) -> None:
-        """Load device status from JSON file."""
-        sample = self.sample_type_var.get()
-        if not sample:
-            return
-        
-        save_root = resolve_default_save_root()
-        sample_dir = save_root / sample
-        json_path = sample_dir / "device_status.json"
-        
-        if not json_path.exists():
-            self.log_terminal("No saved device status found", "INFO")
-            return
-        
-        try:
-            with json_path.open("r", encoding="utf-8") as f:
-                self.device_status = json.load(f)
-            self.log_terminal(f"Loaded device status from {json_path.name}", "SUCCESS")
-            
-            # Update UI
-            if hasattr(self, 'device_status_labels'):
-                for device, status_label in self.device_status_labels.items():
-                    status_info = self.device_status.get(device, {})
-                    manual_status = status_info.get("manual_status", "undefined")
-                    icon = self.status_icons.get(manual_status, "?")
-                    color = self._get_status_color(manual_status)
-                    status_label.config(text=icon, fg=color)
-        except Exception as e:
-            self.log_terminal(f"Failed to load device status: {e}", "ERROR")
+        self.status_store.load_device_status()
 
     def export_device_status_excel(self) -> None:
-        """Export device status to Excel file (user-initiated)."""
-        sample = self.sample_type_var.get()
-        if not sample:
-            messagebox.showwarning("Export", "No sample selected.")
-            return
-        
-        save_root = resolve_default_save_root()
-        sample_dir = save_root / sample
-        sample_dir.mkdir(parents=True, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_path = sample_dir / f"device_status_export_{timestamp}.csv"
-        
-        self._save_device_status_excel(export_path)
-        
-        messagebox.showinfo("Export Complete", f"Device status exported to:\n{export_path}")
-        self.log_terminal(f"Exported device status to {export_path.name}", "SUCCESS")
+        self.device_status_ctrl.export_excel()
 
     # ==========================
     # DEVICE MANAGEMENT
     # ==========================
 
     def get_device_folder(self, device_name: Optional[str] = None) -> Path:
-        """Get the folder path for a specific device."""
-        save_root = resolve_default_save_root()
-        name = device_name or self.current_device_name
-        if not name:
-            raise ValueError("No device name specified")
-        return save_root / name
+        return self.device_mgr.get_folder(device_name)
 
     def set_current_device(self) -> None:
-        """Set the current device name from user input."""
-        device_name = self.device_name_entry.get().strip()
-        
-        if not device_name:
-            messagebox.showwarning("Device Name", "Please enter a device name (e.g., D104)")
-            return
-        
-        # Sanitize device name to allow broader characters (convert disallowed ones to '_')
-        import re
-        cleaned_name = re.sub(r'[^A-Za-z0-9_\-\.\(\)% ]+', '_', device_name)
-        if cleaned_name != device_name:
-            messagebox.showinfo(
-                "Device Name Adjusted",
-                f"Some characters in '{device_name}' were not allowed.\n"
-                f"The device name has been adjusted to:\n{cleaned_name}"
-            )
-            device_name = cleaned_name
-        
-        self.current_device_name = device_name
-        
-        # Notify child GUIs of device name change
-        self._notify_child_guis('device_name', device_name=device_name)
-        
-        # Create device folder
-        device_folder = self.get_device_folder()
-        device_folder.mkdir(parents=True, exist_ok=True)
-        
-        # Update device info
-        sample_type = self.sample_type_var.get()
-        self.device_info = {
-            "name": device_name,
-            "sample_type": sample_type,
-            "created": datetime.now().isoformat(timespec='seconds'),
-            "last_modified": datetime.now().isoformat(timespec='seconds'),
-            "notes": ""
-        }
-        
-        # Save device info
-        self.save_device_info()
-        
-        # Update UI
-        self.device_name_label.config(text=device_name, fg="#4CAF50")
-        self.update_device_info_display()
-        self.log_terminal(f"Set current device to: {device_name}", "SUCCESS")
-        
-        # Refresh device list
-        self.refresh_device_list()
+        self.device_mgr.set_current_device()
 
     def clear_current_device(self) -> None:
-        """Clear the current device."""
-        if messagebox.askyesno("Clear Device", "Are you sure you want to clear the current device?"):
-            self.current_device_name = None
-            self.device_info = {}
-            self.device_name_entry.delete(0, tk.END)
-            self.device_name_label.config(text="No Device", fg="#888888")
-            self.update_device_info_display()
-            self.log_terminal("Cleared current device", "INFO")
-            # Notify child GUIs that device name was cleared
-            self._notify_child_guis('device_name', device_name=None)
+        self.device_mgr.clear_current_device()
 
     def save_device_info(self) -> None:
-        """Save device information to JSON file."""
-        if not self.current_device_name:
-            messagebox.showwarning("No Device", "No device is currently set.")
-            return
-        
-        device_folder = self.get_device_folder()
-        device_folder.mkdir(parents=True, exist_ok=True)
-        
-        # Update last modified
-        self.device_info["last_modified"] = datetime.now().isoformat(timespec='seconds')
-        
-        # Save device info
-        info_path = device_folder / "device_info.json"
-        try:
-            with info_path.open("w", encoding="utf-8") as f:
-                json.dump(self.device_info, f, indent=2)
-            self.log_terminal(f"Saved device info for {self.current_device_name}", "SUCCESS")
-        except Exception as e:
-            messagebox.showerror("Save Error", f"Failed to save device info: {e}")
-            self.log_terminal(f"Error saving device info: {e}", "ERROR")
+        self.device_mgr.save_device_info()
 
     def load_selected_device(self) -> None:
-        """Load the device selected in the tree view."""
-        selection = self.device_tree.selection()
-        if not selection:
-            messagebox.showwarning("No Selection", "Please select a device from the list.")
-            return
-        
-        item = self.device_tree.item(selection[0])
-        device_name = item["values"][0]  # First column is device name
-        
-        self.load_device(device_name)
+        self.device_mgr.load_selected_device()
 
     def load_device(self, device_name: str) -> None:
-        """Load a device and all its data."""
-        device_folder = self.get_device_folder(device_name)
-        
-        if not device_folder.exists():
-            messagebox.showerror("Device Not Found", f"Device folder not found: {device_folder}")
-            return
-        
-        # Load device info
-        info_path = device_folder / "device_info.json"
-        if info_path.exists():
-            try:
-                with info_path.open("r", encoding="utf-8") as f:
-                    self.device_info = json.load(f)
-                
-                self.current_device_name = device_name
-                self.device_name_entry.delete(0, tk.END)
-                self.device_name_entry.insert(0, device_name)
-                self.device_name_label.config(text=device_name, fg="#4CAF50")
-                
-                # Notify child GUIs of device name change
-                self._notify_child_guis('device_name', device_name=device_name)
-                
-                # Update sample type if stored
-                if "sample_type" in self.device_info:
-                    self.sample_type_var.set(self.device_info["sample_type"])
-                    self.update_dropdowns(None)
-                
-                # Load device status
-                status_path = device_folder / "device_status.json"
-                if status_path.exists():
-                    with status_path.open("r", encoding="utf-8") as f:
-                        self.device_status = json.load(f)
-                    self.log_terminal(f"Loaded device status for {device_name}", "SUCCESS")
-                
-                # Load quick scan results
-                quick_scan_path = device_folder / "quick_scan.json"
-                if quick_scan_path.exists():
-                    with quick_scan_path.open("r", encoding="utf-8") as f:
-                        scan_data = json.load(f)
-                        results = {}
-                        for entry in scan_data.get("results", []):
-                            key = entry.get("device_key")
-                            current = entry.get("current_a")
-                            if key is not None:
-                                results[key] = current
-                        self.quick_scan_results = results
-                        self._redraw_quick_scan_overlay()
-                    self.log_terminal(f"Loaded quick scan results for {device_name}", "SUCCESS")
-                
-                self.update_device_info_display()
-                self.log_terminal(f"Loaded device: {device_name}", "SUCCESS")
-                
-                # Update checkboxes with loaded status
-                if hasattr(self, 'device_status_labels'):
-                    for device, status_label in self.device_status_labels.items():
-                        status_info = self.device_status.get(device, {})
-                        manual_status = status_info.get("manual_status", "undefined")
-                        icon = self.status_icons.get(manual_status, "?")
-                        color = self._get_status_color(manual_status)
-                        status_label.config(text=icon, fg=color)
-                
-            except Exception as e:
-                messagebox.showerror("Load Error", f"Failed to load device: {e}")
-                self.log_terminal(f"Error loading device {device_name}: {e}", "ERROR")
-        else:
-            messagebox.showerror("Device Info Missing", f"Device info file not found: {info_path}")
+        self.device_mgr.load_device(device_name)
 
     def refresh_device_list(self) -> None:
-        """Refresh the list of saved devices."""
-        # Clear existing items
-        for item in self.device_tree.get_children():
-            self.device_tree.delete(item)
-        
-        save_root = resolve_default_save_root()
-        if not save_root.exists():
-            return
-        
-        filter_type = self.device_filter_var.get()
-        
-        # Scan for device folders
-        for device_folder in save_root.iterdir():
-            if not device_folder.is_dir():
-                continue
-            
-            info_path = device_folder / "device_info.json"
-            if not info_path.exists():
-                continue
-            
-            try:
-                with info_path.open("r", encoding="utf-8") as f:
-                    info = json.load(f)
-                
-                device_name = info.get("name", device_folder.name)
-                sample_type = info.get("sample_type", "Unknown")
-                last_modified = info.get("last_modified", "Unknown")
-                
-                # Apply filter
-                if filter_type != "All" and sample_type != filter_type:
-                    continue
-                
-                # Determine status
-                status_path = device_folder / "device_status.json"
-                if status_path.exists():
-                    status = "Has Data"
-                else:
-                    status = "New"
-                
-                # Add to tree
-                self.device_tree.insert(
-                    "",
-                    "end",
-                    values=(device_name, sample_type, last_modified, status)
-                )
-                
-            except Exception as e:
-                print(f"Error reading device {device_folder.name}: {e}")
+        self.device_mgr.refresh_device_list()
 
     def update_device_info_display(self) -> None:
-        """Update the device info text display."""
-        self.device_info_text.config(state=tk.NORMAL)
-        self.device_info_text.delete("1.0", tk.END)
-        
-        if not self.current_device_name:
-            self.device_info_text.insert("1.0", "No device currently set.\n\nEnter a device name and click 'Set Device' to begin.")
-        else:
-            info_lines = [
-                f"Device Name: {self.device_info.get('name', 'Unknown')}",
-                f"Sample Type: {self.device_info.get('sample_type', 'Unknown')}",
-                f"Created: {self.device_info.get('created', 'Unknown')}",
-                f"Last Modified: {self.device_info.get('last_modified', 'Unknown')}",
-                ""
-            ]
-            
-            # Load device notes from notes.json (using sample name, not sample_type)
-            sample_name = self.current_device_name  # Current device name is the sample name (D104)
-            if sample_name:
-                try:
-                    sample_folder = resolve_default_save_root() / sample_name
-                    notes_path = sample_folder / "notes.json"
-                    if notes_path.exists():
-                        with notes_path.open("r", encoding="utf-8") as f:
-                            notes_data = json.load(f)
-                            
-                            # Display sample notes FIRST if available
-                            sample_notes = notes_data.get("Sample_Notes", "")
-                            if sample_notes:
-                                info_lines.extend([
-                                    "Sample Notes:",
-                                    sample_notes,
-                                    "",
-                                    "=" * 50,
-                                    ""
-                                ])
-                            
-                            # Then display device notes
-                            info_lines.append("Device Notes:")
-                            device_notes_dict = notes_data.get("device", {})
-                            if device_notes_dict:
-                                # Display notes for each device
-                                for device_id, device_notes in sorted(device_notes_dict.items()):
-                                    if device_notes.strip():  # Only show devices with notes
-                                        info_lines.extend([
-                                            f"\n{device_id}:",
-                                            device_notes,
-                                            ""
-                                        ])
-                            else:
-                                info_lines.append("No device notes found.")
-                except Exception as e:
-                    print(f"Error loading notes from notes.json: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    info_lines.append("Error loading notes from notes.json")
-            
-            self.device_info_text.insert("1.0", "\n".join(info_lines))
-        
-        self.device_info_text.config(state=tk.DISABLED)
+        self.device_mgr.update_info_display()
 
     # ==========================
     # TERMINAL LOG MANAGEMENT
     # ==========================
 
     def log_terminal(self, message: str, level: str = "INFO") -> None:
-        """Log message to terminal with color coding and timestamp."""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.terminal_messages.append((timestamp, level, message))
-        
-        # Apply filter
-        if self.terminal_filter.get() != "All" and level != self.terminal_filter.get().upper():
-            return
-        
-        self.terminal_output.config(state=tk.NORMAL)
-        self.terminal_output.insert(tk.END, f"[{timestamp}] ", "TIMESTAMP")
-        self.terminal_output.insert(tk.END, f"{message}\n", level.upper())
-        self.terminal_output.config(state=tk.DISABLED)
-        self.terminal_output.see(tk.END)
+        self.terminal_log.log(message, level)
 
     def _apply_terminal_filter(self) -> None:
-        """Reapply terminal filter to show only relevant messages."""
-        filter_value = self.terminal_filter.get()
-        
-        self.terminal_output.config(state=tk.NORMAL)
-        self.terminal_output.delete("1.0", tk.END)
-        
-        for timestamp, level, message in self.terminal_messages:
-            if filter_value == "All" or level == filter_value.upper():
-                self.terminal_output.insert(tk.END, f"[{timestamp}] ", "TIMESTAMP")
-                self.terminal_output.insert(tk.END, f"{message}\n", level.upper())
-        
-        self.terminal_output.config(state=tk.DISABLED)
-        self.terminal_output.see(tk.END)
+        self.terminal_log.apply_filter()
 
     def clear_terminal(self) -> None:
-        """Clear terminal output."""
-        self.terminal_output.config(state=tk.NORMAL)
-        self.terminal_output.delete("1.0", tk.END)
-        self.terminal_output.config(state=tk.DISABLED)
-        self.terminal_messages.clear()
+        self.terminal_log.clear()
 
     def export_terminal_log(self) -> None:
-        """Export terminal log to file."""
-        save_root = resolve_default_save_root()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = save_root / f"terminal_log_{timestamp}.txt"
-        
-        try:
-            with log_path.open("w", encoding="utf-8") as f:
-                for ts, level, msg in self.terminal_messages:
-                    f.write(f"[{ts}] [{level}] {msg}\n")
-            messagebox.showinfo("Export Complete", f"Log exported to:\n{log_path}")
-            self.log_terminal(f"Exported log to {log_path.name}", "SUCCESS")
-        except Exception as e:
-            messagebox.showerror("Export Error", f"Failed to export log: {e}")
+        self.terminal_log.export()
 
     # ==========================
     # OVERLAY MANAGEMENT
@@ -1910,42 +506,7 @@ class SampleGUI:
             self.quick_scan_threshold_var.set(f"{self.quick_scan_threshold:.1e}")
 
     def update_multiplexer(self, event: Optional[Any]) -> None:
-        self.multiplexer_type = self.Multiplexer_type_var.get()
-        
-        # Use new MultiplexerManager to create appropriate adapter
-        try:
-            if self.multiplexer_type == "Pyswitchbox":
-                self.mpx_manager = MultiplexerManager.create(
-                    "Pyswitchbox",
-                    pin_mapping=pin_mapping
-                )
-                self.log_terminal("Initiated Pyswitchbox via MultiplexerManager", "SUCCESS")
-                self.mpx_status_label.config(text=f"Multiplexer: {self.multiplexer_type} Connected", fg="#4CAF50")
-            elif self.multiplexer_type == "Electronic_Mpx":
-                # Try to create with real hardware, fall back to simulation if needed
-                try:
-                    self.mpx = MultiplexerController(simulation_mode=False)
-                    self.log_terminal("Initiated Electronic_Mpx with real hardware", "SUCCESS")
-                except Exception as e:
-                    self.log_terminal(f"Hardware not available, using simulation mode", "WARNING")
-                    self.mpx = MultiplexerController(simulation_mode=True)
-                
-                self.mpx_manager = MultiplexerManager.create(
-                    "Electronic_Mpx",
-                    controller=self.mpx
-                )
-                self.mpx_status_label.config(text=f"Multiplexer: {self.multiplexer_type} Connected", fg="#4CAF50")
-            elif self.multiplexer_type == "Manual":
-                # Manual mode: no hardware initialization, user manually moves probes
-                self.mpx_manager = None
-                self.log_terminal("Manual mode activated - no multiplexer routing, manual probe movement required", "SUCCESS")
-                self.mpx_status_label.config(text="Multiplexer: Manual Mode", fg="#FF9800")
-            else:
-                self.log_terminal("Unknown multiplexer type", "ERROR")
-                self.mpx_status_label.config(text="Multiplexer: Unknown Type", fg="#F44336")
-        except Exception as e:
-            self.log_terminal(f"Error initializing multiplexer: {e}", "ERROR")
-            self.mpx_status_label.config(text="Multiplexer: Error", fg="#F44336")
+        self.routing.update_multiplexer(event)
 
     def load_image(self, sample: str) -> None:
         """Load image into canvas set up to add others later simply."""
@@ -2533,43 +1094,7 @@ class SampleGUI:
         self._notify_child_guis('section', section=selected_section, device=selected_device)
 
     def change_relays(self) -> None:
-        """Change relays for the current device using MultiplexerManager"""
-        current_device = self.device_list[self.current_index]
-
-        # Check if current device is in selected devices
-        label = self.get_device_label(current_device)
-
-        if current_device not in self.selected_devices:
-            self.log_terminal(f"Warning: Device {label} is not selected")
-            response = messagebox.askyesno("Device Not Selected",
-                                           f"Device {label} is not in the selected list. Continue anyway?")
-            if not response:
-                return
-
-        # Use unified multiplexer manager interface
-        if self.multiplexer_type == "Manual":
-            # Manual mode: just log and update GUI state, no actual routing
-            self.log_terminal(f"Manual mode: Device {label} selected (manually move probes to this device)", "INFO")
-            # Update measurement window if open
-            if self.measurement_window:
-                self.measuremnt_gui.current_index = self.current_index
-                self.measuremnt_gui.update_variables()
-        elif self.mpx_manager is not None:
-            self.log_terminal(f"Routing to {label} via {self.multiplexer_type}")
-            success = self.mpx_manager.route_to_device(current_device, self.current_index)
-            
-            if success:
-                self.log_terminal(f"Successfully routed to {label}")
-            else:
-                self.log_terminal(f"Failed to route to {label}")
-            
-            # Update measurement window if open
-            if self.measurement_window:
-                self.measuremnt_gui.current_index = self.current_index
-                self.measuremnt_gui.update_variables()
-        else:
-            self.log_terminal("Multiplexer manager not initialized")
-            print("Error: Multiplexer manager is None")
+        self.routing.change_relays()
 
     def clear_canvas(self) -> None:
         self.canvas.delete("all")

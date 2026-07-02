@@ -2,24 +2,24 @@
 Measurement GUI – Main Measurement Interface
 =============================================
 
-Main interface for IV/PMU/SMU measurements on device arrays. Provides instrument
-connection management, sweep configuration, real-time plotting, and data saving.
-Typically launched from Sample GUI when the user starts a measurement.
-
-Exports:
---------
-- MeasurementGUI: Main window class. Requires sample_type, section, device_list,
-  and optionally sample_gui reference.
-
-Components:
------------
-- layout_builder:  Tabbed UI construction
-- plot_panels:     Real-time plotting widgets
-- plot_updaters:   Plot update logic
+Exports MeasurementGUI (lazy-loaded to avoid pulling heavy dependencies on import).
 """
 
-from gui.measurement_gui.main import MeasurementGUI
+from __future__ import annotations
 
-__all__ = ['MeasurementGUI']
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gui.measurement_gui.main import MeasurementGUI
+
+__all__ = ["MeasurementGUI", "SMUAdapter"]
 
 
+def __getattr__(name: str) -> object:
+    if name == "MeasurementGUI":
+        from gui.measurement_gui.main import MeasurementGUI as _MeasurementGUI
+        return _MeasurementGUI
+    if name == "SMUAdapter":
+        from gui.measurement_gui.smu_adapter import SMUAdapter as _SMUAdapter
+        return _SMUAdapter
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

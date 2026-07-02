@@ -14,16 +14,37 @@ gui/
 ├── __init__.py                  # Package exports
 ├── sample_gui/                  # Device selection and sample management
 │   ├── README.md
+│   ├── ARCHITECTURE.md
 │   ├── __init__.py
-│   └── main.py                  # SampleGUI class
+│   ├── main.py                  # SampleGUI orchestrator
+│   ├── config.py
+│   ├── status_store.py          # Device status persistence
+│   ├── selection_controller.py  # Device selection state
+│   ├── routing_controller.py    # Multiplexer routing
+│   ├── quick_scan_controller.py # Quick scan workflow
+│   ├── device_status_controller.py
+│   ├── device_manager_controller.py
+│   ├── telegram_controller.py
+│   ├── terminal_log_controller.py
+│   └── ui/                      # Tab/panel builders
 ├── measurement_gui/             # Main measurement interface
 │   ├── README.md
+│   ├── ARCHITECTURE.md
 │   ├── __init__.py
-│   ├── main.py                  # MeasurementGUI class
+│   ├── main.py                  # MeasurementGUI orchestrator
 │   ├── layout_builder.py        # UI layout construction
-│   ├── plot_panels.py           # Plotting components
-│   ├── plot_updaters.py         # Real-time plot updates
-│   └── custom_measurements_builder.py  # Custom measurement UI
+│   ├── layout/                  # Tab registry, help dialog, tab builders
+│   ├── child_gui_registry.py    # Top-bar child GUI button specs
+│   ├── child_gui_launchers.py   # open_* implementations
+│   ├── tool_registry.py         # Hardware utility tools menu
+│   ├── save_path_controller.py  # Data paths and custom save config
+│   ├── sample_gui_sync.py       # SampleGUI → MeasurementGUI sync
+│   ├── connection_controller.py # Instrument connect / auto-connect
+│   ├── smu_adapter.py           # SMU wrapper for child tools
+│   ├── gui_state.py             # runtime_state + plot_state
+│   ├── tool_adapters/           # Display, LED testing
+│   ├── plot_panels.py
+│   └── plot_updaters.py
 ├── pulse_testing_gui/           # Pulse testing interface
 │   ├── README.md
 │   ├── __init__.py
@@ -181,11 +202,8 @@ Each GUI module can be run standalone for testing:
 
 ```python
 # Test individual GUI
-python -m gui.sample_gui.main
-python -m gui.measurement_gui.main
-python -m gui.pulse_testing_gui.main
-python -m gui.motor_control_gui.main
-python -m gui.connection_check_gui.main
+python -m gui.smoke_test
+python main.py
 ```
 
 ## Notes
