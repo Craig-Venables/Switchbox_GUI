@@ -2,22 +2,21 @@
 Sample GUI – Device Selection and Sample Management
 ====================================================
 
-Provides the primary interface for device selection, sample configuration, and
-multiplexer routing. Users select devices from a visual map, configure sample
-parameters, and launch the measurement interface.
-
-Exports:
---------
-- SampleGUI: Main window class. Use as ``SampleGUI(root)`` where root is a
-  tk.Tk() instance.
-
-Launches:
----------
-- MeasurementGUI when user clicks "Start Measurement" with selected devices.
+Exports SampleGUI (lazy-loaded to avoid pulling MeasurementGUI on submodule import).
 """
 
-from gui.sample_gui.main import SampleGUI
+from __future__ import annotations
 
-__all__ = ['SampleGUI']
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gui.sample_gui.main import SampleGUI
+
+__all__ = ["SampleGUI"]
 
 
+def __getattr__(name: str) -> object:
+    if name == "SampleGUI":
+        from gui.sample_gui.main import SampleGUI as _SampleGUI
+        return _SampleGUI
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

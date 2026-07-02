@@ -214,108 +214,32 @@ class MeasurementGUILayoutBuilder:
         )
         gui.classification_label.pack(side='left', padx=(5, 0))
         
-        # Right side: Utility buttons
+        # Right side: Utility buttons (child GUIs from registry)
         right_section = tk.Frame(frame, bg=self.COLOR_BG)
         right_section.pack(side='right', fill='y')
-        
-        # Motor Control button
-        motor_btn = tk.Button(
-            right_section,
-            text="Motor Control",
-            font=self.FONT_BUTTON,
-            command=self.callbacks.get("open_motor_control"),
-            bg='#2196f3',  # Blue
-            fg='white',
-            activebackground='#1976d2',
-            activeforeground='white',
-            relief='raised',
-            cursor='hand2',
-            padx=12,
-            pady=6
-        )
-        motor_btn.pack(side='left', padx=5)
-        gui.motor_control_button = motor_btn
-        
-        # Check Connection button
-        check_btn = tk.Button(
-            right_section,
-            text="Check Connection",
-            font=self.FONT_BUTTON,
-            command=self.callbacks.get("check_connection"),
-            bg='#2196f3',  # Blue
-            fg='white',
-            activebackground='#1976d2',
-            activeforeground='white',
-            relief='raised',
-            cursor='hand2',
-            padx=12,
-            pady=6
-        )
-        check_btn.pack(side='left', padx=5)
-        gui.check_connection_button = check_btn
-        
-        # Pulse Testing button (opens TSP GUI)
-        pulse_btn = tk.Button(
-            right_section,
-            text="Pulse Testing",
-            font=self.FONT_BUTTON,
-            command=lambda: self._open_pulse_testing(),
-            bg=self.COLOR_BG,
-            relief='raised',
-            padx=10,
-            pady=5
-        )
-        pulse_btn.pack(side='left', padx=5)
-        gui.pulse_testing_button = pulse_btn
-        
-        # Device Visualizer button (opens Qt5 visualization app)
-        visualizer_btn = tk.Button(
-            right_section,
-            text="Device Visualizer",
-            font=self.FONT_BUTTON,
-            command=lambda: self._open_device_visualizer(),
-            bg=self.COLOR_BG,
-            relief='raised',
-            padx=10,
-            pady=5
-        )
-        visualizer_btn.pack(side='left', padx=5)
-        gui.device_visualizer_button = visualizer_btn
-        
-        # Oscilloscope Pulse button
-        scope_btn = tk.Button(
-            right_section,
-            text="Oscilloscope Pulse",
-            font=self.FONT_BUTTON,
-            command=self.callbacks.get("open_oscilloscope_pulse"),
-            bg=self.COLOR_BG,
-            relief='raised',
-            padx=10,
-            pady=5
-        )
-        scope_btn.pack(side='left', padx=5)
-        gui.oscilloscope_pulse_button = scope_btn
 
-        # Laser FG Scope button
-        laser_scope_btn = tk.Button(
-            right_section,
-            text="Laser FG Scope",
-            font=self.FONT_BUTTON,
-            command=self.callbacks.get("open_laser_fg_scope"),
-            bg=self.COLOR_BG,
-            relief='raised',
-            padx=10,
-            pady=5
+        from gui.measurement_gui.child_gui_registry import ChildGuiRegistry
+
+        child_registry = getattr(gui, "child_gui_registry", None) or ChildGuiRegistry()
+        child_registry.build_top_bar_buttons(
+            right_section, gui, self.callbacks, self.FONT_BUTTON, self.COLOR_BG,
         )
-        laser_scope_btn.pack(side='left', padx=5)
-        gui.laser_fg_scope_button = laser_scope_btn
+
+        # Hardware utility tools (Display, LED testing, etc.)
+        tool_registry = getattr(gui, "tool_registry", None)
+        if tool_registry is not None:
+            gui.hardware_tools_button = tool_registry.add_hardware_tools_button(
+                right_section, self.FONT_BUTTON,
+            )
 
         # Help / Guide button (far right)
+        from .layout.help_dialog import show_measurement_help
+
         help_btn = tk.Button(
             right_section,
             text="Help / Guide",
             font=self.FONT_BUTTON,
-            command=lambda: self._show_help(gui),
+            command=lambda: show_measurement_help(gui),
             bg='#1565c0',  # Darker blue
             fg='white',
             activebackground='#0d47a1',
@@ -414,235 +338,6 @@ class MeasurementGUILayoutBuilder:
             else:
                 gui.connection_status_label.config(text="● Connection Failed", fg=self.COLOR_ERROR)
     
-    def _open_pulse_testing(self) -> None:
-        """Open the TSP/Pulse Testing GUI"""
-        open_cb = getattr(self.gui, "open_pulse_testing_gui", None)
-        if callable(open_cb):
-            open_cb()
-            return
-        try:
-            from gui.pulse_testing_gui import TSPTestingGUI
-            TSPTestingGUI(self.gui.master)
-        except Exception as e:
-            print(f"Failed to open Pulse Testing GUI: {e}")
-            messagebox.showerror("Error", f"Could not open Pulse Testing GUI:\n{e}")
-    
-    def _open_device_visualizer(self) -> None:
-        """Open the Device Analysis Visualizer Qt5 application"""
-        open_cb = getattr(self.gui, "open_device_visualizer", None)
-        if callable(open_cb):
-            open_cb()
-            return
-        # Fallback if method doesn't exist
-        try:
-            from tools.device_visualizer.device_visualizer_app import launch_visualizer
-            launch_visualizer()
-        except Exception as e:
-            print(f"Failed to open Device Visualizer: {e}")
-            messagebox.showerror("Error", f"Could not open Device Visualizer:\n{e}")
-    
-    def _show_help(self, gui: object) -> None:
-        """Display a help window with usage instructions."""
-        help_win = tk.Toplevel(gui.master)
-        help_win.title("Measurement GUI Guide")
-        help_win.geometry("800x700")
-        help_win.configure(bg="#f0f0f0")
-        
-        # Scrollable Content
-        canvas = tk.Canvas(help_win, bg="#f0f0f0")
-        scrollbar = ttk.Scrollbar(help_win, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-        
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        
-        # Content
-        pad = {'padx': 20, 'pady': 10, 'anchor': 'w'}
-        
-        tk.Label(scrollable_frame, text="Measurement GUI Guide", 
-                font=("Segoe UI", 16, "bold"), bg="#f0f0f0", fg="#1565c0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="1. Overview", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame, 
-                text="This is the main measurement interface for IV/PMU/SMU measurements on device arrays.\n"
-                      "It provides comprehensive control over instrument connections, measurement\n"
-                      "configuration, real-time plotting, and data saving.",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="2. Getting Started", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• Select your measurement system from the dropdown in the top bar\n"
-                      "• Configure instrument connections in the Setup tab\n"
-                      "• Set measurement parameters in the Measurements tab\n"
-                      "• Click 'Start Measurement' to begin\n"
-                      "• Monitor progress in real-time plots",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="3. Key Features", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• IV Sweeps: Standard voltage sweeps with current measurement\n"
-                      "• Custom Measurements: Load pre-configured sweeps from JSON\n"
-                      "• Sequential Measurements: Test multiple devices automatically\n"
-                      "• Conditional Testing: Smart workflow that screens devices and runs tests only on memristive devices\n"
-                      "• Pulse Testing: Fast pulse characterization (opens separate GUI)\n"
-                      "• Real-time Plotting: Live voltage, current, and resistance plots\n"
-                      "• Data Saving: Automatic file naming and organization",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="4. Utility Buttons", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• Motor Control: Control XY stage for laser positioning\n"
-                      "• Check Connection: Verify electrical connections before testing\n"
-                      "• Pulse Testing: Open advanced pulse testing interface",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="5. Conditional Memristive Testing", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0", fg="#e65100").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="Smart workflow that automatically screens devices and runs tests only on memristive devices.\n\n"
-                      "Workflow:\n"
-                      "1. Quick Test: Runs fast screening test (e.g., 0-2.8V sweep) on all devices\n"
-                      "2. Analysis: Each device analyzed for memristivity score (0-100)\n"
-                      "3. Conditional Tests:\n"
-                      "   • Score ≥ 60: Run basic memristive test\n"
-                      "   • Score ≥ 80: Run high-quality test\n"
-                      "   • Re-evaluation: Re-check after basic test, upgrade if score improves\n"
-                      "4. Final Test (optional): After all devices complete, select best devices and run final test\n\n"
-                      "Configuration:\n"
-                      "• Access from Advanced Tests tab or Measurements tab\n"
-                      "• Set thresholds (default: 60 for basic, 80 for high-quality)\n"
-                      "• Select custom sweeps for quick test, basic test, and high-quality test\n"
-                      "• Configure final test with selection mode:\n"
-                      "  - 'top_x': Select top X devices above minimum score\n"
-                      "  - 'all_above_score': Select all devices above minimum score\n"
-                      "• Toggle re-evaluation and memcapacitive inclusion\n"
-                      "• Save configuration for reuse\n\n"
-                      "Safety: Final test shows confirmation dialog before running (important for potentially\n"
-                      "damaging tests like laser).",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="6. Additional Resources", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0").pack(**pad)
-        tk.Label(scrollable_frame,
-                text="• Documents/guides/USER_GUIDE.md: Complete usage guide\n"
-                      "• Documents/guides/JSON_CONFIG_GUIDE.md: Configuration reference\n"
-                      "• Documents/guides/QUICK_REFERENCE.md: One-page cheat sheet\n\n"
-                      "See Documents/README.md for the full documentation index.",
-                justify="left", bg="#f0f0f0").pack(**pad)
-        
-        tk.Label(scrollable_frame, text="7. Video Tutorials", font=("Segoe UI", 12, "bold"), 
-                bg="#f0f0f0", fg="#d32f2f").pack(**pad)
-        
-        # Video tutorial section
-        video_frame = ttk.Frame(scrollable_frame)
-        video_frame.pack(**pad, fill='x')
-        
-        # Helper function to open videos
-        def open_video(video_path_or_url: str) -> None:
-            """Open video file or URL in default application/browser."""
-            try:
-                if video_path_or_url.startswith(('http://', 'https://')):
-                    # Open URL in default browser
-                    webbrowser.open(video_path_or_url)
-                else:
-                    # Open local file with default application
-                    video_path = Path(video_path_or_url)
-                    if not video_path.is_absolute():
-                        # If relative path, assume it's in a Videos folder in project root
-                        video_path = _PROJECT_ROOT / "Videos" / video_path_or_url
-                    
-                    if video_path.exists():
-                        if sys.platform == "win32":
-                            os.startfile(str(video_path))
-                        elif sys.platform == "darwin":  # macOS
-                            subprocess.run(["open", str(video_path)])
-                        else:  # Linux
-                            subprocess.run(["xdg-open", str(video_path)])
-                    else:
-                        messagebox.showerror("Video Not Found", 
-                                            f"Video file not found:\n{video_path}\n\n"
-                                            f"Please ensure the video file is in the 'Videos' folder.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Could not open video:\n{str(e)}")
-        
-        # Load video configuration from JSON file
-        video_config_path = _PROJECT_ROOT / "Json_Files" / "help_videos.json"
-        video_config = []
-        
-        try:
-            if video_config_path.exists():
-                with open(video_config_path, 'r', encoding='utf-8') as f:
-                    config_data = json.load(f)
-                    video_config = config_data.get("videos", [])
-        except Exception as e:
-            # If JSON loading fails, show error but continue
-            print(f"Warning: Could not load video config: {e}")
-        
-        if video_config:
-            for video_item in video_config:
-                video_title = video_item.get("title", "Untitled Video")
-                video_path = video_item.get("path", "")
-                video_desc = video_item.get("description", "")
-                
-                if not video_path:
-                    continue
-                
-                # Create button frame for each video
-                btn_frame = ttk.Frame(video_frame)
-                btn_frame.pack(side='top', fill='x', pady=5)
-                
-                # Video button
-                btn = tk.Button(
-                    btn_frame,
-                    text=f"▶ {video_title}",
-                    font=("Segoe UI", 10, "bold"),
-                    bg="#4CAF50",
-                    fg="white",
-                    activebackground="#45a049",
-                    activeforeground="white",
-                    relief='raised',
-                    cursor='hand2',
-                    padx=15,
-                    pady=8,
-                    command=lambda v=video_path: open_video(v)
-                )
-                btn.pack(side='left', padx=(0, 10))
-                
-                # Description label
-                if video_desc:
-                    desc_label = tk.Label(
-                        btn_frame,
-                        text=video_desc,
-                        font=("Segoe UI", 9),
-                        bg="#f0f0f0",
-                        fg="#666",
-                        justify='left'
-                    )
-                    desc_label.pack(side='left', fill='x', expand=True)
-        else:
-            tk.Label(video_frame,
-                    text="No video tutorials configured.\n"
-                         "To add videos, edit Json_Files/help_videos.json\n"
-                         "See the file for examples and instructions.",
-                    justify="left", bg="#f0f0f0", fg="#666").pack(**pad)
-        
-        tk.Label(scrollable_frame,
-                text="\nNote: Videos can be local files (place in Videos/ folder) or online URLs (YouTube, Vimeo, etc.).\n"
-                     "Edit Json_Files/help_videos.json to add or modify video tutorials.",
-                justify="left", bg="#f0f0f0", fg="#666", font=("Segoe UI", 9)).pack(**pad)
-    
     # ------------------------------------------------------------------
     # Tabbed Content Area
     # ------------------------------------------------------------------
@@ -655,23 +350,9 @@ class MeasurementGUILayoutBuilder:
         notebook.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         gui.main_notebook = notebook
         
-        # Create tabs
-        from .layout.tab_measurements import build_measurements_tab
-        from .layout.tab_advanced_tests import build_advanced_tests_tab
-        from .layout.tab_setup import build_setup_tab
-        from .layout.tab_custom_measurements import build_custom_measurements_tab
-        from .layout.tab_notes import build_notes_tab
-        build_measurements_tab(self, notebook)
-        build_advanced_tests_tab(self, notebook)
-        build_setup_tab(self, notebook)
-        build_custom_measurements_tab(self, notebook)
-        build_notes_tab(self, notebook)
-        from .layout.tab_stats import build_stats_tab
-        build_stats_tab(self, notebook)  # NEW: Device tracking stats
-        from .layout.tab_graphing import build_graphing_tab
-        build_graphing_tab(self, notebook)  # NEW: Sample analysis and plotting
-        from .layout.tab_custom_sweeps import build_custom_sweeps_graphing_tab
-        build_custom_sweeps_graphing_tab(self, notebook)  # NEW: Custom sweeps graphing
+        # Create tabs from central registry (order defined in layout/tab_registry.py)
+        from .layout.tab_registry import build_all_tabs
+        build_all_tabs(self, notebook)
         
         self.widgets["notebook"] = notebook
     

@@ -71,9 +71,19 @@ measurement_gui = MeasurementGUI(
 
 ```
 sample_gui/
-├── README.md           # This file
-├── __init__.py         # Package exports (SampleGUI)
-└── main.py             # SampleGUI class implementation
+├── README.md
+├── ARCHITECTURE.md
+├── main.py                  # Orchestrator (delegates to controllers)
+├── config.py
+├── status_store.py
+├── selection_controller.py
+├── routing_controller.py
+├── quick_scan_controller.py
+├── device_status_controller.py
+├── device_manager_controller.py
+├── telegram_controller.py
+├── terminal_log_controller.py
+└── ui/                      # Tab builders
 ```
 
 ## Main Class
