@@ -26,6 +26,7 @@ EXCLUDE_DIRS = {
     '.venv',
     '.env',
     'Data_save_loc',  # User data directory
+    'archive',  # Legacy reference code
 }
 
 EXCLUDE_EXTENSIONS = {
@@ -245,8 +246,8 @@ if __name__ == "__main__":
     # Print results
     print_statistics(statistics)
     
-    # Save detailed report
-    report_file = Path(repo_root) / "lines_of_code_report.txt"
+    # Save detailed report next to this script
+    report_file = Path(__file__).resolve().parent / "lines_of_code_report.txt"
     try:
         with open(report_file, 'w', encoding='utf-8') as f:
             f.write("=" * 70 + "\n")

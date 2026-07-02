@@ -2,69 +2,71 @@
 DETAILED CODE STATISTICS REPORT
 ======================================================================
 
-Total Files: 959
-Total Lines: 656,292
-Code Lines:  596,707
+Total Files: 803
+Total Lines: 542,078
+Code Lines:  500,425
 
 BREAKDOWN BY FILE TYPE:
 ----------------------------------------------------------------------
 
 Text:
-  Files: 63
-  Total Lines: 303,488
-  Code Lines: 303,155
-  Blank Lines: 333
+  Files: 43
+  Total Lines: 292,020
+  Code Lines: 291,970
+  Blank Lines: 50
 
 Python:
-  Files: 648
-  Total Lines: 264,848
-  Code Lines: 221,760
-  Blank Lines: 43,088
+  Files: 531
+  Total Lines: 183,442
+  Code Lines: 154,440
+  Blank Lines: 29,002
 
 Markdown:
-  Files: 151
-  Total Lines: 42,588
-  Code Lines: 32,507
-  Blank Lines: 10,081
+  Files: 139
+  Total Lines: 33,633
+  Code Lines: 25,527
+  Blank Lines: 8,106
 
 C:
-  Files: 39
-  Total Lines: 24,818
-  Code Lines: 20,860
-  Blank Lines: 3,958
-
-Backup:
-  Files: 4
-  Total Lines: 14,188
-  Code Lines: 12,304
-  Blank Lines: 1,884
+  Files: 41
+  Total Lines: 26,261
+  Code Lines: 22,108
+  Blank Lines: 4,153
 
 JSON:
-  Files: 46
-  Total Lines: 5,353
-  Code Lines: 5,273
-  Blank Lines: 80
+  Files: 36
+  Total Lines: 4,757
+  Code Lines: 4,700
+  Blank Lines: 57
 
 Arduino:
-  Files: 6
-  Total Lines: 934
-  Code Lines: 798
-  Blank Lines: 136
+  Files: 10
+  Total Lines: 1,860
+  Code Lines: 1,601
+  Blank Lines: 259
+
+C/C++ Header:
+  Files: 1
+  Total Lines: 57
+  Code Lines: 46
+  Blank Lines: 11
 
 Batch:
-  Files: 2
-  Total Lines: 75
-  Code Lines: 50
-  Blank Lines: 25
+  Files: 1
+  Total Lines: 38
+  Code Lines: 25
+  Blank Lines: 13
+
+TOML:
+  Files: 1
+  Total Lines: 10
+  Code Lines: 8
+  Blank Lines: 2
 
 
 ALL FILES:
 ----------------------------------------------------------------------
 Equipment\Laser_Power_Meter\analog_control\comparisons\at_sample vs sample btm\through_vs_bottom_summary.txt [Text] - 23 code lines, 25 total lines
-Equipment\Moku\Moku CLI\_internal\click-8.2.1.dist-info\licenses\LICENSE.txt [Text] - 23 code lines, 28 total lines
-Equipment\Moku\Moku CLI\_internal\mokucli-4.0.1.dist-info\entry_points.txt [Text] - 2 code lines, 3 total lines
-Equipment\Moku\Moku CLI\_internal\setuptools\_vendor\importlib_metadata-8.0.0.dist-info\top_level.txt [Text] - 1 code lines, 1 total lines
-Equipment\Moku\Moku CLI\_internal\setuptools\_vendor\jaraco\text\Lorem ipsum.txt [Text] - 2 code lines, 2 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\format_comparison_output\format_ASCII_1byte_raw.txt [Text] - 20,001 code lines, 20,001 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\format_comparison_output\format_ASCII_1byte_scaled.txt [Text] - 20,001 code lines, 20,001 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\format_comparison_output\format_ASCII_2byte_raw.txt [Text] - 20,001 code lines, 20,001 total lines
@@ -79,31 +81,15 @@ Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\format_comparison_outp
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\format_comparison_output\format_RPBINARY_2byte_scaled.txt [Text] - 20,001 code lines, 20,001 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\grabbed_waveform.txt [Text] - 20,001 code lines, 20,001 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\grabbed_waveform_raw.txt [Text] - 20,025 code lines, 20,025 total lines
-Helpers\Camera_Stream_Standalone\requirements.txt [Text] - 4 code lines, 5 total lines
-Helpers\Classification_Validation\diagnostic_output.txt [Text] - 39 code lines, 39 total lines
-Helpers\Classification_Validation\files_for_testing\10-FS-1.5v-0.05sv-0.05sd-Py-St_v2-.txt [Text] - 364 code lines, 364 total lines
-Helpers\Classification_Validation\files_for_testing\11-FS-2.5v-0.05sv-0.05sd-Py-St_v1-3.txt [Text] - 610 code lines, 610 total lines
-Helpers\Classification_Validation\files_for_testing\17-FS-0.3v-0.05sv-0.05sd-Py-Chris_Devices-3-.txt [Text] - 82 code lines, 82 total lines
-Helpers\Classification_Validation\files_for_testing\19-FS-3.0v-0.05sv-0.05sd-Py-Chris_Devices-3-.txt [Text] - 730 code lines, 730 total lines
-Helpers\Classification_Validation\files_for_testing\19-FS-3.0v-0.05sv-0.05sd-Py-Chris_Devices-3-1.txt [Text] - 730 code lines, 730 total lines
-Helpers\Classification_Validation\files_for_testing\20-FS-2.8v-0.05sv-0.05sd-Py-St_v2-.txt [Text] - 673 code lines, 673 total lines
-Helpers\Classification_Validation\files_for_testing\3-FS-2.0v-0.05sv-0.05sd-Py-St_v2-.txt [Text] - 484 code lines, 484 total lines
-Helpers\Classification_Validation\files_for_testing\31-FS-2.5v-0.05sv-0.05sd-Py-St_v1-5-2.txt [Text] - 1,016 code lines, 1,016 total lines
-Helpers\Classification_Validation\files_for_testing\31-FS-2.5v-0.05sv-0.05sd-Py-St_v1-5.txt [Text] - 1,016 code lines, 1,016 total lines
-Helpers\Classification_Validation\files_for_testing\37-FS-3.0v-0.05sv-0.05sd-Py-St_v1-10.02.txt [Text] - 2,431 code lines, 2,431 total lines
-Helpers\Classification_Validation\files_for_testing\4-FS-2.2v-0.05sv-0.05sd-Py-St_v2-.txt [Text] - 532 code lines, 532 total lines
-Helpers\Classification_Validation\files_for_testing\5-FS-2.5v-0.05sv-0.05sd-Py-St_v2-.txt [Text] - 604 code lines, 604 total lines
-Helpers\Classification_Validation\files_for_testing\8-FS-3.5v-0.05sv-0.05sd-Py-Chris_Devices-3-.txt [Text] - 850 code lines, 850 total lines
-Helpers\Connection_Check_Standalone\requirements_standalone.txt [Text] - 11 code lines, 15 total lines
-Helpers\Data_Analysis_Pulse_2450\requirements.txt [Text] - 12 code lines, 18 total lines
-Helpers\HP4140B_GUI\requirements.txt [Text] - 3 code lines, 4 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\G - 10 - 34.txt [Text] - 616 code lines, 616 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\requirements.txt [Text] - 8 code lines, 11 total lines
-Helpers\plotting_core\requirements.txt [Text] - 4 code lines, 5 total lines
 Other\lines_of_code_report.txt [Text] - 572 code lines, 584 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\G - 10 - 34.txt [Text] - 616 code lines, 616 total lines
-lines_of_code_report.txt [Text] - 0 code lines, 0 total lines
-requirements.txt [Text] - 288 code lines, 558 total lines
+requirements-dev.txt [Text] - 4 code lines, 6 total lines
+requirements.txt [Text] - 56 code lines, 63 total lines
+tools\Display\requirements.txt [Text] - 1 code lines, 1 total lines
+tools\Lines_of_code\lines_of_code_report.txt [Text] - 0 code lines, 0 total lines
+tools\MASS_FLOW\requirements.txt [Text] - 4 code lines, 4 total lines
+tools\afm_curve_analysis\Data\Si.ito.2pacz.pmma.12hr_anneal+tganneal.txt [Text] - 18 code lines, 18 total lines
+tools\afm_curve_analysis\Data\Si.ito.2pacz.pmma.12hr_anneal.txt [Text] - 28 code lines, 28 total lines
+tools\afm_curve_analysis\Data\testing.txt [Text] - 18 code lines, 18 total lines
 tools\camera_stream_standalone\requirements.txt [Text] - 4 code lines, 5 total lines
 tools\classification_validation\diagnostic_output.txt [Text] - 39 code lines, 39 total lines
 tools\classification_validation\files_for_testing\10-FS-1.5v-0.05sv-0.05sd-Py-St_v2-.txt [Text] - 364 code lines, 364 total lines
@@ -131,7 +117,7 @@ Equipment\Camera\__init__.py [Python] - 7 code lines, 25 total lines
 Equipment\Camera\test_thorlabs_camera.py [Python] - 186 code lines, 258 total lines
 Equipment\Camera\thorlabs_camera.py [Python] - 446 code lines, 540 total lines
 Equipment\Camera\view_camera.py [Python] - 169 code lines, 208 total lines
-Equipment\Function_Generator\Siglent_SDG1032X.py [Python] - 525 code lines, 622 total lines
+Equipment\Function_Generator\Siglent_SDG1032X.py [Python] - 670 code lines, 787 total lines
 Equipment\Function_Generator\get_current_settings.py [Python] - 82 code lines, 104 total lines
 Equipment\Function_Generator\test scripts\Waveform_gen.py [Python] - 43 code lines, 56 total lines
 Equipment\Function_Generator\test scripts\drawn_pulse.py [Python] - 57 code lines, 72 total lines
@@ -172,7 +158,7 @@ Equipment\Multiplexers\Multiplexer_10_OUT\Multiplexer_with_measure.py [Python] -
 Equipment\Multiplexers\Multiplexer_10_OUT\Test_binary.py [Python] - 29 code lines, 40 total lines
 Equipment\Multiplexers\PySwitchbox\pySwitchbox.py [Python] - 135 code lines, 192 total lines
 Equipment\Oscilloscopes\GWInstekGDS2062.py [Python] - 678 code lines, 841 total lines
-Equipment\Oscilloscopes\TektronixTBS1000C.py [Python] - 967 code lines, 1,178 total lines
+Equipment\Oscilloscopes\TektronixTBS1000C.py [Python] - 999 code lines, 1,214 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\arm_then_disconnect.py [Python] - 99 code lines, 123 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\grab_screen_waveform.py [Python] - 236 code lines, 282 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\scop.py [Python] - 58 code lines, 67 total lines
@@ -214,6 +200,11 @@ Equipment\SMU_AND_PMU\4200A\Controll_With_python\Working_examples_Python_Using_S
 Equipment\SMU_AND_PMU\4200A\Controll_With_python\Working_examples_Python_Using_Sweepme_server\segarb_example.py [Python] - 302 code lines, 364 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_python\Working_examples_Python_Using_Sweepme_server\simple_10ns_pulse.py [Python] - 107 code lines, 136 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_python\Working_examples_Python_Using_Sweepme_server\working_example.py [Python] - 82 code lines, 101 total lines
+Equipment\SMU_AND_PMU\4200A\scripts\pmu_endurance_burst_test.py [Python] - 109 code lines, 122 total lines
+Equipment\SMU_AND_PMU\4200A\scripts\pmu_endurance_smoke_test.py [Python] - 85 code lines, 95 total lines
+Equipment\SMU_AND_PMU\4200A\scripts\pmu_gui_path_test.py [Python] - 124 code lines, 148 total lines
+Equipment\SMU_AND_PMU\4200A\scripts\pmu_retention_smoke_test.py [Python] - 82 code lines, 92 total lines
+Equipment\SMU_AND_PMU\4200A\scripts\pmu_scope_smoke_test.py [Python] - 135 code lines, 162 total lines
 Equipment\SMU_AND_PMU\4200A\send_keithley_command.py [Python] - 90 code lines, 109 total lines
 Equipment\SMU_AND_PMU\ProxyClass.py [Python] - 113 code lines, 138 total lines
 Equipment\SMU_AND_PMU\__init__.py [Python] - 73 code lines, 83 total lines
@@ -233,7 +224,7 @@ Equipment\SMU_AND_PMU\keithley2450\tsp_sim_scripts.py [Python] - 509 code lines,
 Equipment\SMU_AND_PMU\keithley4200\__init__.py [Python] - 19 code lines, 23 total lines
 Equipment\SMU_AND_PMU\keithley4200\controller.py [Python] - 1,100 code lines, 1,283 total lines
 Equipment\SMU_AND_PMU\keithley4200\kxci_controller.py [Python] - 2,158 code lines, 2,459 total lines
-Equipment\SMU_AND_PMU\keithley4200\kxci_scripts.py [Python] - 4,367 code lines, 5,046 total lines
+Equipment\SMU_AND_PMU\keithley4200\kxci_scripts.py [Python] - 5,635 code lines, 6,421 total lines
 Equipment\SMU_AND_PMU\keithley4200\simulation_4200.py [Python] - 428 code lines, 524 total lines
 Equipment\SMU_AND_PMU\keithley4200\test_unit_conversions.py [Python] - 133 code lines, 162 total lines
 Equipment\TempControllers\Lakeshore355.py [Python] - 152 code lines, 175 total lines
@@ -243,7 +234,7 @@ Equipment\TempControllers\Oxford_ITC4_Tests\PID_Insitu_change.py [Python] - 190 
 Equipment\__init__.py [Python] - 104 code lines, 120 total lines
 Equipment\managers\ammeter.py [Python] - 439 code lines, 537 total lines
 Equipment\managers\camera.py [Python] - 435 code lines, 510 total lines
-Equipment\managers\function_generator.py [Python] - 287 code lines, 326 total lines
+Equipment\managers\function_generator.py [Python] - 340 code lines, 384 total lines
 Equipment\managers\iv_controller.py [Python] - 2,481 code lines, 2,854 total lines
 Equipment\managers\laser.py [Python] - 65 code lines, 96 total lines
 Equipment\managers\multiplexer.py [Python] - 246 code lines, 312 total lines
@@ -253,140 +244,7 @@ Equipment\managers\temperature.py [Python] - 238 code lines, 285 total lines
 Equipment\optical\base.py [Python] - 281 code lines, 337 total lines
 Equipment\optical_excitation.py [Python] - 370 code lines, 434 total lines
 Equipment\test_camera_manager.py [Python] - 208 code lines, 282 total lines
-Helpers\Analysis\__init__.py [Python] - 49 code lines, 63 total lines
-Helpers\Analysis\aggregators\__init__.py [Python] - 13 code lines, 16 total lines
-Helpers\Analysis\aggregators\comprehensive_analyzer.py [Python] - 477 code lines, 570 total lines
-Helpers\Analysis\aggregators\device_analyzer.py [Python] - 33 code lines, 44 total lines
-Helpers\Analysis\aggregators\sample_analyzer.py [Python] - 3,473 code lines, 4,069 total lines
-Helpers\Analysis\aggregators\section_analyzer.py [Python] - 467 code lines, 552 total lines
-Helpers\Analysis\api\__init__.py [Python] - 6 code lines, 9 total lines
-Helpers\Analysis\api\iv_sweep_analyzer.py [Python] - 520 code lines, 598 total lines
-Helpers\Analysis\api\iv_sweep_llm_analyzer.py [Python] - 438 code lines, 509 total lines
-Helpers\Analysis\core\__init__.py [Python] - 10 code lines, 13 total lines
-Helpers\Analysis\core\sweep_analyzer.py [Python] - 4,229 code lines, 5,008 total lines
-Helpers\Analysis\docs\quick_example.py [Python] - 87 code lines, 120 total lines
-Helpers\Analysis\docs\test_ohmic_classification.py [Python] - 198 code lines, 250 total lines
-Helpers\Analysis\utils\migrate_folder_structure.py [Python] - 228 code lines, 267 total lines
-Helpers\Camera_Stream_Standalone\build_exe.py [Python] - 92 code lines, 105 total lines
-Helpers\Camera_Stream_Standalone\camera_stream_app.py [Python] - 1,079 code lines, 1,230 total lines
-Helpers\Classification_Validation\__init__.py [Python] - 7 code lines, 10 total lines
-Helpers\Classification_Validation\batch_processor.py [Python] - 260 code lines, 308 total lines
-Helpers\Classification_Validation\gui\__init__.py [Python] - 1 code lines, 2 total lines
-Helpers\Classification_Validation\gui\file_browser.py [Python] - 153 code lines, 376 total lines
-Helpers\Classification_Validation\gui\main_window.py [Python] - 78 code lines, 189 total lines
-Helpers\Classification_Validation\gui\metrics_panel.py [Python] - 233 code lines, 547 total lines
-Helpers\Classification_Validation\gui\review_panel.py [Python] - 507 code lines, 1,272 total lines
-Helpers\Classification_Validation\gui\review_panel_backup.py [Python] - 318 code lines, 774 total lines
-Helpers\Classification_Validation\gui\tuning_panel.py [Python] - 180 code lines, 446 total lines
-Helpers\Classification_Validation\label_manager.py [Python] - 82 code lines, 103 total lines
-Helpers\Classification_Validation\launch_gui.py [Python] - 140 code lines, 173 total lines
-Helpers\Classification_Validation\metrics_calculator.py [Python] - 268 code lines, 333 total lines
-Helpers\Classification_Validation\parameter_tuner.py [Python] - 164 code lines, 198 total lines
-Helpers\Classification_Validation\parameter_tuner_utf8.py [Python] - 123 code lines, 148 total lines
-Helpers\Classification_Validation\run_validation_tool.py [Python] - 9 code lines, 11 total lines
-Helpers\Classification_Validation\test_diagnostic.py [Python] - 74 code lines, 89 total lines
-Helpers\Classification_Validation\test_specific_files.py [Python] - 60 code lines, 72 total lines
-Helpers\Classification_Validation\validation_tool.py [Python] - 238 code lines, 292 total lines
-Helpers\Classification_Validation\validation_tool_backup.py [Python] - 219 code lines, 265 total lines
-Helpers\Classification_Validation\weight_adjuster.py [Python] - 179 code lines, 221 total lines
-Helpers\Connection_Check_Standalone\Connection_Check_Standalone.py [Python] - 521 code lines, 610 total lines
-Helpers\Data_Analysis\__init__.py [Python] - 18 code lines, 24 total lines
-Helpers\Data_Analysis\data\__init__.py [Python] - 24 code lines, 27 total lines
-Helpers\Data_Analysis\data\data_discovery.py [Python] - 234 code lines, 298 total lines
-Helpers\Data_Analysis\data\data_loader.py [Python] - 341 code lines, 417 total lines
-Helpers\Data_Analysis\data\device_data_model.py [Python] - 149 code lines, 178 total lines
-Helpers\Data_Analysis\device_visualizer_app.py [Python] - 106 code lines, 136 total lines
-Helpers\Data_Analysis\utils\__init__.py [Python] - 38 code lines, 41 total lines
-Helpers\Data_Analysis\utils\color_themes.py [Python] - 139 code lines, 174 total lines
-Helpers\Data_Analysis\utils\plot_utils.py [Python] - 216 code lines, 272 total lines
-Helpers\Data_Analysis\widgets\__init__.py [Python] - 26 code lines, 29 total lines
-Helpers\Data_Analysis\widgets\classification_tab.py [Python] - 171 code lines, 216 total lines
-Helpers\Data_Analysis\widgets\device_list_panel.py [Python] - 201 code lines, 253 total lines
-Helpers\Data_Analysis\widgets\filter_panel.py [Python] - 190 code lines, 240 total lines
-Helpers\Data_Analysis\widgets\main_window.py [Python] - 275 code lines, 351 total lines
-Helpers\Data_Analysis\widgets\metrics_tab.py [Python] - 252 code lines, 312 total lines
-Helpers\Data_Analysis\widgets\overview_tab.py [Python] - 259 code lines, 335 total lines
-Helpers\Data_Analysis\widgets\plots_tab.py [Python] - 158 code lines, 203 total lines
-Helpers\Data_Analysis\widgets\sample_selector.py [Python] - 109 code lines, 140 total lines
-Helpers\Data_Analysis\widgets\yield_heatmap_widget.py [Python] - 190 code lines, 237 total lines
-Helpers\Data_Analysis_Pulse_2450\core\__init__.py [Python] - 3 code lines, 6 total lines
-Helpers\Data_Analysis_Pulse_2450\core\data_parser.py [Python] - 558 code lines, 686 total lines
-Helpers\Data_Analysis_Pulse_2450\core\plot_generator.py [Python] - 342 code lines, 413 total lines
-Helpers\Data_Analysis_Pulse_2450\core\statistics.py [Python] - 292 code lines, 359 total lines
-Helpers\Data_Analysis_Pulse_2450\core\test_type_registry.py [Python] - 227 code lines, 255 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\__init__.py [Python] - 3 code lines, 6 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\batch_processing_dialog.py [Python] - 392 code lines, 478 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\batch_processing_tab.py [Python] - 84 code lines, 100 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\combined_plot_dialog.py [Python] - 147 code lines, 184 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\combined_plot_tab.py [Python] - 435 code lines, 526 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\file_browser_tab.py [Python] - 519 code lines, 639 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\label_editor_dialog.py [Python] - 118 code lines, 151 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\main_window.py [Python] - 399 code lines, 463 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\plot_annotations.py [Python] - 329 code lines, 401 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\plotting_tab.py [Python] - 2,030 code lines, 2,427 total lines
-Helpers\Data_Analysis_Pulse_2450\gui\widgets\__init__.py [Python] - 3 code lines, 6 total lines
-Helpers\Data_Analysis_Pulse_2450\main.py [Python] - 47 code lines, 63 total lines
-Helpers\Data_Analysis_Pulse_2450\test_app.py [Python] - 83 code lines, 94 total lines
-Helpers\Data_Analysis_Pulse_2450\utils\__init__.py [Python] - 3 code lines, 6 total lines
-Helpers\Data_Analysis_Pulse_2450\utils\settings.py [Python] - 127 code lines, 156 total lines
-Helpers\Equipment_Address_Location\find_serial.py [Python] - 7 code lines, 9 total lines
-Helpers\Equipment_Address_Location\find_visa.py [Python] - 17 code lines, 23 total lines
-Helpers\Gordon_temp.py [Python] - 78 code lines, 96 total lines
-Helpers\HP4140B_GUI\__init__.py [Python] - 6 code lines, 10 total lines
-Helpers\HP4140B_GUI\hp4140b_controller.py [Python] - 340 code lines, 405 total lines
-Helpers\HP4140B_GUI\hp4140b_gui.py [Python] - 505 code lines, 603 total lines
-Helpers\HP4140B_GUI\run_gui.py [Python] - 19 code lines, 26 total lines
-Helpers\ITO_Analysis\ITO.py [Python] - 888 code lines, 975 total lines
-Helpers\ITO_Analysis\ITO_all_samples_summary.py [Python] - 927 code lines, 976 total lines
-Helpers\IV_Analysis\__init__.py [Python] - 32 code lines, 42 total lines
-Helpers\IV_Analysis\iv_sweep_analyzer.py [Python] - 520 code lines, 598 total lines
-Helpers\IV_Analysis\iv_sweep_llm_analyzer.py [Python] - 438 code lines, 509 total lines
-Helpers\IV_Analysis\quick_example.py [Python] - 87 code lines, 120 total lines
-Helpers\IV_Analysis\single_file_metrics.py [Python] - 3,814 code lines, 4,520 total lines
-Helpers\IV_Analysis\test_ohmic_classification.py [Python] - 126 code lines, 158 total lines
-Helpers\Maps_Create\check_coms.py [Python] - 27 code lines, 33 total lines
-Helpers\Maps_Create\check_mapping.py [Python] - 115 code lines, 147 total lines
-Helpers\Maps_Create\device_map_tool.py [Python] - 437 code lines, 525 total lines
-Helpers\Maps_Create\old_legacy\Map_device.py [Python] - 70 code lines, 91 total lines
-Helpers\Maps_Create\old_legacy\jason_check.py [Python] - 15 code lines, 21 total lines
-Helpers\Maps_Create\old_legacy\show_boxes.py [Python] - 44 code lines, 56 total lines
-Helpers\Sample_Analysis\__init__.py [Python] - 9 code lines, 27 total lines
-Helpers\Sample_Analysis\comprehensive_analyzer.py [Python] - 291 code lines, 358 total lines
-Helpers\Sample_Analysis\migrate_folder_structure.py [Python] - 228 code lines, 267 total lines
-Helpers\Sample_Analysis\sample_analyzer.py [Python] - 1,283 code lines, 1,551 total lines
-Helpers\Sample_Analysis\section_analyzer.py [Python] - 352 code lines, 417 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Main.py [Python] - 319 code lines, 381 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\1_basic.py [Python] - 182 code lines, 219 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\1_withai.py [Python] - 611 code lines, 725 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\Single_file_metircs.py [Python] - 373 code lines, 455 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\dataanalyzer.py [Python] - 147 code lines, 178 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\enhanced_analyzer.py [Python] - 1,714 code lines, 2,029 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\new.py [Python] - 62 code lines, 62 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\single_file_metrics3.py [Python] - 2,275 code lines, 2,722 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\Old_code\single_files_metrics2.py [Python] - 974 code lines, 1,191 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\data_analyzer.py [Python] - 1,081 code lines, 1,261 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\single_file_metrics.py [Python] - 2,496 code lines, 2,970 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Equipment\SMU_AND_PMU\Keithley2450_TSP.py [Python] - 873 code lines, 1,034 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Equipment\SMU_AND_PMU\__init__.py [Python] - 4 code lines, 5 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Equipment\SMU_AND_PMU\keithley2450_tsp_scripts.py [Python] - 2,215 code lines, 2,613 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Equipment\__init__.py [Python] - 4 code lines, 5 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Measurments\__init__.py [Python] - 4 code lines, 5 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Measurments\data_formats.py [Python] - 702 code lines, 842 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\TSP_Testing_GUI.py [Python] - 1,963 code lines, 2,301 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\main.py [Python] - 27 code lines, 39 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\test_imports.py [Python] - 32 code lines, 43 total lines
-Helpers\plotting_core\__init__.py [Python] - 14 code lines, 16 total lines
-Helpers\plotting_core\__version__.py [Python] - 2 code lines, 4 total lines
-Helpers\plotting_core\base.py [Python] - 22 code lines, 29 total lines
-Helpers\plotting_core\conduction.py [Python] - 314 code lines, 343 total lines
-Helpers\plotting_core\examples\basic_usage.py [Python] - 33 code lines, 46 total lines
-Helpers\plotting_core\examples\conditional_plotting.py [Python] - 127 code lines, 154 total lines
-Helpers\plotting_core\examples\load_from_file.py [Python] - 50 code lines, 67 total lines
-Helpers\plotting_core\hdf5_style.py [Python] - 218 code lines, 240 total lines
-Helpers\plotting_core\iv_grid.py [Python] - 184 code lines, 215 total lines
-Helpers\plotting_core\sclc_fit.py [Python] - 171 code lines, 196 total lines
-Helpers\plotting_core\setup.py [Python] - 42 code lines, 46 total lines
-Helpers\plotting_core\unified_plotter.py [Python] - 650 code lines, 753 total lines
+Laser_FG_Scope_GUI.py [Python] - 32 code lines, 41 total lines
 Measurements\__init__.py [Python] - 27 code lines, 30 total lines
 Measurements\background_workers.py [Python] - 287 code lines, 340 total lines
 Measurements\connection_manager.py [Python] - 180 code lines, 206 total lines
@@ -411,48 +269,13 @@ Measurements\special_measurement_runner.py [Python] - 775 code lines, 884 total 
 Measurements\sweep_config.py [Python] - 222 code lines, 266 total lines
 Measurements\sweep_patterns.py [Python] - 281 code lines, 345 total lines
 Measurements\telegram_coordinator.py [Python] - 147 code lines, 179 total lines
-Measurments\__init__.py [Python] - 18 code lines, 21 total lines
-Measurments\background_workers.py [Python] - 287 code lines, 340 total lines
-Measurments\connection_manager.py [Python] - 180 code lines, 206 total lines
-Measurments\data_formats.py [Python] - 714 code lines, 854 total lines
-Measurments\data_saver.py [Python] - 541 code lines, 631 total lines
-Measurments\data_utils.py [Python] - 178 code lines, 222 total lines
-Measurments\json_config_validator.py [Python] - 202 code lines, 249 total lines
-Measurments\measurement_context.py [Python] - 77 code lines, 98 total lines
-Measurments\measurement_services_pmu.py [Python] - 559 code lines, 629 total lines
-Measurments\measurement_services_smu.py [Python] - 2,637 code lines, 2,857 total lines
-Measurments\optical_controller.py [Python] - 235 code lines, 292 total lines
-Measurments\pulsed_measurement_runner.py [Python] - 460 code lines, 530 total lines
-Measurments\sequential_runner.py [Python] - 468 code lines, 574 total lines
-Measurments\single_measurement_runner.py [Python] - 432 code lines, 498 total lines
-Measurments\source_modes.py [Python] - 261 code lines, 342 total lines
-Measurments\special_measurement_runner.py [Python] - 751 code lines, 859 total lines
-Measurments\sweep_config.py [Python] - 222 code lines, 266 total lines
-Measurments\sweep_patterns.py [Python] - 281 code lines, 345 total lines
-Measurments\telegram_coordinator.py [Python] - 147 code lines, 179 total lines
+Measurments\__init__.py [Python] - 40 code lines, 48 total lines
 Notifications\__init__.py [Python] - 8 code lines, 12 total lines
 Notifications\telegram_bot.py [Python] - 375 code lines, 451 total lines
 Other\count_lines_of_code.py [Python] - 232 code lines, 285 total lines
-Other\old_code\AdaptiveMeasurement.py [Python] - 110 code lines, 120 total lines
-Other\old_code\Check_Connection.py [Python] - 143 code lines, 176 total lines
-Other\old_code\Measurement_GUI.py [Python] - 11 code lines, 16 total lines
-Other\old_code\Sample_GUI.py [Python] - 11 code lines, 16 total lines
-Other\old_code\Sample_GUI_old.py [Python] - 279 code lines, 357 total lines
-Other\old_code\laser_test.py [Python] - 94 code lines, 111 total lines
-Other\old_code\old\Equipment\ammeter_manager.py [Python] - 457 code lines, 555 total lines
-Other\old_code\old\Equipment\camera_manager.py [Python] - 435 code lines, 510 total lines
-Other\old_code\old\Equipment\function_generator_manager.py [Python] - 287 code lines, 326 total lines
-Other\old_code\old\Equipment\iv_controller_manager.py [Python] - 188 code lines, 215 total lines
-Other\old_code\old\Equipment\laser_manager.py [Python] - 33 code lines, 47 total lines
-Other\old_code\old\Equipment\multiplexer_manager.py [Python] - 246 code lines, 312 total lines
-Other\old_code\old\Equipment\oscilloscope_manager.py [Python] - 491 code lines, 576 total lines
-Other\old_code\old\Equipment\power_supply_manager.py [Python] - 81 code lines, 102 total lines
-Other\old_code\old\Equipment\temperature_controller_manager.py [Python] - 238 code lines, 285 total lines
-Other\old_code\old\Measurments\measurement_services_smu.py [Python] - 2,025 code lines, 2,189 total lines
-Other\old_code\sequential.py [Python] - 309 code lines, 309 total lines
-Other\old_code\testing.py [Python] - 68 code lines, 84 total lines
 Pulse_Testing\__init__.py [Python] - 22 code lines, 28 total lines
 Pulse_Testing\keithley4200_constants.py [Python] - 17 code lines, 22 total lines
+Pulse_Testing\pmu_channel_wiring.py [Python] - 91 code lines, 113 total lines
 Pulse_Testing\pulse_pattern_visualizer.py [Python] - 341 code lines, 407 total lines
 Pulse_Testing\system_wrapper.py [Python] - 278 code lines, 339 total lines
 Pulse_Testing\systems\__init__.py [Python] - 25 code lines, 28 total lines
@@ -460,16 +283,17 @@ Pulse_Testing\systems\base_system.py [Python] - 183 code lines, 230 total lines
 Pulse_Testing\systems\keithley2400.py [Python] - 221 code lines, 279 total lines
 Pulse_Testing\systems\keithley2400_scpi_scripts.py [Python] - 1,200 code lines, 1,458 total lines
 Pulse_Testing\systems\keithley2450.py [Python] - 265 code lines, 320 total lines
-Pulse_Testing\systems\keithley4200_core.py [Python] - 789 code lines, 891 total lines
+Pulse_Testing\systems\keithley4200_core.py [Python] - 831 code lines, 934 total lines
 Pulse_Testing\systems\keithley4200_custom.py [Python] - 16 code lines, 22 total lines
 Pulse_Testing\systems\keithley4200_pmu.py [Python] - 6 code lines, 10 total lines
 Pulse_Testing\systems\keithley4200_smu.py [Python] - 6 code lines, 10 total lines
 Pulse_Testing\systems\keithley4200a.py [Python] - 13 code lines, 19 total lines
-Pulse_Testing\test_capabilities.py [Python] - 270 code lines, 301 total lines
-Pulse_Testing\test_definitions.py [Python] - 422 code lines, 436 total lines
+Pulse_Testing\test_capabilities.py [Python] - 282 code lines, 313 total lines
+Pulse_Testing\test_definitions.py [Python] - 662 code lines, 692 total lines
 Pulse_Testing\utils\__init__.py [Python] - 10 code lines, 14 total lines
-Pulse_Testing\utils\data_formatter.py [Python] - 91 code lines, 123 total lines
-TSP_Testing_GUI.py [Python] - 32 code lines, 47 total lines
+Pulse_Testing\utils\data_formatter.py [Python] - 92 code lines, 124 total lines
+Pulse_Testing_GUI_compact.py [Python] - 24 code lines, 35 total lines
+TSP_Testing_GUI.py [Python] - 41 code lines, 57 total lines
 analysis\__init__.py [Python] - 49 code lines, 63 total lines
 analysis\aggregators\__init__.py [Python] - 15 code lines, 18 total lines
 analysis\aggregators\comprehensive_analyzer.py [Python] - 468 code lines, 555 total lines
@@ -485,50 +309,43 @@ analysis\core\sweep_analyzer.py [Python] - 4,229 code lines, 5,008 total lines
 analysis\docs\quick_example.py [Python] - 87 code lines, 120 total lines
 analysis\docs\test_ohmic_classification.py [Python] - 198 code lines, 250 total lines
 analysis\utils\migrate_folder_structure.py [Python] - 228 code lines, 267 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Main.py [Python] - 319 code lines, 381 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\1_basic.py [Python] - 182 code lines, 219 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\1_withai.py [Python] - 611 code lines, 725 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\Single_file_metircs.py [Python] - 373 code lines, 455 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\dataanalyzer.py [Python] - 147 code lines, 178 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\enhanced_analyzer.py [Python] - 1,714 code lines, 2,029 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\new.py [Python] - 62 code lines, 62 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\single_file_metrics3.py [Python] - 2,275 code lines, 2,722 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\Old_code\single_files_metrics2.py [Python] - 974 code lines, 1,191 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\data_analyzer.py [Python] - 1,081 code lines, 1,261 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\single_file_metrics.py [Python] - 2,496 code lines, 2,970 total lines
-archive\old_code\AdaptiveMeasurement.py [Python] - 110 code lines, 120 total lines
-archive\old_code\Check_Connection.py [Python] - 143 code lines, 176 total lines
-archive\old_code\Measurement_GUI.py [Python] - 11 code lines, 16 total lines
-archive\old_code\Sample_GUI.py [Python] - 11 code lines, 16 total lines
-archive\old_code\Sample_GUI_old.py [Python] - 279 code lines, 357 total lines
-archive\old_code\laser_test.py [Python] - 94 code lines, 111 total lines
-archive\old_code\old\Equipment\ammeter_manager.py [Python] - 457 code lines, 555 total lines
-archive\old_code\old\Equipment\camera_manager.py [Python] - 435 code lines, 510 total lines
-archive\old_code\old\Equipment\function_generator_manager.py [Python] - 287 code lines, 326 total lines
-archive\old_code\old\Equipment\iv_controller_manager.py [Python] - 188 code lines, 215 total lines
-archive\old_code\old\Equipment\laser_manager.py [Python] - 33 code lines, 47 total lines
-archive\old_code\old\Equipment\multiplexer_manager.py [Python] - 246 code lines, 312 total lines
-archive\old_code\old\Equipment\oscilloscope_manager.py [Python] - 491 code lines, 576 total lines
-archive\old_code\old\Equipment\power_supply_manager.py [Python] - 81 code lines, 102 total lines
-archive\old_code\old\Equipment\temperature_controller_manager.py [Python] - 238 code lines, 285 total lines
-archive\old_code\old\Measurments\measurement_services_smu.py [Python] - 2,025 code lines, 2,189 total lines
-archive\old_code\sequential.py [Python] - 309 code lines, 309 total lines
-archive\old_code\testing.py [Python] - 68 code lines, 84 total lines
 build_exe.py [Python] - 40 code lines, 53 total lines
-count_lines_of_code.py [Python] - 232 code lines, 285 total lines
+build_pulse_testing_gui.py [Python] - 109 code lines, 133 total lines
 gui\Automated_tester_GUI.py [Python] - 1,043 code lines, 1,110 total lines
 gui\__init__.py [Python] - 24 code lines, 33 total lines
 gui\connection_check_gui\__init__.py [Python] - 12 code lines, 17 total lines
 gui\connection_check_gui\main.py [Python] - 508 code lines, 583 total lines
+gui\laser_fg_scope_gui\__init__.py [Python] - 3 code lines, 4 total lines
+gui\laser_fg_scope_gui\config.py [Python] - 67 code lines, 79 total lines
+gui\laser_fg_scope_gui\config_manager.py [Python] - 113 code lines, 127 total lines
+gui\laser_fg_scope_gui\layout.py [Python] - 202 code lines, 255 total lines
+gui\laser_fg_scope_gui\logic.py [Python] - 765 code lines, 875 total lines
+gui\laser_fg_scope_gui\main.py [Python] - 222 code lines, 277 total lines
+gui\laser_fg_scope_gui\save_manager.py [Python] - 199 code lines, 242 total lines
+gui\laser_fg_scope_gui\ui\__init__.py [Python] - 1 code lines, 1 total lines
+gui\laser_fg_scope_gui\ui\bias_panel.py [Python] - 84 code lines, 101 total lines
+gui\laser_fg_scope_gui\ui\connection.py [Python] - 132 code lines, 165 total lines
+gui\laser_fg_scope_gui\ui\fg_panel.py [Python] - 302 code lines, 358 total lines
+gui\laser_fg_scope_gui\ui\help_panel.py [Python] - 330 code lines, 394 total lines
+gui\laser_fg_scope_gui\ui\laser_panel.py [Python] - 109 code lines, 133 total lines
+gui\laser_fg_scope_gui\ui\plot_panel.py [Python] - 177 code lines, 208 total lines
+gui\laser_fg_scope_gui\ui\save_panel.py [Python] - 112 code lines, 139 total lines
+gui\laser_fg_scope_gui\ui\scope_panel.py [Python] - 111 code lines, 130 total lines
 gui\measurement_gui\__init__.py [Python] - 18 code lines, 25 total lines
 gui\measurement_gui\analysis_handlers.py [Python] - 88 code lines, 101 total lines
 gui\measurement_gui\analysis_stats_window.py [Python] - 421 code lines, 495 total lines
+gui\measurement_gui\child_gui_launchers.py [Python] - 116 code lines, 140 total lines
+gui\measurement_gui\child_gui_registry.py [Python] - 95 code lines, 118 total lines
 gui\measurement_gui\conditional_testing.py [Python] - 296 code lines, 361 total lines
+gui\measurement_gui\connection_controller.py [Python] - 222 code lines, 249 total lines
+gui\measurement_gui\custom_measurement_runner.py [Python] - 826 code lines, 945 total lines
 gui\measurement_gui\custom_measurements_builder.py [Python] - 835 code lines, 1,016 total lines
 gui\measurement_gui\custom_sweeps.py [Python] - 339 code lines, 421 total lines
-gui\measurement_gui\layout\__init__.py [Python] - 34 code lines, 38 total lines
+gui\measurement_gui\gui_state.py [Python] - 31 code lines, 40 total lines
+gui\measurement_gui\layout\__init__.py [Python] - 33 code lines, 36 total lines
 gui\measurement_gui\layout\conditional_config_helpers.py [Python] - 192 code lines, 207 total lines
 gui\measurement_gui\layout\constants.py [Python] - 37 code lines, 42 total lines
+gui\measurement_gui\layout\help_dialog.py [Python] - 138 code lines, 157 total lines
 gui\measurement_gui\layout\notes_helpers.py [Python] - 506 code lines, 584 total lines
 gui\measurement_gui\layout\sections\__init__.py [Python] - 37 code lines, 40 total lines
 gui\measurement_gui\layout\sections\_collapsible.py [Python] - 73 code lines, 88 total lines
@@ -547,22 +364,30 @@ gui\measurement_gui\layout\sections\telegram_bot.py [Python] - 53 code lines, 66
 gui\measurement_gui\layout\tab_advanced_tests.py [Python] - 26 code lines, 36 total lines
 gui\measurement_gui\layout\tab_custom_measurements.py [Python] - 38 code lines, 50 total lines
 gui\measurement_gui\layout\tab_custom_sweeps.py [Python] - 204 code lines, 234 total lines
-gui\measurement_gui\layout\tab_graphing.py [Python] - 578 code lines, 648 total lines
+gui\measurement_gui\layout\tab_graphing.py [Python] - 591 code lines, 662 total lines
 gui\measurement_gui\layout\tab_measurements.py [Python] - 44 code lines, 57 total lines
 gui\measurement_gui\layout\tab_notes.py [Python] - 261 code lines, 303 total lines
+gui\measurement_gui\layout\tab_registry.py [Python] - 36 code lines, 47 total lines
 gui\measurement_gui\layout\tab_setup.py [Python] - 25 code lines, 35 total lines
 gui\measurement_gui\layout\tab_stats.py [Python] - 94 code lines, 117 total lines
-gui\measurement_gui\layout_builder.py [Python] - 1,305 code lines, 1,548 total lines
-gui\measurement_gui\main.py [Python] - 7,146 code lines, 8,159 total lines
+gui\measurement_gui\layout_builder.py [Python] - 1,028 code lines, 1,243 total lines
+gui\measurement_gui\lifecycle_controller.py [Python] - 81 code lines, 97 total lines
+gui\measurement_gui\main.py [Python] - 4,885 code lines, 5,665 total lines
 gui\measurement_gui\messaging_handlers.py [Python] - 49 code lines, 65 total lines
-gui\measurement_gui\plot_handlers.py [Python] - 1,911 code lines, 2,043 total lines
+gui\measurement_gui\plot_handlers.py [Python] - 1,922 code lines, 2,055 total lines
 gui\measurement_gui\plot_panels.py [Python] - 1,266 code lines, 1,472 total lines
 gui\measurement_gui\plot_updaters.py [Python] - 248 code lines, 287 total lines
+gui\measurement_gui\sample_gui_sync.py [Python] - 167 code lines, 188 total lines
+gui\measurement_gui\save_path_controller.py [Python] - 134 code lines, 158 total lines
+gui\measurement_gui\smu_adapter.py [Python] - 71 code lines, 84 total lines
+gui\measurement_gui\system_config_controller.py [Python] - 629 code lines, 714 total lines
+gui\measurement_gui\tool_adapters\__init__.py [Python] - 19 code lines, 25 total lines
+gui\measurement_gui\tool_registry.py [Python] - 135 code lines, 164 total lines
 gui\measurement_gui\yield_concentration\__init__.py [Python] - 21 code lines, 26 total lines
-gui\measurement_gui\yield_concentration\aggregator.py [Python] - 370 code lines, 435 total lines
+gui\measurement_gui\yield_concentration\aggregator.py [Python] - 529 code lines, 610 total lines
 gui\measurement_gui\yield_concentration\fabrication.py [Python] - 121 code lines, 142 total lines
 gui\measurement_gui\yield_concentration\first_sweep_resistance.py [Python] - 112 code lines, 143 total lines
-gui\measurement_gui\yield_concentration\plots.py [Python] - 346 code lines, 390 total lines
+gui\measurement_gui\yield_concentration\plots.py [Python] - 505 code lines, 560 total lines
 gui\measurement_gui\yield_concentration\yield_source.py [Python] - 228 code lines, 271 total lines
 gui\messaging_config.py [Python] - 76 code lines, 93 total lines
 gui\motor_control_gui\__init__.py [Python] - 12 code lines, 17 total lines
@@ -607,24 +432,39 @@ gui\oscilloscope_pulse_gui\ui\scope.py [Python] - 45 code lines, 53 total lines
 gui\oscilloscope_pulse_gui\ui\status_bar.py [Python] - 11 code lines, 16 total lines
 gui\oscilloscope_pulse_gui\ui\widgets.py [Python] - 98 code lines, 121 total lines
 gui\pulse_testing_gui\__init__.py [Python] - 12 code lines, 18 total lines
-gui\pulse_testing_gui\config.py [Python] - 18 code lines, 23 total lines
+gui\pulse_testing_gui\config.py [Python] - 84 code lines, 107 total lines
 gui\pulse_testing_gui\logic.py [Python] - 50 code lines, 60 total lines
-gui\pulse_testing_gui\main.py [Python] - 2,345 code lines, 2,711 total lines
-gui\pulse_testing_gui\optical_runner.py [Python] - 615 code lines, 713 total lines
-gui\pulse_testing_gui\plot_handlers.py [Python] - 710 code lines, 839 total lines
-gui\pulse_testing_gui\ui\__init__.py [Python] - 27 code lines, 30 total lines
-gui\pulse_testing_gui\ui\connection.py [Python] - 100 code lines, 117 total lines
+gui\pulse_testing_gui\main.py [Python] - 2,666 code lines, 3,064 total lines
+gui\pulse_testing_gui\optical_runner.py [Python] - 808 code lines, 945 total lines
+gui\pulse_testing_gui\plot_handlers.py [Python] - 810 code lines, 958 total lines
+gui\pulse_testing_gui\pmu_help_content.py [Python] - 145 code lines, 152 total lines
+gui\pulse_testing_gui\ui\__init__.py [Python] - 36 code lines, 39 total lines
+gui\pulse_testing_gui\ui\connection.py [Python] - 161 code lines, 188 total lines
+gui\pulse_testing_gui\ui\connection_compact.py [Python] - 315 code lines, 372 total lines
 gui\pulse_testing_gui\ui\diagram_section.py [Python] - 20 code lines, 27 total lines
-gui\pulse_testing_gui\ui\laser_section.py [Python] - 305 code lines, 338 total lines
-gui\pulse_testing_gui\ui\parameters.py [Python] - 76 code lines, 95 total lines
+gui\pulse_testing_gui\ui\help_guide.py [Python] - 85 code lines, 104 total lines
+gui\pulse_testing_gui\ui\instrument_current_range.py [Python] - 87 code lines, 106 total lines
+gui\pulse_testing_gui\ui\laser_section.py [Python] - 308 code lines, 341 total lines
+gui\pulse_testing_gui\ui\layout_classic.py [Python] - 94 code lines, 119 total lines
+gui\pulse_testing_gui\ui\layout_compact.py [Python] - 84 code lines, 100 total lines
+gui\pulse_testing_gui\ui\manual_test_sections.py [Python] - 28 code lines, 32 total lines
+gui\pulse_testing_gui\ui\parameters.py [Python] - 129 code lines, 158 total lines
 gui\pulse_testing_gui\ui\plot_section.py [Python] - 23 code lines, 29 total lines
-gui\pulse_testing_gui\ui\pulse_diagram.py [Python] - 1,326 code lines, 1,477 total lines
-gui\pulse_testing_gui\ui\status_section.py [Python] - 31 code lines, 40 total lines
+gui\pulse_testing_gui\ui\pulse_diagram.py [Python] - 1,716 code lines, 1,913 total lines
+gui\pulse_testing_gui\ui\status_section.py [Python] - 36 code lines, 45 total lines
 gui\pulse_testing_gui\ui\tabs_optical.py [Python] - 344 code lines, 376 total lines
-gui\pulse_testing_gui\ui\test_selection.py [Python] - 32 code lines, 40 total lines
-gui\sample_gui\__init__.py [Python] - 16 code lines, 23 total lines
+gui\pulse_testing_gui\ui\test_selection.py [Python] - 43 code lines, 52 total lines
+gui\sample_gui\__init__.py [Python] - 15 code lines, 22 total lines
 gui\sample_gui\config.py [Python] - 135 code lines, 159 total lines
-gui\sample_gui\main.py [Python] - 2,361 code lines, 2,791 total lines
+gui\sample_gui\device_manager_controller.py [Python] - 206 code lines, 242 total lines
+gui\sample_gui\device_status_controller.py [Python] - 157 code lines, 181 total lines
+gui\sample_gui\main.py [Python] - 1,096 code lines, 1,316 total lines
+gui\sample_gui\quick_scan_controller.py [Python] - 445 code lines, 488 total lines
+gui\sample_gui\routing_controller.py [Python] - 90 code lines, 105 total lines
+gui\sample_gui\selection_controller.py [Python] - 139 code lines, 177 total lines
+gui\sample_gui\status_store.py [Python] - 102 code lines, 120 total lines
+gui\sample_gui\telegram_controller.py [Python] - 169 code lines, 197 total lines
+gui\sample_gui\terminal_log_controller.py [Python] - 53 code lines, 67 total lines
 gui\sample_gui\ui\__init__.py [Python] - 21 code lines, 24 total lines
 gui\sample_gui\ui\device_manager.py [Python] - 103 code lines, 133 total lines
 gui\sample_gui\ui\device_map.py [Python] - 61 code lines, 75 total lines
@@ -633,7 +473,8 @@ gui\sample_gui\ui\quick_scan.py [Python] - 159 code lines, 191 total lines
 gui\sample_gui\ui\status_bar.py [Python] - 40 code lines, 50 total lines
 gui\sample_gui\ui\terminal_log.py [Python] - 62 code lines, 77 total lines
 gui\sample_gui\ui\top_control_bar.py [Python] - 100 code lines, 115 total lines
-main.py [Python] - 34 code lines, 45 total lines
+gui\smoke_test.py [Python] - 114 code lines, 145 total lines
+main.py [Python] - 14 code lines, 19 total lines
 plotting\__init__.py [Python] - 20 code lines, 22 total lines
 plotting\__version__.py [Python] - 2 code lines, 4 total lines
 plotting\core\__init__.py [Python] - 3 code lines, 4 total lines
@@ -672,19 +513,30 @@ tests\test_check_connection_stream.py [Python] - 33 code lines, 45 total lines
 tests\test_optical_timing.py [Python] - 150 code lines, 185 total lines
 tests\test_oscilloscope_record_length.py [Python] - 14 code lines, 21 total lines
 tests\test_plot_updaters.py [Python] - 100 code lines, 129 total lines
+tests\test_pmu_burst_planner.py [Python] - 20 code lines, 30 total lines
+tests\test_pmu_i_range_diagnostics.py [Python] - 41 code lines, 55 total lines
+tests\test_pmu_probe_readback.py [Python] - 21 code lines, 30 total lines
 tests\test_sample_gui_quick_scan.py [Python] - 44 code lines, 64 total lines
 tests\test_single_bias_measurement.py [Python] - 27 code lines, 42 total lines
 tests\test_summary_artifacts.py [Python] - 53 code lines, 71 total lines
 tests\test_tektronix_waveform_scaling.py [Python] - 15 code lines, 25 total lines
-tools\Impedence Analyzer\__init__.py [Python] - 29 code lines, 31 total lines
-tools\Impedence Analyzer\calibration.py [Python] - 179 code lines, 216 total lines
-tools\Impedence Analyzer\compare_combinations.py [Python] - 295 code lines, 349 total lines
-tools\Impedence Analyzer\dat_loader.py [Python] - 85 code lines, 102 total lines
-tools\Impedence Analyzer\impedance_plots.py [Python] - 435 code lines, 490 total lines
-tools\Impedence Analyzer\origin_export.py [Python] - 121 code lines, 137 total lines
-tools\Impedence Analyzer\smart_loader.py [Python] - 102 code lines, 122 total lines
-tools\Impedence Analyzer\visualise_csv.py [Python] - 411 code lines, 460 total lines
-tools\Impedence Analyzer\visualise_dat.py [Python] - 89 code lines, 109 total lines
+tools\Display\build_exe.py [Python] - 76 code lines, 94 total lines
+tools\Display\display_controller.py [Python] - 303 code lines, 361 total lines
+tools\Display\main.py [Python] - 574 code lines, 657 total lines
+tools\LED_testing\build_exe.py [Python] - 75 code lines, 93 total lines
+tools\LED_testing\main.py [Python] - 337 code lines, 389 total lines
+tools\Lines_of_code\count_lines_of_code.py [Python] - 233 code lines, 286 total lines
+tools\MASS_FLOW\calibrate_mfc.py [Python] - 142 code lines, 172 total lines
+tools\MASS_FLOW\calibration.py [Python] - 63 code lines, 79 total lines
+tools\MASS_FLOW\calibration_gui.py [Python] - 520 code lines, 614 total lines
+tools\MASS_FLOW\driver.py [Python] - 267 code lines, 328 total lines
+tools\MASS_FLOW\main.py [Python] - 920 code lines, 1,078 total lines
+tools\afm_3d_holes_protrusion\comparison.py [Python] - 891 code lines, 997 total lines
+tools\afm_3d_holes_protrusion\main.py [Python] - 1,195 code lines, 1,377 total lines
+tools\afm_3d_holes_protrusion\refactor.py [Python] - 18 code lines, 25 total lines
+tools\afm_3d_holes_protrusion\substrate_comparison.py [Python] - 317 code lines, 380 total lines
+tools\afm_curve_analysis\comparison.py [Python] - 301 code lines, 366 total lines
+tools\afm_curve_analysis\main.py [Python] - 547 code lines, 647 total lines
 tools\camera_stream_standalone\build_exe.py [Python] - 92 code lines, 105 total lines
 tools\camera_stream_standalone\camera_stream_app.py [Python] - 1,079 code lines, 1,230 total lines
 tools\classification_validation\__init__.py [Python] - 7 code lines, 10 total lines
@@ -750,27 +602,44 @@ tools\device_visualizer\widgets\overview_tab.py [Python] - 259 code lines, 335 t
 tools\device_visualizer\widgets\plots_tab.py [Python] - 212 code lines, 269 total lines
 tools\device_visualizer\widgets\sample_selector.py [Python] - 109 code lines, 140 total lines
 tools\device_visualizer\widgets\yield_heatmap_widget.py [Python] - 190 code lines, 237 total lines
+tools\equipment_address_location\find_serial.py [Python] - 7 code lines, 9 total lines
+tools\equipment_address_location\find_visa.py [Python] - 17 code lines, 23 total lines
+tools\fg_test\test_fg_config.py [Python] - 454 code lines, 537 total lines
 tools\filament_jump_finder\__init__.py [Python] - 30 code lines, 37 total lines
 tools\filament_jump_finder\__main__.py [Python] - 17 code lines, 24 total lines
 tools\filament_jump_finder\core.py [Python] - 176 code lines, 203 total lines
 tools\filament_jump_finder\gui.py [Python] - 525 code lines, 574 total lines
-tools\gwyddion_afm_batch\afm_presentable_batch.py [Python] - 245 code lines, 278 total lines
+tools\gordon_temperature\gordon_temp.py [Python] - 78 code lines, 96 total lines
 tools\hp4140b_gui\__init__.py [Python] - 6 code lines, 10 total lines
 tools\hp4140b_gui\hp4140b_controller.py [Python] - 340 code lines, 405 total lines
-tools\hp4140b_gui\hp4140b_gui.py [Python] - 505 code lines, 603 total lines
+tools\hp4140b_gui\hp4140b_gui.py [Python] - 581 code lines, 689 total lines
+tools\hp4140b_gui\hp4140b_iv_saver.py [Python] - 258 code lines, 306 total lines
 tools\hp4140b_gui\run_gui.py [Python] - 19 code lines, 26 total lines
+tools\impedance_analyzer\__init__.py [Python] - 29 code lines, 31 total lines
+tools\impedance_analyzer\calibration.py [Python] - 179 code lines, 216 total lines
+tools\impedance_analyzer\compare_combinations.py [Python] - 295 code lines, 349 total lines
+tools\impedance_analyzer\dat_loader.py [Python] - 85 code lines, 102 total lines
+tools\impedance_analyzer\impedance_plots.py [Python] - 435 code lines, 490 total lines
+tools\impedance_analyzer\origin_export.py [Python] - 121 code lines, 137 total lines
+tools\impedance_analyzer\smart_loader.py [Python] - 102 code lines, 122 total lines
+tools\impedance_analyzer\visualise_csv.py [Python] - 411 code lines, 460 total lines
+tools\impedance_analyzer\visualise_dat.py [Python] - 89 code lines, 109 total lines
 tools\ito_analysis\ITO.py [Python] - 888 code lines, 975 total lines
 tools\ito_analysis\ITO_all_samples_summary.py [Python] - 927 code lines, 976 total lines
+tools\maps_create\check_coms.py [Python] - 27 code lines, 33 total lines
+tools\maps_create\check_mapping.py [Python] - 115 code lines, 147 total lines
+tools\maps_create\device_map_tool.py [Python] - 437 code lines, 525 total lines
+tools\maps_create\old_legacy\Map_device.py [Python] - 70 code lines, 91 total lines
+tools\maps_create\old_legacy\jason_check.py [Python] - 15 code lines, 21 total lines
+tools\maps_create\old_legacy\show_boxes.py [Python] - 44 code lines, 56 total lines
 tools\optical_timing_calibration\analyze_optical_result.py [Python] - 209 code lines, 235 total lines
 tools\tsp_testing_gui_standalone_v1\Equipment\SMU_AND_PMU\Keithley2450_TSP.py [Python] - 873 code lines, 1,034 total lines
 tools\tsp_testing_gui_standalone_v1\Equipment\SMU_AND_PMU\__init__.py [Python] - 4 code lines, 5 total lines
 tools\tsp_testing_gui_standalone_v1\Equipment\SMU_AND_PMU\keithley2450_tsp_scripts.py [Python] - 2,215 code lines, 2,613 total lines
 tools\tsp_testing_gui_standalone_v1\Equipment\__init__.py [Python] - 4 code lines, 5 total lines
-tools\tsp_testing_gui_standalone_v1\Measurments\__init__.py [Python] - 4 code lines, 5 total lines
-tools\tsp_testing_gui_standalone_v1\Measurments\data_formats.py [Python] - 702 code lines, 842 total lines
-tools\tsp_testing_gui_standalone_v1\TSP_Testing_GUI.py [Python] - 1,963 code lines, 2,301 total lines
+tools\tsp_testing_gui_standalone_v1\TSP_Testing_GUI.py [Python] - 1,968 code lines, 2,308 total lines
 tools\tsp_testing_gui_standalone_v1\main.py [Python] - 27 code lines, 39 total lines
-tools\tsp_testing_gui_standalone_v1\test_imports.py [Python] - 32 code lines, 43 total lines
+tools\tsp_testing_gui_standalone_v1\test_imports.py [Python] - 33 code lines, 44 total lines
 .cursor\plans\conditional_plotting_for_measurement_types_11335025.plan.md [Markdown] - 115 code lines, 157 total lines
 .cursor\plans\custom_measurement_analysis_4f8181fa.plan.md [Markdown] - 431 code lines, 525 total lines
 .cursor\plans\device_analysis_visualizer_qt5_app_5949ed14.plan.md [Markdown] - 261 code lines, 323 total lines
@@ -782,11 +651,18 @@ tools\tsp_testing_gui_standalone_v1\test_imports.py [Python] - 32 code lines, 43
 .cursor\plans\oscilloscope-pulse-capture-gui-33a58f5b.plan.md [Markdown] - 116 code lines, 142 total lines
 .cursor\plans\plotting_readme_and_demo_folder_7a649b58.plan.md [Markdown] - 100 code lines, 134 total lines
 .cursor\plans\refactoring_remaining_plan_23111a87.plan.md [Markdown] - 120 code lines, 189 total lines
-Documents\README.md [Markdown] - 45 code lines, 65 total lines
-Documents\ai\README.md [Markdown] - 18 code lines, 27 total lines
+CONTRIBUTING.md [Markdown] - 55 code lines, 76 total lines
+Documents\LASER_FG_SCOPE_CHAT_SUMMARY.md [Markdown] - 135 code lines, 175 total lines
+Documents\README.md [Markdown] - 58 code lines, 82 total lines
+Documents\ai\README.md [Markdown] - 21 code lines, 30 total lines
 Documents\development\DEVICE_VISUALIZER_GALLERY_OVERLAY_SUMMARY.md [Markdown] - 224 code lines, 287 total lines
 Documents\development\OPTICAL_TESTS_UPDATE_SUMMARY.md [Markdown] - 128 code lines, 156 total lines
-Documents\development\REFACTOR_REMAINING.md [Markdown] - 84 code lines, 121 total lines
+Documents\development\PATH_MIGRATION.md [Markdown] - 52 code lines, 67 total lines
+Documents\development\REFACTOR_REMAINING.md [Markdown] - 82 code lines, 119 total lines
+Documents\guides\DEPLOYMENT_GUI.md [Markdown] - 67 code lines, 91 total lines
+Documents\guides\GUI_EXTENSION_GUIDE.md [Markdown] - 80 code lines, 113 total lines
+Documents\guides\GUI_HANDBOOK.md [Markdown] - 78 code lines, 96 total lines
+Documents\guides\GUI_REFACTOR_BASELINE.md [Markdown] - 84 code lines, 111 total lines
 Documents\guides\JSON_CONFIG_GUIDE.md [Markdown] - 460 code lines, 525 total lines
 Documents\guides\LAB_TEST_CHECKLIST.md [Markdown] - 62 code lines, 79 total lines
 Documents\guides\PULSE_PATTERN_PREVIEW_GUIDE.md [Markdown] - 95 code lines, 122 total lines
@@ -795,28 +671,32 @@ Documents\guides\README_ADD_SAMPLE_TYPE.md [Markdown] - 272 code lines, 363 tota
 Documents\guides\USER_GUIDE.md [Markdown] - 331 code lines, 439 total lines
 Documents\reference\CONNECTION_CHECK_GUI_REFERENCE.md [Markdown] - 85 code lines, 130 total lines
 Documents\reference\KEITHLEY_4200_IV_SWEEP_FLOW.md [Markdown] - 123 code lines, 150 total lines
+Documents\reference\LASER_FG_SCOPE_GUI_REFERENCE.md [Markdown] - 165 code lines, 219 total lines
+Documents\reference\LASER_FG_SCOPE_HARDWARE_LIMITS.md [Markdown] - 184 code lines, 246 total lines
 Documents\reference\MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md [Markdown] - 234 code lines, 337 total lines
 Documents\reference\MOTOR_CONTROL_GUI_REFERENCE.md [Markdown] - 99 code lines, 136 total lines
 Documents\reference\OSCILLOSCOPE_PULSE_GUI_REFERENCE.md [Markdown] - 110 code lines, 150 total lines
 Documents\reference\PULSE_TESTING_GUI_REFERENCE.md [Markdown] - 153 code lines, 207 total lines
 Equipment\Arduino\Device_Current_Testing\README.md [Markdown] - 143 code lines, 211 total lines
 Equipment\Laser_Power_Meter\README.md [Markdown] - 36 code lines, 45 total lines
-Equipment\Moku\README.md [Markdown] - 305 code lines, 419 total lines
+Equipment\Moku\README.md [Markdown] - 309 code lines, 424 total lines
 Equipment\Moku\README_laser_controller.md [Markdown] - 57 code lines, 75 total lines
 Equipment\Oscilloscopes\README.md [Markdown] - 94 code lines, 133 total lines
 Equipment\Oscilloscopes\VOLTAGE_SCALING_EXPLANATION.md [Markdown] - 139 code lines, 207 total lines
 Equipment\SMU_AND_PMU\2450 Info\KEITHLEY_2450_REFERENCE.md [Markdown] - 643 code lines, 876 total lines
 Equipment\SMU_AND_PMU\2450 Info\TSP_ERRORS_AND_FIXES.md [Markdown] - 189 code lines, 245 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\README.md [Markdown] - 575 code lines, 736 total lines
-Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Read_with_laser_pulse\PMU_Measurement_Limits.md [Markdown] - 165 code lines, 237 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Read_with_laser_pulse\PMU_Measurement_Limits.md [Markdown] - 182 code lines, 263 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Read_with_laser_pulse\README.md [Markdown] - 566 code lines, 753 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Readtrain\README.md [Markdown] - 289 code lines, 382 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Readtrain_with_user_wait (UNUSED)\README.md [Markdown] - 336 code lines, 442 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\SMU_BiasTimedRead\README.md [Markdown] - 41 code lines, 58 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Single_Point_Bias\README.md [Markdown] - 30 code lines, 38 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_endurance_interleaved\README.md [Markdown] - 31 code lines, 47 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_endurance_interleaved\README_BURST_TEST.md [Markdown] - 36 code lines, 58 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved\README.md [Markdown] - 800 code lines, 1,012 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\potentiation_depression\README.md [Markdown] - 636 code lines, 829 total lines
-Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\retention\README.md [Markdown] - 355 code lines, 459 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\retention\README.md [Markdown] - 364 code lines, 472 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_C\Chris_man\keithley-memstress_modules_analysis.md [Markdown] - 226 code lines, 279 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_C\Memristor_Measurements.md [Markdown] - 56 code lines, 75 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_C\PMU_Troubleshooting.md [Markdown] - 61 code lines, 75 total lines
@@ -824,53 +704,16 @@ Equipment\SMU_AND_PMU\4200A\Controll_With_C\README.md [Markdown] - 23 code lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_python\Working_examples_Python_Using_Sweepme_server\README.md [Markdown] - 174 code lines, 243 total lines
 Equipment\SMU_AND_PMU\4200A\KEITHLEY_4200A_CODING_GUIDE.md [Markdown] - 957 code lines, 1,222 total lines
 Equipment\SMU_AND_PMU\README.md [Markdown] - 163 code lines, 201 total lines
-Helpers\ANALYSIS_STRUCTURE.md [Markdown] - 286 code lines, 380 total lines
-Helpers\Analysis\README.md [Markdown] - 431 code lines, 591 total lines
-Helpers\Analysis\docs\CLASSIFICATION_V1.3_SUMMARY.md [Markdown] - 286 code lines, 383 total lines
-Helpers\Analysis\docs\ENHANCED_CLASSIFICATION_README.md [Markdown] - 274 code lines, 383 total lines
-Helpers\Analysis\docs\IMPLEMENTATION_SUMMARY.md [Markdown] - 296 code lines, 376 total lines
-Helpers\Analysis\docs\MEMCAPACITIVE_DOUBLE_CROSSING_FIX.md [Markdown] - 319 code lines, 423 total lines
-Helpers\Analysis\docs\MEMRISTIVE_VS_MEMCAPACITIVE_FIX.md [Markdown] - 267 code lines, 371 total lines
-Helpers\Analysis\docs\OHMIC_CLASSIFICATION_IMPROVEMENTS.md [Markdown] - 308 code lines, 421 total lines
-Helpers\Analysis\docs\QUICK_FIX_SUMMARY.md [Markdown] - 93 code lines, 127 total lines
-Helpers\Analysis\docs\README.md [Markdown] - 955 code lines, 1,266 total lines
-Helpers\Camera_Stream_Standalone\README.md [Markdown] - 144 code lines, 201 total lines
-Helpers\Classification_Validation\QUICK_START.md [Markdown] - 93 code lines, 93 total lines
-Helpers\Classification_Validation\README.md [Markdown] - 509 code lines, 509 total lines
-Helpers\Connection_Check_Standalone\README_Standalone.md [Markdown] - 83 code lines, 109 total lines
-Helpers\Data_Analysis_Pulse_2450\ADVANCED_FEATURES_PLAN.md [Markdown] - 63 code lines, 81 total lines
-Helpers\Data_Analysis_Pulse_2450\DEVELOPER_GUIDE.md [Markdown] - 420 code lines, 560 total lines
-Helpers\Data_Analysis_Pulse_2450\README.md [Markdown] - 203 code lines, 248 total lines
-Helpers\Data_Analysis_Pulse_2450\RELAXATION_TIME_EXPLANATION.md [Markdown] - 126 code lines, 180 total lines
-Helpers\Data_Analysis_Pulse_2450\STATISTICS_USAGE_GUIDE.md [Markdown] - 190 code lines, 245 total lines
-Helpers\Data_Analysis_Pulse_2450\TODO_REMAINING_FEATURES.md [Markdown] - 194 code lines, 248 total lines
-Helpers\Data_Analysis_Pulse_2450\TSP_DATA_FORMAT_SPECIFICATION.md [Markdown] - 341 code lines, 434 total lines
-Helpers\Data_Analysis_Pulse_2450\USAGE_GUIDE.md [Markdown] - 403 code lines, 545 total lines
-Helpers\HP4140B_GUI\README.md [Markdown] - 80 code lines, 113 total lines
-Helpers\ITO_Analysis\README_ITO_ANALYSIS.md [Markdown] - 46 code lines, 55 total lines
-Helpers\IV_Analysis\ENHANCED_CLASSIFICATION_README.md [Markdown] - 274 code lines, 383 total lines
-Helpers\IV_Analysis\IMPLEMENTATION_SUMMARY.md [Markdown] - 296 code lines, 376 total lines
-Helpers\IV_Analysis\OHMIC_CLASSIFICATION_FIX.md [Markdown] - 156 code lines, 205 total lines
-Helpers\IV_Analysis\README.md [Markdown] - 927 code lines, 1,223 total lines
-Helpers\Maps_Create\README.md [Markdown] - 212 code lines, 294 total lines
-Helpers\Maps_Create\START_HERE.md [Markdown] - 39 code lines, 62 total lines
-Helpers\Maps_Create\old_legacy\README.md [Markdown] - 49 code lines, 62 total lines
-Helpers\README.md [Markdown] - 7 code lines, 10 total lines
-Helpers\README_ADD_SAMPLE_TYPE.md [Markdown] - 272 code lines, 363 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\README.MD [Markdown] - 195 code lines, 254 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\README.md [Markdown] - 93 code lines, 126 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\SETUP_COMPLETE.md [Markdown] - 61 code lines, 84 total lines
-Helpers\plotting_core\INSTALL.md [Markdown] - 42 code lines, 60 total lines
-Helpers\plotting_core\PACKAGE_STRUCTURE.md [Markdown] - 53 code lines, 67 total lines
-Helpers\plotting_core\README.md [Markdown] - 182 code lines, 243 total lines
+Helpers\README.md [Markdown] - 25 code lines, 31 total lines
 Json_Files\CLASSIFICATION_WEIGHTS_README.md [Markdown] - 59 code lines, 76 total lines
 Json_Files\MESSAGING_README.md [Markdown] - 10 code lines, 16 total lines
 Measurements\README.md [Markdown] - 55 code lines, 63 total lines
 Notifications\README.md [Markdown] - 181 code lines, 244 total lines
-Other\README.md [Markdown] - 3 code lines, 4 total lines
+Other\README.md [Markdown] - 7 code lines, 11 total lines
 Pulse_Testing\README.md [Markdown] - 60 code lines, 89 total lines
 Pulse_Testing\systems\KEITHLEY_2400_DEFAULTS_AND_LIMITS.md [Markdown] - 65 code lines, 86 total lines
-README.md [Markdown] - 835 code lines, 1,076 total lines
+README.md [Markdown] - 947 code lines, 1,214 total lines
+SETUP.md [Markdown] - 110 code lines, 155 total lines
 TODO.md [Markdown] - 40 code lines, 64 total lines
 analysis\ANALYSIS_STRUCTURE.md [Markdown] - 280 code lines, 373 total lines
 analysis\README.md [Markdown] - 454 code lines, 628 total lines
@@ -882,19 +725,20 @@ analysis\docs\MEMRISTIVE_VS_MEMCAPACITIVE_FIX.md [Markdown] - 267 code lines, 37
 analysis\docs\OHMIC_CLASSIFICATION_IMPROVEMENTS.md [Markdown] - 308 code lines, 421 total lines
 analysis\docs\QUICK_FIX_SUMMARY.md [Markdown] - 93 code lines, 127 total lines
 analysis\docs\README.md [Markdown] - 955 code lines, 1,266 total lines
-archive\README.md [Markdown] - 27 code lines, 35 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\README.MD [Markdown] - 195 code lines, 254 total lines
-gui\README.md [Markdown] - 152 code lines, 196 total lines
+gui\README.md [Markdown] - 170 code lines, 214 total lines
 gui\connection_check_gui\README.md [Markdown] - 175 code lines, 224 total lines
-gui\measurement_gui\README.md [Markdown] - 185 code lines, 234 total lines
+gui\laser_fg_scope_gui\README.md [Markdown] - 180 code lines, 240 total lines
+gui\measurement_gui\ARCHITECTURE.md [Markdown] - 65 code lines, 82 total lines
+gui\measurement_gui\README.md [Markdown] - 208 code lines, 264 total lines
 gui\motor_control_gui\CAMERA_DISPLAY_ISSUES.md [Markdown] - 105 code lines, 137 total lines
 gui\motor_control_gui\CHANGELOG.md [Markdown] - 20 code lines, 30 total lines
 gui\motor_control_gui\README.md [Markdown] - 198 code lines, 251 total lines
 gui\oscilloscope_pulse_gui\HOW_TO_USE.md [Markdown] - 26 code lines, 34 total lines
 gui\oscilloscope_pulse_gui\README.md [Markdown] - 18 code lines, 28 total lines
 gui\pulse_testing_gui\LAYOUT_REDESIGN_SUMMARY.md [Markdown] - 133 code lines, 161 total lines
-gui\pulse_testing_gui\README.md [Markdown] - 175 code lines, 224 total lines
-gui\sample_gui\README.md [Markdown] - 121 code lines, 164 total lines
+gui\pulse_testing_gui\README.md [Markdown] - 193 code lines, 246 total lines
+gui\sample_gui\ARCHITECTURE.md [Markdown] - 31 code lines, 41 total lines
+gui\sample_gui\README.md [Markdown] - 131 code lines, 174 total lines
 plotting\ADDING_PLOTS.md [Markdown] - 71 code lines, 114 total lines
 plotting\CATALOG.md [Markdown] - 23 code lines, 25 total lines
 plotting\INSTALL.md [Markdown] - 42 code lines, 60 total lines
@@ -902,23 +746,36 @@ plotting\PACKAGE_STRUCTURE.md [Markdown] - 88 code lines, 104 total lines
 plotting\README.md [Markdown] - 188 code lines, 251 total lines
 plotting\demo\README.md [Markdown] - 29 code lines, 43 total lines
 plotting\demo\data\README.md [Markdown] - 6 code lines, 10 total lines
-tools\Impedence Analyzer\README.md [Markdown] - 165 code lines, 247 total lines
+tools\Display\README.md [Markdown] - 206 code lines, 260 total lines
+tools\LED_testing\README.md [Markdown] - 20 code lines, 31 total lines
+tools\MASS_FLOW\README.md [Markdown] - 207 code lines, 272 total lines
+tools\README.md [Markdown] - 88 code lines, 116 total lines
+tools\afm_3d_holes_protrusion\README.md [Markdown] - 204 code lines, 308 total lines
+tools\afm_curve_analysis\README.md [Markdown] - 117 code lines, 161 total lines
 tools\camera_stream_standalone\README.md [Markdown] - 144 code lines, 201 total lines
-tools\classification_validation\QUICK_START.md [Markdown] - 93 code lines, 93 total lines
-tools\classification_validation\README.md [Markdown] - 509 code lines, 509 total lines
+tools\classification_validation\QUICK_START.md [Markdown] - 47 code lines, 47 total lines
+tools\classification_validation\README.md [Markdown] - 255 code lines, 255 total lines
 tools\connection_check_standalone\README_Standalone.md [Markdown] - 83 code lines, 109 total lines
 tools\data_analysis_pulse_2450\ADVANCED_FEATURES_PLAN.md [Markdown] - 63 code lines, 81 total lines
 tools\data_analysis_pulse_2450\DEVELOPER_GUIDE.md [Markdown] - 420 code lines, 560 total lines
-tools\data_analysis_pulse_2450\README.md [Markdown] - 203 code lines, 248 total lines
+tools\data_analysis_pulse_2450\README.md [Markdown] - 202 code lines, 247 total lines
 tools\data_analysis_pulse_2450\RELAXATION_TIME_EXPLANATION.md [Markdown] - 126 code lines, 180 total lines
 tools\data_analysis_pulse_2450\STATISTICS_USAGE_GUIDE.md [Markdown] - 190 code lines, 245 total lines
 tools\data_analysis_pulse_2450\TODO_REMAINING_FEATURES.md [Markdown] - 194 code lines, 248 total lines
 tools\data_analysis_pulse_2450\TSP_DATA_FORMAT_SPECIFICATION.md [Markdown] - 341 code lines, 434 total lines
-tools\data_analysis_pulse_2450\USAGE_GUIDE.md [Markdown] - 403 code lines, 545 total lines
+tools\data_analysis_pulse_2450\USAGE_GUIDE.md [Markdown] - 405 code lines, 547 total lines
 tools\device_visualizer\GALLERY_OVERLAY_TABS_UPDATE.md [Markdown] - 180 code lines, 237 total lines
 tools\device_visualizer\README.md [Markdown] - 133 code lines, 182 total lines
-tools\hp4140b_gui\README.md [Markdown] - 80 code lines, 113 total lines
+tools\equipment_address_location\README.md [Markdown] - 10 code lines, 15 total lines
+tools\fg_test\README.md [Markdown] - 10 code lines, 16 total lines
+tools\filament_jump_finder\README.md [Markdown] - 17 code lines, 25 total lines
+tools\gordon_temperature\README.md [Markdown] - 12 code lines, 19 total lines
+tools\hp4140b_gui\README.md [Markdown] - 91 code lines, 124 total lines
+tools\impedance_analyzer\README.md [Markdown] - 165 code lines, 247 total lines
 tools\ito_analysis\README_ITO_ANALYSIS.md [Markdown] - 46 code lines, 55 total lines
+tools\maps_create\README.md [Markdown] - 212 code lines, 294 total lines
+tools\maps_create\START_HERE.md [Markdown] - 39 code lines, 62 total lines
+tools\maps_create\old_legacy\README.md [Markdown] - 49 code lines, 62 total lines
 tools\optical_timing_calibration\README.md [Markdown] - 34 code lines, 51 total lines
 tools\tsp_testing_gui_standalone_v1\README.md [Markdown] - 93 code lines, 126 total lines
 tools\tsp_testing_gui_standalone_v1\SETUP_COMPLETE.md [Markdown] - 61 code lines, 84 total lines
@@ -944,10 +801,12 @@ Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\SMU_BiasTimedRead\SMU_Bia
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\SMU_VIsweep\SMU_FullIVsweep.c [C] - 222 code lines, 267 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\SMU_VIsweep\SMU_VIsweep.c [C] - 86 code lines, 121 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\Single_Point_Bias\smu_check_connection.c [C] - 200 code lines, 239 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_endurance_interleaved\pmu_endurance_burst_test.c [C] - 639 code lines, 733 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_endurance_interleaved\pmu_endurance_interleaved.c [C] - 593 code lines, 695 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved\pmu_pulse_read_interleaved.c [C] - 762 code lines, 879 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved\pmu_pulse_read_simplified\pmu_pulse_read_interleaved.c [C] - 652 code lines, 758 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved\pmu_pulse_read_simplified\retention_pulse_ilimit_dual_channel.c [C] - 660 code lines, 808 total lines
-Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved\retention_pulse_ilimit_dual_channel.c [C] - 790 code lines, 947 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved\retention_pulse_ilimit_dual_channel.c [C] - 806 code lines, 962 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved_bias\pmu_pulse_read_interleaved_bias.c [C] - 654 code lines, 761 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_pulse_read_interleaved_bias\retention_pulse_ilimit_dual_channel_bias.c [C] - 791 code lines, 948 total lines
 Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\potentiation_depression\pmu_potentiation_depression.c [C] - 947 code lines, 1,086 total lines
@@ -961,29 +820,11 @@ Equipment\SMU_AND_PMU\4200A\Controll_With_C\Chris_man\chris_man_retention.c [C] 
 Equipment\SMU_AND_PMU\4200A\Controll_With_C\Work-in-pROGRESS c\ACraig12\ACraig12_DC_Sweep.c [C] - 221 code lines, 269 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_C\Work-in-pROGRESS c\ACraig12\ACraig12_PMU_SMU_Sweep.c [C] - 664 code lines, 745 total lines
 Equipment\SMU_AND_PMU\4200A\Controll_With_C\Work-in-pROGRESS c\ACraig13\ACraig13_PMU_Waveform_FlexSegArb.c [C] - 806 code lines, 931 total lines
-Other\old_code\Measurement_GUI.py.backup [Backup] - 3,184 code lines, 3,637 total lines
-Other\old_code\TSP_Testing_GUI.py.backup [Backup] - 2,968 code lines, 3,457 total lines
-archive\old_code\Measurement_GUI.py.backup [Backup] - 3,184 code lines, 3,637 total lines
-archive\old_code\TSP_Testing_GUI.py.backup [Backup] - 2,968 code lines, 3,457 total lines
 .cursor\worktrees.json [JSON] - 5 code lines, 5 total lines
 Equipment\Laser_Power_Meter\Digital_control\laser_power_calibration_20260209_141229.json [JSON] - 451 code lines, 451 total lines
 Equipment\Laser_Power_Meter\Digital_control\laser_power_calibration_20260209_145210.json [JSON] - 495 code lines, 495 total lines
-Equipment\Moku\Moku CLI\_internal\mokucli-4.0.1.dist-info\direct_url.json [JSON] - 1 code lines, 1 total lines
-Equipment\Moku\Moku CLI\_internal\mokucli-4.0.1.dist-info\uv_cache.json [JSON] - 1 code lines, 1 total lines
 Equipment\Moku\experiments.json [JSON] - 35 code lines, 35 total lines
 Equipment\Oscilloscopes\TektronixTBS1000C_example_scripts\scope_settings.json [JSON] - 34 code lines, 34 total lines
-Helpers\Classification_Validation\data\config.json [JSON] - 37 code lines, 37 total lines
-Helpers\Data_Analysis_Pulse_2450\resources\test_types.json [JSON] - 340 code lines, 340 total lines
-Helpers\Data_Analysis_Pulse_2450\settings.json [JSON] - 36 code lines, 36 total lines
-Helpers\HP4140B_GUI\hp4140b_config.json [JSON] - 5 code lines, 5 total lines
-Helpers\Maps_Create\Sectioin_c_map.json [JSON] - 12 code lines, 12 total lines
-Helpers\Maps_Create\device_mapping_multiplexer.json [JSON] - 12 code lines, 13 total lines
-Helpers\Sample_Infomation\device_mapping.json [JSON] - 102 code lines, 104 total lines
-Helpers\Sample_Infomation\mapping_backup.json [JSON] - 102 code lines, 113 total lines
-Helpers\Switchbox_Data_Analysis_and_Graphing - Copy\test_configurations.json [JSON] - 127 code lines, 132 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Json_Files\tsp_gui_config.json [JSON] - 3 code lines, 3 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Json_Files\tsp_gui_save_config.json [JSON] - 4 code lines, 4 total lines
-Helpers\TSP_Testing_GUI_Standalone_V1\Json_Files\tsp_test_presets.json [JSON] - 78 code lines, 78 total lines
 Json_Files\Custom_Sweeps.json [JSON] - 557 code lines, 577 total lines
 Json_Files\PMU_modes.json [JSON] - 50 code lines, 50 total lines
 Json_Files\System_overview.json [JSON] - 74 code lines, 74 total lines
@@ -999,15 +840,19 @@ Json_Files\system_configs.json [JSON] - 72 code lines, 74 total lines
 Json_Files\test_configurations.json [JSON] - 678 code lines, 678 total lines
 Json_Files\tsp_gui_config.json [JSON] - 3 code lines, 3 total lines
 Json_Files\tsp_gui_save_config.json [JSON] - 4 code lines, 4 total lines
-Json_Files\tsp_test_presets.json [JSON] - 179 code lines, 179 total lines
-archive\Switchbox_Data_Analysis_and_Graphing\test_configurations.json [JSON] - 127 code lines, 132 total lines
-gui\oscilloscope_pulse_gui\pulse_gui_config.json [JSON] - 60 code lines, 60 total lines
+Json_Files\tsp_test_presets.json [JSON] - 481 code lines, 481 total lines
+gui\laser_fg_scope_gui\laser_fg_scope_config.json [JSON] - 54 code lines, 54 total lines
+gui\oscilloscope_pulse_gui\pulse_gui_config.json [JSON] - 61 code lines, 61 total lines
 resources\sample_information\device_mapping.json [JSON] - 102 code lines, 104 total lines
 resources\sample_information\mapping_backup.json [JSON] - 102 code lines, 113 total lines
+tools\MASS_FLOW\config.json [JSON] - 30 code lines, 30 total lines
+tools\MASS_FLOW\ui_settings.json [JSON] - 3 code lines, 3 total lines
 tools\classification_validation\data\config.json [JSON] - 37 code lines, 37 total lines
 tools\data_analysis_pulse_2450\resources\test_types.json [JSON] - 340 code lines, 340 total lines
 tools\data_analysis_pulse_2450\settings.json [JSON] - 36 code lines, 36 total lines
 tools\hp4140b_gui\hp4140b_config.json [JSON] - 5 code lines, 5 total lines
+tools\maps_create\Sectioin_c_map.json [JSON] - 12 code lines, 12 total lines
+tools\maps_create\device_mapping_multiplexer.json [JSON] - 12 code lines, 13 total lines
 tools\tsp_testing_gui_standalone_v1\Json_Files\tsp_gui_config.json [JSON] - 3 code lines, 3 total lines
 tools\tsp_testing_gui_standalone_v1\Json_Files\tsp_gui_save_config.json [JSON] - 4 code lines, 4 total lines
 tools\tsp_testing_gui_standalone_v1\Json_Files\tsp_test_presets.json [JSON] - 78 code lines, 78 total lines
@@ -1017,5 +862,10 @@ Equipment\Arduino\Device_Current_Testing\device_current_test_with_sd.ino [Arduin
 Equipment\Arduino\Device_Current_Testing\pwm_voltage_test.ino [Arduino] - 99 code lines, 112 total lines
 Equipment\Arduino\Device_Current_Testing\sht45_test.ino [Arduino] - 102 code lines, 124 total lines
 Equipment\Arduino\Device_Current_Testing\simple_voltage_divider_test.ino [Arduino] - 88 code lines, 98 total lines
-Helpers\Camera_Stream_Standalone\run_camera_stream.bat [Batch] - 25 code lines, 37 total lines
+tools\Display\arduino_firmware\display_control\display_control.ino [Arduino] - 461 code lines, 518 total lines
+tools\Display\existingcode\memristor_device_tester1.ino [Arduino] - 176 code lines, 216 total lines
+tools\LED_testing\arduino_firmware\led_control\led_control.ino [Arduino] - 88 code lines, 100 total lines
+tools\MASS_FLOW\arduino_firmware\firmware.ino [Arduino] - 78 code lines, 92 total lines
+Equipment\SMU_AND_PMU\4200A\C_Code_with_python_scripts\pmu_endurance_interleaved\pmu_burst_common.h [C/C++ Header] - 46 code lines, 57 total lines
 tools\camera_stream_standalone\run_camera_stream.bat [Batch] - 25 code lines, 38 total lines
+ruff.toml [TOML] - 8 code lines, 10 total lines
