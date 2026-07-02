@@ -1,4 +1,4 @@
-# Analysis Module
+﻿# Analysis Module
 
 ## Overview
 
@@ -542,7 +542,7 @@ IVSweepLLMAnalyzer (api)
 
 ### External Dependencies
 
-- `Helpers/plotting_core/` - For plotting functionality
+- `plotting/` - For plotting functionality
 - `Json_Files/test_configurations.json` - For test type configurations
 - `numpy`, `matplotlib`, `pandas` - Standard scientific Python libraries
 

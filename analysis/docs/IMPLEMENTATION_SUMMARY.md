@@ -39,13 +39,13 @@
 
 ### Integration Points
 
-1. **Core Analysis Module**: `Helpers/IV_Analysis/single_file_metrics.py`
+1. **Core Analysis Module**: `analysis/core/sweep_analyzer.py`
    - Added 7 new attributes in `__init__()` (lines ~93-99)
    - Added 9 new methods (lines ~2586-3150)
    - Modified `_classify_device()` to call enhanced classification (lines ~567-573)
    - **Key**: Enhanced classification runs AFTER core classification, not affecting it
 
-2. **Analyzer Wrapper**: `Helpers/IV_Analysis/iv_sweep_analyzer.py`
+2. **Analyzer Wrapper**: `analysis/api/iv_sweep_analyzer.py`
    - Updated `_extract_all_information()` to include enhanced metrics (lines ~254-260)
    - Enhanced metrics added to `classification` section of output
 
@@ -94,13 +94,13 @@
 
 ### Files Modified
 
-1. **`Helpers/IV_Analysis/single_file_metrics.py`** (+565 lines)
+1. **`analysis/core/sweep_analyzer.py`** (+565 lines)
    - New attributes (7)
    - New methods (9)
    - Modified `_classify_device()` (1 method)
    - Added TODO for material-specific models
 
-2. **`Helpers/IV_Analysis/iv_sweep_analyzer.py`** (+8 lines)
+2. **`analysis/api/iv_sweep_analyzer.py`** (+8 lines)
    - Enhanced metrics in output dictionary
 
 3. **`gui/measurement_gui/main.py`** (+65 lines)
@@ -111,13 +111,13 @@
 
 ### Files Created
 
-1. **`Helpers/IV_Analysis/ENHANCED_CLASSIFICATION_README.md`**
+1. **`analysis/docs/ENHANCED_CLASSIFICATION_README.md`**
    - Comprehensive user guide
    - Feature explanations
    - Usage examples
    - Troubleshooting guide
 
-2. **`Helpers/IV_Analysis/IMPLEMENTATION_SUMMARY.md`** (this file)
+2. **`analysis/docs/IMPLEMENTATION_SUMMARY.md`** (this file)
    - Technical implementation details
    - Testing instructions
    - Deployment guide

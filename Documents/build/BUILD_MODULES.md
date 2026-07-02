@@ -65,7 +65,7 @@ Optional third-party stacks (only if you use the feature in a build):
 
 | Tree | Note |
 |------|------|
-| **`Helpers/`** | Legacy / parallel copies; main app does not depend on it for `main.py`. |
+| **`Helpers/`** | Deprecated redirect README only; no code. Main app does not use it. |
 | **`tools/`**, **`archive/`**, **`Other/`** | Standalone or historical; do not bundle unless you change the entry script. |
 | **`tests/`** | Not required at runtime. |
 

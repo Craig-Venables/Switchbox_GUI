@@ -63,6 +63,7 @@ python -m pytest tests/test_sample_gui_quick_scan.py tests/test_plot_updaters.py
 | `Documents/guides/GUI_HANDBOOK.md` | Module map and design rules |
 | `Documents/guides/GUI_EXTENSION_GUIDE.md` | How to add tabs, tools, controllers |
 | `Documents/guides/GUI_REFACTOR_BASELINE.md` | Regression checklist |
+| `tools/README.md` | Standalone tools index (run commands, categories) |
 | `gui/sample_gui/ARCHITECTURE.md` | Sample GUI module layout |
 | `gui/measurement_gui/ARCHITECTURE.md` | Measurement GUI module layout |
 

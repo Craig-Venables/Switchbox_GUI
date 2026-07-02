@@ -22,9 +22,7 @@ This document tracks outstanding refactoring tasks for the Switchbox GUI project
 - **Sample GUI config**: `sample_config`, mappings, save paths moved to `gui/sample_gui/config.py`
 - **Sample GUI UI**: All UI builders moved to `gui/sample_gui/ui/` (device map, device selection,
   terminal log, status bar, device manager, quick scan, top control bar)
-- **Helpers refactor**: Core moved to top-level `analysis/` and `plotting/`; optional tools to `tools/`;
-  assets to `resources/sample_information/`; deprecated `IV_Analysis` and `Sample_Analysis` removed.
-  Main app and tools now import from `analysis`, `plotting`, and `tools.device_visualizer`.
+- **Helpers cleanup**: Duplicate `Helpers/` trees removed; unique utilities moved to `tools/` (`maps_create`, `equipment_address_location`, `gordon_temperature`); `Helpers/` now redirect README only.
 
 ---
 

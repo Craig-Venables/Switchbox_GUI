@@ -76,9 +76,14 @@ Switchbox_GUI/
 │   ├── system_configs.json          # System configurations
 │   ├── mapping.json                 # Device mappings
 │   └── ...
-├── tools/                           # Standalone utility tools
-│   └── MASS_FLOW/                   # Mass flow controller GUI
-├── Helpers/                         # Helper scripts and tools
+├── tools/                           # Standalone utility tools (see tools/README.md)
+│   ├── Display/                     # Arduino TFT control (Measurement GUI)
+│   ├── LED_testing/                 # Arduino LED patterns (Measurement GUI)
+│   ├── MASS_FLOW/                   # Mass flow controller GUI
+│   ├── data_analysis_pulse_2450/    # TSP / pulse data analysis
+│   ├── device_visualizer/           # Device yield & plot gallery
+│   └── ...                          # AFM, impedance, ITO, etc.
+├── Helpers/                         # Deprecated redirect — see Helpers/README.md
 └── archive/                         # Archived legacy code (see archive/README.md)
 ```
 

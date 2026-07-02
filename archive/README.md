@@ -11,9 +11,9 @@ codebase during refactoring. **No production code depends on these modules.**
 - **Archived:** Phase 1 refactoring
 - **Description:** Older copy of data analysis and graphing utilities. Functionality
   has been superseded by:
-  - `Helpers.Analysis` (core sweep analysis, aggregators)
-  - `Helpers.IV_Analysis` (IV sweep analysis)
-  - `Helpers.plotting_core` (plotting utilities)
+  - `analysis/` (core sweep analysis, aggregators)
+  - `plotting/` (plotting utilities)
+  - `tools/device_visualizer/` (device gallery viewer)
 - **Note:** This was a git submodule. Kept for reference only.
 
 ### old_code

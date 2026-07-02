@@ -241,29 +241,29 @@ For each .txt file:
 ### Adding New Sample-Level Analysis
 
 **Option 1: Add to ComprehensiveAnalyzer** (Recommended for orchestration)
-- File: `Helpers/Sample_Analysis/comprehensive_analyzer.py`
+- File: `analysis/aggregators/comprehensive_analyzer.py`
 - Add new method to `ComprehensiveAnalyzer` class
 - Call it from `run_comprehensive_analysis()` method
 
 **Option 2: Add to SampleAnalysisOrchestrator** (For new plot types)
-- File: `Helpers/Sample_Analysis/sample_analyzer.py`
+- File: `analysis/aggregators/sample_analyzer.py`
 - Add new plot method (e.g., `plot_my_new_analysis()`)
 - Add it to `generate_all_plots()` method (currently has 12 plots)
 
 **Option 3: Add to SectionAnalyzer** (For section-level analysis)
-- File: `Helpers/Sample_Analysis/section_analyzer.py`
+- File: `analysis/aggregators/section_analyzer.py`
 - Add new method to `SectionAnalyzer` class
 - Call it from `ComprehensiveAnalyzer.run_comprehensive_analysis()`
 
 ### Adding New Single-File Metrics
 
-- File: `Helpers/IV_Analysis/single_file_metrics.py`
+- File: `analysis/core/sweep_analyzer.py`
 - Add new methods to `analyze_single_file` class
 - These will automatically be available via `quick_analyze()` wrapper
 
 ### Adding New Plot Types
 
-- File: `Helpers/plotting_core/unified_plotter.py`
+- File: `plotting/device/unified_plotter.py`
 - Add new plot methods to `UnifiedPlotter` class
 - These can be called from plotting buttons or analysis functions
 
@@ -281,19 +281,19 @@ For each .txt file:
 
 ---
 
-#### 2. **`Helpers/Maps_Create/old_legacy/`**
+#### 2. **`tools/maps_create/old_legacy/`**
 - **Status**: Marked as "old_legacy"
 - **Recommendation**: **Review and likely remove** if not needed
 
 ---
 
-#### 3. **`Helpers/ITO_Analysis/old/`**
+#### 3. **`tools/ito_analysis/`** generated CSV/PNG outputs (gitignored locally)
 - **Status**: Contains old analysis results
 - **Recommendation**: **Keep if needed for reference**, otherwise archive/remove
 
 ---
 
-#### 4. **`Helpers/Sample_Analysis/migrate_folder_structure.py`**
+#### 4. **`analysis/utils/migrate_folder_structure.py`**
 - **Status**: Migration utility script
 - **Recommendation**: **Keep** - Useful for migrating old data structures, but not called by GUI
 
@@ -302,9 +302,9 @@ For each .txt file:
 ### ✅ **Currently Used Code**
 
 All files in:
-- `Helpers/Sample_Analysis/` (except `migrate_folder_structure.py` which is utility)
-- `Helpers/IV_Analysis/` (all files are used)
-- `Helpers/plotting_core/` (used by plotting buttons)
+- `analysis/aggregators/` (sample, section, comprehensive analyzers)
+- `analysis/core/sweep_analyzer.py` (single-file metrics and classification)
+- `plotting/` (used by plotting buttons)
 
 ---
 
@@ -352,10 +352,10 @@ gui/measurement_gui/layout_builder.py
 
 ### Key Files for Adding New Analysis
 
-1. **Sample-level plots**: `Helpers/Sample_Analysis/sample_analyzer.py` → `generate_all_plots()`
-2. **Orchestration logic**: `Helpers/Sample_Analysis/comprehensive_analyzer.py` → `run_comprehensive_analysis()`
-3. **Single-file metrics**: `Helpers/IV_Analysis/single_file_metrics.py` → `analyze_single_file` class
-4. **Device-level plots**: `Helpers/plotting_core/unified_plotter.py` → `UnifiedPlotter` class
+1. **Sample-level plots**: `analysis/aggregators/sample_analyzer.py` → `generate_all_plots()`
+2. **Orchestration logic**: `analysis/aggregators/comprehensive_analyzer.py` → `run_comprehensive_analysis()`
+3. **Single-file metrics**: `analysis/core/sweep_analyzer.py` → `SweepAnalyzer` class
+4. **Device-level plots**: `plotting/device/unified_plotter.py` → `UnifiedPlotter` class
 
 ---
 

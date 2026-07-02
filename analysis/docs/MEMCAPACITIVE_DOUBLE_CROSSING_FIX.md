@@ -323,7 +323,7 @@ print(f"  Phase shift: {analyzer.classification_features['phase_shift']:.1f}°")
 ## Summary of Changes (v1.4)
 
 ### Files Modified
-1. **`Helpers/Analysis/core/sweep_analyzer.py`**
+1. **`analysis/core/sweep_analyzer.py`**
    - NEW: `_check_double_zero_crossing()` function
    - Updated: `_extract_classification_features()` to include double crossing
    - Updated: Memcapacitive scoring logic (corrected)

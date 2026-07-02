@@ -320,7 +320,7 @@ Console output will show:
 ## Summary of Changes
 
 ### Files Modified
-1. `Helpers/Analysis/core/sweep_analyzer.py`
+1. `analysis/core/sweep_analyzer.py`
 2. `Json_Files/classification_weights.json`
 
 ### New Features (v1.3)
