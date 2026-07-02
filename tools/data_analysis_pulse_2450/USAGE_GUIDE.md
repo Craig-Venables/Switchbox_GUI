@@ -1,4 +1,4 @@
-# TSP Data Analysis Tool - Complete Usage Guide
+﻿# TSP Data Analysis Tool - Complete Usage Guide
 
 A comprehensive guide to using all features of the TSP Data Analysis Tool for analyzing Keithley 2450 pulse test data.
 
@@ -23,9 +23,11 @@ A comprehensive guide to using all features of the TSP Data Analysis Tool for an
 
 ### Launching the Application
 
-1. Navigate to the `Helpers/Data_Analysis_Pulse_2450` directory
-2. Run: `python main.py`
-3. The application opens with three main tabs:
+1. From repository root, run:
+   ```bash
+   python tools/data_analysis_pulse_2450/main.py
+   ```
+2. The application opens with three main tabs:
    - **📁 File Browser**: Browse and select data files
    - **📊 Plotting**: View and analyze your data
    - **⚙️ Batch Processing**: Process multiple files (advanced)

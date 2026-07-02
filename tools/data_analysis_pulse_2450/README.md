@@ -91,17 +91,16 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
 
 1. **Install Python 3.8 or higher**
 
-2. **Install dependencies:**
+2. **Install dependencies** (from repository root):
    ```bash
-   cd Data_Analysis_Pulse_2450
-   pip install -r requirements.txt
+   pip install -r tools/data_analysis_pulse_2450/requirements.txt
    ```
 
 ## Quick Start
 
-1. **Launch the application:**
+1. **Launch the application** (from repository root):
    ```bash
-   python main.py
+   python tools/data_analysis_pulse_2450/main.py
    ```
 
 2. **Browse to your data folder:**
@@ -146,7 +145,7 @@ A PyQt6-based application for analyzing and plotting Keithley 2450 TSP (Test Scr
 ## File Structure
 
 ```
-Data_Analysis_Pulse_2450/
+tools/data_analysis_pulse_2450/
 ├── main.py                          # Entry point
 ├── requirements.txt                 # Dependencies
 ├── README.md                        # This file

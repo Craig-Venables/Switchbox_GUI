@@ -6,7 +6,7 @@
 
 Double-click this file or run in terminal:
 ```bash
-python device_map_tool.py
+python tools/maps_create/device_map_tool.py
 ```
 
 ## Step 2: Select Your Image

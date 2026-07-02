@@ -8,9 +8,9 @@ A user-friendly tool for creating and checking device maps. No coding knowledge 
 
 **Easiest way for non-programmers!**
 
-1. Double-click or run:
+1. Double-click or run from repo root:
    ```bash
-   python device_map_tool.py
+   python tools/maps_create/device_map_tool.py
    ```
 
 2. Follow the on-screen instructions:
@@ -23,13 +23,13 @@ A user-friendly tool for creating and checking device maps. No coding knowledge 
 Check and fix existing mapping files:
 
 ```bash
-python check_mapping.py
+python tools/maps_create/check_mapping.py
 ```
 
 Or specify a file:
 
 ```bash
-python check_mapping.py path/to/your/mapping.json
+python tools/maps_create/check_mapping.py path/to/your/mapping.json
 ```
 
 ## What Are Device Maps?
@@ -105,7 +105,7 @@ Device maps tell the measurement system where each device is located on your sam
 ### Default File Paths
 
 - **Mapping JSON:** `Json_Files/mapping.json`
-- **Sample Images:** `Helpers/Sample_Information/`
+- **Sample Images:** `resources/sample_information/`
 
 ### Mapping File Structure
 
@@ -144,7 +144,7 @@ The mapping file is organized by sample type:
 ### Using the Command-Line Tool
 
 ```bash
-python check_mapping.py
+python tools/maps_create/check_mapping.py
 ```
 
 This will:
@@ -177,7 +177,7 @@ This will:
 - Verify the JSON file is in the correct location
 - Run the checker tool to find errors:
   ```bash
-  python check_mapping.py
+  python tools/maps_create/check_mapping.py
   ```
 
 ### Problem: "Invalid rectangle" error
@@ -185,7 +185,7 @@ This will:
 **Solution:**
 - Run the checker tool - it will auto-fix swapped min/max values:
   ```bash
-  python check_mapping.py
+  python tools/maps_create/check_mapping.py
   ```
 - Or manually ensure:
   - `x_min` < `x_max`
@@ -223,9 +223,9 @@ The mapping file can contain multiple sample types. To add a new one:
 Check multiple files at once:
 
 ```bash
-python check_mapping.py file1.json
-python check_mapping.py file2.json
-python check_mapping.py file3.json
+python tools/maps_create/check_mapping.py file1.json
+python tools/maps_create/check_mapping.py file2.json
+python tools/maps_create/check_mapping.py file3.json
 ```
 
 ## Tools Included
@@ -275,10 +275,10 @@ python device_map_tool.py
 
 ```bash
 # Quick check with default file
-python check_mapping.py
+python tools/maps_create/check_mapping.py
 
 # Check a specific file
-python check_mapping.py Json_Files/my_custom_mapping.json
+python tools/maps_create/check_mapping.py Json_Files/my_custom_mapping.json
 ```
 
 ## File Format Reference

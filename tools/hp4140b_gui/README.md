@@ -27,7 +27,7 @@ pip install pyvisa numpy matplotlib tkinter
 
 1. Navigate to this folder:
    ```bash
-   cd Helpers/HP4140B_GUI
+   cd tools/hp4140b_gui
    ```
 
 2. Run the GUI:
@@ -44,7 +44,7 @@ pip install pyvisa numpy matplotlib tkinter
 
 You can also run it from the project root:
 ```bash
-python Helpers/HP4140B_GUI/hp4140b_gui.py
+python tools/hp4140b_gui/hp4140b_gui.py
 ```
 
 ### Connection
