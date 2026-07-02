@@ -34,11 +34,10 @@ xref-*.html
 *.exe
 Equipment/Moku/Moku CLI/
 
-# AFM tool — raw data and generated outputs (regenerate locally)
+# AFM tools — raw data and generated outputs (regenerate locally)
 tools/afm_3d_holes_protrusion/Data/
 tools/afm_3d_holes_protrusion/Output/
-tools/afm 3d holes and protrusion/Data/
-tools/afm 3d holes and protrusion/Output/
+tools/afm_curve_analysis/Data/
 tools/afm_curve_analysis/Output/
 *.ibw
 

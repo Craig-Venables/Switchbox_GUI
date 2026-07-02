@@ -38,9 +38,9 @@ This GUI provides fast, buffer-based pulse testing with real-time visualization 
 
 1. **Connect your Keithley 2450** via USB, GPIB, or Ethernet
 
-2. **Run the GUI:**
+2. **Run** (from repository root):
    ```bash
-   python main.py
+   python tools/tsp_testing_gui_standalone_v1/main.py
    ```
 
 3. **In the GUI:**
@@ -63,7 +63,7 @@ These files are created automatically with defaults if they don't exist.
 ## File Structure
 
 ```
-TSP_Testing_GUI_Standalone/
+tools/tsp_testing_gui_standalone_v1/
 ├── main.py                          # Entry point - run this to start the GUI
 ├── TSP_Testing_GUI.py               # Main GUI implementation
 ├── Equipment/                       # Instrument controllers

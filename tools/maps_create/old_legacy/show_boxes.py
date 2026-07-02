@@ -4,7 +4,7 @@ import matplotlib.patches as patches
 from PIL import Image
 
 # Load the image
-image_path = "../Sample_Infomation/memristor.png"  # Replace with the actual image filename
+image_path = "resources/sample_information/memristor.png"  # Replace with the actual image filename
 image = Image.open(image_path)
 
 mapping_file = "../../Json_Files/mapping.json"  # Replace with actual mapping JSON fil

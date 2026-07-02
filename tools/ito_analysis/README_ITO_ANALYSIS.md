@@ -10,7 +10,7 @@
 - Produces CSVs, an Excel workbook, plots, and a combined dashboard image.
 
 ## How to run
-1. Edit `Helpers/ITO_Analysis/ITO.py`:
+1. Edit `tools/ito_analysis/ITO.py`:
    - Set `ONEDRIVE_ROOT` to your data root.
    - Choose one:
      - Single sample: set `SAMPLE_FOLDER_NAME = "<sample>"` and `PROCESS_ALL_SAMPLES = False`.
@@ -26,7 +26,7 @@ python -m tools.ito_analysis.ITO
 - Width mapping: A, D, G, H → 200 µm; B, E, L, I → 100 µm.
 - Update `SECTION_WIDTH_UM` if your layout differs.
 
-## Outputs (per sample in `Helpers/ITO_Analysis/<sample>`)
+## Outputs (per sample in `tools/ito_analysis/<sample>`)
 - CSVs:
   - `ITO_<sample>_summary.csv`: per section & sweep metrics (R, G, σ, ρ, Rs, switching).
   - `ITO_<sample>_first_three_sweeps.csv`: long/tidy V-I-Time across sweeps.

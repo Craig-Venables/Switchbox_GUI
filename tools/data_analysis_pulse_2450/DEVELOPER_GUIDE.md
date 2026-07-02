@@ -24,7 +24,7 @@ This is a PyQt6-based desktop application for analyzing and visualizing TSP (Tes
 ### Directory Structure
 
 ```
-Data_Analysis_Pulse_2450/
+tools/data_analysis_pulse_2450/
 ├── main.py                    # Application entry point
 ├── core/                      # Core business logic
 │   ├── data_parser.py        # File format parsing
