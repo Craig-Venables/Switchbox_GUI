@@ -8,7 +8,9 @@ A simple, user-friendly interface for controlling the HP4140B pA Meter/DC Voltag
 - **Voltage sweep control** with configurable parameters
 - **Full/Half sweep** options (direction based on step sign)
 - **Real-time plotting** (linear and log I vs V)
+- **Loop count** — repeat the same sweep N times
 - **Automatic data saving** with incrementing sample numbers
+- **IV plot PNGs** saved alongside data (mirrors main Switchbox GUI)
 - **Remembers last save location**
 
 ## Requirements
@@ -64,12 +66,19 @@ python tools/hp4140b_gui/hp4140b_gui.py
 - **Sweep Type**:
   - **Full**: Goes from 0 → voltage → 0 (triangle sweep)
   - **Half**: Goes from 0 → voltage only (one direction)
+- **Loop Count**: Number of times to repeat the sweep (default: 1)
+- **Loop Delay (s)**: Pause at 0 V between loops (default: 1.0 s)
 
 ### Data Saving
 
 - Default save location: `Documents/data`
 - You can browse and change the save location
-- Files are saved as: `sample_XXXX_timestamp.txt`
+- Each run saves:
+  - `sample_XXXX_timestamp.txt` — combined V/I data (with loop column if multiple loops)
+  - `sample_XXXX_timestamp_loop_NN.txt` — per-loop files when loop count > 1
+  - `images/sample_XXXX_All_graphs_IV.png` / `images/sample_XXXX_All_graphs_LOG.png`
+  - `images/sample_XXXX_Final_graph_IV.png` / `images/sample_XXXX_Final_graph_LOG.png`
+  - `images/sample_XXXX_Combined_summary.png` — 2×2 summary panel
 - Sample numbers auto-increment
 - Last save location is remembered for next session
 
@@ -77,6 +86,7 @@ python tools/hp4140b_gui/hp4140b_gui.py
 
 - `hp4140b_gui.py`: Main GUI application
 - `hp4140b_controller.py`: HP4140B controller module
+- `hp4140b_iv_saver.py`: Standalone data + IV plot saver (for future exe packaging)
 - `hp4140b_config.json`: Configuration file (created automatically)
 - `README.md`: This file
 
@@ -100,6 +110,7 @@ If the instrument doesn't connect:
 
 This GUI is designed to work standalone within this folder. All necessary files are included:
 - `hp4140b_controller.py`: Controller module
+- `hp4140b_iv_saver.py`: Data and plot saving (duplicated from main project for exe packaging)
 - `hp4140b_gui.py`: Main GUI application
 
 The GUI will create a config file (`hp4140b_config.json`) in the same folder to store settings.
