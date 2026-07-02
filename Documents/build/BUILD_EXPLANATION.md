@@ -16,7 +16,7 @@ Discovered from **`main.py`** plus explicit **`hiddenimports`** and submodule co
 
 **Typically excluded unless you change the entry script**  
 
-- **`Helpers/`**, **`tools/`**, **`archive/`**, **`tests/`** — not part of the main `main.py` application.
+- **`Helpers/`** (redirect README only), **`tools/`**, **`archive/`**, **`tests/`** — not part of the main `main.py` application.
 
 ## How to build
 

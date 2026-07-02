@@ -306,7 +306,7 @@ If you find ohmic devices are still being misclassified, you can adjust:
 ## Implementation Summary
 
 ### Files Modified
-1. **`Helpers/Analysis/core/sweep_analyzer.py`**
+1. **`analysis/core/sweep_analyzer.py`**
    - Enhanced `_classify_device()` (lines ~699-825)
    - Added artifact filtering logic
    - Implemented graduated ohmic scoring

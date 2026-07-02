@@ -11,6 +11,8 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 | **[`build/`](build/)** | Release / CI | PyInstaller instructions, spec behaviour, **module inventory for exe builds** |
 | **[`development/`](development/)** | Maintainers | Refactor backlog, feature summaries, internal write-ups |
 | **[`ai/`](ai/)** | AI tooling | Short orientation: where code and docs live, what to update when imports change |
+| **[`../tools/`](../tools/)** | Lab & analysis | Standalone utilities — see **[tools/README.md](../tools/README.md)** |
+| **[`../Helpers/`](../Helpers/)** | Deprecated | Redirect only — see [Helpers/README.md](../Helpers/README.md) |
 
 ## Guides ([`guides/`](guides/))
 
@@ -39,12 +41,21 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 ## Development notes ([`development/`](development/))
 
 - **[REFACTOR_REMAINING.md](development/REFACTOR_REMAINING.md)**  
+- **[PATH_MIGRATION.md](development/PATH_MIGRATION.md)** — old `Helpers/` paths → canonical locations  
 - **[OPTICAL_TESTS_UPDATE_SUMMARY.md](development/OPTICAL_TESTS_UPDATE_SUMMARY.md)**  
 - **[DEVICE_VISUALIZER_GALLERY_OVERLAY_SUMMARY.md](development/DEVICE_VISUALIZER_GALLERY_OVERLAY_SUMMARY.md)**  
 
 ## AI assistants ([`ai/`](ai/))
 
 - **[README.md](ai/README.md)** — entry point for automated tools (Cursor, etc.)  
+
+## Standalone tools ([`../tools/`](../tools/))
+
+- **[tools/README.md](../tools/README.md)** — index of all optional utilities (run commands, categories, PyInstaller builds)  
+- Hardware tools integrated in Measurement GUI: `tools/Display/`, `tools/LED_testing/`  
+- Analysis: `tools/data_analysis_pulse_2450/`, `tools/device_visualizer/`, `tools/classification_validation/`  
+- Setup: `tools/maps_create/`, `tools/equipment_address_location/`  
+- AFM: `tools/afm_3d_holes_protrusion/`, `tools/afm_curve_analysis/`  
 
 ---
 

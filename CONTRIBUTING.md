@@ -16,7 +16,7 @@ This document is for anyone taking over maintenance of the Switchbox Measurement
 | `Pulse_Testing/` | Multi-instrument pulse routing |
 | `Json_Files/` | Runtime configuration |
 | `tools/` | Standalone utilities (canonical location for optional tools) |
-| `Helpers/` | **Legacy copies** — see [Helpers/README.md](Helpers/README.md); prefer `tools/` and `analysis/` |
+| `Helpers/` | **Deprecated redirect** — see [Helpers/README.md](Helpers/README.md); all code moved to `tools/`, `analysis/`, or `plotting/` |
 | `archive/` | Old code kept for reference only — not used by the main app |
 | `tests/` | Pytest suite |
 | `Documents/` | Operator and developer documentation |
@@ -40,7 +40,7 @@ Before lab releases, also use [Documents/guides/LAB_TEST_CHECKLIST.md](Documents
 ## Code conventions
 
 - Match existing style in the file you edit (naming, imports, docstrings).
-- **Do not** add new code under `Measurments/` or duplicate modules in `Helpers/` — use `Measurements/`, `analysis/`, `plotting/`, or `tools/`.
+- **Do not** add new code under `Measurments/` or `Helpers/` — use `Measurements/`, `analysis/`, `plotting/`, or `tools/`.
 - Keep instrument drivers in `Equipment/`; keep GUI code in `gui/`.
 - JSON-driven behaviour belongs in `Json_Files/` with documentation updates in `Documents/guides/`.
 - Avoid committing generated outputs (plots, CSVs, `.ibw`, `.exe`) — see `.gitignore`.

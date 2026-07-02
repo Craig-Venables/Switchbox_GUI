@@ -245,7 +245,7 @@ Location: `{data_directory}/sweep_analysis/{sweep_name}_analysis.txt`
 
 ### File Modifications
 
-1. **`Helpers/IV_Analysis/single_file_metrics.py`**:
+1. **`analysis/core/sweep_analyzer.py`**:
    - Added new attributes in `__init__()` (lines ~86-100)
    - Added 9 new methods (lines ~2583-3100):
      - `calculate_enhanced_classification()`
@@ -259,7 +259,7 @@ Location: `{data_directory}/sweep_analysis/{sweep_name}_analysis.txt`
      - `_infer_speed_characteristics()`
    - Modified `_classify_device()` to call enhanced classification (lines ~567-573)
 
-2. **`Helpers/IV_Analysis/iv_sweep_analyzer.py`**:
+2. **`analysis/api/iv_sweep_analyzer.py`**:
    - Added enhanced metrics to output dictionary (lines ~254-260)
 
 3. **`gui/measurement_gui/main.py`**:

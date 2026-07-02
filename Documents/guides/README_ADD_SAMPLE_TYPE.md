@@ -24,7 +24,7 @@ Adding a new sample type involves four main steps:
 
 Place your sample image in the following directory:
 ```
-Helpers/Sample_Information/
+resources/sample_information/
 ```
 
 **Image Requirements:**
@@ -35,7 +35,7 @@ Helpers/Sample_Information/
 
 **Example:**
 ```
-Helpers/Sample_Information/My_New_Sample.jpg
+resources/sample_information/My_New_Sample.jpg
 ```
 
 ---
@@ -89,7 +89,7 @@ You need to find the pixel coordinates for each device on your sample image. Use
 
 **Helper Script Location:**
 ```
-Helpers/Maps_Create/show_boxes.py
+tools/maps_create/show_boxes.py
 ```
 
 This script can help you visualize and test device locations.
@@ -154,14 +154,14 @@ def load_image(self, sample: str) -> None:
     """ Load image into canvas set up to add others later simply """
     
     if sample == 'Cross_bar':
-        sample = BASE_DIR / "Helpers" / "Sample_Information" / "memristor.png"
+        sample = BASE_DIR / "resources" / "sample_information" / "memristor.png"
         self.original_image = Image.open(sample)
         img = self.original_image.resize((400, 400))
         self.tk_img = ImageTk.PhotoImage(img)
         self.canvas.create_image(0, 0, anchor="nw", image=self.tk_img)
 
     if sample == 'Multiplexer_10_OUT':
-        sample = BASE_DIR / "Helpers" / "Sample_Information" / "Multiplexer_10_OUT.jpg"
+        sample = BASE_DIR / "resources" / "sample_information" / "Multiplexer_10_OUT.jpg"
         self.original_image = Image.open(sample)
         img = self.original_image.resize((400, 400))
         self.tk_img = ImageTk.PhotoImage(img)
@@ -169,7 +169,7 @@ def load_image(self, sample: str) -> None:
     
     # Add your new sample here
     if sample == 'My_New_Sample':
-        sample = BASE_DIR / "Helpers" / "Sample_Information" / "My_New_Sample.jpg"
+        sample = BASE_DIR / "resources" / "sample_information" / "My_New_Sample.jpg"
         self.original_image = Image.open(sample)
         img = self.original_image.resize((400, 400))
         self.tk_img = ImageTk.PhotoImage(img)
@@ -181,7 +181,7 @@ def load_image(self, sample: str) -> None:
 
 **Important Notes:**
 - Use the exact same name in all configurations
-- Include "Helpers" / "Sample_Information" in the path
+- Include `resources/sample_information` in the path
 - The image will be automatically resized to 400x400 pixels
 - Make sure file extension matches your actual file (.jpg or .png)
 
@@ -212,7 +212,7 @@ python main.py
 - Verify JSON syntax is correct
 
 **Issue: Image not found error**
-- Verify image file exists in `Helpers/Sample_Information/`
+- Verify image file exists in `resources/sample_information/`
 - Check file extension (.jpg vs .png)
 - Ensure path in `load_image` function is correct
 
@@ -232,7 +232,7 @@ python main.py
 
 When adding a new sample type named "MySample":
 
-1. **Add image:** `Helpers/Sample_Information/MySample.jpg`
+1. **Add image:** `resources/sample_information/MySample.jpg`
 
 2. **Update `Sample_GUI.py` - sample_config:**
    ```python
@@ -253,7 +253,7 @@ When adding a new sample type named "MySample":
 4. **Update `Sample_GUI.py` - load_image function:**
    ```python
    if sample == 'MySample':
-       sample = BASE_DIR / "Helpers" / "Sample_Information" / "MySample.jpg"
+       sample = BASE_DIR / "resources" / "sample_information" / "MySample.jpg"
        self.original_image = Image.open(sample)
        img = self.original_image.resize((400, 400))
        self.tk_img = ImageTk.PhotoImage(img)
@@ -274,7 +274,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
 # Load your image
-img = Image.open("Helpers/Sample_Information/MySample.jpg")
+img = Image.open("resources/sample_information/MySample.jpg")
 
 # Display with matplotlib
 fig, ax = plt.subplots(1)
@@ -295,9 +295,9 @@ This will help you identify pixel coordinates by clicking on the image.
 
 ## Additional Resources
 
-- **Device mapping tool:** `Helpers/Maps_Create/Map_device.py`
-- **Coordinate verification:** `Helpers/Maps_Create/show_boxes.py`
-- **JSON validation:** `Helpers/Maps_Create/jason_check.py`
+- **Device mapping tool:** `tools/maps_create/Map_device.py`
+- **Coordinate verification:** `tools/maps_create/show_boxes.py`
+- **JSON validation:** `tools/maps_create/jason_check.py`
 
 ---
 
@@ -307,7 +307,7 @@ Here's a complete example of adding a sample called "TestChip":
 
 ### Files to modify:
 
-**1. Add image:** `Helpers/Sample_Information/TestChip.png`
+**1. Add image:** `resources/sample_information/TestChip.png`
 
 **2. `Sample_GUI.py` (sample_config):**
 ```python
@@ -330,7 +330,7 @@ Here's a complete example of adding a sample called "TestChip":
 **4. `Sample_GUI.py` (load_image function):**
 ```python
 if sample == 'TestChip':
-    sample = BASE_DIR / "Helpers" / "Sample_Information" / "TestChip.png"
+    sample = BASE_DIR / "resources" / "sample_information" / "TestChip.png"
     self.original_image = Image.open(sample)
     img = self.original_image.resize((400, 400))
     self.tk_img = ImageTk.PhotoImage(img)
@@ -353,8 +353,8 @@ if sample == 'TestChip':
 
 If you encounter issues:
 1. Check the console output for error messages
-2. Verify JSON syntax using `Helpers/Maps_Create/jason_check.py`
-3. Test coordinates using `Helpers/Maps_Create/show_boxes.py`
+2. Verify JSON syntax using `tools/maps_create/jason_check.py`
+3. Test coordinates using `tools/maps_create/show_boxes.py`
 4. Review existing sample configurations as templates
 
 ---

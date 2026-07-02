@@ -5,27 +5,27 @@
 ### Option 1: Install as Package (Recommended)
 
 ```bash
-cd plotting_core
+cd plotting
 pip install -e .
 ```
 
 Then use in your code:
 ```python
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 plotter = UnifiedPlotter(save_dir="output/plots")
 plotter.plot_all(voltage, current, device_name="Device_1")
 ```
 
 ### Option 2: Copy Folder Directly
 
-Simply copy the `plotting_core` folder to your project and add to path:
+Simply copy the `plotting` folder to your project and add to path:
 
 ```python
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path("path/to/plotting_core").parent))
+sys.path.insert(0, str(Path("path/to/plotting").parent))
 
-from plotting_core import UnifiedPlotter
+from plotting import UnifiedPlotter
 ```
 
 ### Option 3: Use from Repository
@@ -33,7 +33,7 @@ from plotting_core import UnifiedPlotter
 If running examples from within the repository:
 
 ```bash
-cd plotting_core/examples
+cd plotting/examples
 python basic_usage.py
 ```
 

@@ -71,7 +71,7 @@ Features:
 
 ```bash
 # Test with your data
-cd Helpers/Analysis/docs
+cd analysis/docs
 python test_ohmic_classification.py path/to/your/data.txt
 
 # Or run simulation test
@@ -96,7 +96,7 @@ If still misclassifying, increase `ohmic_with_artifact` to 70 or 80.
 
 ## Files Changed
 
-1. **`Helpers/Analysis/core/sweep_analyzer.py`**
+1. **`analysis/core/sweep_analyzer.py`**
    - Enhanced classification logic
    - Added artifact detection
    - Implemented graduated ohmic scoring

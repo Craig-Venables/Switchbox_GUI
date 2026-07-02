@@ -354,7 +354,7 @@ DEBUG_ENABLED = True  # In sweep_analyzer.py line 17
 
 ## Files Modified
 
-1. **`Helpers/Analysis/core/sweep_analyzer.py`**
+1. **`analysis/core/sweep_analyzer.py`**
    - `_classify_device()`: Added switching+nonlinear bonus, memcapacitive penalty
    - `_estimate_hysteresis_present()`: Adaptive area thresholds
    - `_check_pinched_hysteresis()`: Relaxed threshold for switching devices

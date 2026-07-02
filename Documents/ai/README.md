@@ -9,13 +9,16 @@ Use this folder as the **entry point** when an automated assistant (Cursor, Copi
 | **End-user guides** (usage, JSON, lab checklist) | [`../guides/`](../guides/) |
 | **Architecture & GUI maps** (how Sample / Measurement / child GUIs connect) | [`../reference/`](../reference/) — start with [`../reference/MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md`](../reference/MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md) |
 | **Build / PyInstaller** (module inventory, spec file, datas) | [`../build/`](../build/) — see [`../build/BUILD_MODULES.md`](../build/BUILD_MODULES.md) and [`../build/BUILD_INSTRUCTIONS.md`](../build/BUILD_INSTRUCTIONS.md) |
-| **Refactors, summaries, internal notes** | [`../development/`](../development/) |
+| **Refactors, path migration, internal notes** | [`../development/`](../development/) — see [`PATH_MIGRATION.md`](../development/PATH_MIGRATION.md) |
 | **Master doc index** | [`../README.md`](../README.md) |
+| **Standalone tools** (run commands, categories) | [`../../tools/README.md`](../../tools/README.md) |
 
 ## Naming that trips people up
 
 - **“Measurement GUI”** in docs means the **package** `gui/measurement_gui/`, not legacy `archive/old_code/Measurement_GUI.py`. This is stated at the top of the measurement architecture reference.
 - The canonical measurement data package is **`Measurements/`** (with an **e**). **`Measurments/`** is a deprecated compatibility shim that re-exports `Measurements`; do not add code there.
+- **Tool folders** use **`snake_case`** under `tools/` (e.g. `impedance_analyzer`). Do not create space-named duplicates.
+- **`Helpers/`** is retired — only contains a redirect README. Use `tools/`, `analysis/`, or `plotting/`.
 
 ## When you change imports or add packages
 
