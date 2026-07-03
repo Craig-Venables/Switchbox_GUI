@@ -22,8 +22,8 @@ Use this folder as the **entry point** when an automated assistant (Cursor, Copi
 
 ## When you change imports or add packages
 
-1. Open [`../build/BUILD_MODULES.md`](../build/BUILD_MODULES.md) and align **`build_exe.spec`** (`hiddenimports`, `datas`, `binaries`) with the new code or assets.
-2. Rebuild with `python build_exe.py` from the **repository root** and smoke-test the `dist/Switchbox_GUI/` folder.
+1. Open [`../build/BUILD_MODULES.md`](../build/BUILD_MODULES.md) and align **`packaging/build_exe.spec`** (`hiddenimports`, `datas`, `binaries`) with the new code or assets.
+2. Rebuild with `python packaging/build_exe.py` from the **repository root** and smoke-test the `dist/Switchbox_GUI/` folder.
 
 ## Cursor-specific
 

@@ -3,9 +3,9 @@ Build Pulse Testing GUI executables using PyInstaller.
 
 Usage (from repository root)::
 
-    python build_pulse_testing_gui.py           # classic (TSP_Testing_GUI)
-    python build_pulse_testing_gui.py --compact # compact layout only
-    python build_pulse_testing_gui.py --all     # both classic and compact
+    python packaging/build_pulse_testing_gui.py           # classic (TSP_Testing_GUI)
+    python packaging/build_pulse_testing_gui.py --compact # compact layout only
+    python packaging/build_pulse_testing_gui.py --all     # both classic and compact
 
 Outputs (onedir)::
 
@@ -30,25 +30,25 @@ def _check_python_version() -> int | None:
             "Error: Python 3.10.0 breaks PyInstaller analysis (dis.get_instructions bug).\n"
             "Install Python 3.10.11+ (e.g. winget install Python.Python.3.10), then either:\n"
             "  py -3.10 -m venv .venv-build && .venv-build\\Scripts\\pip install -r requirements.txt pyinstaller\n"
-            "  .venv-build\\Scripts\\python build_pulse_testing_gui.py\n"
+            "  .venv-build\\Scripts\\python packaging/build_pulse_testing_gui.py\n"
             "or recreate your main .venv with Python 3.10.11+."
         )
         return 1
     return None
 
 
-def _ensure_pyinstaller(root: Path) -> None:
+def _ensure_pyinstaller(repo_root: Path) -> None:
     try:
         import PyInstaller  # noqa: F401
     except ImportError:
         print("Installing PyInstaller...")
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "pyinstaller"],
-            cwd=root,
+            cwd=repo_root,
         )
 
 
-def _run_spec(root: Path, spec: Path) -> None:
+def _run_spec(repo_root: Path, spec: Path) -> None:
     if not spec.is_file():
         raise FileNotFoundError(f"missing {spec}")
     cmd = [
@@ -60,11 +60,12 @@ def _run_spec(root: Path, spec: Path) -> None:
         "--noconfirm",
     ]
     print("Running:", " ".join(cmd))
-    subprocess.check_call(cmd, cwd=root)
+    subprocess.check_call(cmd, cwd=repo_root)
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parent
+    packaging_dir = Path(__file__).resolve().parent
+    repo_root = packaging_dir.parent
     parser = argparse.ArgumentParser(description="Build Pulse Testing GUI executables")
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -83,10 +84,10 @@ def main() -> int:
     if err:
         return err
 
-    classic_spec = root / "build_pulse_testing_gui.spec"
-    compact_spec = root / "build_pulse_testing_gui_compact.spec"
-    classic_entry = root / "TSP_Testing_GUI.py"
-    compact_entry = root / "Pulse_Testing_GUI_compact.py"
+    classic_spec = packaging_dir / "build_pulse_testing_gui.spec"
+    compact_spec = packaging_dir / "build_pulse_testing_gui_compact.spec"
+    classic_entry = repo_root / "TSP_Testing_GUI.py"
+    compact_entry = repo_root / "Pulse_Testing_GUI_compact.py"
 
     if args.compact:
         targets = [("compact", compact_spec, compact_entry)]
@@ -98,23 +99,23 @@ def main() -> int:
     else:
         targets = [("classic", classic_spec, classic_entry)]
 
-    for _name, spec, entry in targets:
+    for _name, _spec, entry in targets:
         if not entry.is_file():
             print(f"Error: missing {entry}")
             return 1
 
-    _ensure_pyinstaller(root)
+    _ensure_pyinstaller(repo_root)
 
     outputs: list[Path] = []
     try:
         for name, spec, _entry in targets:
             print(f"\n=== Building {name} ===")
-            _run_spec(root, spec)
+            _run_spec(repo_root, spec)
             if name == "classic":
-                outputs.append(root / "dist" / "Pulse_Testing_GUI" / "Pulse_Testing_GUI.exe")
+                outputs.append(repo_root / "dist" / "Pulse_Testing_GUI" / "Pulse_Testing_GUI.exe")
             else:
                 outputs.append(
-                    root / "dist" / "Pulse_Testing_GUI_Compact" / "Pulse_Testing_GUI_Compact.exe"
+                    repo_root / "dist" / "Pulse_Testing_GUI_Compact" / "Pulse_Testing_GUI_Compact.exe"
                 )
     except subprocess.CalledProcessError:
         return 1

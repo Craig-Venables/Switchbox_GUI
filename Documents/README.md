@@ -11,6 +11,7 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 | **[`build/`](build/)** | Release / CI | PyInstaller instructions, spec behaviour, **module inventory for exe builds** |
 | **[`development/`](development/)** | Maintainers | Refactor backlog, feature summaries, internal write-ups |
 | **[`ai/`](ai/)** | AI tooling | Short orientation: where code and docs live, what to update when imports change |
+| **[`../packaging/`](../packaging/)** | Release / CI | PyInstaller specs and build scripts for main app and Pulse Testing GUI |
 | **[`../tools/`](../tools/)** | Lab & analysis | Standalone utilities — see **[tools/README.md](../tools/README.md)** |
 | **[`../Helpers/`](../Helpers/)** | Deprecated | Redirect only — see [Helpers/README.md](../Helpers/README.md) |
 
@@ -36,7 +37,7 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 
 - **[BUILD_INSTRUCTIONS.md](build/BUILD_INSTRUCTIONS.md)** — how to produce `Switchbox_GUI.exe`  
 - **[BUILD_EXPLANATION.md](build/BUILD_EXPLANATION.md)** — what the spec file does, what gets bundled next to the exe  
-- **[BUILD_MODULES.md](build/BUILD_MODULES.md)** — **checklist of packages/paths**; keep in sync with root **`build_exe.spec`**  
+- **[BUILD_MODULES.md](build/BUILD_MODULES.md)** — **checklist of packages/paths**; keep in sync with **`packaging/build_exe.spec`**  
 
 ## Development notes ([`development/`](development/))
 
