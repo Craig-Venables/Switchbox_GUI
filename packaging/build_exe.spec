@@ -2,10 +2,12 @@
 """
 PyInstaller spec for Switchbox_GUI (windowed, onedir).
 
-Repository root should be the current working directory when you run:
-    pyinstaller build_exe.spec
-or:
-    python build_exe.py
+Build from repository root::
+
+    python packaging/build_exe.py
+or::
+
+    pyinstaller packaging/build_exe.spec
 
 Module / data inventory: Documents/build/BUILD_MODULES.md
 """
@@ -16,7 +18,8 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
-SPECDIR = os.path.dirname(os.path.abspath(SPEC))
+# Spec lives in packaging/; application root is one level up.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(SPEC)))
 
 
 def _safe_collect_submodules(package: str) -> list:
@@ -39,7 +42,7 @@ def _modules_from_pkg_path(pkg_name: str, relative_folder: str) -> list:
     Avoids ``import analysis`` at spec time (that package pulls scipy immediately).
     PyInstaller still follows imports inside those files to bundle scipy, etc.
     """
-    root = Path(SPECDIR) / relative_folder
+    root = Path(REPO_ROOT) / relative_folder
     if not root.is_dir():
         return []
     out: list = []
@@ -86,13 +89,13 @@ hiddenimports += [
 ]
 
 datas = [
-    (os.path.join(SPECDIR, "Json_Files"), "Json_Files"),
-    (os.path.join(SPECDIR, "Documents"), "Documents"),
+    (os.path.join(REPO_ROOT, "Json_Files"), "Json_Files"),
+    (os.path.join(REPO_ROOT, "Documents"), "Documents"),
 ]
 
 a = Analysis(
-    [os.path.join(SPECDIR, "main.py")],
-    pathex=[SPECDIR],
+    [os.path.join(REPO_ROOT, "main.py")],
+    pathex=[REPO_ROOT],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

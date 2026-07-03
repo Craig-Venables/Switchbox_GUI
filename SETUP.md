@@ -102,7 +102,7 @@ See [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.m
 
 ```bash
 pip install pyinstaller
-python build_exe.py
+python packaging/build_exe.py
 ```
 
 Output: `dist/Switchbox_GUI/Switchbox_GUI.exe`
@@ -110,9 +110,9 @@ Output: `dist/Switchbox_GUI/Switchbox_GUI.exe`
 **Pulse Testing GUI only** (standalone exe, no full Switchbox app):
 
 ```bash
-python build_pulse_testing_gui.py          # classic only
-python build_pulse_testing_gui.py --all    # classic + compact
-python build_pulse_testing_gui.py --compact  # compact only
+python packaging/build_pulse_testing_gui.py          # classic only
+python packaging/build_pulse_testing_gui.py --all    # classic + compact
+python packaging/build_pulse_testing_gui.py --compact  # compact only
 ```
 
 Requires **Python 3.10.11+** for PyInstaller (3.10.0 fails during analysis). If your `.venv` is still on 3.10.0, use a separate build env:
@@ -120,7 +120,7 @@ Requires **Python 3.10.11+** for PyInstaller (3.10.0 fails during analysis). If 
 ```bash
 py -3.10 -m venv .venv-build
 .venv-build\Scripts\pip install -r requirements.txt pyinstaller
-.venv-build\Scripts\python build_pulse_testing_gui.py --all
+.venv-build\Scripts\python packaging/build_pulse_testing_gui.py --all
 ```
 
 Outputs (distribute each whole folder):

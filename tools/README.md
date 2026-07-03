@@ -108,9 +108,19 @@ Build artefacts land in each tool's `dist/` folder (gitignored). See [Documents/
 - **Data / output:** Use local `Data/` and `Output/` subfolders; add patterns to root `.gitignore` if outputs are large or machine-specific.
 - **Legacy copies:** Do not add new code under `Helpers/` — see [Helpers/README.md](../Helpers/README.md) and [PATH_MIGRATION.md](../Documents/development/PATH_MIGRATION.md).
 
+## Packaging (main app & Pulse GUI)
+
+Main Switchbox and Pulse Testing PyInstaller builds live in **[`../packaging/`](../packaging/)** — not in `tools/` (those are per-tool standalone builds).
+
+```powershell
+python packaging/build_exe.py
+python packaging/build_pulse_testing_gui.py --all
+```
+
 ## Related documentation
 
 - [Documents/README.md](../Documents/README.md) — full documentation index
 - [Documents/guides/GUI_EXTENSION_GUIDE.md](../Documents/guides/GUI_EXTENSION_GUIDE.md) — register tools in Measurement GUI
+- [packaging/README.md](../packaging/README.md) — main app and Pulse Testing GUI builds
 - [Documents/guides/DEPLOYMENT_GUI.md](../Documents/guides/DEPLOYMENT_GUI.md) — release checklist
 - [CONTRIBUTING.md](../CONTRIBUTING.md) — repo layout rules

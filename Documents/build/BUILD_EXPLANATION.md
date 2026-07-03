@@ -2,12 +2,12 @@
 
 ## What is the spec file?
 
-The repository-root **`build_exe.spec`** file is **only** the PyInstaller recipe. It is **not** shipped inside the application; it tells PyInstaller how to assemble the build.
+The **`packaging/build_exe.spec`** file is **only** the PyInstaller recipe. It is **not** shipped inside the application; it tells PyInstaller how to assemble the build.
 
 ## What gets included?
 
 **Python code and dependencies**  
-Discovered from **`main.py`** plus explicit **`hiddenimports`** and submodule collection defined in **`build_exe.spec`**. A full checklist of packages and edge cases lives in **[BUILD_MODULES.md](BUILD_MODULES.md)**.
+Discovered from **`main.py`** plus explicit **`hiddenimports`** and submodule collection defined in **`packaging/build_exe.spec`**. A full checklist of packages and edge cases lives in **[BUILD_MODULES.md](BUILD_MODULES.md)**.
 
 **Bundled next to the runtime (under `sys._MEIPASS` when frozen)**  
 
@@ -21,7 +21,7 @@ Discovered from **`main.py`** plus explicit **`hiddenimports`** and submodule co
 ## How to build
 
 1. Install PyInstaller: `pip install pyinstaller`  
-2. From the **repository root**: `python build_exe.py`  
+2. From the **repository root**: `python packaging/build_exe.py`  
 3. Run: `dist/Switchbox_GUI/Switchbox_GUI.exe`
 
 ## After building (onedir)

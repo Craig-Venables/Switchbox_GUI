@@ -1,20 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for Pulse Testing GUI — compact layout (windowed, onedir).
+PyInstaller spec for Pulse Testing GUI (windowed, onedir).
 
 Build from repository root::
 
-    python build_pulse_testing_gui.py --compact
+    python packaging/build_pulse_testing_gui.py
 
 Output::
 
-    dist/Pulse_Testing_GUI_Compact/Pulse_Testing_GUI_Compact.exe
+    dist/Pulse_Testing_GUI/Pulse_Testing_GUI.exe
 """
 import os
 
 block_cipher = None
 
-SPECDIR = os.path.dirname(os.path.abspath(SPEC))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(SPEC)))
 
 hiddenimports = [
     "matplotlib.backends.backend_tkagg",
@@ -31,13 +31,16 @@ hiddenimports = [
     "gui.sample_gui.config",
 ]
 
+# Rely on import tracing from TSP_Testing_GUI.py (see build_exe.spec notes on
+# collect_submodules + Python 3.10.0 modulegraph failures).
+
 datas = [
-    (os.path.join(SPECDIR, "Json_Files"), "Json_Files"),
+    (os.path.join(REPO_ROOT, "Json_Files"), "Json_Files"),
 ]
 
 a = Analysis(
-    [os.path.join(SPECDIR, "Pulse_Testing_GUI_compact.py")],
-    pathex=[SPECDIR],
+    [os.path.join(REPO_ROOT, "TSP_Testing_GUI.py")],
+    pathex=[REPO_ROOT],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
@@ -58,7 +61,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Pulse_Testing_GUI_Compact",
+    name="Pulse_Testing_GUI",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -79,5 +82,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="Pulse_Testing_GUI_Compact",
+    name="Pulse_Testing_GUI",
 )

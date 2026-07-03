@@ -16,6 +16,7 @@ This document is for anyone taking over maintenance of the Switchbox Measurement
 | `Pulse_Testing/` | Multi-instrument pulse routing |
 | `Json_Files/` | Runtime configuration |
 | `tools/` | Standalone utilities (canonical location for optional tools) |
+| `packaging/` | PyInstaller specs and build scripts (`build_exe.py`, Pulse Testing GUI builds) |
 | `Helpers/` | **Deprecated redirect** — see [Helpers/README.md](Helpers/README.md); all code moved to `tools/`, `analysis/`, or `plotting/` |
 | `archive/` | Old code kept for reference only — not used by the main app |
 | `tests/` | Pytest suite |
@@ -54,7 +55,7 @@ Before lab releases, also use [Documents/guides/LAB_TEST_CHECKLIST.md](Documents
 
 ## Building a release executable
 
-See [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.md) and keep [Documents/build/BUILD_MODULES.md](Documents/build/BUILD_MODULES.md) in sync with `build_exe.spec`.
+See [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.md) and keep [Documents/build/BUILD_MODULES.md](Documents/build/BUILD_MODULES.md) in sync with `packaging/build_exe.spec`.
 
 ## What not to touch without good reason
 

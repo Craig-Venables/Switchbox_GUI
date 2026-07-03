@@ -1,16 +1,17 @@
 # Switchbox_GUI — modules and PyInstaller checklist
 
-This file lists **Python packages and data** the main application (`main.py` → `gui.sample_gui`) can reach, so a frozen build stays complete. When you add a **new top-level package**, **dynamic import**, or **runtime data path**, update **`build_exe.spec`** (and this table) in the same change.
+This file lists **Python packages and data** the main application (`main.py` → `gui.sample_gui`) can reach, so a frozen build stays complete. When you add a **new top-level package**, **dynamic import**, or **runtime data path**, update **`packaging/build_exe.spec`** (and this table) in the same change.
 
 **Build entry:** repository root `main.py`  
-**Spec:** `build_exe.spec` (root)  
-**Runtime project root:** `gui/sample_gui/config.py` uses `sys._MEIPASS` when frozen, so **`Json_Files/`** and bundled **`Documents/`** must appear as **`datas`** in the spec (see `build_exe.spec`).
+**Spec:** `packaging/build_exe.spec`  
+**Build:** `python packaging/build_exe.py` (from repository root)  
+**Runtime project root:** `gui/sample_gui/config.py` uses `sys._MEIPASS` when frozen, so **`Json_Files/`** and bundled **`Documents/`** must appear as **`datas`** in the spec (see `packaging/build_exe.spec`).
 
 ---
 
 ## 1. Core application packages (always include)
 
-By default, **`build_exe.spec`** relies on PyInstaller’s import graph starting at **`main.py`** for **`gui/`**, **`Equipment/`**, **`Pulse_Testing/`**, **`Notifications/`**, **`analysis/`**, **`plotting/`**, etc. Optional **`collect_submodules('gui')`** / **`Measurements`** (commented in the spec) pulls every submodule eagerly if a frozen build misses a lazy import.
+By default, **`packaging/build_exe.spec`** relies on PyInstaller’s import graph starting at **`main.py`** for **`gui/`**, **`Equipment/`**, **`Pulse_Testing/`**, **`Notifications/`**, **`analysis/`**, **`plotting/`**, etc. Optional **`collect_submodules('gui')`** / **`Measurements`** (commented in the spec) pulls every submodule eagerly if a frozen build misses a lazy import.
 
 The spec also defines **`_modules_from_pkg_path()`** so you can uncomment two lines to register **all** `analysis.*` and `plotting.*` modules without running `import analysis` at spec time (useful when lazy paths skip analysis entirely).
 
@@ -40,7 +41,7 @@ If you add **new static assets** (icons, images, templates) loaded by path from 
 
 ## 3. Dynamic / easy-to-miss imports
 
-Add explicit **`hiddenimports`** strings in `build_exe.spec` when PyInstaller omits them.
+Add explicit **`hiddenimports`** strings in `packaging/build_exe.spec` when PyInstaller omits them.
 
 | Module string | Why |
 |---------------|-----|
@@ -73,10 +74,10 @@ Optional third-party stacks (only if you use the feature in a build):
 
 ## 6. Maintenance workflow
 
-1. Add or rename a package under the core list → extend **`collect_submodules`** list in `build_exe.spec` if it is a new **top-level** name.
+1. Add or rename a package under the core list → extend **`collect_submodules`** list in `packaging/build_exe.spec` if it is a new **top-level** name.
 2. Add `importlib.import_module("...")` → add the full dotted path to **`hiddenimports`**.
 3. Add files read from disk relative to project root → add **`datas`** entries.
-4. Run **`python build_exe.py`**, then launch **`dist/Switchbox_GUI/Switchbox_GUI.exe`** and hit the code path you changed.
+4. Run **`python packaging/build_exe.py`**, then launch **`dist/Switchbox_GUI/Switchbox_GUI.exe`** and hit the code path you changed.
 
 For operator-facing build steps, see **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)**. For what the spec file is conceptually, see **[BUILD_EXPLANATION.md](BUILD_EXPLANATION.md)**.
 
@@ -86,4 +87,4 @@ For operator-facing build steps, see **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTION
 
 If the build fails with **`IndexError: tuple index out of range`** in **`dis.py`** / **`modulegraph.util.iterate_instructions`**, that is almost always the **Python interpreter** (early **3.10.0** is a known bad case), not your application source. **Upgrade Python** to the latest **3.10.x** or **3.11+**, recreate the venv, reinstall dependencies, and rebuild.
 
-The stock **`build_exe.spec`** keeps aggressive **`collect_submodules('gui')`** / **`Measurements`** **commented out** by default to shorten analysis time; uncomment those lines if the frozen app misses lazy-loaded GUI submodules.
+The stock **`packaging/build_exe.spec`** keeps aggressive **`collect_submodules('gui')`** / **`Measurements`** **commented out** by default to shorten analysis time; uncomment those lines if the frozen app misses lazy-loaded GUI submodules.

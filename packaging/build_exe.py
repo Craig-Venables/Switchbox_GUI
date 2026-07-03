@@ -1,9 +1,9 @@
 """
-Build Switchbox_GUI using PyInstaller and repository-root ``build_exe.spec``.
+Build Switchbox_GUI using PyInstaller and ``packaging/build_exe.spec``.
 
 Usage (from repository root)::
 
-    python build_exe.py
+    python packaging/build_exe.py
 
 Output (onedir)::
 
@@ -20,8 +20,9 @@ from pathlib import Path
 
 
 def main() -> int:
-    root = Path(__file__).resolve().parent
-    spec = root / "build_exe.spec"
+    packaging_dir = Path(__file__).resolve().parent
+    repo_root = packaging_dir.parent
+    spec = packaging_dir / "build_exe.spec"
     if not spec.is_file():
         print(f"Error: missing {spec}")
         return 1
@@ -32,7 +33,7 @@ def main() -> int:
         print("Installing PyInstaller...")
         subprocess.check_call(
             [sys.executable, "-m", "pip", "install", "pyinstaller"],
-            cwd=root,
+            cwd=repo_root,
         )
 
     cmd = [
@@ -44,8 +45,8 @@ def main() -> int:
         "--noconfirm",
     ]
     print("Running:", " ".join(cmd))
-    subprocess.check_call(cmd, cwd=root)
-    print(f"\nBuild complete: {root / 'dist' / 'Switchbox_GUI' / 'Switchbox_GUI.exe'}")
+    subprocess.check_call(cmd, cwd=repo_root)
+    print(f"\nBuild complete: {repo_root / 'dist' / 'Switchbox_GUI' / 'Switchbox_GUI.exe'}")
     return 0
 
 
