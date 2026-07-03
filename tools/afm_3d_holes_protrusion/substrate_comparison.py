@@ -299,6 +299,75 @@ def _plot_substrate_defect_density(
         fig.write_html(os.path.join(out_dir, f'substrate_defect_density{suffix}.html'), include_plotlyjs='cdn')
 
 
+def _plot_all_defects_per_area(
+    summary_df: pd.DataFrame,
+    out_dir: str,
+    template: str,
+    suffix: str,
+    save_html: bool = True,
+) -> None:
+    """Single-series bar chart: total defects/µm² for every sample in the experiment."""
+    if summary_df.empty or 'base_sample_name' not in summary_df.columns:
+        return
+
+    rows = []
+    for _, row in summary_df.iterrows():
+        name = _sample_label(row)
+        if not name:
+            continue
+        info = parse_sample_stack(name)
+        rows.append({
+            'label': name,
+            'defects_per_um2': _num(row, 'defects_per_um2', 0),
+            'scan_area_um2': _num(row, 'scan_area_um2'),
+            'is_baseline': info['is_baseline'],
+            'substrate': info['substrate'],
+        })
+
+    if not rows:
+        return
+
+    df = pd.DataFrame(rows)
+    df = df.sort_values(['substrate', 'is_baseline', 'label'], ascending=[True, False, True])
+
+    colours = ['#4C9BE8' if b else '#2ECC71' for b in df['is_baseline']]
+    hover = [
+        f"<b>{lbl}</b><br>Defects/µm²: {d:.4f}<br>Scan area: {a:.3f} µm²"
+        + ("<br><i>substrate baseline</i>" if bl else "")
+        for lbl, d, a, bl in zip(df['label'], df['defects_per_um2'], df['scan_area_um2'], df['is_baseline'])
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df['label'],
+        y=df['defects_per_um2'],
+        marker_color=colours,
+        text=[f'{v:.4f}' for v in df['defects_per_um2']],
+        textposition='outside',
+        hovertext=hover,
+        hoverinfo='text',
+        name='Defects / µm²',
+    ))
+    fig.update_layout(
+        title='<b>Defect Density — All Samples</b> (defects / µm²)',
+        xaxis_title='Sample',
+        yaxis_title='Defects / µm²',
+        template=template,
+        width=max(700, len(df) * 120),
+        height=520,
+        font=dict(family='Arial, sans-serif'),
+        showlegend=False,
+    )
+    if save_html:
+        fig.write_html(os.path.join(out_dir, f'all_defects_density{suffix}.html'), include_plotlyjs='cdn')
+
+    if not suffix:
+        _save_txt(
+            _origin_txt_path(out_dir, 'all_defects_density.txt'),
+            df[['label', 'defects_per_um2', 'scan_area_um2', 'substrate', 'is_baseline']],
+        )
+
+
 def _plot_substrate_delta_chart(
     delta_df: pd.DataFrame,
     out_dir: str,
@@ -370,6 +439,9 @@ def run_substrate_analysis(
         for template, suffix in TEMPLATES:
             _plot_substrate_defect_density(
                 summary_df, pairs, output_dir, template, suffix, save_html=save_html,
+            )
+            _plot_all_defects_per_area(
+                summary_df, output_dir, template, suffix, save_html=save_html,
             )
             _plot_substrate_delta_chart(
                 delta_df, output_dir, template, suffix, save_html=save_html,
