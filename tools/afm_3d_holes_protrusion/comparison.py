@@ -19,6 +19,8 @@ Plots produced
 10. fixed_depth_sensitivity  – % interior pixels ≥ X nm below scan median (shared cutoffs)
 11. hole_depth_over_Rq_box   – detected hole depth / Rq per sample
 12. threshold_review_grid   – per base_sample_name: stacked height | feature maps (reload .ibw)
+13. feature_spacing.html    – mean nearest-neighbour centroid spacing per sample (bar)
+14. hole_spacing_box / prot_spacing_box – per-feature NN spacing distributions
 """
 
 import os
@@ -34,7 +36,8 @@ from main import (
     SAVE_PNG_COMP_COUNTS, SAVE_PNG_COMP_DENSITY,
     SAVE_PNG_COMP_COVERAGE, SAVE_PNG_COMP_BOXPLOTS,
     SAVE_PNG_COMP_BUBBLE, SAVE_PNG_COMP_OVERVIEW,
-    SAVE_PNG_COMP_RANKING, SAVE_PNG_COMP_DEPTH_OVER_RQ
+    SAVE_PNG_COMP_RANKING, SAVE_PNG_COMP_DEPTH_OVER_RQ,
+    SAVE_PNG_COMP_SPACING,
 )
 _PALETTE = [
     '#4C9BE8', '#E87C4C', '#2ECC71', '#9B59B6',
@@ -89,6 +92,7 @@ def plot_cross_file_comparison(summary_df: pd.DataFrame,
         PLOT_COMP_ROUGHNESS, PLOT_COMP_BOXPLOTS, PLOT_COMP_BUBBLE,
         PLOT_COMP_OVERVIEW, PLOT_COMP_RANKING,
         PLOT_COMP_FIXED_DEPTH, PLOT_COMP_DEPTH_OVER_RQ,
+        PLOT_COMP_SPACING,
     )
 
     for template, suffix in TEMPLATES:
@@ -143,6 +147,15 @@ def plot_cross_file_comparison(summary_df: pd.DataFrame,
 
         if PLOT_COMP_DEPTH_OVER_RQ:
             _plot_hole_depth_over_rq(all_holes_df, summary_df, labels, colours, out_dir, template, suffix, save_html)
+
+        if PLOT_COMP_SPACING:
+            _plot_feature_spacing(summary_df, labels, colours, out_dir, template, suffix, save_html)
+            if not all_holes_df.empty and 'nn_spacing_nm' in all_holes_df.columns:
+                _plot_box_by_sample(all_holes_df, 'nn_spacing_nm', 'Hole NN Spacing (nm)',
+                                    labels, colours, 'hole_spacing_box', out_dir, template, suffix, save_html)
+            if not all_prots_df.empty and 'nn_spacing_nm' in all_prots_df.columns:
+                _plot_box_by_sample(all_prots_df, 'nn_spacing_nm', 'Protrusion NN Spacing (nm)',
+                                    labels, colours, 'prot_spacing_box', out_dir, template, suffix, save_html)
 
 
 # ===========================================================================
@@ -428,6 +441,72 @@ def _plot_feature_density(summary_df, labels, colours, out_dir, template, suffix
 
 
 # ===========================================================================
+# NEAREST-NEIGHBOUR SPACING
+# ===========================================================================
+
+def _plot_feature_spacing(summary_df, labels, colours, out_dir, template, suffix, save_html=True):
+    """Bar chart of mean nearest-neighbour centroid spacing for holes and protrusions."""
+    hole_sp = summary_df.get('avg_hole_spacing_nm', pd.Series([float('nan')] * len(summary_df))).values
+    prot_sp = summary_df.get('avg_prot_spacing_nm', pd.Series([float('nan')] * len(summary_df))).values
+    if all(np.isnan(v) for v in hole_sp) and all(np.isnan(v) for v in prot_sp):
+        return
+
+    hover_h = [
+        f'<b>{lbl}</b><br>Avg hole NN spacing: {_fmt(hs)} nm'
+        for lbl, hs in zip(labels, hole_sp)
+    ]
+    hover_p = [
+        f'<b>{lbl}</b><br>Avg protrusion NN spacing: {_fmt(ps)} nm'
+        for lbl, ps in zip(labels, prot_sp)
+    ]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name='Holes', x=labels, y=hole_sp,
+        marker_color='#4C9BE8', opacity=0.85,
+        text=[_fmt(v) for v in hole_sp], textposition='outside',
+        hovertext=hover_h, hoverinfo='text',
+    ))
+    fig.add_trace(go.Bar(
+        name='Protrusions', x=labels, y=prot_sp,
+        marker_color='#E87C4C', opacity=0.85,
+        text=[_fmt(v) for v in prot_sp], textposition='outside',
+        hovertext=hover_p, hoverinfo='text',
+    ))
+    fig.update_layout(
+        barmode='group',
+        title=(
+            '<b>Mean Nearest-Neighbour Spacing</b><br>'
+            '<sup>Centroid-to-centroid distance to the closest feature of the same type (nm)</sup>'
+        ),
+        xaxis_title='Sample',
+        yaxis_title='NN spacing (nm)',
+        template=template,
+        width=max(650, len(labels) * 130),
+        height=540,
+        font=dict(family='Arial, sans-serif'),
+        legend=dict(x=0.01, y=0.99),
+    )
+    stem = 'feature_spacing'
+    if save_html:
+        fig.write_html(os.path.join(out_dir, f'{stem}{suffix}.html'), include_plotlyjs='cdn')
+    if SAVE_PNGS and SAVE_PNG_COMP_SPACING:
+        try:
+            fig.write_image(os.path.join(out_dir, f'{stem}{suffix}.png'), scale=2)
+        except Exception:
+            pass
+    if not suffix:
+        _save_txt(
+            _origin_txt_path(out_dir, 'feature_spacing.txt'),
+            pd.DataFrame({
+                'sample': labels,
+                'avg_hole_spacing_nm': hole_sp,
+                'avg_prot_spacing_nm': prot_sp,
+            }),
+        )
+
+
+# ===========================================================================
 # SURFACE COVERAGE
 # ===========================================================================
 
@@ -521,7 +600,9 @@ def _plot_box_by_sample(df, col, ylabel, labels, colours, stem, out_dir, templat
     )
     if save_html:
         fig.write_html(os.path.join(out_dir, f'{stem}{suffix}.html'), include_plotlyjs='cdn')
-    flag = SAVE_PNG_COMP_DEPTH_OVER_RQ if stem == 'hole_depth_over_Rq_box' else SAVE_PNG_COMP_BOXPLOTS
+    flag = SAVE_PNG_COMP_DEPTH_OVER_RQ if stem == 'hole_depth_over_Rq_box' else (
+        SAVE_PNG_COMP_SPACING if stem in ('hole_spacing_box', 'prot_spacing_box') else SAVE_PNG_COMP_BOXPLOTS
+    )
     if SAVE_PNGS and flag:
         try:
             fig.write_image(os.path.join(out_dir, f'{stem}{suffix}.png'), scale=2)

@@ -19,10 +19,10 @@ Output/
     height_map_2d.html        ← interactive Plotly height map
     feature_map.html          ← annotated feature map (holes=blue, prots=orange)
     height_map_3d.html        ← interactive 3D surface render
-    histograms.html           ← size/depth distribution charts
-    holes.csv                 ← per-hole measurements
-    protrusions.csv           ← per-protrusion measurements
-  summary.csv                 ← one row per file
+    histograms.html           ← size/depth/spacing distribution charts
+    holes.csv                 ← per-hole measurements (incl. nn_spacing_nm)
+    protrusions.csv           ← per-protrusion measurements (incl. nn_spacing_nm)
+  summary.csv                 ← one row per file (avg hole/prot NN spacing)
   comparison/                 ← cross-file comparison plots
 
 CONFIGURATION (edit the block below)
@@ -47,10 +47,10 @@ Dependencies: igor2, numpy, scipy, pandas, plotly
 # ===========================================================================
 CHANNEL           = 0      # IBW channel index for height data
 HOLE_THRESHOLD_SD = 2.5    # holes: pixels below mean - N * std 1.5
-PROT_THRESHOLD_SD = 2.5    # protrusions: pixels above mean + N * std 1.5
+PROT_THRESHOLD_SD = 1.5    # protrusions: pixels above mean + N * std 1.5
 MIN_AREA_PX       = 5    # minimum feature area in pixels
 MIN_DEPTH_NM      = 1   # minimum depth for a hole to be counted (nm)
-MIN_HEIGHT_NM     = 1.5   # minimum height for a protrusion to be counted (nm)
+MIN_HEIGHT_NM     = 1   # minimum height for a protrusion to be counted (nm)
 SAVE_PLOTS        = True  # Master switch for all plots
 
 # --- Edge artifact rejection (unlevelled borders → false giant "holes") ---
@@ -88,6 +88,7 @@ PLOT_COMP_RANKING    = False
 PLOT_COMP_FIXED_DEPTH = False
 # Detected holes only: depth / Rq (roughness-normalised severity)
 PLOT_COMP_DEPTH_OVER_RQ = False
+PLOT_COMP_SPACING    = True   # nearest-neighbour centroid spacing (holes / protrusions)
 # Per base_sample_name: one HTML with height + feature map rows (reload .ibw for threshold QA)
 PLOT_COMP_THRESHOLD_REVIEW = True
 
@@ -112,6 +113,7 @@ SAVE_PNG_COMP_OVERVIEW     = False
 SAVE_PNG_COMP_RANKING      = True
 SAVE_PNG_COMP_FIXED_DEPTH  = True
 SAVE_PNG_COMP_DEPTH_OVER_RQ= True
+SAVE_PNG_COMP_SPACING      = True
 
 # Cutoffs (nm) for fixed-depth comparison; edit as needed
 FIXED_DEPTH_CUTOFFS_NM = (0.5,0.8,1.0, 1.2,1.5,2,5 )
@@ -626,6 +628,29 @@ def measure_features(z_nm: np.ndarray, mask: np.ndarray,
     return features, final_labeled
 
 
+def compute_nearest_neighbor_spacing_nm(features) -> list:
+    """
+    Distance (nm) from each feature centroid to its nearest neighbour in the same set.
+    Returns an empty list when fewer than two features are present.
+    """
+    if len(features) < 2:
+        return []
+    from scipy.spatial import cKDTree
+    pts = np.array(
+        [[f['centroid_x_nm'], f['centroid_y_nm']] for f in features],
+        dtype=np.float64,
+    )
+    dists, _ = cKDTree(pts).query(pts, k=2)
+    return dists[:, 1].tolist()
+
+
+def annotate_nearest_neighbor_spacing(features) -> None:
+    """Add ``nn_spacing_nm`` to each feature dict (in-place)."""
+    spacings = compute_nearest_neighbor_spacing_nm(features)
+    for feat, spacing in zip(features, spacings):
+        feat['nn_spacing_nm'] = round(float(spacing), 2)
+
+
 # ===========================================================================
 # PLOTLY — 2D HEIGHT MAP
 # ===========================================================================
@@ -706,6 +731,7 @@ def plot_feature_map(z_nm, pixel_nm, hole_labeled, prot_labeled,
         htxt = [
             f"Hole {f['feature_id']}<br>Depth: {f.get('depth_nm', 0):.2f} nm"
             f"<br>⌀: {f['equiv_diameter_nm']:.1f} nm<br>Area: {f['area_nm2']:.0f} nm²"
+            + (f"<br>NN spacing: {f['nn_spacing_nm']:.1f} nm" if 'nn_spacing_nm' in f else '')
             for f in features_holes
         ]
         fig.add_trace(go.Scatter(
@@ -723,6 +749,7 @@ def plot_feature_map(z_nm, pixel_nm, hole_labeled, prot_labeled,
         htxt = [
             f"Protrusion {f['feature_id']}<br>Height: {f.get('height_nm', 0):.2f} nm"
             f"<br>⌀: {f['equiv_diameter_nm']:.1f} nm<br>Area: {f['area_nm2']:.0f} nm²"
+            + (f"<br>NN spacing: {f['nn_spacing_nm']:.1f} nm" if 'nn_spacing_nm' in f else '')
             for f in features_prots
         ]
         fig.add_trace(go.Scatter(
@@ -813,11 +840,13 @@ def plot_3d_surface(z_nm, pixel_nm, out_dir, fname, template, suffix):
 
 def plot_histograms(features_holes, features_prots, stats, out_dir, fname, template, suffix):
     fig = make_subplots(
-        rows=2, cols=2,
+        rows=3, cols=2,
         subplot_titles=[
             'Hole Equivalent Diameter', 'Hole Depth',
             'Protrusion Equivalent Diameter', 'Protrusion Height',
+            'Hole Nearest-Neighbour Spacing', 'Protrusion Nearest-Neighbour Spacing',
         ],
+        vertical_spacing=0.10,
     )
 
     def _add_hist(row, col, data, color, xlabel):
@@ -831,20 +860,24 @@ def plot_histograms(features_holes, features_prots, stats, out_dir, fname, templ
         fig.update_xaxes(title_text=xlabel, row=row, col=col)
         fig.update_yaxes(title_text='Count',  row=row, col=col)
 
-    h_diams  = [f['equiv_diameter_nm'] for f in features_holes]
-    h_depths = [f.get('depth_nm', 0)   for f in features_holes]
-    p_diams  = [f['equiv_diameter_nm'] for f in features_prots]
-    p_heights= [f.get('height_nm', 0)  for f in features_prots]
+    h_diams    = [f['equiv_diameter_nm'] for f in features_holes]
+    h_depths   = [f.get('depth_nm', 0)   for f in features_holes]
+    h_spacings = [f['nn_spacing_nm'] for f in features_holes if 'nn_spacing_nm' in f]
+    p_diams    = [f['equiv_diameter_nm'] for f in features_prots]
+    p_heights  = [f.get('height_nm', 0)  for f in features_prots]
+    p_spacings = [f['nn_spacing_nm'] for f in features_prots if 'nn_spacing_nm' in f]
 
-    _add_hist(1, 1, h_diams,   COL_HOLE, 'Diameter (nm)')
-    _add_hist(1, 2, h_depths,  COL_HOLE, 'Depth (nm)')
-    _add_hist(2, 1, p_diams,   COL_PROT, 'Diameter (nm)')
-    _add_hist(2, 2, p_heights, COL_PROT, 'Height (nm)')
+    _add_hist(1, 1, h_diams,    COL_HOLE, 'Diameter (nm)')
+    _add_hist(1, 2, h_depths,   COL_HOLE, 'Depth (nm)')
+    _add_hist(2, 1, p_diams,    COL_PROT, 'Diameter (nm)')
+    _add_hist(2, 2, p_heights,  COL_PROT, 'Height (nm)')
+    _add_hist(3, 1, h_spacings, COL_HOLE, 'NN spacing (nm)')
+    _add_hist(3, 2, p_spacings, COL_PROT, 'NN spacing (nm)')
 
     fig.update_layout(
-        title=f'<b>{fname}</b> — Feature Size Distributions',
+        title=f'<b>{fname}</b> — Feature Size & Spacing Distributions',
         showlegend=False,
-        width=900, height=700,
+        width=900, height=980,
         template=template,
         font=dict(family='Arial, sans-serif'),
     )
@@ -1011,6 +1044,8 @@ def _aggregate_replicates(summary_df: pd.DataFrame,
         avg_hole_diam, std_hole_diam = _safe_feature_stats(g_holes, 'equiv_diameter_nm')
         avg_prot_height, std_prot_height = _safe_feature_stats(g_prots, 'height_nm')
         avg_prot_diam, std_prot_diam = _safe_feature_stats(g_prots, 'equiv_diameter_nm')
+        avg_hole_spacing, std_hole_spacing = _safe_feature_stats(g_holes, 'nn_spacing_nm')
+        avg_prot_spacing, std_prot_spacing = _safe_feature_stats(g_prots, 'nn_spacing_nm')
 
         agg_rows.append({
             'filename': base_name,
@@ -1053,6 +1088,10 @@ def _aggregate_replicates(summary_df: pd.DataFrame,
             'std_prot_height_nm': round(std_prot_height, 3) if not np.isnan(std_prot_height) else float('nan'),
             'avg_prot_diameter_nm': round(avg_prot_diam, 3) if not np.isnan(avg_prot_diam) else float('nan'),
             'std_prot_diameter_nm': round(std_prot_diam, 3) if not np.isnan(std_prot_diam) else float('nan'),
+            'avg_hole_spacing_nm': round(avg_hole_spacing, 3) if not np.isnan(avg_hole_spacing) else float('nan'),
+            'std_hole_spacing_nm': round(std_hole_spacing, 3) if not np.isnan(std_hole_spacing) else float('nan'),
+            'avg_prot_spacing_nm': round(avg_prot_spacing, 3) if not np.isnan(avg_prot_spacing) else float('nan'),
+            'std_prot_spacing_nm': round(std_prot_spacing, 3) if not np.isnan(std_prot_spacing) else float('nan'),
         })
         row = agg_rows[-1]
         for c in FIXED_DEPTH_CUTOFFS_NM:
@@ -1095,8 +1134,15 @@ def process_file(filepath: str, output_root: str, replicate_regex: re.Pattern):
     features_prots, prot_labeled = measure_features(
         z_nm, prot_mask, pixel_nm, 'protrusion', stats['mean_nm'])
 
+    annotate_nearest_neighbor_spacing(features_holes)
+    annotate_nearest_neighbor_spacing(features_prots)
+
     print(f"  Holes   : {len(features_holes)}")
     print(f"  Prots   : {len(features_prots)}")
+    if h_spacings := [f['nn_spacing_nm'] for f in features_holes if 'nn_spacing_nm' in f]:
+        print(f"  Hole NN spacing: avg {_safe_mean(h_spacings):.1f} nm  (n={len(h_spacings)})")
+    if p_spacings := [f['nn_spacing_nm'] for f in features_prots if 'nn_spacing_nm' in f]:
+        print(f"  Prot NN spacing: avg {_safe_mean(p_spacings):.1f} nm  (n={len(p_spacings)})")
 
     # --- Output directories ---
     file_dir = _build_sample_output_dir(output_root, fname)
@@ -1143,10 +1189,12 @@ def process_file(filepath: str, output_root: str, replicate_regex: re.Pattern):
         print(f"  Plots -> {file_dir}")
 
     # --- Summary row ---
-    h_depths  = [f.get('depth_nm', 0)   for f in features_holes]
-    h_diams   = [f['equiv_diameter_nm'] for f in features_holes]
-    p_heights = [f.get('height_nm', 0)  for f in features_prots]
-    p_diams   = [f['equiv_diameter_nm'] for f in features_prots]
+    h_depths   = [f.get('depth_nm', 0)   for f in features_holes]
+    h_diams    = [f['equiv_diameter_nm'] for f in features_holes]
+    h_spacings = [f['nn_spacing_nm'] for f in features_holes if 'nn_spacing_nm' in f]
+    p_heights  = [f.get('height_nm', 0)  for f in features_prots]
+    p_diams    = [f['equiv_diameter_nm'] for f in features_prots]
+    p_spacings = [f['nn_spacing_nm'] for f in features_prots if 'nn_spacing_nm' in f]
 
     scan_area_um2 = scan_x_um * scan_y_um
     
@@ -1208,6 +1256,10 @@ def process_file(filepath: str, output_root: str, replicate_regex: re.Pattern):
         'std_prot_height_nm':     round(_safe_std(p_heights), 3),
         'avg_prot_diameter_nm':   round(_safe_mean(p_diams),  3),
         'std_prot_diameter_nm':   round(_safe_std(p_diams),   3),
+        'avg_hole_spacing_nm':    round(_safe_mean(h_spacings), 3),
+        'std_hole_spacing_nm':    round(_safe_std(h_spacings),  3),
+        'avg_prot_spacing_nm':    round(_safe_mean(p_spacings), 3),
+        'std_prot_spacing_nm':    round(_safe_std(p_spacings),  3),
     }
     summary.update(compute_fixed_depth_below_median_metrics(z_nm, pixel_nm))
 

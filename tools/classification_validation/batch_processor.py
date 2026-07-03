@@ -17,6 +17,12 @@ except ImportError:
     quick_analyze = None
     read_data_file = None
 
+_EXCLUDE_TXT = frozenset({
+    "log.txt",
+    "classification_log.txt",
+    "classification_summary.txt",
+})
+
 
 class BatchProcessor:
     """Process multiple IV files and run classification analysis."""
@@ -64,8 +70,11 @@ class BatchProcessor:
         else:
             files = list(directory.glob(pattern))
         
-        # Filter out analysis files (they're not raw IV data)
-        files = [f for f in files if not f.name.endswith('_analysis.txt')]
+        # Filter out analysis files and device metadata logs (not raw IV data)
+        files = [
+            f for f in files
+            if not f.name.endswith('_analysis.txt') and f.name not in _EXCLUDE_TXT
+        ]
         
         if not files:
             print(f"[BATCH] No files found matching {pattern} in {directory}")
@@ -144,6 +153,14 @@ class BatchProcessor:
                 'device_id': device_id,
                 'analysis': None,
                 'error': f"Failed to read file: {e}"
+            }
+
+        if voltage is None or current is None:
+            return {
+                'file_path': filepath,
+                'device_id': device_id,
+                'analysis': None,
+                'error': "Failed to read file: no valid IV data"
             }
         
         # Validate data
