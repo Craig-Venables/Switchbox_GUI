@@ -24,6 +24,7 @@ The application starts with the Sample GUI, where you can select devices and lau
 ## About
 
 - **Real-time Graphing**: Multiple plots with live updates during measurements
+- **IV classification snapshot**: Documented copy of the classifier + batch tools in [`../memristive-iv-classifier`](../memristive-iv-classifier) — see [docs/classification/README.md](docs/classification/README.md). Sync with `.\tools\sync_to_classifier_repo.ps1`.
 - **Temperature Control**: Temperature measurement/manager ready (ITC/Lakeshore)
 - **LED Control**: LED control via PSU
 - **Telegram Notifications**: Bot messaging for remote prompts and updates
