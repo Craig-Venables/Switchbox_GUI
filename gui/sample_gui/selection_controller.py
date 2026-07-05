@@ -27,13 +27,18 @@ class SelectionController:
         gui.device_checkboxes.clear()
         gui.checkbox_vars.clear()
         gui.device_status_labels.clear()
+        gui.device_row_frames = {}
 
         for i, device in enumerate(gui.device_list):
             label = gui.get_device_label(device)
             var = tk.BooleanVar(value=True)
 
-            row_frame = ttk.Frame(gui.scrollable_frame)
+            row_frame = tk.Frame(gui.scrollable_frame)
             row_frame.grid(row=i, column=0, sticky="w", pady=1)
+
+            if not hasattr(gui, "device_row_frames"):
+                gui.device_row_frames = {}
+            gui.device_row_frames[device] = row_frame
 
             cb = tk.Checkbutton(
                 row_frame,
@@ -66,7 +71,8 @@ class SelectionController:
 
         self.update_selected_devices()
 
-    def select_all_devices(self) -> None:
+        if hasattr(gui, "classification_overlay"):
+            gui.classification_overlay._update_checkbox_tints()
         for var in self.gui.checkbox_vars.values():
             var.set(True)
         self.update_selected_devices()

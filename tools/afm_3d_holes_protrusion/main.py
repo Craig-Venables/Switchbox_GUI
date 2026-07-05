@@ -124,6 +124,44 @@ REPLICATE_STRIP_PATTERN = r'[-_ ]?\d+$'  # strip trailing replicate ids
 LEGACY_RUN_TO_RESTRUCTURE = 'Run_2026-05-07_13-50-01final_comparison+2pacz2'
 # ===========================================================================
 
+
+def _apply_env_overrides():
+    """Read AFM_GUI_* environment variables and override module-level config globals.
+
+    Called once at import/startup so the GUI subprocess can inject settings
+    without modifying this file. Each variable maps to an env var of the form
+    AFM_GUI_<VARNAME>. Booleans use '1'/'0'; floats use decimal strings.
+    """
+    import os as _os
+    import sys as _sys
+    _mod = _sys.modules[__name__]
+
+    _bool_flags = [
+        'PLOT_2D_MAP', 'PLOT_3D_SURFACE', 'PLOT_FEATURE_MAP', 'PLOT_HISTOGRAMS',
+        'PLOT_ROUGHNESS', 'PLOT_COMP_COUNTS', 'PLOT_COMP_DENSITY',
+        'PLOT_COMP_COVERAGE', 'PLOT_COMP_ROUGHNESS', 'PLOT_COMP_BOXPLOTS',
+        'PLOT_COMP_BUBBLE', 'PLOT_COMP_OVERVIEW', 'PLOT_COMP_RANKING',
+        'PLOT_COMP_FIXED_DEPTH', 'PLOT_COMP_DEPTH_OVER_RQ', 'PLOT_COMP_SPACING',
+        'PLOT_COMP_THRESHOLD_REVIEW', 'SAVE_PNGS', 'USE_ROBUST_THRESHOLD',
+    ]
+    _float_flags = ['HOLE_THRESHOLD_SD', 'PROT_THRESHOLD_SD']
+
+    for _name in _bool_flags:
+        _val = _os.environ.get(f'AFM_GUI_{_name}')
+        if _val is not None:
+            setattr(_mod, _name, _val.strip() == '1')
+
+    for _name in _float_flags:
+        _val = _os.environ.get(f'AFM_GUI_{_name}')
+        if _val is not None:
+            try:
+                setattr(_mod, _name, float(_val))
+            except ValueError:
+                pass
+
+
+_apply_env_overrides()
+
 import os
 import re
 import glob

@@ -181,9 +181,9 @@ class MeasurementGUILayoutBuilder:
         analysis_section = tk.Frame(left_section, bg=self.COLOR_BG)
         analysis_section.pack(side='left', fill='y', padx=10)
         
-        # Enable Analysis Toggle
-        tk.Label(analysis_section, text="Analysis:", font=self.FONT_MAIN, bg=self.COLOR_BG).pack(side='left', padx=(0, 5))
-        gui.analysis_enabled = tk.BooleanVar(value=False)  # Default: disabled
+        # Extended toggle — detailed reports/stats (classification, tracking, IV dashboard always run)
+        tk.Label(analysis_section, text="Extended:", font=self.FONT_MAIN, bg=self.COLOR_BG).pack(side='left', padx=(0, 5))
+        gui.analysis_enabled = tk.BooleanVar(value=False)  # Default: extra reports off; core pipeline always on
         analysis_checkbox = tk.Checkbutton(analysis_section, variable=gui.analysis_enabled, bg=self.COLOR_BG)
         analysis_checkbox.pack(side='left', padx=(0, 5))
         

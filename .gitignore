@@ -41,6 +41,9 @@ tools/afm_curve_analysis/Data/
 tools/afm_curve_analysis/Output/
 *.ibw
 
+# Consolidated IV batch data on OneDrive (regenerate with tools/data_consolidation/consolidate.py)
+tools/data_consolidation/data/
+
 # ITO / impedance analysis outputs (regenerate locally)
 tools/ito_analysis/**/*.png
 tools/ito_analysis/**/*.csv

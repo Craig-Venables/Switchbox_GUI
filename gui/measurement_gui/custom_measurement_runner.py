@@ -729,11 +729,8 @@ def run_custom_measurement(gui: Any) -> None:
                             # Mark that we've processed the first sweep
                             first_sweep_in_sequence = False
 
-                        # === AUTOMATIC PLOTTING FOR ALL SWEEPS ===
-                        # Plot IV dashboard for EVERY sweep (memristive or not)
-                        # Only include conduction/SCLC plots if device is memristive
+                        # === PLOTTING (IV dashboard always; conduction/SCLC only via Extended elsewhere) ===
                         try:
-                            # Determine if memristive from analysis result (if available)
                             is_memristive_for_plot = False
                             if analysis_result and hasattr(analysis_result, 'get'):
                                 analysis_data = analysis_result.get('analysis_data') or analysis_result
@@ -741,24 +738,27 @@ def run_custom_measurement(gui: Any) -> None:
                                     classification = analysis_data.get('classification', {})
                                     is_memristive_for_plot = classification.get('memristivity_score', 0) > 60
                             else:
-                                # No analysis result - use device flag from first sweep
-                                is_memristive_for_plot = device_is_memristive if device_is_memristive is not None else False
-                        
-                            # ALWAYS plot (dashboard always, conduction/SCLC only if memristive)
-                            # Pass measurement_type and params for conditional plotting
+                                is_memristive_for_plot = (
+                                    device_is_memristive if device_is_memristive is not None else False
+                                )
+
                             gui._plot_measurement_in_background(
                                 voltage=v_arr,
                                 current=c_arr,
                                 timestamps=timestamps,
                                 save_dir=save_dir,
                                 device_name=f"{gui.final_device_letter}{gui.final_device_number}",
-                                sweep_number=current_save_key,  # Use current_save_key for consistency
+                                sweep_number=current_save_key,
                                 is_memristive=is_memristive_for_plot,
-                                filename=name,  # Use actual saved filename (includes extra_info if present)
-                                measurement_type=measurement_type,  # Pass measurement type for conditional plotting
-                                measurement_params=params  # Pass params for read_voltage, etc.
+                                filename=name,
+                                measurement_type=measurement_type,
+                                measurement_params=params,
+                                include_conduction=False,
                             )
-                            _debug_print(f"[PLOT] Queued plots for sweep {current_save_key}: {name} (memristive={is_memristive_for_plot})")
+                            _debug_print(
+                                f"[PLOT] Queued plots for sweep {current_save_key}: {name} "
+                                f"(memristive={is_memristive_for_plot})"
+                            )
                         except Exception as plot_exc:
                             print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
                     

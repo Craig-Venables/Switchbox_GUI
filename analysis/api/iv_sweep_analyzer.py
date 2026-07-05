@@ -223,29 +223,20 @@ class IVSweepAnalyzer:
                     else:
                         measurement_type = 'iv_sweep'
         
-        # Run the technical analysis
+        # Run the technical analysis (tracking fields passed once — no re-run needed)
         self.analyzer = SweepAnalyzer(
-            voltage, current, time, 
+            voltage,
+            current,
+            time,
             measurement_type=measurement_type,
             analysis_level=self.analysis_level,
             classification_weights=custom_weights,
-            device_name=device_name  # Pass device name for diagnostic output
+            device_name=device_name,
+            device_id=device_id,
+            save_directory=save_directory,
+            cycle_number=cycle_number,
         )
-        
-        # === PHASE 2: Re-run enhanced classification with tracking info ===
-        # Enhanced classification was already run in _classify_device(), but without tracking info
-        # Re-run it now with device_id and save_directory for tracking/feedback features
-        if save_directory and device_id and hasattr(self.analyzer, 'calculate_enhanced_classification'):
-            self.analyzer.save_directory = save_directory
-            self.analyzer.device_id = device_id
-            self.analyzer.cycle_number = cycle_number
-            # Re-calculate with tracking enabled
-            self.analyzer.calculate_enhanced_classification(
-                save_directory=save_directory,
-                device_id=device_id,
-                cycle_number=cycle_number
-            )
-        
+
         # Extract comprehensive information
         self.extracted_data = self._extract_all_information(device_name)
         
@@ -288,6 +279,8 @@ class IVSweepAnalyzer:
                 # === ENHANCED CLASSIFICATION (Phase 1) ===
                 'memristivity_score': self.analyzer.memristivity_score if hasattr(self.analyzer, 'memristivity_score') else None,
                 'memristivity_breakdown': self.analyzer.memristivity_breakdown if hasattr(self.analyzer, 'memristivity_breakdown') else {},
+                'forming_stage': getattr(self.analyzer, 'forming_stage', None),
+                'yield_bucket': getattr(self.analyzer, 'yield_bucket', None),
                 'memory_window_quality': self.analyzer.memory_window_quality if hasattr(self.analyzer, 'memory_window_quality') else {},
                 'hysteresis_shape': self.analyzer.hysteresis_shape_features if hasattr(self.analyzer, 'hysteresis_shape_features') else {},
                 'adaptive_thresholds': self.analyzer.adaptive_thresholds if hasattr(self.analyzer, 'adaptive_thresholds') else {},

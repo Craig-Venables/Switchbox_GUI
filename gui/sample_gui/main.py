@@ -119,6 +119,7 @@ from gui.sample_gui.telegram_controller import TelegramController
 from gui.sample_gui.routing_controller import RoutingController
 from gui.sample_gui.selection_controller import SelectionController
 from gui.sample_gui.status_store import StatusStore
+from gui.sample_gui.classification_overlay import ClassificationOverlayController
 
 
 class SampleGUI:
@@ -182,6 +183,10 @@ class SampleGUI:
         # Overlay toggles
         self.show_quick_scan_overlay = tk.BooleanVar(value=True)
         self.show_status_overlay = tk.BooleanVar(value=False)
+        self.show_classification_overlay = tk.BooleanVar(value=True)
+        self.show_classification_scores = tk.BooleanVar(value=True)
+        self.classification_summary: Dict[str, Any] = {}
+        self.device_row_frames: Dict[str, tk.Frame] = {}
         
         # Terminal filter
         self.terminal_filter = tk.StringVar(value="All")
@@ -202,6 +207,7 @@ class SampleGUI:
         self.terminal_log = TerminalLogController(self)
         self.telegram_ctrl = TelegramController(self)
         self._load_telegram_bots()
+        self.classification_overlay = ClassificationOverlayController(self)
 
         # =========================
         # TOP CONTROL BAR
@@ -297,6 +303,9 @@ class SampleGUI:
 
     def _redraw_quick_scan_overlay(self) -> None:
         self.quick_scan_ctrl.redraw_overlay()
+
+    def _on_classification_overlay_toggle(self) -> None:
+        self._redraw_quick_scan_overlay()
 
     def _draw_quick_scan_overlay_on(self, target_canvas: Optional[tk.Canvas], tag: str,
                                     canvas_width: int, canvas_height: int) -> None:
@@ -682,6 +691,8 @@ class SampleGUI:
             self._notify_child_guis('sample_type', sample_type=sample)
             
             self._redraw_quick_scan_overlay()
+            if hasattr(self, "classification_overlay"):
+                self.classification_overlay.refresh()
             if hasattr(self, 'quick_scan_save_button'):
                 self.quick_scan_save_button.config(state=tk.DISABLED)
             self._set_quick_scan_status("Idle")

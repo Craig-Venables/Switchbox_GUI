@@ -14,6 +14,7 @@ Determines per-device yield with the following priority:
 
   3. Auto-classify from device_tracking history JSONs
      yield = 1 if ANY measurement ever had device_type == "memristive", else 0.
+     yield_promising = 1 if ever memristive or rectifying.
      Saves a new JSON manifest so future runs use priority 2.
 """
 
@@ -37,6 +38,9 @@ _TRACKING_SUBDIRS = [
 _MANIFEST_REL = os.path.join("sample_analysis", "yield_analysis", "yield_manifest.json")
 
 _EXCLUDE_TXT = {"classification_log.txt", "classification_summary.txt", "log.txt"}
+
+PROMISING_DEVICE_TYPES = frozenset({"memristive", "rectifying"})
+FORMED_DEVICE_TYPES = frozenset({"memristive"})
 
 
 # ---------------------------------------------------------------------------
@@ -101,11 +105,20 @@ def resolve_yield(
 
 
 def compute_sample_yield(per_device: Dict[str, Dict[str, Any]]) -> float:
-    """Fraction of devices with yield == 1 (0.0 – 1.0)."""
+    """Fraction of devices with yield == 1 (0.0 – 1.0). Strict: formed memristive only."""
     if not per_device:
         return 0.0
     total = len(per_device)
     positive = sum(1 for v in per_device.values() if v.get("yield", 0) == 1)
+    return positive / total
+
+
+def compute_sample_promising_yield(per_device: Dict[str, Dict[str, Any]]) -> float:
+    """Fraction of devices with yield_promising == 1 (memristive or rectifying)."""
+    if not per_device:
+        return 0.0
+    total = len(per_device)
+    positive = sum(1 for v in per_device.values() if v.get("yield_promising", v.get("yield", 0)) == 1)
     return positive / total
 
 
@@ -174,9 +187,13 @@ def _read_manual_excel(
             result[device_id] = {"yield": 0, "source": "manual_excel", "classification_type": "not_found"}
         else:
             classification = str(row.iloc[0]["Classification"]).strip()
-            yield_val = 1 if classification.lower() == "memristive" else 0
+            cls_lower = classification.lower()
+            yield_val = 1 if cls_lower == "memristive" else 0
+            yield_promising = 1 if cls_lower in PROMISING_DEVICE_TYPES else yield_val
             result[device_id] = {
                 "yield": yield_val,
+                "yield_promising": yield_promising,
+                "yield_tier": "formed" if yield_val else ("forming" if yield_promising else "none"),
                 "source": "manual_excel",
                 "classification_type": classification,
             }
@@ -203,18 +220,43 @@ def _auto_classify(
                 with open(history_file, "r", encoding="utf-8") as f:
                     history = json.load(f)
                 all_measurements = history.get("all_measurements", [])
+                if not all_measurements:
+                    all_measurements = history.get("measurements", [])
                 classification_type = "unknown"
                 ever_memristive = False
+                ever_promising = False
+                ever_formed_rectifying = False
+                yield_tier = "none"
                 for m in all_measurements:
-                    dt = m.get("classification", {}).get("device_type", "")
-                    if isinstance(dt, str) and dt.lower() == "memristive":
-                        ever_memristive = True
-                        classification_type = dt
-                        break
+                    clf = m.get("classification", {})
+                    dt = clf.get("device_type", "")
+                    stage = clf.get("forming_stage", "")
+                    if isinstance(dt, str):
+                        dt_lower = dt.lower()
+                        if dt_lower in FORMED_DEVICE_TYPES:
+                            ever_memristive = True
+                            classification_type = dt
+                        if dt_lower in PROMISING_DEVICE_TYPES:
+                            ever_promising = True
+                            if classification_type == "unknown":
+                                classification_type = dt
+                        if stage == "formed_rectifying" or (
+                            dt_lower == "rectifying"
+                            and clf.get("features", {}).get("rectifying_tier") == "formed"
+                        ):
+                            ever_formed_rectifying = True
                     if dt and classification_type == "unknown":
                         classification_type = dt
+                if ever_memristive:
+                    yield_tier = "formed"
+                elif ever_formed_rectifying:
+                    yield_tier = "formed_rectifying"
+                elif ever_promising:
+                    yield_tier = "forming"
                 result[device_id] = {
-                    "yield": 1 if ever_memristive else 0,
+                    "yield": 1 if (ever_memristive or ever_formed_rectifying) else 0,
+                    "yield_promising": 1 if ever_promising else 0,
+                    "yield_tier": yield_tier,
                     "source": "device_tracking",
                     "classification_type": classification_type,
                 }
@@ -233,11 +275,13 @@ def _save_manifest(sample_dir: str, sample_name: str, devices: Dict[str, Dict[st
         manifest_path = os.path.join(sample_dir, _MANIFEST_REL)
         os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
         sample_yield = compute_sample_yield(devices)
+        sample_promising_yield = compute_sample_promising_yield(devices)
         manifest = {
             "sample_name": sample_name,
             "generated": datetime.now(timezone.utc).isoformat(),
             "yield_source": "device_tracking",
             "sample_yield": sample_yield,
+            "sample_promising_yield": sample_promising_yield,
             "devices": devices,
         }
         with open(manifest_path, "w", encoding="utf-8") as f:
@@ -246,13 +290,114 @@ def _save_manifest(sample_dir: str, sample_name: str, devices: Dict[str, Dict[st
         print(f"[YIELD] Could not save manifest: {exc}")
 
 
-def _find_tracking_dir(sample_dir: str) -> Optional[str]:
-    """Return first existing device_tracking directory."""
+def find_tracking_dir(sample_dir: str) -> Optional[str]:
+    """Return first existing device_tracking directory under a sample folder."""
     for subdir in _TRACKING_SUBDIRS:
         path = os.path.join(sample_dir, subdir)
         if os.path.isdir(path):
             return path
     return None
+
+
+# Backward-compatible alias
+_find_tracking_dir = find_tracking_dir
+
+
+def summarize_device_from_history(
+    history: Optional[dict],
+    *,
+    min_sweeps_for_confident: int = 2,
+    mem_score_threshold: float = 60.0,
+) -> dict:
+    """Summarize one device for Sample GUI overlay (best score, min sweeps rule).
+
+    Returns dict with: measured, sweep_count, display_status, best_mem_score,
+    latest_type, promising.
+    """
+    empty = {
+        "measured": False,
+        "sweep_count": 0,
+        "display_status": "unmeasured",
+        "best_mem_score": None,
+        "latest_type": "unknown",
+        "promising": False,
+    }
+    if not history:
+        return empty
+
+    measurements = history.get("all_measurements") or history.get("measurements") or []
+    sweep_count = len(measurements)
+    if sweep_count == 0:
+        return empty
+
+    scores: list[float] = []
+    latest_type = "unknown"
+    for m in measurements:
+        clf = m.get("classification") or {}
+        dt = clf.get("device_type")
+        if isinstance(dt, str) and dt.strip():
+            latest_type = dt.strip().lower()
+        score = clf.get("memristivity_score")
+        if score is not None:
+            try:
+                scores.append(float(score))
+            except (TypeError, ValueError):
+                pass
+
+    best_mem_score = max(scores) if scores else None
+
+    if sweep_count == 1:
+        display_status = "pending"
+    elif (
+        sweep_count >= min_sweeps_for_confident
+        and best_mem_score is not None
+        and best_mem_score >= mem_score_threshold
+    ):
+        display_status = "memristive"
+    else:
+        display_status = _normalize_display_type(latest_type)
+
+    promising = False
+    if display_status != "memristive":
+        if latest_type in ("rectifying", "memcapacitive"):
+            promising = True
+        elif best_mem_score is not None and 40 <= best_mem_score < mem_score_threshold:
+            promising = True
+
+    return {
+        "measured": True,
+        "sweep_count": sweep_count,
+        "display_status": display_status,
+        "best_mem_score": best_mem_score,
+        "latest_type": latest_type,
+        "promising": promising,
+    }
+
+
+def summarize_sample_devices(device_summaries: Dict[str, dict], total_devices: int) -> dict:
+    """Aggregate per-device summaries for the map legend strip."""
+    measured = sum(1 for d in device_summaries.values() if d.get("measured"))
+    memristive = sum(1 for d in device_summaries.values() if d.get("display_status") == "memristive")
+    pending = sum(1 for d in device_summaries.values() if d.get("display_status") == "pending")
+    promising = sum(1 for d in device_summaries.values() if d.get("promising"))
+    return {
+        "total_devices": total_devices,
+        "measured_count": measured,
+        "memristive_count": memristive,
+        "pending_count": pending,
+        "promising_count": promising,
+    }
+
+
+def _normalize_display_type(device_type: str) -> str:
+    dt = (device_type or "unknown").lower().strip()
+    if dt in ("memristive", "memcapacitive"):
+        return "memristive"
+    if dt in ("non_conductive", "non-conductive", "nonconductive"):
+        return "non_conductive"
+    if dt in ("ohmic", "rectifying", "uncertain", "capacitive", "conductive"):
+        return dt
+    return "uncertain"
 
 
 def _parse_device_id(device_id: str) -> Tuple[Optional[str], Optional[str]]:
