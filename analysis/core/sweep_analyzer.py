@@ -81,10 +81,22 @@ class SweepAnalyzer:
     # ========================================================================
     # CLASSIFICATION TOGGLES - Configure behavior at class level
     # ========================================================================
-    ENABLE_MEMCAPACITIVE_CLASSIFICATION = True  # Set to False to disable memcapacitive category
+    ENABLE_MEMCAPACITIVE_CLASSIFICATION = False  # Disabled: not a useful category for current datasets
     UNCERTAIN_THRESHOLD = 40.0  # Score below this → "uncertain" classification
     
-    def __init__(self, voltage, current, time=None, measurement_type='iv_sweep', analysis_level='full', classification_weights=None, device_name=None):
+    def __init__(
+        self,
+        voltage,
+        current,
+        time=None,
+        measurement_type='iv_sweep',
+        analysis_level='full',
+        classification_weights=None,
+        device_name=None,
+        device_id=None,
+        save_directory=None,
+        cycle_number=None,
+    ):
         """
         Initialize device analysis.
 
@@ -170,15 +182,17 @@ class SweepAnalyzer:
         # These are ADDITIONAL metrics that don't affect core classification
         self.memristivity_score = None  # 0-100 continuous score
         self.memristivity_breakdown = {}  # Contribution of each feature to score
+        self.forming_stage = None  # Device forming timeline label (per sweep)
+        self.yield_bucket = None  # 'formed' | 'forming' | 'none' (per sweep)
         self.adaptive_thresholds = {}  # Context-aware thresholds
         self.memory_window_quality = {}  # Detailed window quality metrics
         self.hysteresis_shape_features = {}  # Shape analysis
         self.enhanced_classification_enabled = True  # Can be disabled if needed
         
         # === DEVICE TRACKING (Phase 2) ===
-        self.device_id = None  # Unique device identifier
-        self.cycle_number = None  # Current cycle/measurement number
-        self.save_directory = None  # Where to save tracking data
+        self.device_id = device_id
+        self.cycle_number = cycle_number
+        self.save_directory = save_directory
         self.device_history = None  # Historical data for this device (loaded on demand)
 
         # Additional memristor metrics
@@ -692,14 +706,250 @@ class SweepAnalyzer:
     def _check_noise(self):
         """Check if signal is dominated by noise."""
         if len(self.current) == 0: return True, "No Data"
-        
+
         # Check 1: Absolute magnitude (Open Circuit / Noise floor)
         # Using 95th percentile to be robust against spikes
         max_current = np.percentile(np.abs(self.current), 95)
         if max_current < 1e-9: # 1 nA threshold
             return True, "Low Current (<1nA)"
-            
+
         return False, ""
+
+    def _weak_rectification_ratio(self):
+        """
+        Mean |I| asymmetry between positive and negative bias regions.
+        More robust than single-point I(+V)/I(-V) on sub-nA forming sweeps.
+        """
+        pos_mask = self.voltage > 0.1
+        neg_mask = self.voltage < -0.1
+        if not (np.any(pos_mask) and np.any(neg_mask)):
+            return 1.0
+
+        pos_i = np.mean(np.abs(self.current[pos_mask]))
+        neg_i = np.mean(np.abs(self.current[neg_mask]))
+        if pos_i < 1e-15 and neg_i < 1e-15:
+            return 1.0
+        if pos_i >= neg_i:
+            return pos_i / max(neg_i, 1e-15)
+        return neg_i / max(pos_i, 1e-15)
+
+    def _is_weak_rectifying_signal(self):
+        """
+        Sub-nA sweeps that still show diode-like polarity dependence.
+        Typical of pre-forming / weakly conducting rectifying memristors.
+        """
+        if len(self.current) == 0:
+            return False, 1.0
+
+        p95 = np.percentile(np.abs(self.current), 95)
+        if p95 >= 1e-9:
+            return False, 1.0
+
+        rect_ratio = self._weak_rectification_ratio()
+        polarity_dependent = bool(self.classification_features.get('polarity_dependent'))
+        i_range = float(np.max(self.current) - np.min(self.current))
+        max_i = float(np.max(np.abs(self.current)))
+
+        # Require clear asymmetry and measurable I-V span (not flat symmetric noise)
+        structured = (
+            polarity_dependent
+            and rect_ratio >= 2.5
+            and max_i > 0
+            and i_range > 0.15 * max_i
+        )
+        return structured, rect_ratio
+
+    def _is_formed_rectifying_signal(self):
+        """
+        Measurable-current diode-like devices (stable rectifying type, not just precursor).
+        Distinct from memristive: strong polarity asymmetry without pinched switching.
+        """
+        if len(self.current) == 0:
+            return False, 1.0
+
+        p95 = np.percentile(np.abs(self.current), 95)
+        if p95 < 1e-9:
+            return False, 1.0
+
+        rect_ratio = self._weak_rectification_ratio()
+        feats = self.classification_features
+        mean_on_off = safe_mean(self.on_off, default=1.0)
+
+        if feats.get('pinched_hysteresis'):
+            return False, rect_ratio
+        if feats.get('double_zero_crossing', False):
+            return False, rect_ratio
+
+        # Switching + meaningful on/off normally suggests memristive, not
+        # rectifying.  BUT: very high rectification (>10x) means the
+        # apparent "switching" comes from polarity-dependent conduction,
+        # so we should still allow rectifying classification.
+        if (feats.get('switching_behavior') and mean_on_off > 4.0
+                and rect_ratio < 10.0):
+            return False, rect_ratio
+
+        formed = (
+            feats.get('polarity_dependent')
+            and rect_ratio >= 5.0
+            and not feats.get('pinched_hysteresis', False)
+        )
+        return formed, rect_ratio
+
+    def _set_rectifying_classification(self, rect_ratio, *, tier='precursor'):
+        """Apply rectifying device type (precursor sub-nA or formed diode)."""
+        formed = tier == 'formed'
+        self.classification_features['rectifying_tier'] = tier
+        self.classification_features['rectification_ratio'] = rect_ratio
+        self.classification_features['weak_rectifying'] = not formed
+        self.classification_features['is_low_current'] = not formed
+        self.classification_features['is_noisy'] = False
+
+        if formed:
+            self.classification_features['noise_reason'] = (
+                f"Formed rectifying ({rect_ratio:.1f}x asymmetry)"
+            )
+            confidence = min(0.88, 0.72 + 0.02 * min(rect_ratio - 5.0, 10.0))
+            reasoning = (
+                f"Formed rectifying device ({rect_ratio:.1f}x I(+)/I(-) asymmetry); "
+                "stable diode-like behaviour without memristive switching."
+            )
+            note = 'Legitimate rectifying device type; counts toward formed yield tier.'
+        else:
+            self.classification_features['noise_reason'] = (
+                f"Low current, rectifying ({rect_ratio:.1f}x asymmetry)"
+            )
+            confidence = min(0.85, 0.70 + 0.03 * min(rect_ratio - 2.5, 5.0))
+            reasoning = (
+                f"Weak rectifying conduction below 1 nA (ratio {rect_ratio:.1f}x); "
+                "likely pre-forming / polarity-dependent leak, not open circuit."
+            )
+            note = 'Useful forming precursor; track device over sweeps rather than discarding.'
+
+        self.device_type = 'rectifying'
+        self.classification_confidence = confidence
+        self.classification_breakdown = {
+            'memristive': 0,
+            'memcapacitive': 0,
+            'capacitive': 0,
+            'conductive': 0,
+            'ohmic': 0,
+            'rectifying': round(confidence * 100),
+            'non_conductive': 0,
+            'uncertain': 0,
+        }
+        self.classification_reasoning = reasoning
+        self.classification_explanation = {
+            'primary_reason': self.classification_features['noise_reason'],
+            'device_type': 'rectifying',
+            'rectifying_tier': tier,
+            'rectification_ratio': rect_ratio,
+            'note': note,
+        }
+        self._calculate_rectifying_memristivity_score(rect_ratio, formed=formed)
+
+    def _maybe_promote_to_formed_rectifying(self):
+        """Reclassify conductive/ohmic/uncertain sweeps that are clearly diode-like."""
+        if self.device_type in ('memristive', 'memcapacitive', 'rectifying', 'non_conductive'):
+            return False
+        formed, rect_ratio = self._is_formed_rectifying_signal()
+        if not formed:
+            return False
+        self._set_rectifying_classification(rect_ratio, tier='formed')
+        return True
+
+    def _calculate_rectifying_memristivity_score(self, rect_ratio, *, formed=False):
+        """
+        Memristivity score for rectifying devices.
+        Precursor (sub-nA): rectification + polarity only, cap 40.
+        Formed diode: higher cap (55) with conduction-level bonus.
+        """
+        breakdown = {}
+        polarity_score = 12.0 if formed else 10.0
+        breakdown['polarity_dependence'] = polarity_score
+
+        rect_score = 0.0
+        threshold = 5.0 if formed else 2.5
+        if rect_ratio >= threshold:
+            rect_score = min(30.0 if formed else 25.0, 10.0 + 5.0 * np.log10(rect_ratio / threshold))
+        breakdown['rectification'] = rect_score
+
+        if formed:
+            p95 = np.percentile(np.abs(self.current), 95)
+            if p95 >= 100e-9:
+                conduction_score = 13.0
+            elif p95 >= 10e-9:
+                conduction_score = 10.0
+            else:
+                conduction_score = 6.0
+            breakdown['conduction_level'] = conduction_score
+            structure_score = 0.0
+        else:
+            conduction_score = 0.0
+            structure_score = 5.0
+            breakdown['weak_signal_structure'] = structure_score
+
+        cap = 55.0 if formed else 40.0
+        score = min(cap, polarity_score + rect_score + conduction_score + structure_score)
+        self.memristivity_score = round(score, 1)
+        self.memristivity_breakdown = breakdown
+        self.classification_features['partial_memristivity'] = not formed
+        return self.memristivity_score
+
+    def _assign_forming_stage(self):
+        """Label sweep position on the forming timeline."""
+        dt = self.device_type or 'unknown'
+        score = float(self.memristivity_score or 0)
+
+        if dt == 'rectifying':
+            tier = self.classification_features.get('rectifying_tier', 'precursor')
+            stage = 'formed_rectifying' if tier == 'formed' else 'precursor_rectifying'
+        elif dt == 'memristive':
+            if score >= 60:
+                stage = 'formed_memristive'
+            elif score >= 35:
+                stage = 'forming_memristive'
+            else:
+                stage = 'weak_memristive'
+        elif dt == 'memcapacitive':
+            stage = 'forming_memcapacitive'
+        elif dt == 'non_conductive':
+            stage = 'unformed'
+        elif dt in ('ohmic', 'capacitive', 'conductive'):
+            stage = 'unformed'
+        else:
+            stage = 'unknown'
+
+        self.forming_stage = stage
+        return stage
+
+    def _yield_bucket_for_sweep(self):
+        """Per-sweep yield bucket for promising-device tracking."""
+        dt = self.device_type or 'unknown'
+        score = float(self.memristivity_score or 0)
+
+        if dt == 'memristive' and score >= 50:
+            return 'formed'
+        if dt == 'rectifying':
+            if self.classification_features.get('rectifying_tier') == 'formed':
+                return 'formed'
+            return 'forming'
+        if dt == 'memcapacitive':
+            return 'forming'
+        if dt == 'memristive' and score < 50:
+            return 'forming'
+        return 'none'
+
+    def _finalize_forming_metadata(self):
+        """Set forming_stage and yield_bucket on features + explanation."""
+        self._assign_forming_stage()
+        self.yield_bucket = self._yield_bucket_for_sweep()
+        self.classification_features['forming_stage'] = self.forming_stage
+        self.classification_features['yield_bucket'] = self.yield_bucket
+        if isinstance(self.classification_explanation, dict):
+            self.classification_explanation['forming_stage'] = self.forming_stage
+            self.classification_explanation['yield_bucket'] = self.yield_bucket
+            if self.memristivity_score is not None:
+                self.classification_explanation['memristivity_score'] = self.memristivity_score
 
     def _classify_device(self):
         """
@@ -719,14 +969,55 @@ class SweepAnalyzer:
             self.classification_features['is_noisy'] = is_noisy
             self.classification_features['noise_reason'] = noise_reason
 
-            # === NOISE OVERRIDE ===
+            # === LOW-CURRENT STRUCTURED (WEAK RECTIFYING) ===
+            weak_rectifying, rect_ratio = self._is_weak_rectifying_signal()
+            if weak_rectifying:
+                self._set_rectifying_classification(rect_ratio, tier='precursor')
+                self._finalize_forming_metadata()
+                return
+
+            # === FORMED RECTIFYING (measurable current, diode-like) ===
+            if not is_noisy:
+                formed_rectifying, rect_ratio = self._is_formed_rectifying_signal()
+                if formed_rectifying:
+                    self._set_rectifying_classification(rect_ratio, tier='formed')
+                    self._finalize_forming_metadata()
+                    return
+
+            # === NOISE / NON-CONDUCTIVE OVERRIDE ===
             if is_noisy:
-                # Force critical features to False to suppress false classifications
+                # Force critical features off so scoring cannot invent false memristive/capacitive types
                 self.classification_features['has_hysteresis'] = False
                 self.classification_features['switching_behavior'] = False
                 self.classification_features['nonlinear_iv'] = False
                 self.classification_features['pinched_hysteresis'] = False
-                
+                self.classification_features['double_zero_crossing'] = False
+
+                self.device_type = 'non_conductive'
+                self.classification_confidence = 0.85
+                self.classification_breakdown = {
+                    'memristive': 0,
+                    'memcapacitive': 0,
+                    'capacitive': 0,
+                    'conductive': 0,
+                    'ohmic': 0,
+                    'rectifying': 0,
+                    'non_conductive': 85,
+                    'uncertain': 0,
+                }
+                self.classification_reasoning = (
+                    f"Non-conductive (open circuit / noise floor): {noise_reason}"
+                )
+                self.classification_explanation = {
+                    'primary_reason': noise_reason,
+                    'device_type': 'non_conductive',
+                    'note': 'Current below measurable switching range; not classifiable as memristive/ohmic/etc.',
+                }
+                self.classification_warnings.append(
+                    f"Non-conductive device: {noise_reason}. Treat as open/noise, not uncertain."
+                )
+                self._finalize_forming_metadata()
+                return
             # === ARTIFACT FILTERING ===
             # If pinched hysteresis is detected BUT device is linear with no switching,
             # it's likely measurement artifact, not true memristive behavior
@@ -766,13 +1057,20 @@ class SweepAnalyzer:
             if self.classification_features['pinched_hysteresis']:
                 scores['memristive'] += weights.get('memristive_pinched_hysteresis', 30.0)
             if self.classification_features['switching_behavior']:
-                # CRITICAL: Switching is THE defining memristive feature
-                # Boost score significantly for switching devices
+                # Switching matters, but by itself it is not enough:
+                # many "closed" nonlinear curves look switch-like without any
+                # hysteretic memory fingerprint.
                 scores['memristive'] += weights.get('memristive_switching_behavior', 25.0)
                 
-                # BONUS: If device has switching + nonlinearity, it's almost certainly memristive
-                # Even without perfect pinched loop or large hysteresis area
-                if self.classification_features['nonlinear_iv']:
+                # Strong bonus only when switching is accompanied by an actual
+                # memory signature (hysteresis or pinched loop).
+                if (
+                    self.classification_features['nonlinear_iv']
+                    and (
+                        self.classification_features['has_hysteresis']
+                        or self.classification_features['pinched_hysteresis']
+                    )
+                ):
                     scores['memristive'] += weights.get('memristive_switching_plus_nonlinear_bonus', 20.0)
                     
             if self.classification_features['nonlinear_iv']:
@@ -780,11 +1078,69 @@ class SweepAnalyzer:
             if self.classification_features['polarity_dependent']:
                 scores['memristive'] += weights.get('memristive_polarity_dependent', 10.0)
 
-            # PENALTIES: Prevent linear/ohmic devices from being classified as memristors
-            if self.classification_features['linear_iv']:
-                scores['memristive'] += weights.get('memristive_penalty_linear_iv', -20.0)  # Note: weight is already negative
-            if self.classification_features['ohmic_behavior']:
-                scores['memristive'] += weights.get('memristive_penalty_ohmic', -30.0)  # Note: weight is already negative
+            # Double zero crossing (figure-8) is a defining memristive
+            # signature (Chua's fingerprint).  With memcapacitive
+            # classification disabled this feature would otherwise
+            # contribute nothing.  Give a stronger bonus when combined
+            # with switching because the pair is highly specific.
+            _has_dblx = self.classification_features.get('double_zero_crossing', False)
+            if _has_dblx and self.classification_features.get('switching_behavior'):
+                scores['memristive'] += weights.get('memristive_double_zero_crossing_with_switching', 15.0)
+            elif _has_dblx:
+                scores['memristive'] += weights.get('memristive_double_zero_crossing', 10.0)
+
+            # --- On/off ratio & memory-signature awareness ---
+            # A memristor can be ohmic/linear in each individual resistance
+            # state yet switch between them.  Evidence of genuine state
+            # changes (high symmetric on/off, or figure-8 double zero
+            # crossing) means linear/ohmic penalties should not apply.
+            _mean_on_off = safe_mean(self.on_off, default=1.0)
+
+            # Guard: A strongly rectifying device (>10x polarity
+            # asymmetry) can inflate on_off through rectification, not
+            # state switching.
+            _rect_ratio = self._weak_rectification_ratio()
+            _is_strongly_rectifying = _rect_ratio > 10.0
+
+            _has_memory_evidence = (
+                self.classification_features.get('switching_behavior')
+                and (
+                    (_mean_on_off > 10 and not _is_strongly_rectifying)
+                    or _has_dblx
+                )
+            )
+
+            if self.classification_features['linear_iv'] and not _has_memory_evidence:
+                scores['memristive'] += weights.get('memristive_penalty_linear_iv', -20.0)
+            if self.classification_features['ohmic_behavior'] and not _has_memory_evidence:
+                scores['memristive'] += weights.get('memristive_penalty_ohmic', -30.0)
+
+            # Switching without hysteresis/pinched signature -- severity
+            # depends on evidence strength.  High symmetric on/off or a
+            # figure-8 double zero crossing prove genuine resistive
+            # switching even when the hysteresis loop area is below the
+            # detector threshold.
+            if (
+                self.classification_features.get('switching_behavior')
+                and not self.classification_features.get('has_hysteresis')
+                and not self.classification_features.get('pinched_hysteresis')
+            ):
+                if _mean_on_off > 50 and not _is_strongly_rectifying:
+                    scores['memristive'] += weights.get(
+                        'memristive_bonus_switching_high_ratio', 20.0
+                    )
+                elif _has_dblx:
+                    # Figure-8 IS a form of hysteresis (current follows
+                    # different paths each direction) so no penalty.
+                    pass
+                elif _has_memory_evidence:
+                    scores['memristive'] += weights.get(
+                        'memristive_penalty_switching_moderate_ratio', -5.0
+                    )
+                else:
+                    scores['memristive'] += weights.get(
+                        'memristive_penalty_switching_without_hysteresis', -45.0
+                    )
             
             # === CRITICAL PENALTY: Missing core memristive features ===
             # A true memristor MUST have switching behavior (state change)
@@ -922,15 +1278,15 @@ class SweepAnalyzer:
             device_info = f" [{self.device_name}]" if self.device_name else ""
             debug_print(f"\n[DIAGNOSTIC]{device_info} Classification scores:")
             for device_type, score in scores.items():
-                print(f"  - {device_type}: {score:.1f}")
-            print(f"  - Total score: {total_score:.1f}, Max score: {max_score:.1f}")
-            print(f"  - Conduction mechanism: {self.conduction_mechanism}")
+                debug_print(f"  - {device_type}: {score:.1f}")
+            debug_print(f"  - Total score: {total_score:.1f}, Max score: {max_score:.1f}")
+            debug_print(f"  - Conduction mechanism: {self.conduction_mechanism}")
 
             # === UNCERTAIN CLASSIFICATION ===
             # If max score below threshold (default 40%), classify as "uncertain"
             if total_score == 0 or max_score < self.UNCERTAIN_THRESHOLD:
                 self.device_type = 'uncertain'
-                self.classification_confidence = max_score / 100.0
+                self.classification_confidence = min(max_score / 100.0, 1.0)
                 debug_print(f"[DIAGNOSTIC]{device_info} !!! UNCERTAIN CLASSIFICATION !!!")
                 if total_score == 0:
                     debug_print(f"[DIAGNOSTIC]{device_info}   Reason: All scores are 0 (no features detected)")
@@ -943,7 +1299,7 @@ class SweepAnalyzer:
                 self.classification_reasoning = f"Uncertain classification - max score ({max_score:.1f}) below threshold ({self.UNCERTAIN_THRESHOLD}). Top candidates: {', '.join(top_candidates) if top_candidates else 'None'}"
             else:
                 self.device_type = max(scores, key=scores.get)
-                self.classification_confidence = max_score / 100.0
+                self.classification_confidence = min(max_score / 100.0, 1.0)
                 debug_print(f"[DIAGNOSTIC]{device_info} Classification: {self.device_type} (confidence: {self.classification_confidence:.1%})")
             
             # === REALITY CHECK WARNINGS (Item 6) ===
@@ -969,6 +1325,9 @@ class SweepAnalyzer:
             # === GENERATE DETAILED EXPLANATION (Item 8) ===
             if self.device_type != 'uncertain':
                 self._generate_classification_explanation()
+
+            # Promote conductive/ohmic/uncertain diode-like sweeps to formed rectifying
+            self._maybe_promote_to_formed_rectifying()
             
             # === ENHANCED CLASSIFICATION (Phase 1) ===
             # Calculate additional metrics without affecting core classification
@@ -978,6 +1337,8 @@ class SweepAnalyzer:
                 except Exception as e:
                     # Silently fail - don't disrupt core classification
                     self.classification_warnings.append(f"Enhanced classification error: {str(e)}")
+
+            self._finalize_forming_metadata()
                     
         except Exception as e:
             device_info = f" [{self.device_name}]" if self.device_name else ""
@@ -1230,6 +1591,7 @@ class SweepAnalyzer:
             'memristive_polarity_dependent': 10.0,
             'memristive_penalty_linear_iv': -20.0,
             'memristive_penalty_ohmic': -30.0,
+            'memristive_penalty_switching_without_hysteresis': -45.0,
             'memristive_penalty_no_switching': -40.0,
             # Capacitive
             'capacitive_hysteresis_unpinched': 40.0,
@@ -2612,9 +2974,11 @@ POWER CHARACTERISTICS:
                     current_scale = np.sqrt(max_current / 1e-3) if max_current > 0 else 1.0
                     min_area_for_pinched = 1e-4 * max(0.01, min(100, current_scale))
                     
-                    # For devices with strong switching, be more lenient on area
+                    # For devices with strong switching, be somewhat more lenient
+                    # on area, but not enough to let nearly closed curves pass as
+                    # memristive just because they pinch near the origin.
                     if has_strong_switching:
-                        min_area_for_pinched *= 0.1  # 10x more lenient
+                        min_area_for_pinched *= 0.25
                     
                     if median_norm_area < min_area_for_pinched:
                         # Area too small - likely ohmic with artifact
@@ -3269,6 +3633,10 @@ POWER CHARACTERISTICS:
             'switching_strength': self.switching_strength,  # NEW: Continuous metric
             'conduction_mechanism': self.conduction_mechanism,
             'model_fit_r2': self.model_parameters.get('R2', 0) if isinstance(self.model_parameters, dict) else 0,
+            'memristivity_score': self.memristivity_score,
+            'memristivity_breakdown': self.memristivity_breakdown,
+            'forming_stage': self.forming_stage,
+            'yield_bucket': self.yield_bucket,
         }
 
     def get_results(self, level=None):
@@ -3594,7 +3962,15 @@ POWER CHARACTERISTICS:
         
         try:
             # Phase 1.1: Calculate memristivity score (0-100)
-            self._calculate_memristivity_score()
+            if self.device_type == 'rectifying':
+                if self.memristivity_score is None:
+                    rect_ratio = self.classification_features.get('rectification_ratio')
+                    if not rect_ratio:
+                        rect_ratio = self._weak_rectification_ratio()
+                    formed = self.classification_features.get('rectifying_tier') == 'formed'
+                    self._calculate_rectifying_memristivity_score(rect_ratio, formed=formed)
+            else:
+                self._calculate_memristivity_score()
             
             # Phase 1.2: Calculate adaptive thresholds
             self._calculate_adaptive_thresholds()
@@ -4191,6 +4567,8 @@ POWER CHARACTERISTICS:
                     'device_type': self.device_type,
                     'confidence': float(self.classification_confidence),
                     'memristivity_score': float(self.memristivity_score) if self.memristivity_score else None,
+                    'forming_stage': self.forming_stage,
+                    'yield_bucket': self.yield_bucket,
                     'conduction_mechanism': self.conduction_mechanism,
                 },
                 'resistance': {
@@ -4362,9 +4740,14 @@ POWER CHARACTERISTICS:
             memristivity_scores = [m['classification']['memristivity_score'] for m in measurements 
                                   if m['classification']['memristivity_score'] is not None]
             classifications = [m['classification']['device_type'] for m in measurements]
-            ron_values = [m['resistance']['ron_mean'] for m in measurements 
+            forming_stages = [
+                m['classification'].get('forming_stage')
+                for m in measurements
+                if m.get('classification', {}).get('forming_stage')
+            ]
+            ron_values = [m['resistance']['ron_mean'] for m in measurements
                          if m['resistance']['ron_mean'] is not None]
-            roff_values = [m['resistance']['roff_mean'] for m in measurements 
+            roff_values = [m['resistance']['roff_mean'] for m in measurements
                           if m['resistance']['roff_mean'] is not None]
             
             summary = {
@@ -4376,6 +4759,12 @@ POWER CHARACTERISTICS:
                     'most_common': max(set(classifications), key=classifications.count) if classifications else None,
                     'changes': len(set(classifications)),
                     'current': classifications[-1] if classifications else None,
+                    'sequence': classifications,
+                },
+                'forming_timeline': {
+                    'current_stage': forming_stages[-1] if forming_stages else None,
+                    'stages_seen': list(dict.fromkeys(forming_stages)),
+                    'sequence': forming_stages,
                 },
                 'memristivity_trend': {
                     'first': memristivity_scores[0] if memristivity_scores else None,

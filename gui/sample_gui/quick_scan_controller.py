@@ -88,6 +88,8 @@ class QuickScanController:
             gui.canvas if hasattr(gui, "canvas") else None,
             "status_overlay",
         )
+        if hasattr(gui, "classification_overlay"):
+            gui.classification_overlay.draw()
 
     def _draw_quick_scan_overlay_on(
         self, target_canvas: Optional[tk.Canvas], tag: str,

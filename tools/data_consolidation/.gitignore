@@ -1,0 +1,16 @@
+# Consolidated IV data lives on OneDrive (see paths.py):
+#   Phd/2) Data/All_data_collated/data 1/
+#   Phd/2) Data/All_data_collated/Quantum Dots/
+#   Phd/2) Data/All_data_collated/Stock/
+#
+# Regenerate with: python tools/data_consolidation/consolidate.py --all
+
+data/
+manifest.csv
+classification_results.json
+classification_results.csv
+classification_summary.txt
+review_labels.json
+review_corrections.json
+review_corrections.csv
+device_yield_summary.json

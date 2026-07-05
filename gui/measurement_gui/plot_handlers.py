@@ -545,8 +545,14 @@ def plot_measurement_in_background(
     filename: Optional[str] = None,
     measurement_type: str = "IV",
     measurement_params: Optional[dict] = None,
+    *,
+    include_conduction: bool = False,
 ) -> None:
-    """Plot measurement graphs in background thread using UnifiedPlotter."""
+    """Plot measurement graphs in background thread using UnifiedPlotter.
+
+    By default only the IV dashboard is saved (fast). Pass include_conduction=True
+    for conduction/SCLC plots (e.g. retroactive full-sample analysis).
+    """
     def run_plotting() -> None:
         try:
             import sys
@@ -677,27 +683,28 @@ def plot_measurement_in_background(
                     section=section_letter,
                     device_num=dev_num,
                 )
-                try:
-                    os.makedirs(conduction_dir, exist_ok=True)
-                    os.makedirs(sclc_dir, exist_ok=True)
-                    plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
-                    plotter_cond.plot_conduction_analysis(
-                        voltage=voltage,
-                        current=current,
-                        device_name=plot_filename,
-                        title=f"{title_prefix} {plot_filename} - Conduction Analysis",
-                        save_name=f"{plot_filename}_conduction.png",
-                    )
-                    plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
-                    plotter_sclc.plot_sclc_fit(
-                        voltage=voltage,
-                        current=current,
-                        device_name=plot_filename,
-                        title=f"{title_prefix} {plot_filename} - SCLC Fit",
-                        save_name=f"{plot_filename}_sclc_fit.png",
-                    )
-                except Exception as e:
-                    _debug_print(f"[PLOT] Error plotting conduction/SCLC for {plot_filename}: {e}")
+                if include_conduction:
+                    try:
+                        os.makedirs(conduction_dir, exist_ok=True)
+                        os.makedirs(sclc_dir, exist_ok=True)
+                        plotter_cond = UnifiedPlotter(save_dir=conduction_dir, auto_close=True)
+                        plotter_cond.plot_conduction_analysis(
+                            voltage=voltage,
+                            current=current,
+                            device_name=plot_filename,
+                            title=f"{title_prefix} {plot_filename} - Conduction Analysis",
+                            save_name=f"{plot_filename}_conduction.png",
+                        )
+                        plotter_sclc = UnifiedPlotter(save_dir=sclc_dir, auto_close=True)
+                        plotter_sclc.plot_sclc_fit(
+                            voltage=voltage,
+                            current=current,
+                            device_name=plot_filename,
+                            title=f"{title_prefix} {plot_filename} - SCLC Fit",
+                            save_name=f"{plot_filename}_sclc_fit.png",
+                        )
+                    except Exception as e:
+                        _debug_print(f"[PLOT] Error plotting conduction/SCLC for {plot_filename}: {e}")
                 _debug_print(f"[PLOT] Generated plots for {plot_filename} (memristive={is_memristive_flag})")
         except ImportError as e:
             _debug_print(f"[PLOT ERROR] Failed to import UnifiedPlotter: {e}")
@@ -1443,6 +1450,7 @@ def plot_all_device_graphs(gui: Any) -> None:
                                 sweep_number=idx, is_memristive=is_memristive,
                                 filename=filename, measurement_type=measurement_type,
                                 measurement_params=measurement_params,
+                                include_conduction=is_memristive,
                             )
                             success_count += 1
                         except Exception as e:

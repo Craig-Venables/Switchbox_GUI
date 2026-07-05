@@ -862,127 +862,69 @@ class MeasurementGUI:
         device_memristive_flag: bool = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Run IV analysis if enabled, display results, and save to file.
-        
-        This method checks if analysis is enabled, runs quick_analyze() on the
-        measurement data, updates the stats window/panel, and saves results to
-        the unified analysis folder at {sample}/sample_analysis/analysis/sweeps/{device_id}/.
-        
-        For custom sequences:
-        - Sweep 1: Always analyze to determine if memristive
-        - Sweeps 2+: Only analyze if device_memristive_flag == True
-        a "sweep_analysis" subfolder.
+        Post-measurement analysis pipeline.
 
-        Parameters:
-        -----------
-        voltage : List[float]
-            Voltage data array from measurement
-        current : List[float]
-            Current data array from measurement
-        timestamps : Optional[List[float]]
-            Timestamp data array (optional, for pulse/retention measurements)
-        save_dir : str
-            Directory where measurement data is saved
-        file_name : str
-            Base filename for the measurement (without extension)
-        metadata : Optional[Dict[str, Any]]
-            Additional metadata (LED state, temperature, etc.)
-        is_custom_sequence : bool
-            Whether this is part of a custom measurement sequence
-        sweep_number : int
-            Sweep number within the sequence (1-indexed)
-        device_memristive_flag : bool, optional
-            Whether device is known to be memristive (for sweeps 2+)
-        
-        Returns:
-        --------
-        Optional[Dict[str, Any]] - Analysis data dict, or None if skipped.
-            For custom sequences, first sweep returns {'analysis_data': ..., 'is_memristive': bool}
+        Always (when data is valid):
+          - classification-level quick_analyze
+          - device_tracking history JSON
+          - device classification_log.txt
+          - IV dashboard PNG (no conduction/SCLC during live measure)
+
+        When Extended checkbox is ON, also:
+          - GUI stats / top-bar label
+          - analysis report txt under sample_analysis/
+
+        Research-level re-analysis is not run here; use full-sample analysis on demand.
         """
-        # Master switch: no analysis when checkbox is unchecked (graphs still plot)
-        if not (hasattr(self, 'analysis_enabled') and self.analysis_enabled.get()):
-            return None
-        
-        # === CONDITIONAL LOGIC FOR CUSTOM SEQUENCES ===
-        # Skip if not first sweep AND device is not memristive
-        if is_custom_sequence and sweep_number > 1:
-            if not device_memristive_flag:
-                debug_print(f"[ANALYSIS] Skipping sweep {sweep_number} - device not memristive")
-                return None
-        
-        # Validate input data
         if not voltage or not current or len(voltage) == 0 or len(current) == 0:
             debug_print("[ANALYSIS] Skipping analysis: empty voltage or current arrays")
             return None
-        
+
         if len(voltage) != len(current):
             debug_print(f"[ANALYSIS] Skipping analysis: array length mismatch (V:{len(voltage)}, I:{len(current)})")
             return None
-        
+
+        extended = bool(hasattr(self, 'analysis_enabled') and self.analysis_enabled.get())
+        skip_extended = (
+            is_custom_sequence
+            and sweep_number > 1
+            and not device_memristive_flag
+        )
+
         try:
-            # Import analysis module
             from analysis import quick_analyze
-            
-            # Fixed level: classification for speed (memristive devices get research in background)
-            analysis_level = 'classification'
-            
-            # Convert to numpy arrays if needed
             import numpy as np
+            import threading as _threading
+
+            analysis_level = 'classification'
             v_arr = np.array(voltage) if not isinstance(voltage, np.ndarray) else voltage
             i_arr = np.array(current) if not isinstance(current, np.ndarray) else current
             t_arr = None
             if timestamps and len(timestamps) > 0:
                 t_arr = np.array(timestamps) if not isinstance(timestamps, np.ndarray) else timestamps
-            
-            # Build metadata if not provided
+
             if metadata is None:
                 metadata = {}
-            
-            # Add device info to metadata
             if 'device_name' not in metadata:
-                device_name = f"{self.sample_name_var.get()}_{self.final_device_letter}{self.final_device_number}"
-                metadata['device_name'] = device_name
-            
-            # Add LED info if available
-            if hasattr(self, 'optical') and self.optical is not None:
-                try:
-                    caps = getattr(self.optical, 'capabilities', {})
-                    if caps.get('type', '').lower() == 'led':
-                        # Check if LED was on during measurement
-                        # This might need to be passed in metadata from the measurement runner
-                        pass
-                except Exception:
-                    pass
-            
-            # === PHASE 2: Build device tracking info ===
+                metadata['device_name'] = (
+                    f"{self.sample_name_var.get()}_{self.final_device_letter}{self.final_device_number}"
+                )
+
             device_id = None
             cycle_number = None
-            sample_save_dir = save_dir  # Will be updated to sample-level for unified analysis folder
-            
+            sample_save_dir = save_dir
             if hasattr(self, 'sample_name_var') and hasattr(self, 'final_device_letter') and hasattr(self, 'final_device_number'):
-                # Create unique device ID: sample_letter_number (e.g., "MyChip_A_1")
                 device_id = f"{self.sample_name_var.get()}_{self.final_device_letter}_{self.final_device_number}"
-                
-                # Use sample-level directory for tracking/research (not device-level)
                 sample_name = self.sample_name_var.get()
                 if sample_name:
                     sample_save_dir = self._get_sample_save_directory(sample_name)
-            
-            # Try to get cycle number from measurement count (if available)
-            # This will be overridden in endurance/retention measurements with actual cycle count
             if hasattr(self, 'measurement_count'):
                 cycle_number = getattr(self, 'measurement_count', None)
-            
-            # Run analysis in background thread to prevent crashes
-            debug_print(f"[ANALYSIS] Queuing analysis (level: {analysis_level}) on {len(v_arr)} points...")
 
-            # Ensure threading module is accessible (fix for UnboundLocalError)
-            import threading as _threading
+            debug_print(f"[ANALYSIS] Queuing classification on {len(v_arr)} points (extended={extended})...")
 
-            # Create a thread-safe way to update GUI after analysis
             def run_analysis_thread():
                 try:
-                    debug_print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
                     analysis_data = quick_analyze(
                         voltage=v_arr,
                         current=i_arr,
@@ -991,113 +933,86 @@ class MeasurementGUI:
                         analysis_level=analysis_level,
                         device_id=device_id,
                         cycle_number=cycle_number,
-                        save_directory=sample_save_dir  # Use sample-level for tracking/research
+                        save_directory=sample_save_dir,
                     )
 
-                    # Update GUI in main thread using after() method
+                    classification = analysis_data.get('classification', {})
+                    device_type = classification.get('device_type', '')
+                    memristivity_score = classification.get('memristivity_score', 0) or 0
+
+                    try:
+                        self._append_classification_log(save_dir, file_name, analysis_data)
+                    except Exception as log_exc:
+                        debug_print(f"[ANALYSIS] Failed to update classification log: {log_exc}")
+
+                    sg = getattr(self, "sample_gui", None)
+                    if sg is not None and hasattr(sg, "classification_overlay"):
+                        root = getattr(sg, "root", None)
+                        if root is not None:
+                            root.after(0, sg.classification_overlay.refresh)
+                        else:
+                            sg.classification_overlay.refresh()
+
                     def update_gui():
                         try:
-                            # Update stats window and panel
+                            self.update_classification_display(classification)
+                        except Exception as display_exc:
+                            debug_print(f"[ANALYSIS] Failed to update classification display: {display_exc}")
+
+                        if is_custom_sequence and sweep_number == 1:
+                            is_memristive = (
+                                device_type in ('memristive', 'memcapacitive')
+                                or memristivity_score > 60
+                            )
+                            if not hasattr(self, '_pending_analysis_results'):
+                                self._pending_analysis_results = {}
+                            self._pending_analysis_results[f"{file_name}_sweep_{sweep_number}"] = {
+                                'analysis_data': analysis_data,
+                                'is_memristive': is_memristive,
+                            }
+
+                        if not is_custom_sequence:
+                            try:
+                                device_name = (
+                                    f"{self.final_device_letter}{self.final_device_number}"
+                                    if hasattr(self, 'final_device_letter')
+                                    else "device"
+                                )
+                                self._plot_measurement_in_background(
+                                    voltage=list(v_arr),
+                                    current=list(i_arr),
+                                    timestamps=list(t_arr) if t_arr is not None else None,
+                                    save_dir=save_dir,
+                                    device_name=device_name,
+                                    sweep_number=sweep_number,
+                                    is_memristive=memristivity_score > 60,
+                                    filename=file_name,
+                                    include_conduction=False,
+                                )
+                            except Exception as plot_exc:
+                                print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
+
+                        if not extended or skip_extended:
+                            return
+
+                        try:
                             self.update_analysis_stats(analysis_data, analysis_level)
                         except Exception as stats_exc:
                             debug_print(f"[ANALYSIS] Failed to update stats window: {stats_exc}")
 
                         try:
-                            # Update top bar classification display
-                            self.update_classification_display(analysis_data.get('classification', {}))
-                        except Exception as display_exc:
-                            debug_print(f"[ANALYSIS] Failed to update classification display: {display_exc}")
-
-                        try:
-                            # Save analysis results to file
                             self._save_analysis_results(analysis_data, save_dir, file_name, analysis_level)
                         except Exception as save_exc:
                             debug_print(f"[ANALYSIS] Failed to save analysis results: {save_exc}")
 
-                        # Store analysis result for plotting
                         if not is_custom_sequence:
                             self._last_analysis_result = analysis_data
 
-                        # Log analysis completion
                         if hasattr(self, 'plot_panels'):
-                            self.plot_panels.log_graph_activity(f"Analysis complete: {file_name} ({analysis_level})")
+                            self.plot_panels.log_graph_activity(
+                                f"Analysis complete: {file_name} ({analysis_level})"
+                            )
 
-                        # === AUTO-TRIGGER RESEARCH ANALYSIS FOR MEMRISTIVE DEVICES ===
-                        device_type = analysis_data.get('classification', {}).get('device_type', '')
-                        memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
-
-                        if device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60):
-                            # Spawn background thread for research-level analysis
-                            def run_research_analysis():
-                                try:
-                                    debug_print(f"[RESEARCH] Starting background research analysis for {file_name}...")
-                                    if hasattr(self, 'plot_panels'):
-                                        self.plot_panels.log_graph_activity(f"Starting research analysis: {file_name}")
-
-                                    # Run research-level analysis
-                                    research_data = quick_analyze(
-                                        voltage=v_arr,
-                                        current=i_arr,
-                                        time=t_arr,
-                                        metadata=metadata,
-                                        analysis_level='research',
-                                        device_id=device_id,
-                                        cycle_number=cycle_number,
-                                        save_directory=sample_save_dir
-                                    )
-
-                                    # Save to device-specific research folder
-                                    self._save_research_analysis(research_data, sample_save_dir, file_name, device_id)
-
-                                    debug_print(f"[RESEARCH] Background research analysis complete for {file_name}")
-                                    if hasattr(self, 'plot_panels'):
-                                        self.plot_panels.log_graph_activity(f"Research analysis complete: {file_name}")
-                                except Exception as e:
-                                    debug_print(f"[RESEARCH ERROR] Background analysis failed: {e}")
-                                    import traceback
-                                    traceback.print_exc()
-
-                            # Start background thread (daemon so it doesn't block exit)
-                            research_thread = _threading.Thread(target=run_research_analysis, daemon=True)
-                            research_thread.start()
-
-                            debug_print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
-
-                        # === RETURN FOR CUSTOM SEQUENCES ===
-                        # For first sweep in custom sequence, store memristive flag
-                        if is_custom_sequence and sweep_number == 1:
-                            is_memristive = device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60)
-                            debug_print(f"[ANALYSIS] First sweep: score={memristivity_score:.1f}, memristive={is_memristive}")
-                            # Store result for custom measurement to use
-                            if not hasattr(self, '_pending_analysis_results'):
-                                self._pending_analysis_results = {}
-                            self._pending_analysis_results[f"{file_name}_sweep_{sweep_number}"] = {
-                                'analysis_data': analysis_data,
-                                'is_memristive': is_memristive
-                            }
-
-                        # For non-custom or subsequent sweeps, trigger automatic plotting
-                        if not is_custom_sequence:
-                            try:
-                                classification = analysis_data.get('classification', {})
-                                is_memristive = classification.get('memristivity_score', 0) > 60
-                                device_name = f"{self.final_device_letter}{self.final_device_number}" if hasattr(self, 'final_device_letter') else "device"
-
-                                if save_dir:
-                                    self._plot_measurement_in_background(
-                                        voltage=list(v_arr),
-                                        current=list(i_arr),
-                                        timestamps=list(t_arr) if t_arr is not None else None,
-                                        save_dir=save_dir,
-                                        device_name=device_name,
-                                        sweep_number=1,
-                                        is_memristive=is_memristive,
-                                        filename=file_name
-                                    )
-                            except Exception as plot_exc:
-                                print(f"[PLOT ERROR] Failed to queue background plotting: {plot_exc}")
-
-                    # Schedule GUI update on main thread
                     if hasattr(self, 'master') and self.master:
                         self.master.after(0, update_gui)
                     else:
@@ -1107,102 +1022,26 @@ class MeasurementGUI:
                     debug_print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
                     import traceback
                     traceback.print_exc()
-                    # Try to update GUI with error message
                     if hasattr(self, 'master') and self.master:
                         def show_error():
                             try:
                                 if hasattr(self, 'plot_panels'):
-                                    self.plot_panels.log_graph_activity(f"Analysis failed: {str(exc)[:50]}")
-                            except:
+                                    self.plot_panels.log_graph_activity(
+                                        f"Analysis failed: {str(exc)[:50]}"
+                                    )
+                            except Exception:
                                 pass
                         self.master.after(0, show_error)
 
-            # Start analysis in background thread
-            analysis_thread = _threading.Thread(target=run_analysis_thread, daemon=True, name="AnalysisThread")
-            analysis_thread.start()
+            _threading.Thread(target=run_analysis_thread, daemon=True, name="AnalysisThread").start()
 
-            # Log that analysis is starting
             if hasattr(self, 'plot_panels'):
                 self.plot_panels.log_graph_activity(f"Analysis queued: {file_name} ({analysis_level})")
 
-            # Return immediately - analysis will continue in background
-            # For custom sequences, we need to check for pending results
-            if is_custom_sequence and sweep_number == 1:
-                # Wait a short time for analysis to complete (non-blocking check)
-                # The actual result will be stored in _pending_analysis_results
-                return None
-
-            # For non-custom sequences, return None (analysis happens in background)
             return None
-            
-            # Run analysis
-            debug_print(f"[ANALYSIS] Running analysis (level: {analysis_level}) on {len(v_arr)} points...")
-            analysis_data = quick_analyze(
-                voltage=v_arr,
-                current=i_arr,
-                time=t_arr,
-                metadata=metadata,
-                analysis_level=analysis_level,
-                device_id=device_id,
-                cycle_number=cycle_number,
-                save_directory=sample_save_dir  # Use sample-level for tracking/research
-            )
-
-            # Update stats window and panel
-            self.update_analysis_stats(analysis_data, analysis_level)
-
-            # Update top bar classification display
-            self.update_classification_display(analysis_data.get('classification', {}))
-
-            # Save analysis results to file
-            self._save_analysis_results(analysis_data, save_dir, file_name, analysis_level)
-
-            # === AUTO-TRIGGER RESEARCH ANALYSIS FOR MEMRISTIVE DEVICES ===
-            # If device is memristive, run full research analysis in background
-            device_type = analysis_data.get('classification', {}).get('device_type', '')
-            memristivity_score = analysis_data.get('classification', {}).get('memristivity_score', 0)
-
-            if device_type in ['memristive', 'memcapacitive'] or (memristivity_score and memristivity_score > 60):
-                # Spawn background thread for research-level analysis
-                import threading
-
-                def run_research_analysis():
-                    try:
-                        debug_print(f"[RESEARCH] Starting background research analysis for {file_name}...")
-
-                        # Use sample-level directory for research (same as tracking)
-                        research_save_dir = sample_save_dir
-
-                        # Run research-level analysis
-                        research_data = quick_analyze(
-                            voltage=v_arr,
-                            current=i_arr,
-                            time=t_arr,
-                            metadata=metadata,
-                            analysis_level='research',
-                            device_id=device_id,
-                            cycle_number=cycle_number,
-                            save_directory=research_save_dir  # Use sample-level
-                        )
-
-                        # Save to device-specific research folder (within sample-level directory)
-                        self._save_research_analysis(research_data, research_save_dir, file_name, device_id)
-
-                        debug_print(f"[RESEARCH] Background research analysis complete for {file_name}")
-                    except Exception as e:
-                        debug_print(f"[RESEARCH ERROR] Background analysis failed: {e}")
-
-                # Start background thread (daemon so it doesn't block exit)
-                research_thread = _threading.Thread(target=run_research_analysis, daemon=True)
-                research_thread.start()
-
-                debug_print(f"[RESEARCH] Background research analysis queued (memristive device detected, score={memristivity_score:.1f})")
-
-            debug_print("[ANALYSIS] Analysis complete and results saved")
 
         except Exception as exc:
-            # Log error but don't interrupt measurement flow
-            debug_print(f"[ANALYSIS ERROR] Failed to run analysis: {exc}")
+            debug_print(f"[ANALYSIS ERROR] Failed to queue analysis: {exc}")
             import traceback
             traceback.print_exc()
             return None
@@ -1455,28 +1294,6 @@ class MeasurementGUI:
             
             debug_print(f"[ANALYSIS] Results saved to: {os.path.abspath(analysis_file)}")
             
-            # Update classification log if classification-level analysis was performed
-            if analysis_level in ['classification', 'full', 'research']:
-                try:
-                    # Get device directory from save_dir (should be G/{device_num}/)
-                    # If save_dir is already device-level, use it; otherwise try to extract
-                    device_dir = save_dir
-                    
-                    # If save_dir is sample-level, try to construct device directory
-                    if 'sample_analysis' in save_dir or not os.path.basename(save_dir).isdigit():
-                        # Try to extract device directory from path or use a fallback
-                        # For now, use save_dir as-is and let _append_classification_log handle it
-                        pass
-                    
-                    self._append_classification_log(
-                        save_dir=device_dir,
-                        file_name=file_name,
-                        analysis_data=analysis_data
-                    )
-                except Exception as log_exc:
-                    debug_print(f"[ANALYSIS] Failed to update classification log: {log_exc}")
-                    # Non-critical error, don't fail the whole save operation
-            
         except Exception as exc:
             debug_print(f"[ANALYSIS ERROR] Failed to save analysis results: {exc}")
             import traceback
@@ -1709,13 +1526,16 @@ class MeasurementGUI:
         is_memristive: Optional[bool] = None,
         filename: Optional[str] = None,
         measurement_type: str = "IV",
-        measurement_params: Optional[dict] = None
+        measurement_params: Optional[dict] = None,
+        *,
+        include_conduction: bool = False,
     ) -> None:
         """Plot measurement graphs in background thread using UnifiedPlotter."""
         _plot_measurement_in_background(
             self, voltage, current, timestamps, save_dir, device_name, sweep_number,
             is_memristive=is_memristive, filename=filename,
             measurement_type=measurement_type, measurement_params=measurement_params,
+            include_conduction=include_conduction,
         )
 
     def _generate_sequence_summary(
