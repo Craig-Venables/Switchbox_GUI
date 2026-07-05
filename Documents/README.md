@@ -13,6 +13,7 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 | **[`ai/`](ai/)** | AI tooling | Short orientation: where code and docs live, what to update when imports change |
 | **[`../packaging/`](../packaging/)** | Release / CI | PyInstaller specs and build scripts for main app and Pulse Testing GUI |
 | **[`../tools/`](../tools/)** | Lab & analysis | Standalone utilities — see **[tools/README.md](../tools/README.md)** |
+| **[`../docs/classification/`](../docs/classification/)** | Developers | IV classifier GitHub repo, sync workflow, integration map — **[README](../docs/classification/README.md)** |
 | **[`../Helpers/`](../Helpers/)** | Deprecated | Redirect only — see [Helpers/README.md](../Helpers/README.md) |
 
 ## Guides ([`guides/`](guides/))
@@ -57,6 +58,12 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 - Analysis: `tools/data_analysis_pulse_2450/`, `tools/device_visualizer/`, `tools/classification_validation/`  
 - Setup: `tools/maps_create/`, `tools/equipment_address_location/`  
 - AFM: `tools/afm_3d_holes_protrusion/`, `tools/afm_curve_analysis/`  
+
+## IV classification ([`../docs/classification/`](../docs/classification/))
+
+- **[README.md](../docs/classification/README.md)** — GitHub repo link, daily workflow, integration map  
+- **[SYNC.md](../docs/classification/SYNC.md)** — sync Switchbox_GUI → [memristive-iv-classifier](https://github.com/Craig-Venables/memristive-iv-classifier) and push  
+- External deep docs: [github.com/Craig-Venables/memristive-iv-classifier/tree/master/docs](https://github.com/Craig-Venables/memristive-iv-classifier/tree/master/docs)
 
 ---
 
