@@ -47,7 +47,7 @@ FILTERS = [
     "Not reviewed (priority)",
     "High review priority",
     "Non-conductive / noise",
-    "Rectifying / weak forming",
+    "Predicted: memristive (rectifying)",
     "Promising yield (forming+)",
     "Low confidence (<40%)",
     "Uncertain",
@@ -60,7 +60,7 @@ FILTERS = [
     "Predicted: ohmic",
     "Predicted: conductive",
     "Predicted: non_conductive",
-    "Predicted: rectifying",
+    "Predicted: memristive (rectifying)",
     "All",
 ]
 
@@ -330,9 +330,10 @@ class ClassificationReviewApp:
                 or row.get("is_noisy") is True
                 or row.get("is_noisy") == "True"
             )
-        if filt == "Rectifying / weak forming":
+        if filt == "Predicted: memristive (rectifying)":
             return (
-                row.get("predicted_type") == "rectifying"
+                row.get("rectifying_character") is True
+                or row.get("rectifying_character") == "True"
                 or row.get("weak_rectifying") is True
                 or row.get("weak_rectifying") == "True"
             )
@@ -377,7 +378,9 @@ class ClassificationReviewApp:
             f"Device: {row.get('device_key', '')}  |  Sample {row.get('sample_id', '')}"
             + (f"  |  Material: {row.get('material')}" if row.get("material") else "")
             + (f"  |  From: {row.get('origin_dataset')}" if row.get("origin_dataset") else ""),
-            f"Predicted: {row.get('predicted_type', '?')}  ({row.get('confidence_pct', 0)}% confidence)",
+            f"Predicted: {row.get('predicted_type', '?')}"
+            + ("  [rectifying character]" if row.get("rectifying_character") in (True, "True") else "")
+            + f"  ({row.get('confidence_pct', 0)}% confidence)",
             f"Forming stage: {row.get('forming_stage', '—')}  |  Yield bucket: {row.get('yield_bucket', '—')}",
             f"Rectifying tier: {row.get('rectifying_tier', '—')}",
             f"Memristivity score: {row.get('memristivity_score', '—')}",

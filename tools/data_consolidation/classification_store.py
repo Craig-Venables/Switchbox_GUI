@@ -29,7 +29,7 @@ FILENAME_RE = re.compile(r"^(D\d+)-([A-Za-z])-(\d+)-(.+)$", re.IGNORECASE)
 # Optional material prefix from nested sources: WS2-D15-G-1-...
 MATERIAL_STRIP_RE = re.compile(r"^.*?-(D\d+-)", re.IGNORECASE)  # kept for reference; use _canonical_stem
 
-PROMISING_DEVICE_TYPES = frozenset({"memristive", "rectifying"})
+PROMISING_DEVICE_TYPES = frozenset({"memristive"})
 FORMED_DEVICE_TYPES = frozenset({"memristive"})
 FORMED_RECTIFYING_STAGES = frozenset({"formed_rectifying"})
 
@@ -38,7 +38,6 @@ VALID_USER_LABELS = (
     "capacitive",
     "conductive",
     "ohmic",
-    "rectifying",
     "non_conductive",
     "uncertain",
     "skip",
@@ -146,6 +145,38 @@ def parse_sweep_index(name: str) -> int:
         return 0
 
 
+# Patterns to extract sweep parameters from filenames
+# e.g. "8-FS-2.2v-0.05sv-0.05sd-Py-St_v2-" → type=FS, voltage=2.2
+_SWEEP_TYPE_RE = re.compile(r"-(FS|RS|Endurance|Retention|Pulse[^-]*)-", re.IGNORECASE)
+_SWEEP_VOLTAGE_RE = re.compile(r"-(\d+(?:\.\d+)?)v-", re.IGNORECASE)
+
+
+def parse_sweep_params(name: str) -> Dict[str, str]:
+    """
+    Extract sweep type and voltage from a consolidated filename.
+
+    Returns a dict with keys 'sweep_type' and 'sweep_voltage_v'.
+    Both default to '' if not parseable.
+
+    Examples:
+        D108-B-4-8-FS-2.2v-0.05sv-...  → {'sweep_type': 'FS', 'sweep_voltage_v': '2.2'}
+        D94-A-1-3-RS-1.5v-...           → {'sweep_type': 'RS', 'sweep_voltage_v': '1.5'}
+    """
+    stem = Path(name).stem
+    sweep_type = ""
+    sweep_voltage = ""
+
+    m = _SWEEP_TYPE_RE.search(stem)
+    if m:
+        sweep_type = m.group(1).upper()
+
+    m = _SWEEP_VOLTAGE_RE.search(stem)
+    if m:
+        sweep_voltage = m.group(1)
+
+    return {"sweep_type": sweep_type, "sweep_voltage_v": sweep_voltage}
+
+
 def record_sweep_sort_key(rec: Dict[str, Any]) -> tuple:
     """Sort key: device, numeric sweep index, then filename."""
     row = rec.get("row", {}) or {}
@@ -161,6 +192,7 @@ def sort_records_by_device_sweep(records: List[Dict[str, Any]]) -> List[Dict[str
 def extract_summary_row(file_path: Path, analysis: Dict[str, Any]) -> Dict[str, Any]:
     """Flatten analysis dict to a CSV-friendly row."""
     meta = parse_consolidated_filename(file_path.name)
+    sweep_params = parse_sweep_params(file_path.name)
     clf = analysis.get("classification", {}) or {}
     feats = clf.get("features", {}) or {}
     res = analysis.get("resistance_metrics", {}) or {}
@@ -171,6 +203,9 @@ def extract_summary_row(file_path: Path, analysis: Dict[str, Any]) -> Dict[str, 
     mem_score = clf.get("memristivity_score")
     if mem_score is None:
         mem_score = feats.get("memristivity_score")
+    compliance_limited = bool(feats.get("compliance_limited", False))
+    warnings = clf.get("warnings") or []
+    has_override = any("OVERRIDE" in str(w) for w in warnings)
 
     origin = infer_origin_dataset(file_path.name)
     base_device_key = build_device_key(meta["sample_id"], meta["section"], meta["device_number"])
@@ -192,6 +227,8 @@ def extract_summary_row(file_path: Path, analysis: Dict[str, Any]) -> Dict[str, 
         "device_group_key": device_group_key,
         "material": meta.get("material", ""),
         "sweep_index": meta.get("sweep_index", "0"),
+        "sweep_type": sweep_params["sweep_type"],
+        "sweep_voltage_v": sweep_params["sweep_voltage_v"],
         "origin_dataset": origin,
         "predicted_type": device_type,
         "confidence": round(confidence, 4),
@@ -206,6 +243,8 @@ def extract_summary_row(file_path: Path, analysis: Dict[str, Any]) -> Dict[str, 
         "double_zero_crossing": bool(feats.get("double_zero_crossing", False)),
         "switching_behavior": bool(feats.get("switching_behavior", False)),
         "is_noisy": bool(feats.get("is_noisy", False)),
+        "compliance_limited": compliance_limited,
+        "rectifying_character": bool(feats.get("rectifying_character", False)),
         "weak_rectifying": bool(feats.get("weak_rectifying", False)),
         "noise_reason": feats.get("noise_reason") or "",
         "ron_mean": res.get("ron_mean", ""),
@@ -215,16 +254,38 @@ def extract_summary_row(file_path: Path, analysis: Dict[str, Any]) -> Dict[str, 
         "score_capacitive": breakdown.get("capacitive", ""),
         "score_conductive": breakdown.get("conductive", ""),
         "score_ohmic": breakdown.get("ohmic", ""),
-        "score_rectifying": breakdown.get("rectifying", ""),
         "review_priority": _review_priority(
-            device_type, confidence, mem_score, bool(feats.get("is_noisy", False))
+            device_type,
+            confidence,
+            mem_score,
+            bool(feats.get("is_noisy", False)),
+            compliance_limited=compliance_limited,
+            has_override=has_override,
         ),
     }
 
 
-def _review_priority(device_type: str, confidence: float, mem_score: Optional[float], is_noisy: bool = False) -> str:
-    if device_type == "rectifying":
-        return "medium"
+def _review_priority(
+    device_type: str,
+    confidence: float,
+    mem_score: Optional[float],
+    is_noisy: bool = False,
+    compliance_limited: bool = False,
+    has_override: bool = False,
+) -> str:
+    """
+    Assign a manual-review priority for the sweep.
+
+    high   → classifier is uncertain, contradicted itself, or compliance was hit
+    medium → moderate confidence / borderline forming / rectifying needs verification
+    low    → high-confidence, unambiguous classification
+    """
+    # Compliance-saturated sweeps: scoring was penalised, result uncertain
+    if compliance_limited:
+        return "high"
+    # Any post-classification override was applied (contradiction resolved automatically)
+    if has_override:
+        return "high"
     if device_type == "non_conductive" or is_noisy:
         return "low"
     if device_type == "uncertain" or confidence < 0.4:
@@ -278,7 +339,7 @@ def save_results(
 
 
 def build_summary_text(rows: List[Dict[str, Any]]) -> str:
-    from collections import Counter
+    from collections import Counter, defaultdict
 
     lines = ["CLASSIFICATION BATCH SUMMARY", "=" * 60, f"Total files: {len(rows)}", ""]
 
@@ -299,6 +360,9 @@ def build_summary_text(rows: List[Dict[str, Any]]) -> str:
     lines.append(f"Low confidence (<40%): {len(low_conf)}")
     uncertain = [r for r in rows if r["predicted_type"] == "uncertain"]
     lines.append(f"Uncertain type: {len(uncertain)}")
+    compliance_lim = [r for r in rows if r.get("compliance_limited")]
+    if compliance_lim:
+        lines.append(f"Compliance-limited sweeps: {len(compliance_lim)} (review_priority=high)")
     lines.append("")
 
     lines.append("Average confidence by predicted type:")
@@ -310,6 +374,52 @@ def build_summary_text(rows: List[Dict[str, Any]]) -> str:
         avg = sum(vals) / len(vals) if vals else 0
         lines.append(f"  {dtype:16s} avg confidence {avg*100:.1f}%  (n={len(vals)})")
     lines.append("")
+
+    # --- Per origin-dataset breakdown ---
+    origins = set(r.get("origin_dataset", "") for r in rows if r.get("origin_dataset"))
+    if len(origins) > 1:
+        lines.append("Per origin-dataset breakdown:")
+        by_origin: Dict[str, Counter] = defaultdict(Counter)
+        for r in rows:
+            by_origin[r.get("origin_dataset", "unknown")][r["predicted_type"]] += 1
+        for origin in sorted(by_origin):
+            total_o = sum(by_origin[origin].values())
+            mem_n = by_origin[origin].get("memristive", 0)
+            lines.append(
+                f"  {origin:<20} {total_o:5d} sweeps  "
+                f"memristive={mem_n} ({100*mem_n/total_o:.0f}%)"
+            )
+        lines.append("")
+
+    # --- Per sweep-type breakdown (FS / RS etc.) ---
+    sweep_types = [r.get("sweep_type", "") for r in rows if r.get("sweep_type")]
+    if sweep_types:
+        st_counts = Counter(sweep_types)
+        lines.append("Per sweep-type breakdown:")
+        for st, n in st_counts.most_common():
+            st_rows = [r for r in rows if r.get("sweep_type") == st]
+            mem_n = sum(1 for r in st_rows if r["predicted_type"] == "memristive")
+            unc_n = sum(1 for r in st_rows if r["predicted_type"] == "uncertain")
+            lines.append(
+                f"  {st:<8} {n:5d} sweeps  "
+                f"memristive={mem_n} ({100*mem_n/n:.0f}%)  "
+                f"uncertain={unc_n} ({100*unc_n/n:.0f}%)"
+            )
+        lines.append("")
+
+    # --- Sweep voltage breakdown for uncertain/low-confidence ---
+    unc_voltages = [
+        r.get("sweep_voltage_v", "")
+        for r in rows
+        if r["predicted_type"] in ("uncertain",) and r.get("sweep_voltage_v")
+    ]
+    if unc_voltages:
+        v_counts = Counter(unc_voltages)
+        lines.append("Uncertain sweeps by sweep voltage (top 5):")
+        for v, n in v_counts.most_common(5):
+            lines.append(f"  {v}V: {n}")
+        lines.append("  (Low voltages may need a lower noise threshold.)")
+        lines.append("")
 
     lines.append("Likely strong areas (high confidence, clear type):")
     strong = [r for r in rows if r["confidence"] >= 0.7 and r["predicted_type"] not in ("uncertain",)]
@@ -323,25 +433,41 @@ def build_summary_text(rows: List[Dict[str, Any]]) -> str:
     lines.append("  2. closed nonlinear curves vs true memristive loops")
     lines.append("  3. capacitive vs memristive")
     lines.append("  4. ohmic with artifact hysteresis")
+    lines.append("  5. compliance-limited sweeps (hardware current ceiling hit)")
     lines.append("")
     nc = type_counts.get("non_conductive", 0)
     if nc:
         lines.append(f"Non-conductive (open/noise, auto-detected): {nc} — low review priority")
-    rect = type_counts.get("rectifying", 0)
-    if rect:
-        lines.append(
-            f"Rectifying (precursor + formed diode types): {rect} — review forming / stable rectifiers"
-        )
     lines.append("")
     lines.append("Device-level promising yield: see device_yield_summary.json")
-    lines.append("")
-    lines.append("Open review GUI: python tools/data_consolidation/launch_review.py")
+    lines.append("Corrections analysis:  python tools/data_consolidation/analyze_corrections.py")
+    lines.append("Open review GUI:       python tools/data_consolidation/launch_review.py")
     return "\n".join(lines)
 
 
 def build_device_yield_summaries(records: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Aggregate per-device forming stage and yield buckets from batch records."""
+    """
+    Aggregate per-device forming stage and yield buckets from batch records.
+
+    Improvements over the original logic:
+    - Uses DeviceSweepAggregator for trajectory analysis and smarter yield tiers
+      (requires 2+ memristive sweeps OR a single high-score sweep for 'formed')
+    - Adds trajectory, memristivity_trend, peak_forming_stage, best_memristivity_score fields
+    - Adds per-material memristive sweep counts for cross-dataset comparison
+    """
     from collections import Counter, defaultdict
+
+    # Import here to avoid circular imports at module load time
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _root = _Path(__file__).resolve().parents[2]
+        if str(_root) not in _sys.path:
+            _sys.path.insert(0, str(_root))
+        from analysis.aggregators.device_analyzer import DeviceSweepAggregator
+        _has_aggregator = True
+    except ImportError:
+        _has_aggregator = False
 
     devices: Dict[str, Dict[str, Any]] = defaultdict(
         lambda: {
@@ -382,27 +508,35 @@ def build_device_yield_summaries(records: List[Dict[str, Any]]) -> Dict[str, Dic
     summaries: Dict[str, Dict[str, Any]] = {}
     for key, entry in devices.items():
         entry["sweeps"].sort(key=lambda s: (s.get("sweep_index", 0), s.get("filename", "")))
-        types = set(entry["type_counts"].keys())
-        ever_memristive = bool(types & FORMED_DEVICE_TYPES)
-        ever_rectifying = "rectifying" in types
-        ever_promising = bool(types & PROMISING_DEVICE_TYPES)
-
         sweep_stages = [s["forming_stage"] for s in entry["sweeps"] if s.get("forming_stage")]
-        has_formed_rectifying = bool(set(sweep_stages) & FORMED_RECTIFYING_STAGES)
-        only_precursor_rect = ever_rectifying and not has_formed_rectifying
 
-        if ever_memristive:
-            yield_tier = "formed"
-            device_forming_stage = "formed_memristive"
-        elif has_formed_rectifying:
-            yield_tier = "formed_rectifying"
-            device_forming_stage = "formed_rectifying"
-        elif only_precursor_rect:
-            yield_tier = "forming"
-            device_forming_stage = "precursor_rectifying"
+        if _has_aggregator:
+            agg = DeviceSweepAggregator(entry["sweeps"])
+            agg_summary = agg.summarize()
+            yield_tier = agg_summary["yield_tier"]
+            device_forming_stage = agg_summary.get("peak_forming_stage") or (
+                "formed_memristive" if yield_tier == "formed"
+                else "formed_rectifying" if yield_tier == "formed_rectifying"
+                else "precursor_rectifying" if yield_tier == "forming"
+                else "unformed"
+            )
         else:
-            yield_tier = "none"
-            device_forming_stage = "unformed"
+            # Fallback to original logic if aggregator import fails
+            types = set(entry["type_counts"].keys())
+            ever_memristive = bool(types & FORMED_DEVICE_TYPES)
+            has_formed_rectifying = bool(set(sweep_stages) & FORMED_RECTIFYING_STAGES)
+            has_precursor_rect = bool(set(sweep_stages) & {"precursor_rectifying"})
+            agg_summary = {}
+            if ever_memristive and not has_formed_rectifying:
+                yield_tier, device_forming_stage = "formed", "formed_memristive"
+            elif has_formed_rectifying:
+                yield_tier, device_forming_stage = "formed_rectifying", "formed_rectifying"
+            elif ever_memristive or has_precursor_rect:
+                yield_tier, device_forming_stage = "forming", "precursor_rectifying"
+            else:
+                yield_tier, device_forming_stage = "none", "unformed"
+
+        ever_promising = bool(entry["type_counts"].get("memristive", 0))
 
         summaries[key] = {
             "device_key": entry["device_key"],
@@ -413,9 +547,14 @@ def build_device_yield_summaries(records: List[Dict[str, Any]]) -> Dict[str, Dic
             "sweep_count": entry["sweep_count"],
             "type_counts": dict(entry["type_counts"]),
             "yield_tier": yield_tier,
-            "yield": 1 if (ever_memristive or has_formed_rectifying) else 0,
+            "yield": 1 if yield_tier in ("formed", "formed_rectifying") else 0,
             "yield_promising": 1 if ever_promising else 0,
             "device_forming_stage": device_forming_stage,
+            "trajectory": agg_summary.get("trajectory", ""),
+            "memristivity_trend": agg_summary.get("memristivity_trend", ""),
+            "peak_forming_stage": agg_summary.get("peak_forming_stage", device_forming_stage),
+            "best_memristivity_score": agg_summary.get("best_memristivity_score"),
+            "memristive_sweep_count": agg_summary.get("memristive_sweep_count", entry["type_counts"].get("memristive", 0)),
             "forming_stages_seen": list(dict.fromkeys(sweep_stages)),
             "latest_type": entry["sweeps"][-1]["predicted_type"] if entry["sweeps"] else "",
             "latest_forming_stage": sweep_stages[-1] if sweep_stages else device_forming_stage,
@@ -434,6 +573,10 @@ def save_device_yield_summary(
     formed_rect = sum(1 for s in summaries.values() if s["yield_tier"] == "formed_rectifying")
     forming = sum(1 for s in summaries.values() if s["yield_tier"] == "forming")
     promising = sum(1 for s in summaries.values() if s["yield_promising"] == 1)
+    # Trajectory distribution
+    from collections import Counter as _Counter
+    traj_counts = _Counter(s.get("trajectory", "") for s in summaries.values() if s.get("trajectory"))
+    regression_count = traj_counts.get("regression", 0)
     payload = _json_safe(
         {
             "generated_at": datetime.now().isoformat(),
@@ -442,6 +585,8 @@ def save_device_yield_summary(
             "yield_formed_rectifying_count": formed_rect,
             "yield_forming_count": forming,
             "yield_promising_count": promising,
+            "trajectory_distribution": dict(traj_counts),
+            "regression_count": regression_count,
             "devices": summaries,
         }
     )

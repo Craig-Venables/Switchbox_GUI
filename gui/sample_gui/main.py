@@ -120,6 +120,7 @@ from gui.sample_gui.routing_controller import RoutingController
 from gui.sample_gui.selection_controller import SelectionController
 from gui.sample_gui.status_store import StatusStore
 from gui.sample_gui.classification_overlay import ClassificationOverlayController
+from gui.sample_gui.reclassify_controller import ReclassifyController
 
 
 class SampleGUI:
@@ -207,6 +208,7 @@ class SampleGUI:
         self.terminal_log = TerminalLogController(self)
         self.telegram_ctrl = TelegramController(self)
         self._load_telegram_bots()
+        self.reclassify_ctrl = ReclassifyController(self)
         self.classification_overlay = ClassificationOverlayController(self)
 
         # =========================
@@ -263,6 +265,7 @@ class SampleGUI:
         create_terminal_log(self)
         create_quick_scan_ui(self)
         create_status_bar(self)
+        self.reclassify_ctrl.update_menu_labels()
 
         # =========================
         # INITIALIZATION

@@ -33,6 +33,7 @@ hiddenimports = [
 
 datas = [
     (os.path.join(REPO_ROOT, "Json_Files"), "Json_Files"),
+    (os.path.join(REPO_ROOT, "tools", "data_analysis_pulse_2450", "resources"), "resources"),
 ]
 
 a = Analysis(

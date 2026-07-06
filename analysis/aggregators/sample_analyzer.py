@@ -1014,7 +1014,7 @@ Sample: {self.sample_name}
                         section_positions[section]['qualities'].append(q)
                     section_positions[section]['total'] += 1
                     dtype = dev['classification'].get('device_type')
-                    if dtype in ('memristive', 'rectifying', 'memcapacitive'):
+                    if dtype in ('memristive', 'memcapacitive'):
                         section_positions[section]['yield'] += 1
             sections = sorted(section_positions.keys())
             metrics = {'avg_score': [np.mean(section_positions[s]['scores']) if section_positions[s]['scores'] else 0 for s in sections], 'avg_quality': [np.mean(section_positions[s]['qualities']) if section_positions[s]['qualities'] else 0 for s in sections], 'yield_pct': [100 * section_positions[s]['yield'] / section_positions[s]['total'] if section_positions[s]['total'] > 0 else 0 for s in sections]}
