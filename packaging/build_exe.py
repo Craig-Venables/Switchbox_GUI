@@ -20,6 +20,13 @@ from pathlib import Path
 
 
 def main() -> int:
+    if sys.version_info[:3] == (3, 10, 0):
+        print(
+            "Error: Python 3.10.0 breaks PyInstaller analysis.\n"
+            "Use Python 3.10.11+ or 3.11+ (see Documents/build/BUILD_INSTRUCTIONS.md)."
+        )
+        return 1
+
     packaging_dir = Path(__file__).resolve().parent
     repo_root = packaging_dir.parent
     spec = packaging_dir / "build_exe.spec"
@@ -41,7 +48,6 @@ def main() -> int:
         "-m",
         "PyInstaller",
         str(spec),
-        "--clean",
         "--noconfirm",
     ]
     print("Running:", " ".join(cmd))

@@ -4331,16 +4331,12 @@ class MeasurementGUI:
 
         def _show_calibration_curve():
             try:
-                import subprocess
-                import sys
-                from pathlib import Path
-                from Equipment.Laser_Power_Meter import plot_laser_calibration
-                script = Path(plot_laser_calibration.__file__).resolve()
-                repo_root = script.parent.parent.parent
-                subprocess.Popen(
-                    [sys.executable, str(script)],
-                    cwd=str(repo_root),
-                    creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0,
+                from gui.frozen_launch import launch_python_script, repo_root
+
+                launch_python_script(
+                    "Equipment/Laser_Power_Meter/plot_laser_calibration.py",
+                    cwd=repo_root(),
+                    new_console=sys.platform == "win32",
                 )
             except Exception as e:
                 messagebox.showerror("Calibration curve", f"Could not open plot.\n{e}")

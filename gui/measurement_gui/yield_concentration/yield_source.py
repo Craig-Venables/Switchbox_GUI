@@ -14,7 +14,7 @@ Determines per-device yield with the following priority:
 
   3. Auto-classify from device_tracking history JSONs
      yield = 1 if ANY measurement ever had device_type == "memristive", else 0.
-     yield_promising = 1 if ever memristive or rectifying.
+     yield_promising = 1 if ever memristive (includes rectifying-character sub-type).
      Saves a new JSON manifest so future runs use priority 2.
 """
 
@@ -39,7 +39,7 @@ _MANIFEST_REL = os.path.join("sample_analysis", "yield_analysis", "yield_manifes
 
 _EXCLUDE_TXT = {"classification_log.txt", "classification_summary.txt", "log.txt"}
 
-PROMISING_DEVICE_TYPES = frozenset({"memristive", "rectifying"})
+PROMISING_DEVICE_TYPES = frozenset({"memristive"})
 FORMED_DEVICE_TYPES = frozenset({"memristive"})
 
 
@@ -114,7 +114,7 @@ def compute_sample_yield(per_device: Dict[str, Dict[str, Any]]) -> float:
 
 
 def compute_sample_promising_yield(per_device: Dict[str, Dict[str, Any]]) -> float:
-    """Fraction of devices with yield_promising == 1 (memristive or rectifying)."""
+    """Fraction of devices with yield_promising == 1 (memristive, including rectifying sub-type)."""
     if not per_device:
         return 0.0
     total = len(per_device)
@@ -241,7 +241,7 @@ def _auto_classify(
                             if classification_type == "unknown":
                                 classification_type = dt
                         if stage == "formed_rectifying" or (
-                            dt_lower == "rectifying"
+                            clf.get("features", {}).get("rectifying_character")
                             and clf.get("features", {}).get("rectifying_tier") == "formed"
                         ):
                             ever_formed_rectifying = True

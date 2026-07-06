@@ -9,7 +9,6 @@ New tool integration:
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +16,8 @@ from typing import List, Optional, Protocol, runtime_checkable
 
 import tkinter as tk
 from tkinter import messagebox
+
+from gui.frozen_launch import launch_registered_tool, resolve_bundled_script
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,23 +46,20 @@ class SubprocessTool:
 
     def launch(self, parent: tk.Misc) -> None:
         cwd = self.cwd or _PROJECT_ROOT
-        script = _PROJECT_ROOT / self.module_path
-        if not script.exists():
+        if resolve_bundled_script(self.module_path) is None:
             messagebox.showerror(
                 self.label,
-                f"Tool script not found:\n{script}",
+                f"Tool script not found:\n{_PROJECT_ROOT / self.module_path}",
                 parent=parent,
             )
             return
         try:
-            popen_kwargs: dict = {"cwd": str(cwd)}
-            if sys.platform == "win32":
-                popen_kwargs["creationflags"] = subprocess.CREATE_NEW_CONSOLE
-            subprocess.Popen(
-                [sys.executable, str(script)],
-                **popen_kwargs,
+            launch_registered_tool(
+                self.tool_id,
+                module_path=self.module_path,
+                cwd=cwd,
             )
-        except OSError as exc:
+        except (OSError, FileNotFoundError) as exc:
             messagebox.showerror(
                 self.label,
                 f"Failed to launch {self.label}:\n{exc}",
