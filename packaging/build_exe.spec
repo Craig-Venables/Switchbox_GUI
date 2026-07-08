@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for Switchbox_GUI v6 (windowed, onedir).
+PyInstaller spec for Switchbox_GUI v6.1 (windowed, onedir).
 
 Build from repository root::
 
@@ -113,6 +113,7 @@ def _tool_script_datas() -> list:
         "tools/Display",
         "tools/LED_testing",
         "tools/data_analysis_pulse_2450",
+        "tools/device_visualizer",
         "Equipment/Laser_Power_Meter",
     )
     out: list = []
@@ -140,6 +141,7 @@ hiddenimports: list = []
 # Lazy-imported analysis / plotting (measurement GUI classification & plots)
 hiddenimports.extend(_modules_from_pkg_path("analysis", "analysis"))
 hiddenimports.extend(_modules_from_pkg_path("plotting", "plotting"))
+hiddenimports.extend(_modules_from_pkg_path("Pulse_Testing", "Pulse_Testing"))
 
 # Measurement GUI top-bar child windows (lazy-imported from child_gui_launchers)
 _CHILD_GUI_PACKAGES = (
@@ -156,6 +158,10 @@ for _pkg, _folder in _CHILD_GUI_PACKAGES:
 # Lazy importlib / backends / hardware (see Documents/build/BUILD_MODULES.md)
 hiddenimports += [
     "Equipment.SMU_AND_PMU.4200A.C_Code_with_python_scripts.A_Iv_Sweep.run_smu_vi_sweep",
+    "Equipment.SMU_AND_PMU.keithley4200.kxci_scripts",
+    "Equipment.SMU_AND_PMU.Keithley2450_TSP",
+    "Equipment.SMU_AND_PMU.keithley2450_tsp_scripts",
+    "Equipment.Oscilloscopes.TektronixTBS1000C",
     "matplotlib.backends.backend_tkagg",
     "matplotlib.backends.backend_qtagg",
     "PIL._tkinter_finder",
