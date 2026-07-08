@@ -36,6 +36,9 @@ _spec.loader.exec_module(_config)
 BuildTarget = _config.BuildTarget
 CopyArtifact = _config.CopyArtifact
 RELEASE_DIR_NAME = _config.RELEASE_DIR_NAME
+RELEASE_VERSION = _config.RELEASE_VERSION
+TOP_BAR_BUILD_KEYS = _config.TOP_BAR_BUILD_KEYS
+TOP_BAR_ARTIFACT_KEYS = _config.TOP_BAR_ARTIFACT_KEYS
 assembly_artifacts = _config.assembly_artifacts
 release_root = _config.release_root
 repo_targets = _config.repo_targets
@@ -141,7 +144,12 @@ def _copy_tree(src: Path, dest: Path) -> None:
         shutil.copy2(src, dest)
 
 
-def _assemble(repo_root: Path, *, skip_optional: bool) -> int:
+def _assemble(
+    repo_root: Path,
+    *,
+    skip_optional: bool,
+    artifacts: list | None = None,
+) -> int:
     out_root = release_root(repo_root)
     if out_root.exists():
         print(f"Removing previous {out_root}")
@@ -151,7 +159,7 @@ def _assemble(repo_root: Path, *, skip_optional: bool) -> int:
     errors: list[str] = []
     skipped: list[str] = []
 
-    for artifact in assembly_artifacts():
+    for artifact in artifacts or assembly_artifacts():
         src = _resolve_source(repo_root, artifact.source_globs)
         if src is None:
             if artifact.required and not skip_optional:
@@ -168,8 +176,8 @@ def _assemble(repo_root: Path, *, skip_optional: bool) -> int:
     readme.write_text(
         "\n".join(
             [
-                "Switchbox_GUI v6 release package",
-                "================================",
+                f"Switchbox_GUI v{RELEASE_VERSION} release package",
+                "=" * (32 + len(RELEASE_VERSION)),
                 "",
                 "Run the main application:",
                 "  Switchbox_GUI\\Switchbox_GUI.exe",
@@ -181,7 +189,7 @@ def _assemble(repo_root: Path, *, skip_optional: bool) -> int:
                 "  Pulse_Testing_GUI\\Pulse_Testing_GUI.exe",
                 "  Pulse_Testing_GUI_Compact\\Pulse_Testing_GUI_Compact.exe",
                 "",
-                "Distribute this entire folder (zip Switchbox_GUI_v6).",
+                f"Distribute this entire folder (zip {RELEASE_DIR_NAME}).",
                 "",
                 f"Skipped optional copies: {', '.join(skipped) if skipped else 'none'}",
                 "",
@@ -226,6 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not fail when optional targets/artifacts are missing",
     )
+    parser.add_argument(
+        "--main-only",
+        action="store_true",
+        help="Build main app + ScriptRunner + Display/LED tools (top-bar + Hardware Tools)",
+    )
     args = parser.parse_args(argv)
 
     if not args.build and not args.assemble_only:
@@ -236,8 +249,14 @@ def main(argv: list[str] | None = None) -> int:
         return err
 
     targets = repo_targets(repo_root)
-    if args.skip_optional:
+    if args.main_only:
+        targets = [t for t in targets if t.key in TOP_BAR_BUILD_KEYS]
+    elif args.skip_optional:
         targets = [t for t in targets if t.required]
+
+    artifacts = assembly_artifacts()
+    if args.main_only:
+        artifacts = [a for a in artifacts if a.key in TOP_BAR_ARTIFACT_KEYS]
 
     print(f"Repository: {repo_root}")
     print(f"Python: {sys.version.split()[0]} ({sys.executable})")
@@ -248,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
         for w in warnings:
             print(f"  - {w}")
 
-    _print_plan(targets, assembly_artifacts())
+    _print_plan(targets, artifacts)
 
     if args.check and not args.build and not args.assemble_only:
         print(
@@ -272,7 +291,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nBuild stopped — failed targets: {', '.join(failed)}")
             return 1
 
-    return _assemble(repo_root, skip_optional=args.skip_optional)
+    return _assemble(
+        repo_root,
+        skip_optional=args.skip_optional or args.main_only,
+        artifacts=artifacts if args.main_only else None,
+    )
 
 
 if __name__ == "__main__":

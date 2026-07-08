@@ -637,6 +637,10 @@ class MeasurementGUI:
         
         # Build the modern tabbed layout
         self.layout_builder.build_modern_layout(self.master)
+
+        # Keep bottom-bar acquisition status in sync (legacy layout started this in top_banner).
+        self._status_updates_active = True
+        self.master.after(250, self._status_update_tick)
         
         # Set default system
         self.set_default_system()
@@ -1401,9 +1405,17 @@ class MeasurementGUI:
             # Handle None device_type
             if device_type is None:
                 device_type = 'unknown'
-            confidence = classification.get('confidence', 0.0)
-            memristivity_score = classification.get('memristivity_score', 0.0)
-            switching_strength = classification.get('switching_strength', 0.0)
+            def _num(value: Any, default: float = 0.0) -> float:
+                if value is None:
+                    return default
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            confidence = _num(classification.get('confidence'), 0.0)
+            memristivity_score = _num(classification.get('memristivity_score'), 0.0)
+            switching_strength = _num(classification.get('switching_strength'), 0.0)
             reasoning = classification.get('reasoning', '')
             warnings = classification.get('warnings', [])
             
@@ -1442,9 +1454,10 @@ class MeasurementGUI:
                 
                 # Score breakdown
                 f.write(f"Score Breakdown:\n")
-                for dtype, score in sorted(breakdown.items(), key=lambda x: x[1], reverse=True):
-                    if score > 0:
-                        f.write(f"  - {dtype:15s}: {score:6.1f}\n")
+                for dtype, score in sorted(breakdown.items(), key=lambda x: _num(x[1]), reverse=True):
+                    score_val = _num(score)
+                    if score_val > 0:
+                        f.write(f"  - {dtype:15s}: {score_val:6.1f}\n")
                 f.write(f"\n")
                 
                 # Detailed explanation/reasoning
@@ -2658,56 +2671,74 @@ class MeasurementGUI:
 
     def _set_measurement_feedback(self, active: bool, detail: Optional[str] = None) -> None:
         """Update both large top banner and bottom-bar acquisition indicators."""
-        active = bool(active)
-        if detail is not None:
-            self._measurement_activity_detail = str(detail)
+        def _apply() -> None:
+            active_local = bool(active)
+            if detail is not None:
+                self._measurement_activity_detail = str(detail)
+            if not active_local:
+                self._measurement_activity_detail = ""
 
-        detail_text = str(getattr(self, "_measurement_activity_detail", "Acquiring data from instrument"))
-        if getattr(self, "stop_measurement_flag", False) and active:
-            base_text = "Stopping measurement"
-        else:
-            base_text = detail_text if detail_text else "Acquiring data from instrument"
+            detail_text = str(
+                getattr(self, "_measurement_activity_detail", "Acquiring data from instrument")
+            )
+            if getattr(self, "stop_measurement_flag", False) and active_local:
+                base_text = "Stopping measurement"
+            else:
+                base_text = detail_text if detail_text else "Acquiring data from instrument"
 
-        phase = int(getattr(self, "_status_tick_counter", 0)) % 4
-        dots = "." * phase
-        animated_text = f"{base_text}{dots}" if active else "Idle"
+            phase = int(getattr(self, "_status_tick_counter", 0)) % 4
+            dots = "." * phase
+            animated_text = f"{base_text}{dots}" if active_local else "Idle"
 
-        top_label = getattr(self, "measurement_activity_label", None)
-        bottom_label = getattr(self, "status_bar_activity", None)
-        top_progress = getattr(self, "measurement_activity_progress", None)
-        bottom_progress = getattr(self, "status_bar_progress", None)
+            top_label = getattr(self, "measurement_activity_label", None)
+            bottom_label = getattr(self, "status_bar_activity", None)
+            top_progress = getattr(self, "measurement_activity_progress", None)
+            bottom_progress = getattr(self, "status_bar_progress", None)
 
-        if top_label is not None:
-            top_label.config(text=animated_text, fg=("#cc0000" if active else "#4d4d4d"))
-        if bottom_label is not None:
-            bottom_label.config(text=animated_text, fg=("#cc0000" if active else "#4d4d4d"))
+            if top_label is not None:
+                top_label.config(text=animated_text, fg=("#cc0000" if active_local else "#4d4d4d"))
+            if bottom_label is not None:
+                bottom_label.config(text=animated_text, fg=("#cc0000" if active_local else "#4d4d4d"))
 
-        running = bool(getattr(self, "_status_progress_running", False))
-        if active and not running:
-            for bar in (top_progress, bottom_progress):
-                if bar is not None:
-                    try:
-                        bar.start(12)
-                    except Exception:
-                        pass
-            self._status_progress_running = True
-        elif (not active) and running:
-            for bar in (top_progress, bottom_progress):
-                if bar is not None:
-                    try:
-                        bar.stop()
-                    except Exception:
-                        pass
-            self._status_progress_running = False
-        elif not active:
-            # Hard stop even if local running flag got out of sync.
-            for bar in (top_progress, bottom_progress):
-                if bar is not None:
-                    try:
-                        bar.stop()
-                    except Exception:
-                        pass
-            self._status_progress_running = False
+            running = bool(getattr(self, "_status_progress_running", False))
+            if active_local and not running:
+                for bar in (top_progress, bottom_progress):
+                    if bar is not None:
+                        try:
+                            bar.start(12)
+                        except Exception:
+                            pass
+                self._status_progress_running = True
+            elif (not active_local) and running:
+                for bar in (top_progress, bottom_progress):
+                    if bar is not None:
+                        try:
+                            bar.stop()
+                        except Exception:
+                            pass
+                self._status_progress_running = False
+            elif not active_local:
+                # Hard stop even if local running flag got out of sync.
+                for bar in (top_progress, bottom_progress):
+                    if bar is not None:
+                        try:
+                            bar.stop()
+                        except Exception:
+                            pass
+                self._status_progress_running = False
+
+        try:
+            if threading.current_thread() is threading.main_thread():
+                _apply()
+            else:
+                self.master.after(0, _apply)
+        except Exception:
+            _apply()
+
+    def _finish_measurement_ui(self) -> None:
+        """Clear run-state flags and reset acquisition indicators after a run."""
+        self.measuring = False
+        self._set_measurement_feedback(False)
 
     def log_test(self, msg: str) -> None:
         """Append a line to the tests log widget or stdout if unavailable."""
@@ -3483,15 +3514,17 @@ class MeasurementGUI:
         try:
             self._status_tick_counter = int(getattr(self, "_status_tick_counter", 0)) + 1
 
-            # Failsafe: if worker thread has ended unexpectedly, clear busy UI state.
+            # Failsafe: clear busy UI state when no measurement worker is active.
             if getattr(self, "measuring", False):
                 worker = getattr(self, "measurement_thread", None)
-                if worker is not None:
+                if worker is None:
+                    self.measuring = False
+                else:
                     try:
                         if not worker.is_alive():
                             self.measuring = False
                     except Exception:
-                        pass
+                        self.measuring = False
 
             # Device name
             try:
@@ -5092,27 +5125,30 @@ class MeasurementGUI:
         self.measuring = True
         self._set_measurement_feedback(True, "Acquiring data from instrument")
 
-        # Branch by excitation mode if available
         try:
-            excitation = self.excitation_var.get()
-        except Exception:
-            excitation = "DC Triangle IV"
+            # Branch by excitation mode if available
+            try:
+                excitation = self.excitation_var.get()
+            except Exception:
+                excitation = "DC Triangle IV"
 
-        self.stop_measurement_flag = False
-        # Apply SMU current measurement range for every excitation path (DC, pulse, endurance, …)
-        self._apply_smu_current_range()
-        # Device routing context
-        if self.current_device in self.device_list:
-            start_index = self.device_list.index(self.current_device)
-        else:
-            start_index = 0
-        device_count = 1 if self.single_device_flag else len(self.device_list)
+            self.stop_measurement_flag = False
+            # Apply SMU current measurement range for every excitation path (DC, pulse, endurance, …)
+            self._apply_smu_current_range()
+            # Device routing context
+            if self.current_device in self.device_list:
+                start_index = self.device_list.index(self.current_device)
+            else:
+                start_index = 0
+            device_count = 1 if self.single_device_flag else len(self.device_list)
 
-        if self.pulsed_runner.run(excitation, device_count, start_index):
-            return
-        if self.special_runner.run(excitation, device_count, start_index):
-            return
-        return self.single_runner.run_standard_iv()
+            if self.pulsed_runner.run(excitation, device_count, start_index):
+                return
+            if self.special_runner.run(excitation, device_count, start_index):
+                return
+            self.single_runner.run_standard_iv()
+        finally:
+            self._finish_measurement_ui()
     def retention_measure(self,
                           set_voltage: float,
                           set_time: float,

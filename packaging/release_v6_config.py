@@ -35,7 +35,17 @@ class CopyArtifact:
     optional_reason: str = ""
 
 
-RELEASE_DIR_NAME = "Switchbox_GUI_v6"
+RELEASE_VERSION = "6.1"
+RELEASE_DIR_NAME = f"Switchbox_GUI_v{RELEASE_VERSION}"
+
+# Main app + everything needed for Measurement GUI top-bar buttons (Hardware Tools exes).
+TOP_BAR_BUILD_KEYS = ("main", "script_runner", "display", "led_testing")
+TOP_BAR_ARTIFACT_KEYS = (
+    "main_app",
+    "tools_bin_runner",
+    "tools_bin_display",
+    "tools_bin_led",
+)
 
 
 def repo_targets(repo_root: Path) -> list[BuildTarget]:

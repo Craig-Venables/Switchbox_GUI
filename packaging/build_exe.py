@@ -52,7 +52,9 @@ def main() -> int:
     ]
     print("Running:", " ".join(cmd))
     subprocess.check_call(cmd, cwd=repo_root)
-    print(f"\nBuild complete: {repo_root / 'dist' / 'Switchbox_GUI' / 'Switchbox_GUI.exe'}")
+    exe = repo_root / "dist" / "Switchbox_GUI" / "Switchbox_GUI.exe"
+    print(f"\nBuild complete (v6.1 main GUI): {exe}")
+    print("Full release package: python packaging/build_release_v6.py --build --main-only")
     return 0
 
 
