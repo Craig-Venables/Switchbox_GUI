@@ -48,6 +48,11 @@ tools/data_consolidation/data/
 tools/ito_analysis/**/*.png
 tools/ito_analysis/**/*.csv
 
+# Historical yield tool — local cache / reports (regenerate locally)
+tools/historical_yield_analysis/cache/
+tools/historical_yield_analysis/output/
+tools/historical_yield_analysis/config.json
+
 # OS
 .DS_Store
 Thumbs.db

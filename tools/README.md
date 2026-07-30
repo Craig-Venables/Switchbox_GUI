@@ -19,6 +19,7 @@ Optional utilities that live outside the main `main.py` application. Each tool h
 | [`classification_validation/`](classification_validation/) | Classifier weight tuning & validation | `python tools/classification_validation/launch_gui.py` |
 | [`device_visualizer/`](device_visualizer/) | Qt device yield / IV gallery viewer | `python tools/device_visualizer/device_visualizer_app.py` |
 | [`filament_jump_finder/`](filament_jump_finder/) | Detect large current jumps in IV data | `python -m tools.filament_jump_finder` |
+| [`historical_yield_analysis/`](historical_yield_analysis/) | Thesis yield / composition timeline from manual Excel labels (cached) | `python tools/historical_yield_analysis/launch_gui.py` |
 | [`impedance_analyzer/`](impedance_analyzer/) | SMaRT impedance CSV / `.dat` plots | `python tools/impedance_analyzer/visualise_csv.py` |
 | [`ito_analysis/`](ito_analysis/) | ITO sample comparison plots | `python tools/ito_analysis/ITO.py` |
 | [`afm_3d_holes_protrusion/`](afm_3d_holes_protrusion/) | AFM hole / protrusion batch analysis | `python tools/afm_3d_holes_protrusion/main.py` |
@@ -57,6 +58,7 @@ To add a new hardware tool, see [Documents/guides/GUI_EXTENSION_GUIDE.md](../Doc
 | **classification_validation** | Tune classifier weights against labelled test files | [README](classification_validation/README.md), [QUICK_START](classification_validation/QUICK_START.md) |
 | **device_visualizer** | Browse device folders, yield heatmaps, plot gallery | [README](device_visualizer/README.md) |
 | **filament_jump_finder** | Find filament-forming jumps in IV sweeps | Run with `python -m tools.filament_jump_finder --sample <path>` |
+| **historical_yield_analysis** | Index split data roots, cache classifications, plot yield evolution | [README](historical_yield_analysis/README.md) |
 | **impedance_analyzer** | Open/short corrected impedance plots | [README](impedance_analyzer/README.md) |
 | **ito_analysis** | Compare ITO deposition batches | [README_ITO_ANALYSIS](ito_analysis/README_ITO_ANALYSIS.md) |
 | **optical_timing_calibration** | Derive timing from optical readout files | [README](optical_timing_calibration/README.md) |
