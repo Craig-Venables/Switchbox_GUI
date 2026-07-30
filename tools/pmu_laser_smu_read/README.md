@@ -54,12 +54,17 @@ RPM is **only** on the laser pulse path. The SMU does not go through an RPM for 
 | **Train** | N pulses at fixed period |
 | **Cool-down** | Pulse 0 fires at the same **Width** as a single pulse (the on-time already confirmed to reach the laser). From there, both **Width** and the OFF-time between pulses taper together toward the end of the train, over **Cool-down over**, following the chosen decay shape (linear / exponential / quadratic) — progressively smaller, more widely spaced pulses. N and the width/period range are derived automatically from Width/rise/fall/span, so they scale with Width (a small Width barely tapers; a big Width gets a long, gradual taper) instead of a fixed ns-scale floor unrelated to Width. If **Cool-down over** is too short to fit even two full-Width pulses, the taper's starting width shrinks automatically so a meaningful multi-pulse ramp still fits. |
 
-## Two tabs
+## Three tabs
+
+Tab order (left to right): **Live / Manual Fire** opens first (the tab you'll
+use most for day-to-day testing), then **Automated Routine**, then
+**Single-shot Run**.
 
 | Tab | Use for |
 |-----|---------|
-| **Single-shot Run** | One bounded measurement: pre-laser baseline + fixed-duration post-laser read, single `EX` call, saved as one CSV. |
 | **Live / Manual Fire** | Continuous SMU read with a **"Fire Pulse Now"** button — alternate/repeat pulses on demand while watching R(t) update live. See below. |
+| **Automated Routine** | Unattended width x power sweep: fire a low-power pulse at a series of increasing widths, then step the laser power up (over serial) and repeat — see below. |
+| **Single-shot Run** | One bounded measurement: pre-laser baseline + fixed-duration post-laser read, single `EX` call, saved as one CSV. |
 
 ### Live / Manual Fire tab
 
@@ -104,6 +109,54 @@ stops automatically once **Max width** is reached (or if streaming stops/
 errors), or can be stopped early with **Stop sweep**. The pulse type
 (single/train/cool-down) used is whatever is currently selected — only
 **Width** is swept.
+
+### Automated Routine tab
+
+Automates the general threshold-finding procedure: **fire a low-power
+pulse at a series of increasing widths, then raise the laser power and
+repeat**, from low power upward, until you see a response on the live
+R(t) plot. It reuses the exact same PMU/SMU streaming session as the Live
+tab (only one GPIB session can exist at a time — streaming starts
+automatically if it isn't already running), and adds real serial control
+of the Oxxius laser (`Equipment/Laser_Controller/oxxius.py`) between
+blocks.
+
+**Laser (serial)** — Port/Baud + Connect/Disconnect (same driver used
+elsewhere in the repo, e.g. `gui/pulse_testing_gui`). Once connected you
+also get manual **Emission On/Off**, a one-off **Set power (mW)** for
+testing, and a **Restore manual control** button. The laser is **always**
+returned to normal analog/front-panel-wheel control automatically whenever
+the routine stops (Stop button) or finishes — you never have to remember
+to hand control back.
+
+**Routine** section:
+
+- **Pulse widths** — either type a comma-separated list directly (e.g.
+  `100ns, 1000ns, 10000ns`), or use **Start width / step multiplier /
+  number of steps** + **Generate** to fill it in automatically (multiplier
+  defaults to `10` for true decade steps — `100 ns -> 1000 ns -> 10000 ns
+  -> ...` — but is customizable, e.g. `2` for octave steps).
+- **Laser power (mW)** — **Start power / Power step / Max power** define
+  an additive ramp (e.g. 1, 3, 5, 7, 9 mW); a live preview line shows the
+  exact levels that will be used.
+- **Timing** — **Settle after power change (s)** (dwell time after a
+  serial power command before the width sweep starts) and **Fire every
+  (s)** (spacing between pulses within a width sweep).
+- **Preview plan** shows the full step-by-step plan (every power change
+  and fire, in order) and the estimated total duration before you commit.
+- **Start routine** / **Stop routine** run/cancel the sweep; a status line
+  shows live progress (e.g. `Step 4/20: Fire 1000 ns @ 3 mW — next in
+  2.0s`). Stopping is always manual — watch the plot and click **Stop
+  routine** as soon as you see a response; there is no automatic
+  stop-on-response detection yet.
+
+The pulse type (single/train/cool-down) and PMU shape (Vhigh/rise/fall/
+delay) are shared with the Live tab; only **Width** is routine-controlled
+(shown read-only as "Current width"). Each fire event records the laser
+power that was active at the time (`laser_power_mw` in the CSV header
+comments / meta JSON), alongside the usual pulse parameters. **Save
+routine CSV** exports the session the same way as **Save live CSV**
+(`run_kind: "routine"` instead of `"live_manual_fire"`).
 
 ## Clarius — one library, two modules the tool calls
 
