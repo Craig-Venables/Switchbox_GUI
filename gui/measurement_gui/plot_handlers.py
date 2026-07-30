@@ -247,16 +247,21 @@ def run_impedance_visualisation(gui: Any) -> None:
                 f"Expected visualise_csv.py or visualise_dat.py in:\n{tools_dir}",
             )
             return
+        from gui.frozen_launch import launch_python_script
+
         open_path, short_path = _ask_impedance_calibration(gui, folder)
-        cmd = [sys.executable, str(script), folder]
+        extra_args = [folder]
         if open_path:
-            cmd.extend(["--open", open_path])
+            extra_args.extend(["--open", open_path])
         if short_path:
-            cmd.extend(["--short", short_path])
-        subprocess.Popen(
-            cmd,
-            cwd=str(tools_dir),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+            extra_args.extend(["--short", short_path])
+        launch_python_script(
+            "tools/impedance_analyzer/visualise_csv.py"
+            if script.name == "visualise_csv.py"
+            else "tools/impedance_analyzer/visualise_dat.py",
+            extra_args,
+            cwd=tools_dir,
+            new_console=os.name == "nt",
         )
         print(f"[IMPEDANCE] Launched visualisation for: {folder}" + (
             f" (open={open_path!r}, short={short_path!r})" if (open_path or short_path) else ""
@@ -490,16 +495,18 @@ def run_impedance_combinations(gui: Any) -> None:
             )
             return
         
-        # Convert combinations dict to command-line arguments
-        cmd = [sys.executable, str(script), str(output_dir)]
+        from gui.frozen_launch import launch_python_script
+
+        extra_args = [str(output_dir)]
         for name, files in combinations.items():
             files_str = ",".join(str(Path(f).resolve()) for f in files)
-            cmd.append(f"{name}:{files_str}")
-        
-        subprocess.Popen(
-            cmd,
-            cwd=str(tools_dir),
-            creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0,
+            extra_args.append(f"{name}:{files_str}")
+
+        launch_python_script(
+            "tools/impedance_analyzer/compare_combinations.py",
+            extra_args,
+            cwd=tools_dir,
+            new_console=os.name == "nt",
         )
         print(f"[IMPEDANCE] Launched combinations comparison: {list(combinations.keys())}")
     except Exception as e:

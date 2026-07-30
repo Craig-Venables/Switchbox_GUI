@@ -98,10 +98,17 @@ These are **not** bundled in git — install or build separately if you need the
 
 ## 7. Building a standalone executable (optional)
 
-See [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.md):
+See [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.md) for the main app only, or **[packaging/BUILD_RELEASE_V6.md](packaging/BUILD_RELEASE_V6.md)** for the full v6 release (all companion exes).
 
 ```bash
 pip install pyinstaller
+python packaging/build_release_v6.py          # check environment + plan
+python packaging/build_release_v6.py --build  # build + assemble dist/Switchbox_GUI_v6/
+```
+
+Single-app build (without companion tools assembly):
+
+```bash
 python packaging/build_exe.py
 ```
 

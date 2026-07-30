@@ -11,6 +11,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any
 
+from analysis.reclassify_sample import get_weights_version
+
 
 def create_canvas_section(sample_gui: Any) -> None:
     """
@@ -25,6 +27,9 @@ def create_canvas_section(sample_gui: Any) -> None:
     canvas_container.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
     canvas_container.grid_rowconfigure(0, weight=1)
     canvas_container.grid_rowconfigure(1, weight=0)
+    canvas_container.grid_rowconfigure(2, weight=0)
+    canvas_container.grid_rowconfigure(3, weight=0)
+    canvas_container.grid_rowconfigure(4, weight=0)
     canvas_container.grid_columnconfigure(0, weight=1)
 
     canvas_frame = ttk.LabelFrame(canvas_container, text="Device Map", padding=5)
@@ -74,10 +79,10 @@ def create_canvas_section(sample_gui: Any) -> None:
     sample_gui.clear_button = ttk.Button(nav_bar, text="Clear", command=sample_gui.clear_canvas, width=10)
     sample_gui.clear_button.pack(side="left", padx=5)
 
-    # IV classification overlay controls + summary
+    # IV classification overlay controls + summary (top row)
     class_bar = ttk.Frame(canvas_container)
-    class_bar.grid(row=2, column=0, sticky="ew", pady=(0, 4))
-    canvas_container.grid_rowconfigure(2, weight=0)
+    class_bar.grid(row=2, column=0, sticky="ew", pady=(4, 2))
+    class_bar.columnconfigure(2, weight=1)
 
     if not hasattr(sample_gui, "show_classification_overlay"):
         sample_gui.show_classification_overlay = tk.BooleanVar(value=True)
@@ -89,14 +94,14 @@ def create_canvas_section(sample_gui: Any) -> None:
         text="IV colors",
         variable=sample_gui.show_classification_overlay,
         command=sample_gui._on_classification_overlay_toggle,
-    ).pack(side="left", padx=(0, 8))
+    ).grid(row=0, column=0, padx=(0, 8), sticky="w")
 
     ttk.Checkbutton(
         class_bar,
         text="Scores",
         variable=sample_gui.show_classification_scores,
         command=sample_gui._on_classification_overlay_toggle,
-    ).pack(side="left", padx=(0, 12))
+    ).grid(row=0, column=1, padx=(0, 12), sticky="w")
 
     sample_gui.classification_summary_label = tk.Label(
         class_bar,
@@ -105,18 +110,10 @@ def create_canvas_section(sample_gui: Any) -> None:
         fg="#555555",
         anchor="w",
     )
-    sample_gui.classification_summary_label.pack(side="left", fill="x", expand=True)
+    sample_gui.classification_summary_label.grid(row=0, column=2, sticky="ew", padx=(0, 8))
 
-    ttk.Button(
-        class_bar,
-        text="Refresh",
-        command=lambda: sample_gui.classification_overlay.refresh(),
-        width=8,
-    ).pack(side="right", padx=4)
-
-    # Compact color legend
     legend_frame = ttk.Frame(class_bar)
-    legend_frame.pack(side="right", padx=(8, 4))
+    legend_frame.grid(row=0, column=3, sticky="e")
     _legend_items = (
         ("#A5D6A7", "Mem"),
         ("#BDBDBD", "1x"),
@@ -128,3 +125,52 @@ def create_canvas_section(sample_gui: Any) -> None:
         swatch = tk.Label(legend_frame, text="  ", bg=color, relief=tk.GROOVE, width=2)
         swatch.pack(side="left", padx=1)
         tk.Label(legend_frame, text=tip, font=("Segoe UI", 7), fg="#666").pack(side="left", padx=(0, 4))
+
+    # Separator between overlay display and classification actions
+    ttk.Separator(canvas_container, orient="horizontal").grid(
+        row=3, column=0, sticky="ew", pady=(2, 4),
+    )
+
+    # Actions row: reclassify / refresh + inline progress
+    actions_bar = ttk.Frame(canvas_container)
+    actions_bar.grid(row=4, column=0, sticky="ew", pady=(0, 4))
+    actions_bar.columnconfigure(2, weight=1)
+
+    sample_gui.reclassify_menu = tk.Menu(actions_bar, tearoff=0)
+    sample_gui.reclassify_menubutton = ttk.Menubutton(
+        actions_bar,
+        text="Reclassify ▾",
+        width=12,
+    )
+    sample_gui.reclassify_menubutton["menu"] = sample_gui.reclassify_menu
+    sample_gui.reclassify_menubutton.grid(row=0, column=0, padx=(0, 6), sticky="w")
+
+    sample_gui.classification_refresh_button = ttk.Button(
+        actions_bar,
+        text="Refresh",
+        command=lambda: sample_gui.classification_overlay.refresh(),
+        width=9,
+    )
+    sample_gui.classification_refresh_button.grid(row=0, column=1, padx=(0, 12), sticky="w")
+
+    weights_ver = get_weights_version()
+    sample_gui.classification_action_status = tk.Label(
+        actions_bar,
+        text=f"Ready · classification weights v{weights_ver}",
+        font=("Segoe UI", 9),
+        fg="#555555",
+        anchor="w",
+    )
+    sample_gui.classification_action_status.grid(row=0, column=2, sticky="ew", padx=(0, 8))
+
+    sample_gui.classification_progress = ttk.Progressbar(
+        actions_bar,
+        mode="determinate",
+        maximum=100,
+        length=180,
+    )
+    sample_gui.classification_progress.grid(row=0, column=3, sticky="e")
+    sample_gui.classification_progress.grid_remove()
+
+    if hasattr(sample_gui, "reclassify_ctrl"):
+        sample_gui.reclassify_ctrl.update_menu_labels()

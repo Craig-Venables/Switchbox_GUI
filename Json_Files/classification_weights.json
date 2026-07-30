@@ -1,6 +1,6 @@
 {
     "description": "Default classification weights for device type scoring in sweep_analyzer.py",
-    "version": "1.4",
+    "version": "1.7",
     "weights": {
         "memristive_has_hysteresis": 25.0,
         "memristive_pinched_hysteresis": 30.0,
@@ -11,9 +11,32 @@
         "memristive_penalty_linear_iv": -20.0,
         "memristive_penalty_ohmic": -30.0,
         "memristive_penalty_no_switching": -40.0,
+
+        "_comment_double_crossing": "Double zero-crossing (figure-8): Chua memristive fingerprint. Added in v1.5.",
+        "memristive_double_zero_crossing": 10.0,
+        "memristive_double_zero_crossing_with_switching": 15.0,
+
+        "_comment_switching_variants": "Graduated switching penalties (v1.5): high on/off bonus, moderate ratio soft penalty, no-hysteresis hard penalty.",
+        "memristive_bonus_switching_high_ratio": 20.0,
+        "memristive_penalty_switching_moderate_ratio": -5.0,
+        "memristive_penalty_switching_without_hysteresis": -45.0,
+
+        "_comment_capacitive_penalty": "Penalty applied to memristive score when device has capacitive-like features but no switching (v1.5).",
+        "memristive_penalty_capacitive_like": -30.0,
+
+        "_comment_compliance": "Compliance-saturation penalty: reduces memristive and conductive scores when current is capped by hardware limit (v1.5).",
+        "memristive_penalty_compliance_saturated": -25.0,
+        "conductive_penalty_compliance_saturated": -20.0,
+
+        "_comment_forming_event": "Bonus for abrupt current jump in the forward sweep — direct signature of the electroforming event (filament creation). Scaled by jump magnitude. v1.7.",
+        "memristive_bonus_forming_event_large":  35.0,
+        "memristive_bonus_forming_event_medium": 25.0,
+        "memristive_bonus_forming_event_small":  15.0,
+
         "capacitive_hysteresis_unpinched": 40.0,
         "capacitive_phase_shift": 40.0,
         "capacitive_elliptical": 20.0,
+
         "memcapacitive_double_zero_crossing": 50.0,
         "memcapacitive_phase_shift": 20.0,
         "memcapacitive_switching_behavior": 30.0,
@@ -22,21 +45,34 @@
         "memcapacitive_nonlinear_iv": 20.0,
         "memcapacitive_penalty_pinched": -30.0,
         "memcapacitive_hysteresis_unpinched": 20.0,
+
         "conductive_no_hysteresis": 30.0,
         "conductive_nonlinear_no_switching": 40.0,
         "conductive_advanced_mechanism": 30.0,
+
+        "_comment_conductive_switching": "Bonus when switching is present but no hysteresis/pinch loop (v1.5). Targets devices in LRS that show abrupt switching without a memory loop — better labelled conductive than uncertain.",
+        "conductive_has_switching": 15.0,
+
+        "_comment_conductive_penalties": "Capacitive-feature penalties for conductive score — previously hardcoded, now tunable (v1.5).",
+        "conductive_penalty_phase_shift": -20.0,
+        "conductive_penalty_elliptical": -15.0,
+
         "ohmic_strong": 80.0,
         "ohmic_clear": 70.0,
         "ohmic_with_artifact": 60.0,
         "ohmic_weak": 40.0,
         "ohmic_linear_clean": 60.0,
-        "ohmic_model_fit": 20.0
+        "ohmic_model_fit": 20.0,
+
+        "_comment_ohmic_penalties": "Penalties for ohmic score — previously hardcoded, now tunable (v1.5).",
+        "ohmic_penalty_strong_hysteresis_switching": -30.0,
+        "ohmic_penalty_nonlinear": -20.0
     },
     "notes": {
         "memristive": "Scores for devices showing SINGLE pinched loop (ONE zero crossing) + switching behavior. Pinched hysteresis = figure-8 with lobes meeting at origin. v1.3: +20 bonus for switching+nonlinearity combination. Switching is THE defining memristive feature.",
         "capacitive": "Scores for devices with unpinched hysteresis, phase shift, and elliptical patterns (pure capacitive, no memory)",
         "memcapacitive": "CORRECTED v1.4: Memcapacitors show DOUBLE zero crossing (TWO crossings per cycle) - butterfly/horizontal figure-8 pattern. This is charge-dependent capacitance. Primary signature (50 pts): double_zero_crossing. Penalty -30 for single pinched crossing (that's memristive, not memcapacitive!). Strong switching penalty (-25) still applies.",
-        "conductive": "Scores for non-linear devices without hysteresis (non-ohmic, non-memristive)",
+        "conductive": "Scores for non-linear devices without hysteresis (non-ohmic, non-memristive). Penalty keys conductive_penalty_phase_shift and conductive_penalty_elliptical now tunable (v1.5). conductive_has_switching (+15) bonus added in v1.5 for devices that switch between states without forming a hysteresis loop (LRS-dominant or degraded devices).",
         "ohmic": "Enhanced graduated scoring system: ohmic_strong (80) for perfect ohmic, ohmic_clear (70), ohmic_with_artifact (60) for linear with weak hysteresis, ohmic_weak (40) for marginal cases. Legacy weights preserved for compatibility.",
         "penalties": "Negative scores to prevent misclassification. Critical: memristive_penalty_no_switching (-40) prevents devices with hysteresis but NO switching from being classified as memristive.",
         "adaptive_thresholds": "v1.3+: Area thresholds scale with current magnitude (sqrt scaling) to handle devices from 1e-9 to 1e-3 A. Pinched check relaxed to 10% for switching devices to handle non-ideal zero crossing.",
@@ -47,6 +83,9 @@
         "v1.1": "Fixed ohmic device misclassification: (1) Increased ohmic weights 60→90, 20→30, (2) Strengthened memristive penalties -20→-40, -30→-50, (3) Added ohmic guard in classification logic, (4) Fixed pinched hysteresis false positives",
         "v1.2": "Major enhancement to ohmic classification: (1) NEW graduated ohmic scoring system with 4 quality levels (strong/clear/artifact/weak), (2) NEW memristive_penalty_no_switching (-40) for devices with hysteresis but no switching/nonlinearity, (3) Enhanced artifact filtering in pinched hysteresis detection with minimum area requirement, (4) Improved hysteresis presence detection with multi-level thresholds (1e-4 to 1e-2) and consistency checks, (5) Added artifact detection logic for linear+pinched+no_switching cases",
         "v1.3": "CRITICAL FIX for memristive vs memcapacitive competition: (1) NEW memristive_switching_plus_nonlinear_bonus (+20) - if device has BOTH switching AND nonlinearity, strongly favor memristive classification, (2) NEW memcapacitive_penalty_strong_switching (-25) - strong switching (ON/OFF > 2) is memristive, not memcapacitive, (3) ADAPTIVE area thresholds now scale with current magnitude using sqrt(I/1mA) to handle devices from 1e-9 to 1e-3 A, (4) Relaxed pinched hysteresis check to 10% (from 5%) for switching devices to handle non-ideal zero crossing due to series resistance, (5) Adaptive minimum area for pinched check (10x more lenient for switching devices)",
-        "v1.4": "FUNDAMENTAL CORRECTION to memcapacitive classification logic: (1) NEW _check_double_zero_crossing() - detects TWO zero crossings per cycle (memcapacitive fingerprint), (2) NEW memcapacitive_double_zero_crossing (+50) - PRIMARY memcapacitive signature, (3) NEW memcapacitive_elliptical (+15) - elliptical pattern support, (4) CORRECTED logic: Memcapacitors have DOUBLE crossing (butterfly/horizontal figure-8), NOT unpinched hysteresis, (5) Increased memcapacitive_penalty_pinched to -30 (from -20) - single pinch is memristive!, (6) Reduced memcapacitive_hysteresis_unpinched to 20 (from 40) - de-emphasized legacy logic, (7) Updated classification notes to clarify: ONE crossing = memristive, TWO crossings = memcapacitive"
+        "v1.4": "FUNDAMENTAL CORRECTION to memcapacitive classification logic: (1) NEW _check_double_zero_crossing() - detects TWO zero crossings per cycle (memcapacitive fingerprint), (2) NEW memcapacitive_double_zero_crossing (+50) - PRIMARY memcapacitive signature, (3) NEW memcapacitive_elliptical (+15) - elliptical pattern support, (4) CORRECTED logic: Memcapacitors have DOUBLE crossing (butterfly/horizontal figure-8), NOT unpinched hysteresis, (5) Increased memcapacitive_penalty_pinched to -30 (from -20) - single pinch is memristive!, (6) Reduced memcapacitive_hysteresis_unpinched to 20 (from 40) - de-emphasized legacy logic, (7) Updated classification notes to clarify: ONE crossing = memristive, TWO crossings = memcapacitive",
+        "v1.5": "SYNC, NEW RULES, and TUNING FROM TEST DATA: (1) Added memristive_double_zero_crossing (+10) and memristive_double_zero_crossing_with_switching (+15) - previously hardcoded fallbacks, now tunable, (2) Added graduated switching penalty keys: memristive_bonus_switching_high_ratio (+20), memristive_penalty_switching_moderate_ratio (-5), memristive_penalty_switching_without_hysteresis (-45), (3) NEW memristive_penalty_capacitive_like (-30) - applied when has_hysteresis+no_pinch+no_switching+phase_shift>30 to prevent capacitive loops winning memristive, (4) NEW compliance-saturation penalties: memristive_penalty_compliance_saturated (-25), conductive_penalty_compliance_saturated (-20) - prevent hardware current-limit plateaus from looking like switching, (5) Moved hardcoded conductive penalties to JSON: conductive_penalty_phase_shift (-20), conductive_penalty_elliptical (-15), (6) Moved hardcoded ohmic penalties to JSON: ohmic_penalty_strong_hysteresis_switching (-30), ohmic_penalty_nonlinear (-20), (7) NEW conductive_has_switching (+15) - from test-file analysis: high-current devices that switch without forming a hysteresis loop were scoring uncertain(max=30) instead of conductive; this +15 bonus pushes conductive to 45 crossing the UNCERTAIN_THRESHOLD=40",
+        "v1.6": "Red Flag 3 context-awareness: 'classified memristive but I-V linear' now emits INFO for forming-stage devices (mem_score < 60) and RED FLAG only for formed devices (mem_score >= 60). Validated against 60 real-world sweeps from 5 device folders with no regressions.",
+        "v1.7": "NEW forming-event detection: _detect_current_jump() looks for abrupt current onset (>50x in one step, or >200x over 5 steps) on the forward sweep — direct signature of electroforming (filament creation). Three scaled bonus weights: forming_event_large (>=1000x jump, +35), forming_event_medium (>=100x, +25), forming_event_small (>=50x, +15). Also adds forming_voltage_onset (V_form) to classification features. _assign_forming_stage now labels the actual forming sweep as 'forming_event' stage."
     }
 }

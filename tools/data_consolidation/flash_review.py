@@ -37,7 +37,6 @@ from paths import DATASETS, DEFAULT_DATASET, dataset_paths
 
 FLASH_TYPE_CHOICES = [
     "memristive",
-    "rectifying",
     "uncertain",
     "ohmic",
     "non_conductive",
@@ -48,7 +47,6 @@ FLASH_TYPE_CHOICES = [
 
 TYPE_COLORS = {
     "memristive": "#1a7f37",
-    "rectifying": "#bf5700",
     "uncertain": "#6e40c9",
     "ohmic": "#0969da",
     "non_conductive": "#57606a",

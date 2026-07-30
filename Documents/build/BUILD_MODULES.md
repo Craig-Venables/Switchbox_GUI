@@ -33,6 +33,8 @@ The spec also defines **`_modules_from_pkg_path()`** so you can uncomment two li
 |------|---------|-------------|
 | **`main.py`** | Application entry | Listed as `Analysis(... scripts=[main.py])`. |
 | **`Json_Files/`** | `mapping.json`, `pin_mapping.json`, `Custom_Sweeps.json`, system configs, etc. | **`datas`**: copy tree to `Json_Files` inside the bundle. |
+| **`resources/`** | Sample device images (`memristor.png`, multiplexer photos, etc.) | **`datas`**: copy whole `resources/` tree. |
+| **`Equipment/`** | Calibration JSON/CSV, scope presets, Arduino sketches, driver assets | **`datas`**: copy whole `Equipment/` tree (Python already traced; this adds non-`.py` files). |
 | **`Documents/`** | User-facing and AI-oriented docs (this tree) | **`datas`**: copy whole tree so help text and zips stay complete. |
 
 If you add **new static assets** (icons, images, templates) loaded by path from `BASE_DIR`, add them under **`datas`** with the correct destination folder name.
@@ -83,7 +85,22 @@ For operator-facing build steps, see **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTION
 
 ---
 
-## 7. PyInstaller crashes during “Analyzing main.py”
+## 7. v6 full release (all executables)
+
+For lab handover with **main app + companion tool exes + Pulse GUIs**:
+
+```powershell
+python packaging/build_release_v6.py          # check only
+python packaging/build_release_v6.py --build
+```
+
+Output: `dist/Switchbox_GUI_v6/` — see **[packaging/BUILD_RELEASE_V6.md](../../packaging/BUILD_RELEASE_V6.md)**.
+
+Frozen subprocess launches (Hardware Tools, impedance plots, laser calibration, TSP analysis) use **`gui/frozen_launch.py`** and **`Switchbox_GUI/tools_bin/`**.
+
+---
+
+## 8. PyInstaller crashes during “Analyzing main.py”
 
 If the build fails with **`IndexError: tuple index out of range`** in **`dis.py`** / **`modulegraph.util.iterate_instructions`**, that is almost always the **Python interpreter** (early **3.10.0** is a known bad case), not your application source. **Upgrade Python** to the latest **3.10.x** or **3.11+**, recreate the venv, reinstall dependencies, and rebuild.
 

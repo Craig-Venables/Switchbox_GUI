@@ -36,7 +36,10 @@ def run_sequential_measurement(gui: Any) -> None:
         else:
             _log(gui, f"Unknown sequential measurement mode '{mode}'.")
     finally:
-        gui.measuring = False
+        if hasattr(gui, "_finish_measurement_ui"):
+            gui._finish_measurement_ui()
+        else:
+            gui.measuring = False
         _safe_disable_output(gui, set_zero=False)
 
 

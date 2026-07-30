@@ -2568,19 +2568,29 @@ class TSPTestingGUI(tk.Toplevel):
                     "Please ensure the tools/data_analysis_pulse_2450 folder exists.")
                 return
             
-            # Launch the analysis tool in a separate process
-            # Use pythonw on Windows to avoid showing console window
-            if sys.platform == "win32":
-                # Try pythonw first, fallback to python if pythonw doesn't exist
+            from gui.frozen_launch import is_frozen, launch_python_script, launch_registered_tool
+
+            if is_frozen():
+                try:
+                    launch_registered_tool(
+                        "data_analysis_pulse_2450",
+                        module_path="tools/data_analysis_pulse_2450/main.py",
+                    )
+                except FileNotFoundError:
+                    launch_python_script(
+                        "tools/data_analysis_pulse_2450/main.py",
+                        hide_console=sys.platform == "win32",
+                    )
+            elif sys.platform == "win32":
                 python_exe = sys.executable.replace("python.exe", "pythonw.exe")
                 if not Path(python_exe).exists():
                     python_exe = sys.executable
-                # CREATE_NO_WINDOW flag to hide console window on Windows
                 try:
-                    subprocess.Popen([python_exe, str(analysis_script)],
-                                   creationflags=subprocess.CREATE_NO_WINDOW)
+                    subprocess.Popen(
+                        [python_exe, str(analysis_script)],
+                        creationflags=subprocess.CREATE_NO_WINDOW,
+                    )
                 except AttributeError:
-                    # Fallback if CREATE_NO_WINDOW is not available
                     subprocess.Popen([python_exe, str(analysis_script)])
             else:
                 subprocess.Popen([sys.executable, str(analysis_script)])
