@@ -825,22 +825,25 @@ class SweepAnalyzer:
             )
             note = 'Useful forming precursor; track device over sweeps rather than discarding.'
 
-        self.device_type = 'rectifying'
+        # Rectifying is a sub-category of memristive (polarity-dependent resistance).
+        # Report as memristive; flag the rectifying character for downstream display.
+        self.device_type = 'memristive'
+        self.classification_features['rectifying_character'] = True
         self.classification_confidence = confidence
         self.classification_breakdown = {
-            'memristive': 0,
+            'memristive': round(confidence * 100),
             'memcapacitive': 0,
             'capacitive': 0,
             'conductive': 0,
             'ohmic': 0,
-            'rectifying': round(confidence * 100),
             'non_conductive': 0,
             'uncertain': 0,
         }
         self.classification_reasoning = reasoning
         self.classification_explanation = {
             'primary_reason': self.classification_features['noise_reason'],
-            'device_type': 'rectifying',
+            'device_type': 'memristive',
+            'rectifying_character': True,
             'rectifying_tier': tier,
             'rectification_ratio': rect_ratio,
             'note': note,
@@ -849,7 +852,7 @@ class SweepAnalyzer:
 
     def _maybe_promote_to_formed_rectifying(self):
         """Reclassify conductive/ohmic/uncertain sweeps that are clearly diode-like."""
-        if self.device_type in ('memristive', 'memcapacitive', 'rectifying', 'non_conductive'):
+        if self.device_type in ('memristive', 'memcapacitive', 'non_conductive'):
             return False
         formed, rect_ratio = self._is_formed_rectifying_signal()
         if not formed:
@@ -900,7 +903,14 @@ class SweepAnalyzer:
         dt = self.device_type or 'unknown'
         score = float(self.memristivity_score or 0)
 
-        if dt == 'rectifying':
+        # If an abrupt current jump was detected, this is the actual forming sweep —
+        # label it explicitly regardless of the general score tier.
+        if self.classification_features.get('current_jump_detected', False):
+            stage = 'forming_event'
+            self.forming_stage = stage
+            return stage
+
+        if dt == 'memristive' and self.classification_features.get('rectifying_character', False):
             tier = self.classification_features.get('rectifying_tier', 'precursor')
             stage = 'formed_rectifying' if tier == 'formed' else 'precursor_rectifying'
         elif dt == 'memristive':
@@ -914,8 +924,21 @@ class SweepAnalyzer:
             stage = 'forming_memcapacitive'
         elif dt == 'non_conductive':
             stage = 'unformed'
-        elif dt in ('ohmic', 'capacitive', 'conductive'):
+        elif dt in ('capacitive',):
             stage = 'unformed'
+        elif dt == 'ohmic':
+            stage = 'unformed'
+        elif dt == 'conductive':
+            # Distinguish a truly unformed conductive device from a post-forming
+            # device cycling in its low-resistance state (LRS).  LRS indicators:
+            #   • switching detected (device changes state)
+            #   • current already in the µA range (> 100 nA p95)
+            switching = self.classification_features.get('switching_behavior', False)
+            i_level = float(np.percentile(np.abs(self.current), 95)) if len(self.current) > 0 else 0.0
+            if switching and i_level > 1e-7:   # 100 nA threshold
+                stage = 'lrs_cycling'
+            else:
+                stage = 'unformed'
         else:
             stage = 'unknown'
 
@@ -927,15 +950,15 @@ class SweepAnalyzer:
         dt = self.device_type or 'unknown'
         score = float(self.memristivity_score or 0)
 
-        if dt == 'memristive' and score >= 50:
-            return 'formed'
-        if dt == 'rectifying':
-            if self.classification_features.get('rectifying_tier') == 'formed':
+        if dt == 'memristive':
+            if self.classification_features.get('rectifying_character', False):
+                if self.classification_features.get('rectifying_tier') == 'formed':
+                    return 'formed'
+                return 'forming'
+            if score >= 50:
                 return 'formed'
             return 'forming'
         if dt == 'memcapacitive':
-            return 'forming'
-        if dt == 'memristive' and score < 50:
             return 'forming'
         return 'none'
 
@@ -1001,7 +1024,6 @@ class SweepAnalyzer:
                     'capacitive': 0,
                     'conductive': 0,
                     'ohmic': 0,
-                    'rectifying': 0,
                     'non_conductive': 85,
                     'uncertain': 0,
                 }
@@ -1088,6 +1110,28 @@ class SweepAnalyzer:
                 scores['memristive'] += weights.get('memristive_double_zero_crossing_with_switching', 15.0)
             elif _has_dblx:
                 scores['memristive'] += weights.get('memristive_double_zero_crossing', 10.0)
+
+            # === FORMING-EVENT BONUS ===
+            # An abrupt current jump in the forward sweep is the direct
+            # electrical signature of electroforming (filament creation).
+            # It is highly specific to memristive behaviour and should push
+            # an ambiguous score well above the uncertainty threshold.
+            # The bonus scales with the magnitude of the jump to distinguish
+            # a major forming event (>1000x) from a modest step (50-100x).
+            if self.classification_features.get('current_jump_detected', False):
+                jump_ratio = self.classification_features.get('current_jump_ratio', 1.0)
+                if jump_ratio >= 1000:
+                    jump_bonus = weights.get('memristive_bonus_forming_event_large', 35.0)
+                elif jump_ratio >= 100:
+                    jump_bonus = weights.get('memristive_bonus_forming_event_medium', 25.0)
+                else:
+                    jump_bonus = weights.get('memristive_bonus_forming_event_small', 15.0)
+                scores['memristive'] += jump_bonus
+                debug_print(
+                    f"[DIAGNOSTIC]{device_info} Forming-event bonus applied: "
+                    f"+{jump_bonus:.0f} (jump_ratio={jump_ratio:.1f}x, "
+                    f"V_onset={self.classification_features.get('forming_voltage_onset', '?'):.2f}V)"
+                )
 
             # --- On/off ratio & memory-signature awareness ---
             # A memristor can be ohmic/linear in each individual resistance
@@ -1215,12 +1259,25 @@ class SweepAnalyzer:
                 scores['conductive'] += weights.get('conductive_nonlinear_no_switching', 40.0)
             if self.conduction_mechanism in ['sclc', 'trap_sclc', 'poole_frenkel', 'schottky', 'fowler_nordheim']:
                 scores['conductive'] += weights.get('conductive_advanced_mechanism', 30.0)
-            
-            # PENALTY: Reduce score if capacitive features are present
+
+            # Bonus: switching present but no hysteresis loop detected.
+            # Devices in a low-resistance state (LRS) or with abrupt threshold switching can
+            # switch between states without showing a clear hysteresis loop in the IV curve.
+            # Without this bonus, such devices score conductive=30 which falls below
+            # UNCERTAIN_THRESHOLD=40 → they get misclassified as uncertain.
+            # Only apply when not better explained by memristive (no hysteresis evidence).
+            if (
+                self.classification_features.get('switching_behavior', False)
+                and not self.classification_features.get('has_hysteresis', False)
+                and not self.classification_features.get('pinched_hysteresis', False)
+            ):
+                scores['conductive'] += weights.get('conductive_has_switching', 15.0)
+
+            # PENALTY: Reduce score if capacitive features are present (now using tunable weights)
             if self.classification_features['phase_shift'] > 30:
-                scores['conductive'] -= 20.0  # Has capacitive characteristics
+                scores['conductive'] += weights.get('conductive_penalty_phase_shift', -20.0)
             if self.classification_features['elliptical_hysteresis']:
-                scores['conductive'] -= 15.0  # Elliptical pattern suggests capacitive
+                scores['conductive'] += weights.get('conductive_penalty_elliptical', -15.0)
 
             # === ENHANCED OHMIC SCORING SYSTEM ===
             # Score ohmic characteristics with graduated scoring for quality
@@ -1263,11 +1320,53 @@ class SweepAnalyzer:
                 model_bonus = 20.0 if r2 > 0.98 else 15.0 if r2 > 0.95 else 10.0
                 scores['ohmic'] += model_bonus
                 
-            # 6. Penalize ohmic if has strong features of other types
+            # 6. Penalize ohmic if has strong features of other types (now using tunable weights)
             if has_strong_hysteresis and self.classification_features.get('switching_behavior'):
-                scores['ohmic'] -= 30.0  # Clearly not ohmic
+                scores['ohmic'] += weights.get('ohmic_penalty_strong_hysteresis_switching', -30.0)
             if self.classification_features.get('nonlinear_iv'):
-                scores['ohmic'] -= 20.0  # Nonlinearity contradicts ohmic
+                scores['ohmic'] += weights.get('ohmic_penalty_nonlinear', -20.0)
+
+            # === COMPLIANCE-SATURATION PENALTY ===
+            # Compliance current at ≥90% of max measured current means the hardware
+            # limit was hit.  Switching features detected in such sweeps are unreliable
+            # (the plateau looks like a HRS→LRS transition but is just the instrument).
+            # Penalise memristive and conductive; note compliance_limited for review.
+            max_i = float(np.max(np.abs(self.current))) if len(self.current) > 0 else 0.0
+            compliance_saturated = (
+                self.compliance_current is not None
+                and self.compliance_current > 0
+                and max_i > 0
+                and (self.compliance_current / max_i) > 0.9
+                and not self.classification_features.get('pinched_hysteresis', False)
+                and safe_mean(self.on_off, default=1.0) < 10.0
+            )
+            if compliance_saturated:
+                scores['memristive'] += weights.get('memristive_penalty_compliance_saturated', -25.0)
+                scores['conductive'] += weights.get('conductive_penalty_compliance_saturated', -20.0)
+                self.classification_features['compliance_limited'] = True
+                debug_print(
+                    f"[DIAGNOSTIC]{device_info} Compliance saturation penalty applied "
+                    f"(compliance={self.compliance_current*1e6:.1f}µA, max_I={max_i*1e6:.1f}µA)"
+                )
+            else:
+                self.classification_features['compliance_limited'] = False
+
+            # === CAPACITIVE-LIKE TIE-BREAKER ===
+            # Hysteresis without pinching and without any switching + significant phase shift
+            # means the loop is most likely a capacitive artefact, not memory.
+            # Apply an extra memristive penalty to prevent a borderline positive score
+            # from accidentally winning over capacitive.
+            if (
+                self.classification_features.get('has_hysteresis', False)
+                and not self.classification_features.get('pinched_hysteresis', False)
+                and not self.classification_features.get('switching_behavior', False)
+                and self.classification_features.get('phase_shift', 0) > 30
+            ):
+                scores['memristive'] += weights.get('memristive_penalty_capacitive_like', -30.0)
+                debug_print(
+                    f"[DIAGNOSTIC]{device_info} Capacitive-like tie-breaker applied "
+                    f"(hysteresis+no_pinch+no_switching+phase_shift={self.classification_features['phase_shift']:.0f}°)"
+                )
 
             # Keep breakdown and normalize to get confidence-style weights
             self.classification_breakdown = scores.copy()
@@ -1383,12 +1482,25 @@ class SweepAnalyzer:
                     f"Ohmic devices should not switch states."
                 )
         
-        # Red Flag 3: Classified as Memristive but linear I-V
+        # Red Flag 3: Classified as Memristive but linear I-V.
+        # For forming-stage devices the classifier fires on switching-only sweeps where
+        # each resistance state is individually linear — that is expected physics and
+        # generates a flood of noise in the review GUI.  Only emit the full RED FLAG for
+        # formed devices (mem_score >= 60); emit a softer INFO note for forming ones.
         if self.device_type == 'memristive' and features.get('linear_iv', False):
-            self.classification_warnings.append(
-                f"⚠ RED FLAG: Classified as memristive but I-V is linear. "
-                f"Memristors typically show nonlinear I-V characteristics."
-            )
+            mem_sc = float(self.memristivity_score or 0)
+            if mem_sc >= 60:
+                self.classification_warnings.append(
+                    "⚠ RED FLAG: Classified as memristive but I-V is linear. "
+                    "Memristors typically show nonlinear I-V characteristics."
+                )
+            else:
+                # forming_memristive / weak_memristive: device switches between two
+                # roughly-linear resistance states — normal for early forming cycles.
+                self.classification_warnings.append(
+                    "INFO: Forming-stage memristive with linear per-state I-V "
+                    "(device switches between linear resistance states — expected for early forming)."
+                )
         
         # Red Flag 4: Strong hysteresis but no switching (might be capacitive/artifact)
         if (features.get('has_hysteresis', False) and 
@@ -1429,7 +1541,80 @@ class SweepAnalyzer:
                         f"⚠ WARNING: Low SNR (≈{snr:.1f}). Signal may be affected by noise. "
                         f"Classification confidence may be reduced."
                     )
-        
+
+        # ---------------------------------------------------------------
+        # POST-CLASSIFICATION OVERRIDES
+        # Only applied for unambiguous contradictions where the physical
+        # interpretation is clear.  Each override logs a warning so it
+        # is visible during review.  The breakdown scores are NOT changed
+        # here — only device_type and confidence, to preserve traceability.
+        # ---------------------------------------------------------------
+
+        # Override A: Classified memristive but has NO switching at all AND
+        # the phase shift strongly suggests capacitive behaviour.
+        # This catches hysteresis-only loops that beat the memristive score
+        # through a combination of has_hysteresis + polarity bonuses.
+        if (
+            self.device_type == 'memristive'
+            and not features.get('switching_behavior', False)
+            and not features.get('pinched_hysteresis', False)
+            and features.get('phase_shift', 0) > 45
+        ):
+            old_type = self.device_type
+            self.device_type = 'capacitive'
+            self.classification_confidence = min(self.classification_confidence, 0.55)
+            self.classification_warnings.append(
+                f"⚠ OVERRIDE A: Reclassified {old_type} → capacitive "
+                "(no switching, no pinch, strong phase shift). "
+                "Review if this is a true memristor."
+            )
+            debug_print(f"[DIAGNOSTIC]{device_info} Override A: memristive → capacitive")
+
+        # Override B: Classified ohmic but shows clear state switching
+        # (on/off > 5 AND pinched hysteresis detected).
+        # Ohmic devices cannot switch resistance states.
+        elif (
+            self.device_type == 'ohmic'
+            and features.get('pinched_hysteresis', False)
+            and features.get('switching_behavior', False)
+            and safe_mean(self.on_off, default=1.0) > 5.0
+        ):
+            breakdown = getattr(self, 'classification_breakdown', {})
+            mem_score = breakdown.get('memristive', 0)
+            old_type = self.device_type
+            # Only flip if memristive score was competitive (2nd place)
+            if mem_score > 30:
+                self.device_type = 'memristive'
+                self.classification_confidence = min(self.classification_confidence, 0.70)
+                self.classification_warnings.append(
+                    f"⚠ OVERRIDE B: Reclassified {old_type} → memristive "
+                    f"(pinched+switching+on/off={safe_mean(self.on_off,default=1.0):.1f}x despite linear I-V). "
+                    "Review if ohmic state-switching or forming."
+                )
+                debug_print(f"[DIAGNOSTIC]{device_info} Override B: ohmic → memristive")
+            else:
+                # Score gap is too large to flip — cap confidence and flag for review
+                self.classification_confidence = min(self.classification_confidence, 0.50)
+                self.classification_warnings.append(
+                    f"⚠ OVERRIDE B (soft): Ohmic with pinched+switching detected; "
+                    "memristive score too low to flip but confidence capped. Flag for review."
+                )
+
+        # Override C: Pinched hysteresis detected but winner is conductive.
+        # Pinched loop is the Chua fingerprint — conductive should not win.
+        # Cap confidence and flag for high-priority review; do NOT auto-flip
+        # because the device may genuinely be in a conductive (LRS) state.
+        elif (
+            self.device_type == 'conductive'
+            and features.get('pinched_hysteresis', False)
+        ):
+            self.classification_confidence = min(self.classification_confidence, 0.50)
+            self.classification_warnings.append(
+                "⚠ OVERRIDE C: Conductive + pinched hysteresis — confidence capped. "
+                "Device may be in LRS (formed memristive). Flag for high-priority review."
+            )
+            debug_print(f"[DIAGNOSTIC]{device_info} Override C: conductive+pinched → confidence capped")
+
         debug_print(f"[DIAGNOSTIC]{device_info} Reality checks: {len(self.classification_warnings)} warnings raised")
     
     def _generate_classification_explanation(self):
@@ -2845,7 +3030,19 @@ POWER CHARACTERISTICS:
         except Exception as e:
             debug_print(f"[DIAGNOSTIC] Error in double zero crossing check: {e}")
             features['double_zero_crossing'] = False
-        
+
+        # Detect abrupt current jump (electroforming event signature)
+        try:
+            jump, jump_ratio, v_onset = self._detect_current_jump()
+            features['current_jump_detected'] = jump
+            features['current_jump_ratio'] = float(jump_ratio)
+            features['forming_voltage_onset'] = float(v_onset) if v_onset is not None else None
+        except Exception as e:
+            debug_print(f"[DIAGNOSTIC] Error in current jump detection: {e}")
+            features['current_jump_detected'] = False
+            features['current_jump_ratio'] = 1.0
+            features['forming_voltage_onset'] = None
+
         # DIAGNOSTIC: Print feature extraction results
         device_info = f" [{self.device_name}]" if self.device_name else ""
         debug_print(f"\n[DIAGNOSTIC]{device_info} Feature extraction results:")
@@ -2860,6 +3057,118 @@ POWER CHARACTERISTICS:
         debug_print(f"  - phase_shift: {features.get('phase_shift')}")
 
         return features
+
+    def _detect_current_jump(self):
+        """
+        Detect an abrupt, large-magnitude current onset in the forward sweep.
+
+        This is the electrical signature of the electroforming event: at the
+        forming voltage V_form, the insulating gap suddenly breaks down and a
+        conductive filament is created.  The jump is:
+          - Irreversible (the device stays conductive after the sweep)
+          - Large: typically 2–5 orders of magnitude in a single or few steps
+          - Monotonic: it occurs on the rising-voltage part of the sweep
+
+        Distinguishing from normal resistance switching (SET/RESET):
+          - Forming jumps are much larger (>100x in a single step typical)
+          - They occur at higher voltages than subsequent SET events
+          - They are not present on pre-formed sweeps or post-forming cycling
+
+        Returns
+        -------
+        jump_detected : bool
+        jump_ratio    : float   — peak single-step current increase ratio
+        onset_voltage : float | None — voltage at which the jump began
+        """
+        v = np.array(self.voltage)
+        i = np.abs(np.array(self.current))
+
+        if len(v) < 10 or len(i) < 10:
+            return False, 1.0, None
+
+        # --- Isolate the forward (rising-voltage) segment only ---
+        # We look for the largest contiguous rising-voltage section.
+        dv = np.diff(v)
+        forward = dv > 0
+
+        # Find contiguous forward-sweep blocks and pick the longest
+        blocks = []
+        start = None
+        for k, fwd in enumerate(forward):
+            if fwd and start is None:
+                start = k
+            elif not fwd and start is not None:
+                blocks.append((start, k))
+                start = None
+        if start is not None:
+            blocks.append((start, len(forward)))
+
+        if not blocks:
+            return False, 1.0, None
+
+        # Use the longest forward block
+        start_idx, end_idx = max(blocks, key=lambda b: b[1] - b[0])
+        fwd_v = v[start_idx: end_idx + 1]
+        fwd_i = i[start_idx: end_idx + 1]
+
+        n = len(fwd_v)
+        if n < 5:
+            return False, 1.0, None
+
+        # --- Light smoothing to reduce point noise, preserving real jumps ---
+        # Window size 3 only — bigger windows would blur the onset.
+        window = 3
+        kernel = np.ones(window) / window
+        fwd_i_sm = np.convolve(fwd_i, kernel, mode='same')
+        # Restore endpoints (convolution edge artefacts)
+        fwd_i_sm[0] = fwd_i[0]
+        fwd_i_sm[-1] = fwd_i[-1]
+
+        # --- Step-ratio scan ---
+        # For each consecutive pair, compute I[k+1] / I[k].
+        # Use a small floor to avoid noise dividing by near-zero.
+        noise_floor = max(1e-12, float(np.percentile(fwd_i, 5)))
+        denom = np.maximum(fwd_i_sm[:-1], noise_floor)
+        ratios = fwd_i_sm[1:] / denom
+
+        peak_ratio = float(np.max(ratios))
+        peak_step  = int(np.argmax(ratios))
+        onset_v    = float(fwd_v[peak_step])
+
+        # --- Window-sum check: total current growth over a 5-step window ---
+        # A real forming jump grows monotonically over several steps; a single
+        # noisy outlier does not.  Sum of log-ratios over ±2 steps around peak.
+        half = 2
+        lo = max(0, peak_step - half)
+        hi = min(len(ratios), peak_step + half + 1)
+        window_ratio = float(np.prod(ratios[lo:hi]))   # multiplicative over window
+
+        # --- Decision thresholds ---
+        #
+        # jump_ratio > 50   : single step grows ≥50× — highly significant
+        # window_ratio > 200: sustained growth over 5 steps totals ≥200× (catches
+        #                     gradual forming that spreads over a few voltage steps)
+        # current after jump: must reach at least 10 nA — not just noise
+        # onset_voltage     : must be at a meaningful voltage (> 0.1 V)
+        #
+        min_post_jump_current = 1e-8   # 10 nA
+        post_jump_current = float(fwd_i_sm[min(peak_step + 1, n - 1)])
+
+        jump_detected = (
+            (peak_ratio > 50 or window_ratio > 200)
+            and post_jump_current >= min_post_jump_current
+            and onset_v >= 0.1
+        )
+
+        device_info = f" [{self.device_name}]" if self.device_name else ""
+        if jump_detected:
+            debug_print(
+                f"[DIAGNOSTIC]{device_info} Current jump detected: "
+                f"ratio={peak_ratio:.1f}x at V={onset_v:.2f}V "
+                f"(window_ratio={window_ratio:.1f}x, post_I={post_jump_current*1e9:.1f}nA)"
+            )
+
+        return jump_detected, peak_ratio, onset_v
 
     def _estimate_hysteresis_present(self):
         """
@@ -3962,7 +4271,7 @@ POWER CHARACTERISTICS:
         
         try:
             # Phase 1.1: Calculate memristivity score (0-100)
-            if self.device_type == 'rectifying':
+            if self.classification_features.get('rectifying_character', False):
                 if self.memristivity_score is None:
                     rect_ratio = self.classification_features.get('rectification_ratio')
                     if not rect_ratio:
@@ -5030,21 +5339,58 @@ def zero_division_check(x, y):
 
 def read_data_file(file_path):
     try:
-        data = np.loadtxt(file_path, skiprows=1)
+        # Use genfromtxt so lines with missing/nan values don't raise an exception
+        data = np.genfromtxt(file_path, skip_header=1, filling_values=np.nan)
+
+        # Ensure 2-D even if the file has only one column (edge case guard)
+        if data.ndim == 1:
+            raise ValueError("too many indices for array: array is 1-dimensional, but 2 were indexed")
+        if data.shape[1] < 2:
+            raise ValueError(f"Expected at least 2 columns, got {data.shape[1]}")
+
         voltage = data[:, 0]
         current = data[:, 1]
+        time    = data[:, 2] if data.shape[1] > 2 else None
 
-        # Check if time column exists
-        time = data[:, 2] if data.shape[1] > 2 else None
+        # --- NaN scrubbing ---
+        # Interpolate isolated NaN values in the *current* column so they do
+        # not cascade through calculations (resistance ratios, on/off, etc.).
+        # Voltage NaNs (rare) are also removed by dropping those rows entirely.
+        nan_v = np.isnan(voltage)
+        nan_i = np.isnan(current)
 
-        # Return two values for backward compatibility
+        if nan_v.any():
+            # Drop rows where voltage is NaN — we cannot interpolate V meaningfully
+            keep = ~nan_v
+            voltage = voltage[keep]
+            current = current[keep]
+            if time is not None:
+                time = time[keep]
+            nan_i = np.isnan(current)  # recompute after row removal
+
+        if nan_i.any():
+            n_nan = int(nan_i.sum())
+            n_total = len(current)
+            if n_nan / n_total <= 0.05:
+                # ≤5% NaN: linear interpolation is safe
+                idx = np.arange(n_total)
+                current = np.interp(idx, idx[~nan_i], current[~nan_i])
+            else:
+                # >5% NaN: too many gaps — drop the rows to avoid misleading data
+                keep = ~nan_i
+                voltage = voltage[keep]
+                current = current[keep]
+                if time is not None:
+                    time = time[keep]
+
         if time is None:
             return voltage, current
         else:
             return voltage, current, time
+
     except Exception as e:
         print(f"Error reading file {file_path}: {str(e)}")
-        return None, None  # Return two values for compatibility
+        return None, None
 
 ######
 # extras

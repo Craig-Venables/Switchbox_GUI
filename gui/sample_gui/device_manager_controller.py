@@ -66,6 +66,8 @@ class DeviceManagerController:
         self.update_info_display()
         gui.log_terminal(f"Set current device to: {device_name}", "SUCCESS")
         self.refresh_device_list()
+        if hasattr(gui, "reclassify_ctrl"):
+            gui.reclassify_ctrl.update_menu_labels()
 
     def clear_current_device(self) -> None:
         gui = self.gui
@@ -78,6 +80,8 @@ class DeviceManagerController:
         self.update_info_display()
         gui.log_terminal("Cleared current device", "INFO")
         gui._notify_child_guis("device_name", device_name=None)
+        if hasattr(gui, "reclassify_ctrl"):
+            gui.reclassify_ctrl.update_menu_labels()
 
     def save_device_info(self) -> None:
         gui = self.gui
@@ -155,6 +159,9 @@ class DeviceManagerController:
 
             self.update_info_display()
             gui.log_terminal(f"Loaded device: {device_name}", "SUCCESS")
+
+            if hasattr(gui, "reclassify_ctrl"):
+                gui.reclassify_ctrl.update_menu_labels()
 
             if hasattr(gui, "device_status_labels"):
                 for device, status_label in gui.device_status_labels.items():

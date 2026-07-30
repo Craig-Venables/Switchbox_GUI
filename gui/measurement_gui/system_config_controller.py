@@ -163,7 +163,7 @@ class SystemConfigController:
             if opt_type != "None" and hasattr(gui, 'optical_config_frame'):
                 if hasattr(gui, 'optical_expanded_var') and not gui.optical_expanded_var.get():
                     if hasattr(gui, 'optical_toggle_button'):
-                        gui.layout_builder._toggle_optical_section(self, gui.optical_config_frame, gui.optical_toggle_button)
+                        gui.layout_builder._toggle_optical_section(gui, gui.optical_config_frame, gui.optical_toggle_button)
 
             if opt_type == "LED":
                 if hasattr(gui, 'optical_led_units_var'):
@@ -182,7 +182,7 @@ class SystemConfigController:
                     gui.optical_led_default_channel_var.set(defaults.get("channel", "380nm"))
                 # Update UI
                 if hasattr(gui, 'optical_config_frame'):
-                    gui.layout_builder._update_optical_ui(self, gui.optical_config_frame)
+                    gui.layout_builder._update_optical_ui(gui, gui.optical_config_frame)
 
             elif opt_type == "Laser":
                 if hasattr(gui, 'optical_laser_driver_var'):
@@ -205,7 +205,7 @@ class SystemConfigController:
                     gui.optical_laser_default_var.set(str(defaults.get("level", 1.0)))
                 # Update UI
                 if hasattr(gui, 'optical_config_frame'):
-                    gui.layout_builder._update_optical_ui(self, gui.optical_config_frame)
+                    gui.layout_builder._update_optical_ui(gui, gui.optical_config_frame)
         elif hasattr(gui, 'optical_type_var'):
             gui.optical_type_var.set("None")
 
