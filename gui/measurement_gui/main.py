@@ -3526,30 +3526,30 @@ class MeasurementGUI:
                     except Exception:
                         self.measuring = False
 
-            # Device name
-            try:
-                current_device = self.sample_gui.device_var.get()
-            except Exception:
-                current_device = self.display_index_section_number
-            if current_device:
-                self.device_label.config(text=f"Device: {current_device}")
+            # Legacy top-banner labels (not created by modern layout).
+            if hasattr(self, "device_label"):
+                try:
+                    current_device = self.sample_gui.device_var.get()
+                except Exception:
+                    current_device = self.display_index_section_number
+                if current_device:
+                    self.device_label.config(text=f"Device: {current_device}")
 
-            # Current voltage (latest sample if available)
-            if self.v_arr_disp:
+            if hasattr(self, "voltage_label") and self.v_arr_disp:
                 try:
                     v_now = float(self.v_arr_disp[-1])
                     self.voltage_label.config(text=f"Voltage: {v_now:.3f} V")
                 except Exception:
                     pass
 
-            # Loop number (if known)
-            loop_val = None
-            if getattr(self, 'sweep_num', None) is not None:
-                loop_val = self.sweep_num
-            elif getattr(self, 'measurment_number', None) is not None:
-                loop_val = self.measurment_number
-            if loop_val is not None:
-                self.loop_label.config(text=f"Loop: {loop_val}")
+            if hasattr(self, "loop_label"):
+                loop_val = None
+                if getattr(self, 'sweep_num', None) is not None:
+                    loop_val = self.sweep_num
+                elif getattr(self, 'measurment_number', None) is not None:
+                    loop_val = self.measurment_number
+                if loop_val is not None:
+                    self.loop_label.config(text=f"Loop: {loop_val}")
 
             # Keep acquisition indicators animated and synchronized with run state.
             # Treat "not measuring" as an explicit idle state every tick.

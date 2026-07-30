@@ -1,0 +1,6 @@
+{
+  "gpib_address": "GPIB0::17::INSTR",
+  "pmu_id": "PMU1",
+  "save_dir": "C:\\Users\\ppxcv1\\AppData\\Local\\Temp\\tmplqwi0hxq",
+  "sample_name": "40nm gst_f3_50%"
+}
