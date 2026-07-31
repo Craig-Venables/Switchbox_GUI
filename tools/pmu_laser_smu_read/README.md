@@ -170,7 +170,8 @@ blocks.
 
 **Laser (serial)** — Port/Baud + Connect/Disconnect (same driver used
 elsewhere in the repo, e.g. `gui/pulse_testing_gui`). On **Connect** the
-tool arms TTL-ready mode: analog modulation OFF (`AM 0`) →
+tool arms TTL-ready mode: power ceiling raised to the unit's rated max
+(`PM 330`, see below) → analog modulation OFF (`AM 0`) →
 digital modulation ON (`TTL 1`) → emission ON (`DL 1`). Emission must be
 ON for the TTL input to gate light. Manual controls: **Emission On/Off**,
 **Set current (%)** (sets `APC 0` + `CM <%>` without changing AM/TTL),
@@ -180,6 +181,19 @@ re-arms `TTL 1` with emission ON), and **Restore manual control**.
 Default serial port is **COM8**. Disconnect / routine stop restores the usual
 manual state: digital mod OFF (`TTL 0`), analog ON, constant power (`APC 1`),
 emission ON (`close(restore_to_manual_control=True)`).
+
+**Power ceiling (`PM`) vs. current (%) (`CM`):** `PM <mW>` is an absolute
+power *ceiling* enforced by the firmware in **every** mode, including the
+ACC/current-% mode this tool uses for routines. If `PM` is left at a lower
+leftover value (e.g. the 100 mW used for manual front-panel/analog-wheel
+control), `CM` (current %) gets silently clamped once the resulting power
+would exceed that ceiling — so "100% current" would **not** mean "100% of
+the laser's rated output". To fix this, `prepare_for_ttl_modulation()`
+(called on Connect, on Align OFF, and when arming for the routine) now
+also sets `PM` to the unit's true rated max power (**330 mW** by default —
+see `TTL_FULL_POWER_MW` in `oxxius.py`; change it if your laser isn't a
+330 mW model) before arming ACC/TTL, so the full `CM` range maps to
+genuine, uncapped output.
 
 Note: this LBX firmware returns `????` for unknown commands. Correct
 tokens are `TTL` (not `DM`) for digital modulation and `CM` (not `I`)

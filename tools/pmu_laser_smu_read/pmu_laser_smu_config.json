@@ -7,7 +7,7 @@
   "device_number": "4",
   "routine_settle_s": "15",
   "routine_interval_s": "10",
-  "routine_start_pct": "10",
+  "routine_start_pct": "50",
   "routine_step_pct": "10",
   "routine_max_pct": "100",
   "routine_widths": "100 ns, 1 \u00b5s, 10 \u00b5s, 100 \u00b5s, 1 ms, 10 ms, 100 ms"
