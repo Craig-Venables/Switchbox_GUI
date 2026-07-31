@@ -633,9 +633,9 @@ def build_pmu_ex_command(
 
 # Parameter positions (1-indexed) of the Imeas/Timestamps D_ARRAY_T outputs in
 # pmu_laser_smu_run's argument list, for GP queries after the EX call.
-# cdStartWidth + cdEndWidth inserted before the output arrays.
-RUN_GP_PARAM_IMEAS = 22
-RUN_GP_PARAM_TIMESTAMPS = 24
+# cdStartWidth + cdEndWidth + Irange are inserted before the output arrays.
+RUN_GP_PARAM_IMEAS = 23
+RUN_GP_PARAM_TIMESTAMPS = 25
 
 
 def build_pmu_laser_smu_run_ex_command(
@@ -663,6 +663,7 @@ def build_pmu_laser_smu_run_ex_command(
     decay: DecayName = "linear",
     cd_start_width_s: float = 0.0,
     cd_end_width_s: float = 0.0,
+    irange: float = 0.0,
     library: str = DEFAULT_USR_LIBRARY,
 ) -> str:
     """Build EX command for pmu_laser_smu_run (SMU bias + PMU TTL + SMU read,
@@ -675,6 +676,10 @@ def build_pmu_laser_smu_run_ex_command(
 
     cd_start_width_s / cd_end_width_s set the cool-down pulse-WIDTH decay
     bounds — see build_pmu_ex_command's docstring for details.
+
+    irange is SMU1's current MEASUREMENT range (separate from ilimit, the
+    compliance limit): 0.0 = autorange (default), > 0.0 = fixed range for
+    lower-noise/faster reads once you know roughly what current to expect.
     """
     vhigh = _clamp_vhigh(vhigh)
     mode_i = mode_to_int(mode, decay)
@@ -701,6 +706,7 @@ def build_pmu_laser_smu_run_ex_command(
         format_param(int(num_pre_points)),
         format_param(cd_start_width_s),
         format_param(cd_end_width_s),
+        format_param(irange),
         "",  # Imeas output array
         format_param(num_points),
         "",  # Timestamps output array
@@ -711,8 +717,9 @@ def build_pmu_laser_smu_run_ex_command(
 
 # Parameter positions (1-indexed) of the Imeas/Timestamps D_ARRAY_T outputs in
 # pmu_laser_smu_stream's argument list, for GP queries after each chunk EX call.
-STREAM_GP_PARAM_IMEAS = 22
-STREAM_GP_PARAM_TIMESTAMPS = 24
+# cdStartWidth + cdEndWidth + Irange are inserted before the output arrays.
+STREAM_GP_PARAM_IMEAS = 23
+STREAM_GP_PARAM_TIMESTAMPS = 25
 
 
 def build_pmu_laser_smu_stream_ex_command(
@@ -740,6 +747,7 @@ def build_pmu_laser_smu_stream_ex_command(
     decay: DecayName = "linear",
     cd_start_width_s: float = 0.0,
     cd_end_width_s: float = 0.0,
+    irange: float = 0.0,
     library: str = DEFAULT_USR_LIBRARY,
 ) -> str:
     """Build EX command for ONE CHUNK of pmu_laser_smu_stream (live/manual-fire
@@ -752,6 +760,10 @@ def build_pmu_laser_smu_stream_ex_command(
 
     cd_start_width_s / cd_end_width_s set the cool-down pulse-WIDTH decay
     bounds — see build_pmu_ex_command's docstring for details.
+
+    irange is SMU1's current MEASUREMENT range (separate from ilimit, the
+    compliance limit): 0.0 = autorange (default), > 0.0 = fixed range for
+    lower-noise/faster reads once you know roughly what current to expect.
     """
     vhigh = _clamp_vhigh(vhigh)
     mode_i = mode_to_int(mode, decay)
@@ -778,6 +790,7 @@ def build_pmu_laser_smu_stream_ex_command(
         format_param(1 if stop_now else 0),
         format_param(cd_start_width_s),
         format_param(cd_end_width_s),
+        format_param(irange),
         "",  # Imeas output array
         format_param(num_points),
         "",  # Timestamps output array

@@ -2,7 +2,7 @@
 
 	MODULE NAME: pmu_laser_smu_stream
 	MODULE RETURN TYPE: int 
-	NUMBER OF PARMS: 25
+	NUMBER OF PARMS: 26
 	ARGUMENTS:
 		Vforce,	double,	Input,	0.2,	-200,	200
 		Ilimit,	double,	Input,	0.0001,	1e-9,	1.0
@@ -25,6 +25,7 @@
 		StopNow,	int,	Input,	0,	0,	1
 		cdStartWidth,	double,	Input,	0.0,	0.0,	0.999999
 		cdEndWidth,	double,	Input,	0.0,	0.0,	0.999999
+		Irange,	double,	Input,	0.0,	0.0,	1.0
 		Imeas,	D_ARRAY_T,	Output,	,	,	
 		NumPoints,	int,	Input,	20,	1,	100000
 		Timestamps,	D_ARRAY_T,	Output,	,	,	
@@ -55,7 +56,12 @@ sets FireNow=1 for that one call. This module then:
   1. Re-asserts SMU bias (forcev) — REQUIRED every call. Per hardware
      testing (see pmu_laser_smu_run.c), the SMU source does not stay
      "operational" across separate top-level EX/UL invocations, so forcev()
-     must immediately precede measi() within the SAME call, every time.
+     must immediately precede measi() within the SAME call, every time. Irange (SMU1 current MEASUREMENT range, separate
+     from the Ilimit compliance) is re-asserted here too: 0.0 = autorange
+     (default/historical behaviour), > 0.0 = fixed range (rangei()) for
+     lower-noise/faster, more consistent readings once you know roughly
+     what current to expect. Invalid values are silently snapped to the
+     nearest hardware range by the LPT driver.
   2. If FireNow: build + fire the PMU CH1 TTL Segment ARB waveform (same
      single/train/cool-down shapes as pmu_laser_smu_run), then continue
      into this same chunk's sample loop so the transient is caught.
@@ -94,6 +100,20 @@ StopNow=1: skip everything else, just forcev(SMU1, 0.0) and return 0. Use
 this as the final call when the user clicks "Stop streaming" to safely
 ramp the SMU down. (All other params are ignored when StopNow=1, but must
 still be supplied with valid values for USRLIB argument parsing.)
+
+KNOWN ARTIFACT: because STEP 1 re-asserts forcev()/limiti()/setmode() at
+the top of every chunk (required — see STEP 1 comment below), some samples
+(observed on GST phase-change films) show a small relaxation transient
+right after each re-assert that decays over the rest of the chunk, then
+resets at the next chunk boundary — a periodic sawtooth/"triangle" ripple
+in Imeas synced exactly to NumPoints, riding on top of the real underlying
+drift. Larger NumPoints (Python: bigger "Chunk size (s)") means fewer
+re-asserts per unit time and more settling time per chunk, which reduces
+both how often it happens and its size relative to the real signal — at
+the cost of slower FireNow response (Python side is blocked for the whole
+chunk duration). If a real fix is wanted, the likely place is inserting an
+untimed settle delay (a few discarded measi() calls or a short Sleep())
+between STEP 1's forcev() and STEP 3's timestamped sample loop.
 
 Return codes:
   0     OK
@@ -538,6 +558,7 @@ int pmu_laser_smu_stream(
     int StopNow,
     double cdStartWidth,
     double cdEndWidth,
+    double Irange,
     double *Imeas,
     int NumPoints,
     double *Timestamps,
@@ -594,6 +615,12 @@ int pmu_laser_smu_stream(
         forcev(SMU1, 0.0);
         return status;
     }
+
+    /* Irange = 0.0 -> autorange (rangei's own convention); Irange > 0.0 ->
+       fixed measurement range. Non-fatal: an unsupported value just snaps
+       to the nearest hardware range rather than failing the whole chunk. */
+    status = rangei(SMU1, Irange);
+    (void)status; /* non-fatal */
 
     status = setmode(SMU1, KI_INTGPLC, 0.01);
     (void)status; /* non-fatal */

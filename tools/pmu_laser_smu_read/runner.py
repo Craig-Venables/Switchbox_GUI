@@ -292,7 +292,7 @@ def list_visa_resources(timeout_s: float = 5.0) -> Tuple[List[str], str]:
 
 
 def _connect_kxci(
-    gpib_address: str, timeout: float, debug: bool = True
+    gpib_address: str, timeout: float, debug: bool = False
 ) -> Keithley4200A_KXCI:
     """Open GPIB with short, safe KXCI handshake (DE flush → *IDN?)."""
     address = (gpib_address or "").strip()
@@ -347,7 +347,7 @@ def test_kxci_connection(gpib_address: str, timeout: float = 5.0) -> str:
     lines = [f"Trying {address!r} (timeout={timeout}s)…"]
 
     try:
-        kxci = _connect_kxci(address, timeout=timeout, debug=True)
+        kxci = _connect_kxci(address, timeout=timeout, debug=False)
     except Exception as exc:
         lines.append(f"FAIL connect: {exc}")
         # Best-effort resource list only after failure (may also hang — cap via timeout on open)
@@ -397,6 +397,7 @@ def run_pmu_laser_smu_read(
     mode: ModeName = "single",
     vread: float = 0.2,
     ilimit: float = 1e-4,
+    irange: float = 0.0,
     capture_time_s: float = 2.0,
     pre_capture_s: float = 0.0,
     sample_interval_s: float = 0.01,
@@ -416,7 +417,7 @@ def run_pmu_laser_smu_read(
     clarius_debug: int = 0,
     usr_library: str = DEFAULT_USR_LIBRARY,
     dry_run: bool = False,
-    debug: bool = True,
+    debug: bool = False,
     decay: DecayName = "linear",
     cooldown_span_s: Optional[float] = None,
     cd_start_width_s: Optional[float] = None,
@@ -431,6 +432,10 @@ def run_pmu_laser_smu_read(
     call, used for the on-screen preview/info text) purely so this call's
     plan_cooldown() reproduces the identical, possibly shrunk-to-fit bounds
     rather than recomputing them a second time.
+
+    irange is SMU1's current MEASUREMENT range (separate from ilimit, the
+    compliance limit): 0.0 = autorange (default), > 0.0 = fixed range for
+    lower-noise/faster reads once you know roughly what current to expect.
     """
     if sample_interval_s < 0.001:
         raise ValueError("sample_interval_s must be >= 1 ms (SMU_BiasTimedRead limit)")
@@ -506,6 +511,7 @@ def run_pmu_laser_smu_read(
         decay=decay,
         cd_start_width_s=cd_start_w,
         cd_end_width_s=cd_end_w,
+        irange=irange,
         library=usr_library,
     )
     # Wait long enough for: pre-pulse baseline samples + PMU pulse train duration
@@ -581,6 +587,7 @@ def run_pmu_laser_smu_read(
                 "overlap_mode": "single_ex_call",
                 "pmu_command": run_cmd,
                 "vread": vread,
+                "irange": irange,
                 "num_pulses": n_pulses,
                 "pmu_return": rv,
                 "num_pre_points": num_pre_points,
@@ -637,7 +644,7 @@ class PmuLaserSmuStreamSession:
         pmu_id: str = "PMU1",
         clarius_debug: int = 0,
         usr_library: str = DEFAULT_USR_LIBRARY,
-        debug: bool = True,
+        debug: bool = False,
     ) -> None:
         self.gpib_address = gpib_address
         self.timeout = timeout
@@ -672,6 +679,7 @@ class PmuLaserSmuStreamSession:
         ilimit: float,
         sample_interval_s: float,
         num_points: int,
+        irange: float = 0.0,
         fire_now: bool = False,
         mode: ModeName = "single",
         vhigh: float = 5.0,
@@ -690,7 +698,12 @@ class PmuLaserSmuStreamSession:
     ) -> Dict[str, Any]:
         """Run one chunk: (optionally fire the laser, then) sample NumPoints
         SMU readings. Returns absolute session timestamps on a continuous
-        wall-clock axis (perf_counter origin; even spacing within each chunk)."""
+        wall-clock axis (perf_counter origin; even spacing within each chunk).
+
+        irange is SMU1's current MEASUREMENT range (separate from ilimit,
+        the compliance limit): 0.0 = autorange (default), > 0.0 = fixed
+        range for lower-noise/faster reads once you know roughly what
+        current to expect. Re-asserted every chunk, same as vread/ilimit."""
         if not self._connected or self._kxci is None:
             raise RuntimeError("Not connected — call connect() first")
 
@@ -761,6 +774,7 @@ class PmuLaserSmuStreamSession:
             decay=decay,
             cd_start_width_s=cd_start_w,
             cd_end_width_s=cd_end_w,
+            irange=irange,
             library=self.usr_library,
         )
         wait = max(0.5, pulse_dur + num_points * sample_interval_s + 0.5)
