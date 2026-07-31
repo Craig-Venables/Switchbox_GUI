@@ -2228,6 +2228,24 @@ class PmuLaserSmuReadGUI:
         self._update_pause_buttons()
         print("[PAUSE] Resumed.", flush=True)
 
+    def _print_laser_levels(self, tag: str = "FIRE") -> None:
+        """Query and print laser current / power just before a pulse fires."""
+        if self.laser is None:
+            print(f"[LASER] {tag}: laser not connected — no CM/power to report", flush=True)
+            return
+        try:
+            levels = self.laser.query_levels()
+        except Exception as exc:
+            print(f"[LASER] {tag}: could not query levels: {exc}", flush=True)
+            return
+        print(
+            f"[LASER] {tag}: CM(current%)={levels.get('cm_pct')!r}  "
+            f"current(mA)={levels.get('current_ma')!r}  "
+            f"power(mW)={levels.get('power_mw')!r}  "
+            f"power_setpoint(mW)={levels.get('power_setpoint_mw')!r}",
+            flush=True,
+        )
+
     def _fire_now(self) -> None:
         if not self._stream_active or self._paused:
             return
@@ -2239,6 +2257,7 @@ class PmuLaserSmuReadGUI:
             # Don't kill streaming — just refuse this fire and say why.
             self.live_status_var.set(f"Fire skipped: {exc}")
             return
+        self._print_laser_levels("FIRE NOW")
         self._stream_fire_queue.put(p)
         self.live_fire_btn.configure(state=tk.DISABLED)
         self.live_status_var.set("Fire pending — will fire at start of next chunk…")
@@ -2539,6 +2558,7 @@ class PmuLaserSmuReadGUI:
             self.exp_status_var.set(f"Sweep stopped — invalid params: {exc}")
             self._stop_width_sweep()
             return
+        self._print_laser_levels(f"WIDTH SWEEP FIRE #{self._exp_count + 1}")
         self._stream_fire_queue.put(p)
         self._exp_count += 1
 
@@ -2993,6 +3013,7 @@ class PmuLaserSmuReadGUI:
                 self.laser.set_current_percent_for_ttl(pct)
                 # Keep emission ON for TTL gating (no-op if already on).
                 self.laser.emission_on()
+                self._print_laser_levels(f"ROUTINE SET CURRENT {i}/{n}")
             except Exception as exc:
                 print(f"[ROUTINE] STOP — current set failed: {exc}", flush=True)
                 self.routine_status_var.set(f"Routine stopped — current set failed: {exc}")
@@ -3020,6 +3041,7 @@ class PmuLaserSmuReadGUI:
                 self._stop_routine()
                 return
             p["laser_power_mw"] = self._routine_current_power_mw
+            self._print_laser_levels(f"ROUTINE FIRE {i}/{n}")
             self._stream_fire_queue.put(p)
             self.routine_status_var.set(
                 f"Step {i}/{n}: fire {format_time_compact(step.width_s)} "

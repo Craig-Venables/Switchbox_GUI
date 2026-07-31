@@ -1,6 +1,17 @@
 import serial
 import time
 
+# True rated max optical power of the LBX unit normally used with the
+# TTL/ACC (current-%) workflow (tools/pmu_laser_smu_read). PM is an
+# absolute power CEILING enforced by the firmware in ALL modes (APC *and*
+# ACC) — if it's left at a lower leftover value (e.g. the 100 mW used for
+# manual/analog-wheel control elsewhere in this driver), CM (current %)
+# gets silently clamped once the resulting power would exceed that
+# ceiling, so "100% current" does NOT mean "100% of the laser's rated
+# output". Set this to your unit's actual rated power (see its label/
+# datasheet) if it's not a 330 mW model.
+TTL_FULL_POWER_MW = 330
+
 class OxxiusLaser:
     def __init__(self, port="COM3", baud=38400, timeout=1.0, safe_power_mw=10, verbose=True):
         """
@@ -124,11 +135,22 @@ class OxxiusLaser:
         return self.send_command(f"PM {value}")
 
     def get_power(self):
-        """Query power setpoint/reading (?P)."""
+        """Query measured output power in mW (?P)."""
         return self.send_command("?P")
 
+    def get_power_setpoint(self):
+        """Query power setpoint / ceiling in mW (?SP)."""
+        return self.send_command("?SP")
+
     def set_current(self, value):
-        """Set diode current as % of nominal (0–125). Uses CM (not saved to EEPROM)."""
+        """Set diode current as % of nominal (0–125). Uses CM (not saved to EEPROM).
+
+        CM = Automatic Current Control setpoint as a *percent of the laser's
+        nominal diode current* (not mA, and not optical power %). In ACC
+        mode (APC 0) this is what sets how bright the beam is when TTL
+        gates the emission on. Typical range 0–100 (up to 125 on some
+        firmwares). Distinct from PM/SP, which are absolute power in mW.
+        """
         # Firmware expects an integer percent; "I …" is not a valid LBX command.
         pct = int(round(float(value)))
         return self.send_command(f"CM {pct}")
@@ -136,6 +158,42 @@ class OxxiusLaser:
     def get_current(self):
         """Query diode current setpoint in mA (?SC)."""
         return self.send_command("?SC")
+
+    def get_current_percent(self):
+        """Query diode current setpoint as % of nominal (?CM)."""
+        return self.send_command("?CM")
+
+    def query_levels(self):
+        """Snapshot of current-% / current-mA / measured power / power setpoint.
+
+        Used when logging a pulse fire so the terminal shows what the laser
+        was actually set to (CM / ?SC) and what power it reported (?P / ?SP).
+        Returns a dict of raw reply strings (never raises — missing queries
+        become None).
+        """
+        out = {
+            "cm_pct": None,
+            "current_ma": None,
+            "power_mw": None,
+            "power_setpoint_mw": None,
+        }
+        try:
+            out["cm_pct"] = self.get_current_percent()
+        except Exception:
+            pass
+        try:
+            out["current_ma"] = self.get_current()
+        except Exception:
+            pass
+        try:
+            out["power_mw"] = self.get_power()
+        except Exception:
+            pass
+        try:
+            out["power_setpoint_mw"] = self.get_power_setpoint()
+        except Exception:
+            pass
+        return out
 
     def digital_modulation_on(self):
         """Enable TTL digital modulation (TTL 1). Alias CW 0 on some firmwares."""
@@ -218,26 +276,51 @@ class OxxiusLaser:
         time.sleep(0.1)
         return results
 
-    def prepare_for_ttl_modulation(self):
+    def prepare_for_ttl_modulation(self, full_power_mw=TTL_FULL_POWER_MW):
         """
         Arm the laser for external TTL gating via the digital modulation input.
 
-        Sequence: analog modulation OFF (AM 0) → digital modulation ON (TTL 1)
-        → emission ON (DL 1). Emission must be ON for the TTL input to gate
-        light; LOW TTL = off, HIGH TTL = on at the current/power setpoint.
+        Sequence: set power ceiling (PM <full_power_mw>) → analog modulation
+        OFF (AM 0) → digital modulation ON (TTL 1) → emission ON (DL 1).
+        Emission must be ON for the TTL input to gate light; LOW TTL = off,
+        HIGH TTL = on at the current/power setpoint.
+
+        Why set PM here: PM is an absolute power CEILING enforced by the
+        firmware in ALL modes, including ACC (current-%, what this method
+        arms). If PM was left at a lower leftover value from a previous
+        session (e.g. 100 mW, the standard manual/analog-wheel default),
+        CM (current %) silently clamps once the resulting power would
+        exceed that ceiling — so "100% current" would NOT mean "100% of
+        the laser's rated output". Setting PM to the unit's true rated max
+        power here ensures the full CM range (0-100%, or up to 125% of
+        nominal) maps to genuine 0-100%+ of rated output, uncapped.
 
         Note: LBX firmware uses ``TTL``, not ``DM`` (``DM`` returns ``????``).
+
+        Args:
+            full_power_mw: Power ceiling to set (mW) — default is this
+                unit's rated max (see TTL_FULL_POWER_MW at module level;
+                change that constant, or pass a value here, if your laser
+                is not a 330 mW model).
 
         Returns:
             dict: Results of each command.
         """
         results = {}
         if self.verbose:
-            print("[LASER] === prepare_for_ttl_modulation (TTL 1, ACC, emission ON) ===", flush=True)
+            print(
+                f"[LASER] === prepare_for_ttl_modulation (PM {full_power_mw}, "
+                "TTL 1, ACC, emission ON) ===",
+                flush=True,
+            )
         # Emission must be OFF to change APC; then arm TTL and turn emission
         # back ON — required for the TTL input to gate light.
         results['emission_off'] = self.emission_off()
         time.sleep(0.05)
+        # Raise the power ceiling BEFORE arming ACC/TTL so CM% is never
+        # silently clamped by a lower leftover PM value.
+        results['power'] = self.set_power(full_power_mw)
+        time.sleep(0.1)
         results['AM'] = self.send_command("AM 0")
         time.sleep(0.1)
         results['APC'] = self.send_command("APC 0")
