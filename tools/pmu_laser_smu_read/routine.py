@@ -1,8 +1,8 @@
 """Pure-logic helpers for the Automated Routine tab (no tkinter deps).
 
-Builds a "sweep pulse width at each of a series of laser power levels"
-plan: for each power level (low -> high), fire every width in the widths
-list, then move to the next (higher) power level. Kept separate from
+Builds a "sweep pulse width at each of a series of laser current-% levels"
+plan: for each current level (low -> high), fire every width in the widths
+list, then move to the next (higher) current %. Kept separate from
 ``gui.py`` so the parsing/generation logic is easy to read and reason
 about on its own — mirrors the style of ``waveform.py``.
 """
@@ -112,13 +112,17 @@ def generate_decade_widths(
 
 
 def generate_power_levels(start_mw: float, step_mw: float, max_mw: float) -> List[float]:
-    """Additive power ramp from ``start_mw`` to ``max_mw`` in ``step_mw``
-    increments (same boundary logic as the existing Live-tab width sweep).
-    A ``step_mw`` of 0 with ``start_mw <= max_mw`` yields a single level."""
+    """Additive level ramp from ``start`` to ``max`` in ``step`` increments
+    (same boundary logic as the existing Live-tab width sweep).
+
+    In the Automated Routine UI these values are **diode current percent**
+    (0–100), not mW; the parameter names are kept for call-site compatibility.
+    A ``step`` of 0 with ``start <= max`` yields a single level.
+    """
     if start_mw <= 0:
-        raise ValueError("start power must be > 0")
+        raise ValueError("start current % must be > 0")
     if max_mw < start_mw:
-        raise ValueError("max power must be >= start power")
+        raise ValueError("max current % must be >= start")
 
     levels = [start_mw]
     if step_mw <= 0:
@@ -137,52 +141,52 @@ def generate_power_levels(start_mw: float, step_mw: float, max_mw: float) -> Lis
 class RoutineStep:
     """One step of the routine plan.
 
-    ``kind == "set_power"``: change the laser's power level (and re-enable
-    emission, since setting digital power control switches emission off).
+    ``kind == "set_power"``: set diode current percent and turn emission ON
+    (connect leaves emission off; the run path arms it).
 
     ``kind == "fire"``: fire one PMU pulse at the current width (and the
-    most recently set power, recorded for the CSV).
+    most recently set current %, recorded for the CSV).
     """
 
     kind: Literal["set_power", "fire"]
-    power_mw: Optional[float] = None
+    power_mw: Optional[float] = None  # diode current % (field name kept for CSV/meta)
     width_s: Optional[float] = None
     label: str = ""
 
 
 def build_routine_plan(widths_s: List[float], powers_mw: List[float]) -> List[RoutineStep]:
-    """For each power level (low -> high): one ``set_power`` step, then one
-    ``fire`` step per width (low -> high). Encodes "low power pulse at
-    various widths, then increase power, repeat until something is seen."
+    """For each current-% level (low -> high): one ``set_power`` step, then one
+    ``fire`` step per width (low -> high). Encodes "low-current pulse at
+    various widths, then increase current %, repeat until something is seen."
     """
     if not widths_s:
         raise ValueError("no widths configured")
     if not powers_mw:
-        raise ValueError("no power levels configured")
+        raise ValueError("no current % levels configured")
 
     plan: List[RoutineStep] = []
-    for power_mw in powers_mw:
+    for current_pct in powers_mw:
         plan.append(
             RoutineStep(
                 kind="set_power",
-                power_mw=power_mw,
-                label=f"Set laser power \u2192 {power_mw:.3g} mW",
+                power_mw=current_pct,
+                label=f"Set laser current \u2192 {current_pct:.3g} %",
             )
         )
         for width_s in widths_s:
             plan.append(
                 RoutineStep(
                     kind="fire",
-                    power_mw=power_mw,
+                    power_mw=current_pct,
                     width_s=width_s,
-                    label=f"Fire {format_time_compact(width_s)} @ {power_mw:.3g} mW",
+                    label=f"Fire {format_time_compact(width_s)} @ {current_pct:.3g} %",
                 )
             )
     return plan
 
 
 def estimate_duration_s(plan: List[RoutineStep], settle_s: float, interval_s: float) -> float:
-    """Sum of the wait-after time for each step (settle after a power
+    """Sum of the wait-after time for each step (settle after a current
     change, fire-interval after a pulse) — matches how ``_routine_tick``
     schedules the next step in the GUI."""
     total = 0.0
@@ -197,7 +201,7 @@ def describe_plan(plan: List[RoutineStep], settle_s: float, interval_s: float) -
     n_powers = sum(1 for s in plan if s.kind == "set_power")
     total_s = estimate_duration_s(plan, settle_s, interval_s)
     lines = [
-        f"{n_powers} power level(s), {n_fires} fire(s) total, "
+        f"{n_powers} current % level(s), {n_fires} fire(s) total, "
         f"~{total_s:.1f}s estimated duration.",
         "",
     ]

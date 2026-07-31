@@ -2,7 +2,7 @@
 
 	MODULE NAME: pmu_laser_smu_run
 	MODULE RETURN TYPE: int 
-	NUMBER OF PARMS: 25
+	NUMBER OF PARMS: 26
 	ARGUMENTS:
 		Vforce,	double,	Input,	0.2,	-200,	200
 		Ilimit,	double,	Input,	0.0001,	1e-9,	1.0
@@ -25,6 +25,7 @@
 		NumPrePoints,	int,	Input,	0,	0,	100000
 		cdStartWidth,	double,	Input,	0.0,	0.0,	0.999999
 		cdEndWidth,	double,	Input,	0.0,	0.0,	0.999999
+		Irange,	double,	Input,	0.0,	0.0,	1.0
 		Imeas,	D_ARRAY_T,	Output,	,	,	
 		NumPoints,	int,	Input,	500,	1,	100000
 		Timestamps,	D_ARRAY_T,	Output,	,	,	
@@ -52,7 +53,8 @@ ONE continuous C function / ONE EX call so the SMU source is never torn
 down between operations.
 
 Sequence (all inline, one call):
-  1. limiti(SMU1, Ilimit); setmode(SMU1, KI_INTGPLC, 0.01); forcev(SMU1, Vforce)
+  1. limiti(SMU1, Ilimit); rangei(SMU1, Irange); setmode(SMU1, KI_INTGPLC, 0.01);
+     forcev(SMU1, Vforce)
   2. Sample NumPrePoints BASELINE points at SampleInterval_s (laser still off)
   3. Build + fire PMU CH1 Segment ARB TTL waveform (single/train/cool-down),
      via RPM pathway KI_RPM_PULSE (CH2 held at 0V, physically unconnected).
@@ -81,6 +83,14 @@ Modes (same as pmu_ttl_laser_ch1):
   the selected decay shape. Anchoring the taper's start to "width" (instead
   of a fixed ns-scale constant) means pulse count/width/spacing all scale
   with whatever "width" is set to.
+
+Irange: SMU1 current MEASUREMENT range (separate from Ilimit, the compliance
+limit). Irange = 0.0 -> autorange (instrument picks a range per reading,
+the historical/default behaviour). Irange > 0.0 -> fixed range (rangei()),
+which gives lower-noise / faster, more consistent readings once you know
+roughly what current to expect, at the cost of clipping if the real
+current exceeds that range. Invalid/unsupported values are silently
+snapped to the nearest hardware range by the LPT driver.
 
 Return codes:
   0     OK
@@ -218,6 +228,7 @@ int pmu_laser_smu_run(
     int NumPrePoints,
     double cdStartWidth,
     double cdEndWidth,
+    double Irange,
     double *Imeas,
     int NumPoints,
     double *Timestamps,
@@ -290,6 +301,12 @@ int pmu_laser_smu_run(
         forcev(SMU1, 0.0);
         return status;
     }
+
+    /* Irange = 0.0 -> autorange (rangei's own convention); Irange > 0.0 ->
+       fixed measurement range. Non-fatal: an unsupported value just snaps
+       to the nearest hardware range rather than failing the whole run. */
+    status = rangei(SMU1, Irange);
+    (void)status; /* non-fatal */
 
     status = setmode(SMU1, KI_INTGPLC, 0.01);
     (void)status; /* non-fatal */
