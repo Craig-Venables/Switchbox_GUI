@@ -37,6 +37,11 @@ DecayName = Literal["linear", "exponential", "quadratic"]
 MAX_TTL_VHIGH = 5.0
 MIN_SEG_S = 20e-9
 MIN_WIDTH_S = 40e-9
+# PMU Segment ARB hardware allows up to 40 s per segment. Older Clarius
+# USRLIB headers capped width/period at ~1 s, which silently rejected longer
+# exposure pulses (e.g. 5 s typed as 5000000 µs). Match the hardware limit.
+MAX_WIDTH_S = 40.0
+MAX_PERIOD_S = 40.0
 MIN_RISE_FALL_S = 20e-9
 # seg_arb limit 2048; waveform uses ~4 segments/pulse + overhead
 MAX_PULSES = 500
@@ -79,6 +84,11 @@ def validate_timing(
 ) -> None:
     if width_s < MIN_WIDTH_S:
         raise ValueError(f"width must be >= {MIN_WIDTH_S * 1e6:.3g} µs")
+    if width_s > MAX_WIDTH_S:
+        raise ValueError(
+            f"width ({width_s:g} s) exceeds PMU Segment ARB max ({MAX_WIDTH_S:g} s). "
+            f"Use e.g. '5 s' or '5e6 µs' for a 5-second pulse (max {MAX_WIDTH_S:g} s)."
+        )
     if rise_s < MIN_RISE_FALL_S or fall_s < MIN_RISE_FALL_S:
         raise ValueError(f"rise/fall must be >= {MIN_RISE_FALL_S * 1e9:.0f} ns")
     if period_s is not None:
@@ -89,6 +99,10 @@ def validate_timing(
             raise ValueError(
                 f"period ({period_s * 1e6:.4g} µs) must exceed rise+width+fall "
                 f"({(rise_s + width_s + fall_s) * 1e6:.4g} µs)"
+            )
+        if period_s > MAX_PERIOD_S:
+            raise ValueError(
+                f"period ({period_s:g} s) exceeds PMU Segment ARB max ({MAX_PERIOD_S:g} s)"
             )
 
 

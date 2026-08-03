@@ -102,6 +102,17 @@ Click **Fire Pulse Now** anytime — the laser fires at the very start of the
 (shown live as "Fire Now latency ≈ up to Xs"). Smaller **Sample dt** /
 **Chunk size** values give lower latency at the cost of more GPIB
 round-trips; 0.05 s dt / 0.3 s chunks is a reasonable starting point.
+Manual Fire stays available while an Automated Routine is running (same
+streaming session). The pulse summary shows the parsed ON-time (e.g.
+`Single pulse ON for 5 s`).
+
+**Width** is an editable dropdown (presets from 100 ns … 5 s, or type
+values like `250 ns` / `5 s`; a bare number still means µs). Hardware
+(PMU Segment ARB) allows up to **40 s** per pulse. Older Clarius module
+headers capped Width/Period at ~1 s — if a long pulse is still truncated
+after updating this repo, recompile/reload `pmu_laser_smu_stream.c` /
+`pmu_laser_smu_run.c` / `pmu_ttl_laser_ch1.c` so the new 40 s max is
+picked up.
 
 **Known artifact — small periodic "sawtooth"/"triangle" ripple in I(t)/R(t):**
 because each chunk is its own `EX` call, `pmu_laser_smu_stream.c` has to
