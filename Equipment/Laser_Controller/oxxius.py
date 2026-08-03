@@ -329,6 +329,57 @@ class OxxiusLaser:
         time.sleep(0.1)
         results['emission_on'] = self.emission_on()
         time.sleep(0.1)
+        # Verify TTL actually stuck — some firmwares ignore TTL while still
+        # settling after APC/AM changes. Retry once if needed.
+        try:
+            ttl_q = self.send_command("?TTL")
+            results['TTL_query'] = ttl_q
+            if "1" not in str(ttl_q):
+                if self.verbose:
+                    print(
+                        f"[LASER] TTL not armed after prepare ({ttl_q!r}) — retrying TTL 1 + DL 1",
+                        flush=True,
+                    )
+                results['TTL_retry'] = self.digital_modulation_on()
+                time.sleep(0.1)
+                results['emission_on_retry'] = self.emission_on()
+                time.sleep(0.1)
+                results['TTL_query_retry'] = self.send_command("?TTL")
+        except Exception as exc:
+            results['TTL_verify_error'] = str(exc)
+        return results
+
+    def ensure_ttl_modulation(self, full_power_mw=TTL_FULL_POWER_MW):
+        """Make sure TTL digital modulation + emission are armed.
+
+        Queries ``?TTL`` first. If already on, only re-asserts emission ON
+        (cheap). If off / unknown / query fails, runs the full
+        ``prepare_for_ttl_modulation`` sequence so ACC + PM ceiling + TTL
+        are definitely correct.
+
+        Returns:
+            dict: Results of commands / queries performed.
+        """
+        results = {"already_armed": False}
+        try:
+            ttl_q = self.send_command("?TTL")
+            results['TTL_query'] = ttl_q
+            if "1" in str(ttl_q):
+                results['already_armed'] = True
+                results['emission_on'] = self.emission_on()
+                if self.verbose:
+                    print("[LASER] ensure_ttl: already TTL=1 — emission ON re-asserted", flush=True)
+                return results
+            if self.verbose:
+                print(
+                    f"[LASER] ensure_ttl: TTL not on ({ttl_q!r}) — full re-arm",
+                    flush=True,
+                )
+        except Exception as exc:
+            results['TTL_query_error'] = str(exc)
+            if self.verbose:
+                print(f"[LASER] ensure_ttl: query failed ({exc}) — full re-arm", flush=True)
+        results.update(self.prepare_for_ttl_modulation(full_power_mw=full_power_mw))
         return results
 
     def set_current_percent_for_ttl(self, percent):

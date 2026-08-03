@@ -9,17 +9,17 @@
 		vlow,	double,	Input,	0.0,	0.0,	5.0
 		rise,	double,	Input,	100e-9,	20e-9,	0.033
 		fall,	double,	Input,	100e-9,	20e-9,	0.033
-		width,	double,	Input,	10e-6,	40e-9,	0.999999
-		period,	double,	Input,	100e-6,	120e-9,	1.0
-		startPeriod,	double,	Input,	100e-6,	120e-9,	1.0
-		endPeriod,	double,	Input,	1e-3,	120e-9,	1.0
+		width,	double,	Input,	10e-6,	40e-9,	40.0
+		period,	double,	Input,	100e-6,	120e-9,	40.0
+		startPeriod,	double,	Input,	100e-6,	120e-9,	40.0
+		endPeriod,	double,	Input,	1e-3,	120e-9,	40.0
 		numPulses,	int,	Input,	1,	1,	500
 		delayBefore,	double,	Input,	0.0,	0.0,	10.0
 		vrange,	double,	Input,	10.0,	5.0,	40.0
 		PMU_ID,	char *,	Input,	"PMU1",	,
 		ClariusDebug,	int,	Input,	0,	0,	1
-		cdStartWidth,	double,	Input,	0.0,	0.0,	0.999999
-		cdEndWidth,	double,	Input,	0.0,	0.0,	0.999999
+		cdStartWidth,	double,	Input,	0.0,	0.0,	40.0
+		cdEndWidth,	double,	Input,	0.0,	0.0,	40.0
 	INCLUDES:
 #include "keithley.h"
 #include <stdlib.h>

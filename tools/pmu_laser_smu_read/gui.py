@@ -43,6 +43,19 @@ DEFAULT_DATA_ROOT = resolve_default_save_root()
 TEST_TYPE_FOLDER_NAME = "PMU_Laser_SMU_Testing"
 SECTION_LETTERS = list("ABCDEFGHIJKL")
 DEVICE_NUMBERS = [str(i) for i in range(1, 11)]
+# Editable Width combobox presets (parsed via parse_time_value → seconds).
+# Bare numbers still mean microseconds for backwards compatibility.
+WIDTH_PRESETS = (
+    "100 ns",
+    "1 µs",
+    "10 µs",
+    "100 µs",
+    "1 ms",
+    "10 ms",
+    "100 ms",
+    "1 s",
+    "5 s",
+)
 _OLD_DEFAULT_SAVE = Path.home() / "Documents" / "data" / "pmu_laser_smu_read"
 _OLD_TOOL_DATA_ROOT = DEFAULT_DATA_ROOT / "pmu_laser_smu_read"
 
@@ -70,6 +83,7 @@ try:
         format_width_list,
         generate_decade_widths,
         generate_power_levels,
+        parse_time_value,
         parse_width_list,
     )
 except ImportError:
@@ -96,6 +110,7 @@ except ImportError:
         format_width_list,
         generate_decade_widths,
         generate_power_levels,
+        parse_time_value,
         parse_width_list,
     )
 
@@ -414,13 +429,13 @@ class PmuLaserSmuReadGUI:
         pmu = ttk.LabelFrame(left, text="PMU CH1 TTL", padding=6)
         pmu.pack(fill=tk.X, pady=4)
         self.vhigh_var = tk.StringVar(value="5.0")
-        self.width_us_var = tk.StringVar(value="10")
+        self.width_us_var = tk.StringVar(value="10 µs")
         self.rise_ns_var = tk.StringVar(value="100")
         self.fall_ns_var = tk.StringVar(value="100")
         self.delay_ms_var = tk.StringVar(value="50")
         self.fire_delay_ms_var = tk.StringVar(value="100")
         self._row(pmu, "Vhigh (V)", self.vhigh_var)
-        self._row(pmu, "Width (µs)", self.width_us_var)
+        self._width_row(pmu, self.width_us_var)
         self._row(pmu, "Rise (ns)", self.rise_ns_var)
         self._row(pmu, "Fall (ns)", self.fall_ns_var)
         self._row(pmu, "PMU delay before (ms)", self.delay_ms_var)
@@ -530,6 +545,29 @@ class PmuLaserSmuReadGUI:
         ttk.Label(fr, text=label, width=22).pack(side=tk.LEFT)
         ttk.Entry(fr, textvariable=var, width=14).pack(side=tk.LEFT)
         return fr
+
+    def _width_row(self, parent: tk.Misc, var: tk.StringVar) -> ttk.Frame:
+        """Width field as editable combobox with ns/µs/ms presets."""
+        fr = ttk.Frame(parent)
+        fr.pack(fill=tk.X, pady=1)
+        ttk.Label(fr, text="Width", width=22).pack(side=tk.LEFT)
+        cb = ttk.Combobox(fr, textvariable=var, values=WIDTH_PRESETS, width=12)
+        cb.pack(side=tk.LEFT)
+        ttk.Label(
+            parent,
+            text="Presets or type e.g. 250 ns / 5 µs / 5 s (bare number = µs). Max 40 s.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+        ).pack(anchor=tk.W, padx=(22, 0))
+        return fr
+
+    def _width_s(self) -> float:
+        """Parse the Width field into seconds (presets or bare µs)."""
+        return parse_time_value(self.width_us_var.get())
+
+    def _set_width_s(self, width_s: float) -> None:
+        """Write a duration into the Width field in human-readable form."""
+        self.width_us_var.set(format_time_compact(width_s))
 
     def _collapsible_section(
         self,
@@ -725,7 +763,7 @@ class PmuLaserSmuReadGUI:
 
     def _params(self) -> Dict[str, Any]:
         mode: ModeName = self.mode_var.get()  # type: ignore[assignment]
-        width_s = self._f(self.width_us_var) * 1e-6
+        width_s = self._width_s()
         rise_s = self._f(self.rise_ns_var) * 1e-9
         fall_s = self._f(self.fall_ns_var) * 1e-9
         vhigh = self._f(self.vhigh_var)
@@ -1373,7 +1411,7 @@ class PmuLaserSmuReadGUI:
         live_pmu = ttk.LabelFrame(left, text="PMU CH1 TTL", padding=6)
         live_pmu.pack(fill=tk.X, pady=4)
         self._row(live_pmu, "Vhigh (V)", self.vhigh_var)
-        self._row(live_pmu, "Width (µs)", self.width_us_var)
+        self._width_row(live_pmu, self.width_us_var)
         self._row(live_pmu, "Rise (ns)", self.rise_ns_var)
         self._row(live_pmu, "Fall (ns)", self.fall_ns_var)
         self._row(live_pmu, "PMU delay before (ms)", self.delay_ms_var)
@@ -1713,7 +1751,7 @@ class PmuLaserSmuReadGUI:
         width_row.pack(fill=tk.X, pady=1)
         ttk.Label(width_row, text="Current width", width=22).pack(side=tk.LEFT)
         self.routine_current_width_var = tk.StringVar(
-            value=format_width_s(self._f(self.width_us_var) * 1e-6)
+            value=format_width_s(self._width_s())
         )
         ttk.Label(width_row, textvariable=self.routine_current_width_var, foreground="#555555").pack(
             side=tk.LEFT
@@ -1953,12 +1991,13 @@ class PmuLaserSmuReadGUI:
         right now, shared by the Live tab and the Automated Routine tab."""
         p = self._params()
         mode = p["mode"]
+        w = format_time_compact(p["width_s"])
         if mode == "single":
-            return f"Single pulse, {p['width_s'] * 1e6:.3g} µs wide, Vhigh={p['vhigh']} V"
+            return f"Single pulse ON for {w}, Vhigh={p['vhigh']} V"
         if mode == "train":
             return (
-                f"Train: {p['num_pulses']} pulses @ {p['period_s'] * 1e6:.3g} µs "
-                f"period, {p['width_s'] * 1e6:.3g} µs wide, Vhigh={p['vhigh']} V"
+                f"Train: {p['num_pulses']} pulses @ {format_time_compact(p['period_s'])} "
+                f"period, each ON {w}, Vhigh={p['vhigh']} V"
             )
         return (
             f"Cool-down ({p.get('decay', 'linear')}): "
@@ -1981,7 +2020,7 @@ class PmuLaserSmuReadGUI:
             return
         if hasattr(self, "routine_current_width_var"):
             try:
-                self.routine_current_width_var.set(format_width_s(self._f(self.width_us_var) * 1e-6))
+                self.routine_current_width_var.set(format_width_s(self._width_s()))
             except Exception:
                 pass
         try:
@@ -2257,10 +2296,25 @@ class PmuLaserSmuReadGUI:
             # Don't kill streaming — just refuse this fire and say why.
             self.live_status_var.set(f"Fire skipped: {exc}")
             return
+        if self.laser is not None:
+            try:
+                self.laser.ensure_ttl_modulation()
+            except Exception as exc:
+                self.live_status_var.set(f"Fire skipped — could not arm TTL: {exc}")
+                return
+        w = format_time_compact(p["width_s"])
+        print(
+            f"[FIRE] Queuing {p['mode']} pulse — Width={w} "
+            f"({p['width_s']:.6g} s), Vhigh={p['vhigh']} V",
+            flush=True,
+        )
         self._print_laser_levels("FIRE NOW")
         self._stream_fire_queue.put(p)
         self.live_fire_btn.configure(state=tk.DISABLED)
-        self.live_status_var.set("Fire pending — will fire at start of next chunk…")
+        self.live_status_var.set(
+            f"Fire pending — {p['mode']} ON for {w} at start of next chunk…"
+        )
+        self._update_live_pulse_summary()
 
     def _poll_stream_queue(self) -> None:
         try:
@@ -2350,6 +2404,10 @@ class PmuLaserSmuReadGUI:
                     }
                 )
             self.live_fire_btn.configure(state=tk.NORMAL)
+        # Re-arm Fire after every chunk so manual pulses stay available
+        # mid-routine / mid-stream (not only after a fired chunk).
+        if self._stream_active and not self._paused:
+            self.live_fire_btn.configure(state=tk.NORMAL)
         if local_t:
             self._stream_elapsed = float(local_t[-1])
 
@@ -2360,6 +2418,7 @@ class PmuLaserSmuReadGUI:
         if hasattr(self, "routine_stream_status_var"):
             self.routine_stream_status_var.set(status)
         self._redraw_all_stream_plots()
+        self._update_live_pulse_summary()
 
     def _redraw_all_stream_plots(self) -> None:
         """Redraw every canvas subscribed to the shared stream buffers —
@@ -2527,7 +2586,7 @@ class PmuLaserSmuReadGUI:
             messagebox.showerror("Invalid experiment parameters", str(exc))
             return
 
-        self.width_us_var.set(self._fmt_num(start_w))
+        self._set_width_s(start_w * 1e-6)
 
         if not self._stream_active:
             self._start_streaming()
@@ -2551,7 +2610,7 @@ class PmuLaserSmuReadGUI:
             return
 
         width_us = self._exp_next_width_us
-        self.width_us_var.set(self._fmt_num(width_us))
+        self._set_width_s(width_us * 1e-6)
         try:
             p = self._params()
         except Exception as exc:
@@ -2623,6 +2682,8 @@ class PmuLaserSmuReadGUI:
             laser = OxxiusLaser(port=port, baud=baud)
             idn = laser.idn()
             laser.prepare_for_ttl_modulation()
+            # Always verify — prepare can occasionally leave TTL off until retry.
+            laser.ensure_ttl_modulation()
         except Exception as exc:
             self.laser_status_var.set("Disconnected")
             try:
@@ -2934,14 +2995,17 @@ class PmuLaserSmuReadGUI:
         if not self._stream_active:
             self._start_streaming()
 
-        if getattr(self, "_laser_align_active", False):
-            try:
-                self.laser.prepare_for_ttl_modulation()
-                self._laser_align_active = False
-                self.laser_status_var.set("Connected — TTL mod re-armed for routine (emission ON)")
-            except Exception as exc:
-                messagebox.showerror("Routine", f"Could not leave Align mode: {exc}")
-                return
+        # Always re-arm TTL (not only after Align) — otherwise a missed/
+        # dropped TTL=1 on connect, or a manual emission/mode tweak, can
+        # leave the laser in CW/analog and pulses do nothing.
+        try:
+            print("[ROUTINE] Ensuring laser TTL mode before start…", flush=True)
+            self.laser.ensure_ttl_modulation()
+            self._laser_align_active = False
+            self.laser_status_var.set("Connected — TTL mod armed for routine (emission ON)")
+        except Exception as exc:
+            messagebox.showerror("Routine", f"Could not arm TTL mode: {exc}")
+            return
 
         self._save_config()
         self._routine_plan = plan
@@ -3027,7 +3091,7 @@ class PmuLaserSmuReadGUI:
         else:
             width_us = step.width_s * 1e6
             pct = self._routine_current_power_mw
-            self.width_us_var.set(self._fmt_num(width_us))
+            self._set_width_s(step.width_s)
             print(
                 f"[ROUTINE] Step {i}/{n}: FIRE width={format_time_compact(step.width_s)} "
                 f"@ current={pct:.3g}% (next in {interval_s:g}s)",
