@@ -40,25 +40,15 @@ debugging / dry-run comparison) but the Python tool now only calls
 Cool-down `mode` ints (same in run / stream / ttl modules):
 `0` single, `1` train, `2` linear cool-down, `3` exponential, `4` quadratic.
 
-Cool-down design (current, Jul 2026): pulse 0 fires at the full `width` — a
-single/train pulse's confirmed-working on-time. From pulse 1 onward, BOTH
-the pulse **width** AND the **period** taper together, `cdStartWidth` →
-`cdEndWidth` and `startPeriod` → `endPeriod`, over the requested span,
-following the chosen decay shape. Python (`plan_cooldown` in `waveform.py`)
-derives `numPulses`/`startPeriod`/`endPeriod`/`cdStartWidth`/`cdEndWidth`
-from `width + rise + fall + span + decay`; the C side regenerates the exact
-same width/period curves per pulse (`ttl_cooldown_width` / mirrored in
-`pmu_laser_smu_run.c` / `pmu_laser_smu_stream.c`).
+Cool-down design (current, Aug 2026 — explicit sequence):
+pulse 0 is a full-`width` **write**. Pulses after that come from
+`cdSequence` (`delay:width;delay:width;...` in seconds). The first
+delay is the OFF gap immediately after the write; each later delay is
+the OFF before the next cool-down pulse. Python GUI lines are
+`delay, pulse`; wire uses `:` / `;` (no commas — those split EX args).
+Legacy cdStartWidth/cdEndWidth/startPeriod are unused for cool-down shape.
 
-`cdStartWidth` defaults to `width` itself (if `<= 0`), and `cdEndWidth`
-defaults to `MIN_WIDTH` (40 ns, the PMU's true hardware-minimum pulse
-width, if `<= 0`) — i.e. pulse count/width/spacing all scale directly with
-whatever `width` is set to, instead of the earlier (buggy) default that
-capped the very first cool-down pulse at a fixed ~200 ns regardless of
-`width`. If the requested span can't even fit two full-`width` pulses,
-`plan_cooldown` shrinks the *starting* width so a meaningful multi-pulse
-taper still fits, rather than forcing one oversized pulse into too little
-time (see `plan_cooldown`'s shrink-to-fit step in `waveform.py`).
+Empty / `"0"` sequence → write-only.
 
 ## Source files
 

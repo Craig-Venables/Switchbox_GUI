@@ -76,8 +76,8 @@ RPM is **only** on the laser pulse path. The SMU does not go through an RPM for 
 | Mode | Behaviour |
 |------|-----------|
 | **Single** | One TTL high pulse |
-| **Train** | N pulses at fixed period |
-| **Cool-down** | Pulse 0 fires at the same **Width** as a single pulse (the on-time already confirmed to reach the laser). From there, both **Width** and the OFF-time between pulses taper together toward the end of the train, over **Cool-down over**, following the chosen decay shape (linear / exponential / quadratic) — progressively smaller, more widely spaced pulses. N and the width/period range are derived automatically from Width/rise/fall/span, so they scale with Width (a small Width barely tapers; a big Width gets a long, gradual taper) instead of a fixed ns-scale floor unrelated to Width. If **Cool-down over** is too short to fit even two full-Width pulses, the taper's starting width shrinks automatically so a meaningful multi-pulse ramp still fits. |
+| **Train** | N pulses: **Width** = ON time, **Off time** = LOW gap between pulses (period = rise + width + fall + off) |
+| **Cool-down** | Write pulse = **Width**, then an explicit list: each line is `delay, pulse` (e.g. `1 us, 2 us`). The **first delay** is the OFF gap right after the write; then that pulse fires; then the next delay, etc. Preview shows TTL + red average-power. Hardware uses `cdSequence` (`delay:width;...` — rebuild Clarius if needed). |
 
 ## Three tabs
 
@@ -302,6 +302,49 @@ Python EX signature change — but Clarius must rebuild:
 4. Re-run a single pulse and measure Vpeak at the laser TTL with the laser
    connected (see Wiring Help in the GUI)
 
+### Recompile after manual cool-down sequence (Aug 2026)
+
+Cool-down is now an explicit pulse/delay list (GUI text box), not auto
+packing or % envelopes. C modules take a new ``cdSequence`` string
+(`width:delay;...`). Rebuild Clarius:
+
+1. Open library **`A_pmu_laser_smu_read`** in Clarius / KULT
+2. Replace/re-add updated `.c` files from
+   `Equipment/.../pmu_ttl_laser_ch1/` (run, stream, ttl — NUMBER OF PARMS +1)
+3. **Build** then **Load** onto the 4200
+4. Scope: typed widths and gaps must match the preview exactly
+
+### Recompile after average-power cool-down envelope (Aug 2026)
+
+Cool-down packing is no longer sparse/dense. The tail follows a **linear
+average-power envelope** (100% → 0% duty over the % window): on-time
+shrinks and gaps grow (`period ≈ width/duty`). Clarius must rebuild so C
+matches the Python preview:
+
+1. Open library **`A_pmu_laser_smu_read`** in Clarius / KULT
+2. Replace/re-add the updated `.c` files from
+   `Equipment/.../pmu_ttl_laser_ch1/`
+3. **Build** then **Load** the library onto the 4200
+4. Re-run cool-down: confirm one full-Width write, then tapering spaced
+   pulses over ~pct% of Width (not write-only, not dense PWM)
+
+### Recompile after Blu-ray-style cool-down redesign (Aug 2026)
+
+Cool-down is no longer one long tapering train with expanding gaps.
+Pulse 0 is a full-Width **write**; pulses 1..N are a short multipulse
+**cool-down tail** whose duration is a user-chosen **% of Width**
+(default 20%). Tail widths start at ~10% of Width and decay to 40 ns,
+tight-packed. Clarius must rebuild so C matches the Python preview:
+
+1. Open library **`A_pmu_laser_smu_read`** in Clarius / KULT
+2. Replace/re-add the updated `.c` files from
+   `Equipment/.../pmu_ttl_laser_ch1/`
+3. **Build** then **Load** the library onto the 4200
+4. Re-run cool-down: confirm one full-Width write, then a short train of
+   tiny pulses (not a 1000 µs widening-gap train)
+
+Full notes: that folder’s `README.md`.
+
 ### Recompile after cool-down redesign (Jul 2026)
 
 Cool-down mode used to shrink pulses 1..N-1 toward a fixed `cdStartWidth`
@@ -344,7 +387,7 @@ continuous C function executed by **one** `EX` command, so the SMU source
 is never released mid-sequence.
 
 ```text
-EX A_pmu_laser_smu_read pmu_laser_smu_run(Vforce,Ilimit,mode,vhigh,vlow,rise,fall,width,period,startPeriod,endPeriod,numPulses,delayBefore,vrange,PMU_ID,ClariusDebug,Duration_s,SampleInterval_s,NumPrePoints,cdStartWidth,cdEndWidth,Irange,,NumPoints,,NumPointsTimestamps)
+EX A_pmu_laser_smu_read pmu_laser_smu_run(...,cdStartWidth,cdEndWidth,cdSequence,Irange,,NumPoints,,NumPointsTimestamps)
 ```
 
 ## Timing
@@ -379,7 +422,7 @@ repeatedly (a "chunk" per call) instead of once, because GPIB has no way to
 interrupt an in-flight `EX` call to fire the laser on demand:
 
 ```text
-EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,fall,width,period,startPeriod,endPeriod,numPulses,delayBefore,vrange,PMU_ID,ClariusDebug,SampleInterval_s,FireNow,StopNow,cdStartWidth,cdEndWidth,Irange,,NumPoints,,NumPointsTimestamps)
+EX A_pmu_laser_smu_read pmu_laser_smu_stream(...,cdStartWidth,cdEndWidth,cdSequence,Irange,,NumPoints,,NumPointsTimestamps)
 ```
 
 Each call: re-assert bias (`forcev`, required every call) → if `FireNow=1`,

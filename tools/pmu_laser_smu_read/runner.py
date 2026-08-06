@@ -43,11 +43,14 @@ try:
         STREAM_GP_PARAM_IMEAS,
         DecayName,
         ModeName,
+        PackingName,
         WaveformPreview,
         build_pmu_laser_smu_run_ex_command,
         build_pmu_laser_smu_stream_ex_command,
         build_preview,
-        plan_cooldown,
+        plan_cooldown_sequence,
+        parse_cooldown_sequence,
+        format_cooldown_sequence_wire,
         ensure_period_s,
     )
 except ImportError:
@@ -57,11 +60,14 @@ except ImportError:
         STREAM_GP_PARAM_IMEAS,
         DecayName,
         ModeName,
+        PackingName,
         WaveformPreview,
         build_pmu_laser_smu_run_ex_command,
         build_pmu_laser_smu_stream_ex_command,
         build_preview,
-        plan_cooldown,
+        plan_cooldown_sequence,
+        parse_cooldown_sequence,
+        format_cooldown_sequence_wire,
         ensure_period_s,
     )
 
@@ -419,24 +425,21 @@ def run_pmu_laser_smu_read(
     dry_run: bool = False,
     debug: bool = False,
     decay: DecayName = "linear",
+    packing: PackingName = "sparse",
     cooldown_span_s: Optional[float] = None,
+    num_cd_pulses: Optional[int] = None,
     cd_start_width_s: Optional[float] = None,
     cd_end_width_s: Optional[float] = None,
+    cooldown_sequence: Optional[list] = None,
+    cd_sequence: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run SMU bias + PMU TTL + SMU collect on one KXCI GPIB session.
 
-    cd_start_width_s / cd_end_width_s are OPTIONAL overrides for the
-    cool-down pulse-WIDTH decay bounds (normally left None so
-    plan_cooldown() derives them from width_s — see its docstring). The GUI
-    passes back the values IT already resolved (from its own plan_cooldown
-    call, used for the on-screen preview/info text) purely so this call's
-    plan_cooldown() reproduces the identical, possibly shrunk-to-fit bounds
-    rather than recomputing them a second time.
-
-    irange is SMU1's current MEASUREMENT range (separate from ilimit, the
-    compliance limit): 0.0 = autorange (default), > 0.0 = fixed range for
-    lower-noise/faster reads once you know roughly what current to expect.
+    Cool-down uses an explicit ``cooldown_sequence`` list of
+    ``(width_s, delay_s)`` pairs (or a ``cd_sequence`` wire string).
+    Legacy pct / packing / cd_start args are ignored.
     """
+    del cooldown_span_s, num_cd_pulses, cd_start_width_s, cd_end_width_s, packing
     if sample_interval_s < 0.001:
         raise ValueError("sample_interval_s must be >= 1 ms (SMU_BiasTimedRead limit)")
 
@@ -444,27 +447,35 @@ def run_pmu_laser_smu_read(
     start_p = start_period_s
     end_p = end_period_s
     period_use = period_s
-    cd_start_w = 0.0
-    cd_end_w = 0.0
+    seq_list: list = list(cooldown_sequence or [])
+    wire = (cd_sequence or "").strip()
     if mode == "train":
         period_use = ensure_period_s(
             period_s, width_s=width_s, rise_s=rise_s, fall_s=fall_s
         )
     if mode == "cooldown":
-        span = cooldown_span_s
-        if span is None or span <= 0:
-            span = max(start_period_s, 1e-6)
-        n_pulses, start_p, end_p, _, cd_start_w, cd_end_w = plan_cooldown(
-            width_s=width_s,
-            rise_s=rise_s,
-            fall_s=fall_s,
-            span_s=span,
-            decay=decay,
-            cd_start_width_s=cd_start_width_s,
-            cd_end_width_s=cd_end_width_s,
+        if not seq_list and wire and wire != "0":
+            # Recover list from wire if only string was passed.
+            for pair in wire.split(";"):
+                if not pair.strip() or ":" not in pair:
+                    continue
+                a, b = pair.split(":", 1)
+                seq_list.append((float(a), float(b)))
+        if not seq_list and not wire:
+            seq_list = []
+        plan = plan_cooldown_sequence(
+            width_s=width_s, rise_s=rise_s, fall_s=fall_s, sequence=seq_list
         )
+        n_pulses = plan.num_pulses
+        seq_list = plan.sequence
+        wire = plan.wire or "0"
+        if len(plan.offs) > 1:
+            start_p = rise_s + plan.widths[1] + fall_s + plan.offs[1]
+            end_p = rise_s + plan.widths[-1] + fall_s + plan.offs[-1]
     if mode == "single":
         n_pulses = 1
+    if not wire:
+        wire = "0"
 
     preview: WaveformPreview = build_preview(
         mode,
@@ -478,10 +489,7 @@ def run_pmu_laser_smu_read(
         end_period_s=end_p,
         num_pulses=n_pulses,
         delay_before_s=delay_before_s,
-        decay=decay,
-        cooldown_span_s=cooldown_span_s if mode == "cooldown" else None,
-        cd_start_width_s=cd_start_w,
-        cd_end_width_s=cd_end_w,
+        cooldown_sequence=seq_list if mode == "cooldown" else None,
     )
 
     num_pre_points = max(0, int(round(pre_capture_s / sample_interval_s))) if pre_capture_s > 0 else 0
@@ -509,8 +517,7 @@ def run_pmu_laser_smu_read(
         num_pre_points=num_pre_points,
         num_points=num_points,
         decay=decay,
-        cd_start_width_s=cd_start_w,
-        cd_end_width_s=cd_end_w,
+        cd_sequence=wire,
         irange=irange,
         library=usr_library,
     )
@@ -694,16 +701,16 @@ class PmuLaserSmuStreamSession:
         delay_before_s: float = 0.0,
         vrange: float = 10.0,
         decay: DecayName = "linear",
+        packing: PackingName = "sparse",
         cooldown_span_s: Optional[float] = None,
+        num_cd_pulses: Optional[int] = None,
+        cd_start_width_s: Optional[float] = None,
+        cd_end_width_s: Optional[float] = None,
+        cooldown_sequence: Optional[list] = None,
+        cd_sequence: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run one chunk: (optionally fire the laser, then) sample NumPoints
-        SMU readings. Returns absolute session timestamps on a continuous
-        wall-clock axis (perf_counter origin; even spacing within each chunk).
-
-        irange is SMU1's current MEASUREMENT range (separate from ilimit,
-        the compliance limit): 0.0 = autorange (default), > 0.0 = fixed
-        range for lower-noise/faster reads once you know roughly what
-        current to expect. Re-asserted every chunk, same as vread/ilimit."""
+        """Run one chunk: (optionally fire the laser, then) sample NumPoints."""
+        del packing, cooldown_span_s, num_cd_pulses, cd_start_width_s, cd_end_width_s
         if not self._connected or self._kxci is None:
             raise RuntimeError("Not connected — call connect() first")
 
@@ -713,19 +720,18 @@ class PmuLaserSmuStreamSession:
         period_use = ensure_period_s(
             period_s, width_s=width_s, rise_s=rise_s, fall_s=fall_s
         ) if mode == "train" else period_s
-        cd_start_w = 0.0
-        cd_end_w = 0.0
+        seq_list: list = list(cooldown_sequence or [])
+        wire = (cd_sequence or "").strip() or "0"
         if fire_now and mode == "cooldown":
-            span = cooldown_span_s if cooldown_span_s and cooldown_span_s > 0 else None
-            if span is None:
-                span = max(start_period_s, 1e-6)
-            n_pulses, start_p, end_p, _, cd_start_w, cd_end_w = plan_cooldown(
-                width_s=width_s,
-                rise_s=rise_s,
-                fall_s=fall_s,
-                span_s=span,
-                decay=decay,
+            plan = plan_cooldown_sequence(
+                width_s=width_s, rise_s=rise_s, fall_s=fall_s, sequence=seq_list
             )
+            n_pulses = plan.num_pulses
+            seq_list = plan.sequence
+            wire = plan.wire or "0"
+            if len(plan.offs) > 1:
+                start_p = rise_s + plan.widths[1] + fall_s + plan.offs[1]
+                end_p = rise_s + plan.widths[-1] + fall_s + plan.offs[-1]
 
         laser_on_intervals: List[Tuple[float, float]] = []
         pulse_dur = 0.0
@@ -742,10 +748,7 @@ class PmuLaserSmuStreamSession:
                 end_period_s=end_p,
                 num_pulses=n_pulses,
                 delay_before_s=delay_before_s,
-                decay=decay,
-                cooldown_span_s=cooldown_span_s if mode == "cooldown" else None,
-                cd_start_width_s=cd_start_w,
-                cd_end_width_s=cd_end_w,
+                cooldown_sequence=seq_list if mode == "cooldown" else None,
             )
             pulse_dur = preview.total_duration_s
             laser_on_intervals = list(preview.laser_on_intervals)
@@ -772,8 +775,7 @@ class PmuLaserSmuStreamSession:
             stop_now=False,
             num_points=num_points,
             decay=decay,
-            cd_start_width_s=cd_start_w,
-            cd_end_width_s=cd_end_w,
+            cd_sequence=wire,
             irange=irange,
             library=self.usr_library,
         )
