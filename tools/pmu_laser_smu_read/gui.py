@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+from tkinter import scrolledtext
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -62,13 +63,21 @@ _OLD_TOOL_DATA_ROOT = DEFAULT_DATA_ROOT / "pmu_laser_smu_read"
 try:
     from waveform import (
         MAX_TTL_VHIGH,
+        MIN_WIDTH_S,
         DecayName,
         ModeName,
+        PackingName,
+        avg_power_polyline,
         build_preview,
         ensure_period_s,
         format_width_s,
-        plan_cooldown,
         preview_polyline,
+    )
+    from cooldown_seq import (
+        DEFAULT_COOLDOWN_SEQUENCE_TEXT,
+        format_cooldown_sequence_wire,
+        parse_cooldown_sequence,
+        plan_cooldown_sequence,
     )
     from runner import (
         PmuLaserSmuStreamSession,
@@ -89,13 +98,21 @@ try:
 except ImportError:
     from tools.pmu_laser_smu_read.waveform import (
         MAX_TTL_VHIGH,
+        MIN_WIDTH_S,
         DecayName,
         ModeName,
+        PackingName,
+        avg_power_polyline,
         build_preview,
         ensure_period_s,
         format_width_s,
-        plan_cooldown,
         preview_polyline,
+    )
+    from tools.pmu_laser_smu_read.cooldown_seq import (
+        DEFAULT_COOLDOWN_SEQUENCE_TEXT,
+        format_cooldown_sequence_wire,
+        parse_cooldown_sequence,
+        plan_cooldown_sequence,
     )
     from tools.pmu_laser_smu_read.runner import (
         PmuLaserSmuStreamSession,
@@ -136,6 +153,8 @@ class PmuLaserSmuReadGUI:
         self._running = False
 
         self._inset_ax = None
+        self._preview_after_id: Optional[str] = None
+        self._pulse_summary_after_id: Optional[str] = None
 
         # Laser (serial, Oxxius) — shared across the Automated Routine tab.
         self.laser: Optional[Any] = None
@@ -446,8 +465,10 @@ class PmuLaserSmuReadGUI:
         mode_fr.pack(fill=tk.X, pady=4)
         self.mode_var = tk.StringVar(value="single")
         self.decay_var = tk.StringVar(value="linear")
-        self.cooldown_span_us_var = tk.StringVar(value="1000")
+        self.cooldown_packing_var = tk.StringVar(value="sparse")
         self.cooldown_info_var = tk.StringVar(value="")
+        self._cooldown_seq = DEFAULT_COOLDOWN_SEQUENCE_TEXT
+        self._cd_text_widgets: List[Any] = []
         for label, val in (
             ("Single", "single"),
             ("Train", "train"),
@@ -463,40 +484,20 @@ class PmuLaserSmuReadGUI:
 
         self.mode_params = ttk.Frame(mode_fr)
         self.mode_params.pack(fill=tk.X, pady=4)
-        self.period_us_var = tk.StringVar(value="100")
+        # Train: Width (ON) is in PMU CH1 TTL; Off time is the LOW gap between pulses.
+        # Hardware period = rise + width + fall + off (sent as period_s to the C module).
+        self.off_time_var = tk.StringVar(value="90 µs")
         self.num_pulses_var = tk.StringVar(value="10")
         # Legacy vars kept for config compatibility; cool-down now plans these.
         self.start_period_us_var = tk.StringVar(value="100")
         self.end_period_us_var = tk.StringVar(value="1000")
 
-        self.period_row = self._row(self.mode_params, "Period (µs)", self.period_us_var)
+        self.off_row = self._time_row(self.mode_params, self.off_time_var, label="Off time")
         self.npulses_row = self._row(self.mode_params, "Num pulses", self.num_pulses_var)
 
         self.cooldown_block = ttk.Frame(self.mode_params)
-        self._row(self.cooldown_block, "Cool-down over (µs)", self.cooldown_span_us_var)
-        decay_row = ttk.Frame(self.cooldown_block)
-        decay_row.pack(fill=tk.X, pady=1)
-        ttk.Label(decay_row, text="Decay type", width=22).pack(side=tk.LEFT)
-        self.decay_combo = ttk.Combobox(
-            decay_row,
-            textvariable=self.decay_var,
-            values=("linear", "exponential", "quadratic"),
-            state="readonly",
-            width=12,
-        )
-        self.decay_combo.pack(side=tk.LEFT)
-        self.decay_combo.bind("<<ComboboxSelected>>", lambda *_: self._on_cooldown_change())
-        ttk.Label(
-            self.cooldown_block,
-            textvariable=self.cooldown_info_var,
-            foreground="#555555",
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(2, 2))
-        self.cd_fig = Figure(figsize=(3.2, 1.35), dpi=100)
-        self.cd_ax = self.cd_fig.add_subplot(111)
-        self.cd_fig.subplots_adjust(left=0.14, right=0.98, top=0.88, bottom=0.28)
-        self.cd_canvas = FigureCanvasTkAgg(self.cd_fig, master=self.cooldown_block)
-        self.cd_canvas.get_tk_widget().pack(fill=tk.X, pady=(2, 0))
+        self._fill_cooldown_block(self.cooldown_block, info_var=self.cooldown_info_var, fig_attr="cd")
+
 
         btns = ttk.Frame(left)
         btns.pack(fill=tk.X, pady=8)
@@ -527,17 +528,112 @@ class PmuLaserSmuReadGUI:
 
         for var in (
             self.width_us_var,
-            self.period_us_var,
+            self.off_time_var,
             self.num_pulses_var,
-            self.cooldown_span_us_var,
             self.vhigh_var,
             self.decay_var,
         ):
-            var.trace_add("write", lambda *_: self.root.after(200, self._update_preview))
+            var.trace_add("write", lambda *_: self._schedule_preview())
 
         self._build_live_tab(live_tab)
         self._build_routine_tab(routine_tab)
         self._on_mode_change()
+
+
+    def _get_cooldown_sequence_text(self) -> str:
+        """Prefer live text-widget contents so paste / focus changes are not lost."""
+        for w in getattr(self, "_cd_text_widgets", []):
+            try:
+                if w.winfo_exists():
+                    return w.get("1.0", "end-1c")
+            except Exception:
+                continue
+        return getattr(self, "_cooldown_seq", DEFAULT_COOLDOWN_SEQUENCE_TEXT)
+
+    def _sync_cd_texts(self, source) -> None:
+        text_val = source.get("1.0", "end-1c")
+        self._cooldown_seq = text_val
+        for w in getattr(self, "_cd_text_widgets", []):
+            if w is source:
+                continue
+            try:
+                if w.get("1.0", "end-1c") != text_val:
+                    w.delete("1.0", "end")
+                    w.insert("1.0", text_val)
+            except Exception:
+                pass
+
+    def _fill_cooldown_block(self, parent, *, info_var, fig_attr: str, fig_h: float = 1.35) -> None:
+        """Shared cool-down sequence editor + mini preview for Single/Live/Routine."""
+        ttk.Label(
+            parent,
+            text="Cool-down sequence (one line: delay, pulse)",
+            font=("TkDefaultFont", 8, "bold"),
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            parent,
+            text="First delay = gap after write.  Example:  1 us, 2 us",
+            foreground="#666666",
+            font=("TkDefaultFont", 8),
+        ).pack(anchor=tk.W)
+        st = scrolledtext.ScrolledText(parent, height=5, width=40, font=("Consolas", 9))
+        st.insert("1.0", self._get_cooldown_sequence_text())
+        st.pack(fill=tk.X, pady=2)
+
+        def _on_key(_event=None, widget=st):
+            self._sync_cd_texts(widget)
+            self._on_cooldown_change()
+
+        st.bind("<KeyRelease>", _on_key)
+        st.bind("<<Paste>>", _on_key)
+        st.bind("<FocusOut>", _on_key)
+        if not hasattr(self, "_cd_text_widgets"):
+            self._cd_text_widgets = []
+        self._cd_text_widgets.append(st)
+
+        ttk.Label(parent, textvariable=info_var, foreground="#555555", justify=tk.LEFT).pack(
+            anchor=tk.W, pady=(2, 2)
+        )
+        fig = Figure(figsize=(3.2, fig_h), dpi=100)
+        ax = fig.add_subplot(111)
+        fig.subplots_adjust(left=0.14, right=0.98, top=0.88, bottom=0.28)
+        canvas = FigureCanvasTkAgg(fig, master=parent)
+        canvas.get_tk_widget().pack(fill=tk.X, pady=(2, 0))
+        if fig_attr == "cd":
+            self.cd_fig, self.cd_ax, self.cd_canvas = fig, ax, canvas
+        elif fig_attr == "live":
+            self.live_cd_fig, self.live_cd_ax, self.live_cd_canvas = fig, ax, canvas
+        else:
+            self.routine_cd_fig, self.routine_cd_ax, self.routine_cd_canvas = fig, ax, canvas
+
+    def _schedule_preview(self) -> None:
+        """Debounced TTL preview redraw (cancel pending so typing doesn't stack)."""
+        if self._preview_after_id is not None:
+            try:
+                self.root.after_cancel(self._preview_after_id)
+            except Exception:
+                pass
+        self._preview_after_id = self.root.after(200, self._run_scheduled_preview)
+
+    def _run_scheduled_preview(self) -> None:
+        self._preview_after_id = None
+        self._update_preview()
+
+    def _schedule_pulse_summary(self) -> None:
+        """Debounced live/routine pulse-summary refresh."""
+        if self._pulse_summary_after_id is not None:
+            try:
+                self.root.after_cancel(self._pulse_summary_after_id)
+            except Exception:
+                pass
+        self._pulse_summary_after_id = self.root.after(
+            200, self._run_scheduled_pulse_summary
+        )
+
+    def _run_scheduled_pulse_summary(self) -> None:
+        self._pulse_summary_after_id = None
+        self._update_live_pulse_summary()
+        self._update_routine_pulse_summary()
 
     def _row(self, parent: tk.Misc, label: str, var: tk.StringVar) -> ttk.Frame:
         fr = ttk.Frame(parent)
@@ -546,13 +642,11 @@ class PmuLaserSmuReadGUI:
         ttk.Entry(fr, textvariable=var, width=14).pack(side=tk.LEFT)
         return fr
 
-    def _width_row(self, parent: tk.Misc, var: tk.StringVar) -> ttk.Frame:
+    def _width_row(
+        self, parent: tk.Misc, var: tk.StringVar, *, label: str = "Width"
+    ) -> ttk.Frame:
         """Width field as editable combobox with ns/µs/ms presets."""
-        fr = ttk.Frame(parent)
-        fr.pack(fill=tk.X, pady=1)
-        ttk.Label(fr, text="Width", width=22).pack(side=tk.LEFT)
-        cb = ttk.Combobox(fr, textvariable=var, values=WIDTH_PRESETS, width=12)
-        cb.pack(side=tk.LEFT)
+        fr = self._time_row(parent, var, label=label)
         ttk.Label(
             parent,
             text="Presets or type e.g. 250 ns / 5 µs / 5 s (bare number = µs). Max 40 s.",
@@ -561,9 +655,25 @@ class PmuLaserSmuReadGUI:
         ).pack(anchor=tk.W, padx=(22, 0))
         return fr
 
+    def _time_row(
+        self, parent: tk.Misc, var: tk.StringVar, *, label: str
+    ) -> ttk.Frame:
+        """Editable duration combobox (same presets/units as Width)."""
+        fr = ttk.Frame(parent)
+        fr.pack(fill=tk.X, pady=1)
+        ttk.Label(fr, text=label, width=22).pack(side=tk.LEFT)
+        ttk.Combobox(fr, textvariable=var, values=WIDTH_PRESETS, width=12).pack(
+            side=tk.LEFT
+        )
+        return fr
+
     def _width_s(self) -> float:
         """Parse the Width field into seconds (presets or bare µs)."""
         return parse_time_value(self.width_us_var.get())
+
+    def _off_s(self) -> float:
+        """Parse Train Off time (LOW gap between pulses) into seconds."""
+        return parse_time_value(self.off_time_var.get())
 
     def _set_width_s(self, width_s: float) -> None:
         """Write a duration into the Width field in human-readable form."""
@@ -722,20 +832,20 @@ class PmuLaserSmuReadGUI:
     def _on_mode_change(self) -> None:
         mode = self.mode_var.get()
 
-        def sync(period_row, npulses_row, cooldown_block) -> None:
-            for row in (period_row, npulses_row, cooldown_block):
+        def sync(off_row, npulses_row, cooldown_block) -> None:
+            for row in (off_row, npulses_row, cooldown_block):
                 row.pack_forget()
             if mode == "train":
-                period_row.pack(fill=tk.X, pady=1)
+                off_row.pack(fill=tk.X, pady=1)
                 npulses_row.pack(fill=tk.X, pady=1)
             elif mode == "cooldown":
                 cooldown_block.pack(fill=tk.X, pady=1)
 
-        sync(self.period_row, self.npulses_row, self.cooldown_block)
-        if hasattr(self, "live_period_row"):
-            sync(self.live_period_row, self.live_npulses_row, self.live_cooldown_block)
-        if hasattr(self, "routine_period_row"):
-            sync(self.routine_period_row, self.routine_npulses_row, self.routine_cooldown_block)
+        sync(self.off_row, self.npulses_row, self.cooldown_block)
+        if hasattr(self, "live_off_row"):
+            sync(self.live_off_row, self.live_npulses_row, self.live_cooldown_block)
+        if hasattr(self, "routine_off_row"):
+            sync(self.routine_off_row, self.routine_npulses_row, self.routine_cooldown_block)
         self._update_preview()
         self._update_cooldown_mini()
 
@@ -771,52 +881,40 @@ class PmuLaserSmuReadGUI:
             raise ValueError(f"Vhigh must be ≤ {MAX_TTL_VHIGH} V")
 
         num_pulses = max(1, int(float(self.num_pulses_var.get().strip())))
-        period_s = self._f(self.period_us_var) * 1e-6
-        decay: DecayName = self.decay_var.get()  # type: ignore[assignment]
-        if decay not in ("linear", "exponential", "quadratic"):
-            decay = "linear"
+        off_s = self._off_s()
+        decay: DecayName = "linear"
+        packing: PackingName = "sparse"
+        self.decay_var.set(decay)
 
         start_period_s = self._f(self.start_period_us_var) * 1e-6
         end_period_s = self._f(self.end_period_us_var) * 1e-6
-        cooldown_span_s = self._f(self.cooldown_span_us_var) * 1e-6
+        # Train period = edges + ON + OFF. ensure_period_s bumps if OFF is too short.
+        period_s = ensure_period_s(
+            rise_s + width_s + fall_s + off_s,
+            width_s=width_s,
+            rise_s=rise_s,
+            fall_s=fall_s,
+        )
+        off_s = max(off_s, period_s - (rise_s + width_s + fall_s))
 
-        # Auto-bump period so train/cool-down never abort over rise+width+fall
-        # (those are fixed elsewhere; period is the adjustable timing).
-        period_s = ensure_period_s(period_s, width_s=width_s, rise_s=rise_s, fall_s=fall_s)
-
-        cd_start_width_s = 0.0
-        cd_end_width_s = 0.0
+        cd_sequence: list = []
+        cd_sequence_text = self._get_cooldown_sequence_text()
+        cd_sequence_wire = "0"
+        cooldown_span_s = 0.0
         if mode == "cooldown":
-            # Pulse 0 is IDENTICAL to a single/train shot (full Width — the
-            # on-time already confirmed to reach the laser). From there
-            # BOTH the on-time (Width) and off-time (period) taper together
-            # start -> end over Cool-down span, per the chosen decay shape.
-            # The taper is anchored to Width itself (not a fixed ns-scale
-            # constant), so pulse count/width/spacing all scale with
-            # whatever Width the user set. If the span is too short to fit
-            # even 2 full-Width pulses, the starting width auto-shrinks so
-            # the taper still fits (see plan_cooldown's shrink-to-fit step).
-            (
-                num_pulses,
-                start_period_s,
-                end_period_s,
-                _,
-                cd_start_width_s,
-                cd_end_width_s,
-            ) = plan_cooldown(
-                width_s=width_s,
-                rise_s=rise_s,
-                fall_s=fall_s,
-                span_s=cooldown_span_s,
-                decay=decay,
+            cd_sequence = parse_cooldown_sequence(cd_sequence_text)
+            plan = plan_cooldown_sequence(
+                width_s=width_s, rise_s=rise_s, fall_s=fall_s, sequence=cd_sequence
             )
-            w0 = format_width_s(cd_start_width_s)
-            w1 = format_width_s(cd_end_width_s)
-            shrunk = cd_start_width_s < width_s * 0.999
-            shrink_note = " (span too short for full Width — shrunk)" if shrunk else ""
+            num_pulses = plan.num_pulses
+            cd_sequence_wire = plan.wire or "0"
+            cooldown_span_s = plan.total_cd_s
+            if len(plan.offs) > 1:
+                start_period_s = rise_s + plan.widths[1] + fall_s + plan.offs[1]
+                end_period_s = rise_s + plan.widths[-1] + fall_s + plan.offs[-1]
             info = (
-                f"Auto: {num_pulses} pulses, width {w0}\u2192{w1}{shrink_note} "
-                f"over {cooldown_span_s * 1e6:.3g} µs ({decay})"
+                f"Write {format_width_s(width_s)} + {len(cd_sequence)} cool-down pulse(s), "
+                f"total CD {format_width_s(cooldown_span_s)}"
             )
             self.cooldown_info_var.set(info)
             if hasattr(self, "live_cooldown_info_var"):
@@ -827,7 +925,11 @@ class PmuLaserSmuReadGUI:
             "pmu_id": self.pmu_id_var.get().strip() or "PMU1",
             "mode": mode,
             "decay": decay,
+            "packing": packing,
             "cooldown_span_s": cooldown_span_s,
+            "cooldown_sequence": cd_sequence,
+            "cooldown_sequence_text": cd_sequence_text,
+            "cd_sequence": cd_sequence_wire,
             "vread": self._f(self.vread_var),
             "ilimit": self._f(self.ilimit_var),
             "irange": self._irange(),
@@ -838,12 +940,11 @@ class PmuLaserSmuReadGUI:
             "width_s": width_s,
             "rise_s": rise_s,
             "fall_s": fall_s,
+            "off_s": off_s,
             "period_s": period_s,
             "start_period_s": start_period_s,
             "end_period_s": end_period_s,
             "num_pulses": num_pulses,
-            "cd_start_width_s": cd_start_width_s,
-            "cd_end_width_s": cd_end_width_s,
             "delay_before_s": self._f(self.delay_ms_var) * 1e-3,
             "laser_fire_delay_s": self._f(self.fire_delay_ms_var) * 1e-3,
         }
@@ -876,17 +977,21 @@ class PmuLaserSmuReadGUI:
                 end_period_s=p["end_period_s"],
                 num_pulses=p["num_pulses"],
                 delay_before_s=p["delay_before_s"],
-                decay=p.get("decay", "linear"),
-                cooldown_span_s=p.get("cooldown_span_s") if p["mode"] == "cooldown" else None,
-                cd_start_width_s=p.get("cd_start_width_s"),
-                cd_end_width_s=p.get("cd_end_width_s"),
+                cooldown_sequence=p.get("cooldown_sequence") if p["mode"] == "cooldown" else None,
             )
             t, v = preview_polyline(prev)
             scale, unit = self._pick_time_unit(prev.total_duration_s)
             t_scaled = [x * scale for x in t]
 
             self.ax_ttl.clear()
-            for idx, (a, b) in enumerate(prev.laser_on_intervals):
+            # Cap green bands — hundreds of axvspans tank matplotlib on long
+            # Widths / dense cool-down tails.
+            on_spans = prev.laser_on_intervals
+            draw_spans = on_spans
+            if len(on_spans) > 64:
+                step = max(1, len(on_spans) // 63)
+                draw_spans = on_spans[:1] + on_spans[1::step]
+            for idx, (a, b) in enumerate(draw_spans):
                 self.ax_ttl.axvspan(
                     a * scale,
                     b * scale,
@@ -1045,23 +1150,34 @@ class PmuLaserSmuReadGUI:
         return f"Laser ON ({mode})"
 
     def _update_cooldown_mini(self) -> None:
-        """Tiny cool-down waveform sketch in the cool-down param block(s)."""
-        axes = []
-        canvases = []
+        """Tiny cool-down waveform sketch in the cool-down param block(s).
+
+        Only redraws canvases that are currently mapped (visible tab) so the
+        three mirrored Single/Live/Routine previews don't triple the cost.
+        """
+        targets = []
         if hasattr(self, "cd_ax"):
-            axes.append(self.cd_ax)
-            canvases.append(self.cd_canvas)
+            targets.append((self.cd_ax, self.cd_canvas))
         if hasattr(self, "live_cd_ax"):
-            axes.append(self.live_cd_ax)
-            canvases.append(self.live_cd_canvas)
+            targets.append((self.live_cd_ax, self.live_cd_canvas))
         if hasattr(self, "routine_cd_ax"):
-            axes.append(self.routine_cd_ax)
-            canvases.append(self.routine_cd_canvas)
-        if not axes:
+            targets.append((self.routine_cd_ax, self.routine_cd_canvas))
+        if not targets:
             return
+
+        def _mapped(canvas) -> bool:
+            try:
+                return bool(canvas.get_tk_widget().winfo_ismapped())
+            except Exception:
+                return True
+
+        visible = [(ax, c) for ax, c in targets if _mapped(c)]
+        # On first build nothing is mapped yet — update all so they aren't blank.
+        axes_canvases = visible if visible else targets
+
         try:
             if self.mode_var.get() != "cooldown":
-                for ax, canvas in zip(axes, canvases):
+                for ax, canvas in axes_canvases:
                     ax.clear()
                     ax.set_xticks([])
                     ax.set_yticks([])
@@ -1076,31 +1192,41 @@ class PmuLaserSmuReadGUI:
                 width_s=p["width_s"],
                 rise_s=p["rise_s"],
                 fall_s=p["fall_s"],
-                start_period_s=p["start_period_s"],
-                end_period_s=p["end_period_s"],
                 num_pulses=p["num_pulses"],
                 delay_before_s=0.0,
-                decay=p.get("decay", "linear"),
-                cooldown_span_s=p.get("cooldown_span_s"),
-                cd_start_width_s=p.get("cd_start_width_s"),
-                cd_end_width_s=p.get("cd_end_width_s"),
+                cooldown_sequence=p.get("cooldown_sequence") or [],
             )
             t, v = preview_polyline(prev)
             scale, unit = self._pick_time_unit(prev.total_duration_s)
             t_scaled = [x * scale for x in t]
-            for ax, canvas in zip(axes, canvases):
+            on_spans = prev.laser_on_intervals
+            if len(on_spans) > 64:
+                on_spans = on_spans[:1] + on_spans[1:: max(1, len(on_spans) // 63)]
+            vhigh = max(1e-12, float(p["vhigh"]))
+            red_t, red_v = avg_power_polyline(
+                width_s=p["width_s"],
+                rise_s=p["rise_s"],
+                fall_s=p["fall_s"],
+                sequence=p.get("cooldown_sequence") or [],
+                vhigh=vhigh,
+                delay_before_s=0.0,
+            )
+            red_t = [x * scale for x in red_t]
+            for ax, canvas in axes_canvases:
                 ax.clear()
                 ax.step(t_scaled, v, where="post", color="#1f4e79", lw=1.1)
-                for a, b in prev.laser_on_intervals:
+                for a, b in on_spans:
                     ax.axvspan(a * scale, b * scale, color="#4caf50", alpha=0.25)
+                if red_t:
+                    ax.plot(red_t, red_v, color="#c62828", lw=1.4, solid_capstyle="round")
                 ax.set_ylabel("V", fontsize=7)
                 ax.set_xlabel(unit, fontsize=7)
                 ax.tick_params(labelsize=6)
-                ax.set_ylim(-0.2, max(1.0, p["vhigh"]) * 1.15)
+                ax.set_ylim(-0.2, vhigh * 1.15)
                 ax.set_title("Cool-down preview", fontsize=8)
                 canvas.draw_idle()
         except Exception as exc:
-            for ax, canvas in zip(axes, canvases):
+            for ax, canvas in axes_canvases:
                 ax.clear()
                 ax.text(0.5, 0.5, str(exc)[:40], ha="center", va="center",
                         transform=ax.transAxes, fontsize=7, color="#a00")
@@ -1434,35 +1560,16 @@ class PmuLaserSmuReadGUI:
 
         self.live_mode_params = ttk.Frame(live_mode_fr)
         self.live_mode_params.pack(fill=tk.X, pady=4)
-        self.live_period_row = self._row(self.live_mode_params, "Period (µs)", self.period_us_var)
+        self.live_off_row = self._time_row(
+            self.live_mode_params, self.off_time_var, label="Off time"
+        )
         self.live_npulses_row = self._row(self.live_mode_params, "Num pulses", self.num_pulses_var)
 
         self.live_cooldown_block = ttk.Frame(self.live_mode_params)
-        self._row(self.live_cooldown_block, "Cool-down over (µs)", self.cooldown_span_us_var)
-        live_decay_row = ttk.Frame(self.live_cooldown_block)
-        live_decay_row.pack(fill=tk.X, pady=1)
-        ttk.Label(live_decay_row, text="Decay type", width=22).pack(side=tk.LEFT)
-        live_decay_combo = ttk.Combobox(
-            live_decay_row,
-            textvariable=self.decay_var,
-            values=("linear", "exponential", "quadratic"),
-            state="readonly",
-            width=12,
-        )
-        live_decay_combo.pack(side=tk.LEFT)
-        live_decay_combo.bind("<<ComboboxSelected>>", lambda *_: self._on_cooldown_change())
         self.live_cooldown_info_var = tk.StringVar(value="")
-        ttk.Label(
-            self.live_cooldown_block,
-            textvariable=self.live_cooldown_info_var,
-            foreground="#555555",
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(2, 2))
-        self.live_cd_fig = Figure(figsize=(3.2, 1.35), dpi=100)
-        self.live_cd_ax = self.live_cd_fig.add_subplot(111)
-        self.live_cd_fig.subplots_adjust(left=0.14, right=0.98, top=0.88, bottom=0.28)
-        self.live_cd_canvas = FigureCanvasTkAgg(self.live_cd_fig, master=self.live_cooldown_block)
-        self.live_cd_canvas.get_tk_widget().pack(fill=tk.X, pady=(2, 0))
+        self._fill_cooldown_block(
+            self.live_cooldown_block, info_var=self.live_cooldown_info_var, fig_attr="live"
+        )
 
         pulse_summary = ttk.LabelFrame(left, text="Pulse that will fire", padding=6)
         pulse_summary.pack(fill=tk.X, pady=4)
@@ -1584,14 +1691,13 @@ class PmuLaserSmuReadGUI:
         self._update_live_chunk_info()
         for var in (
             self.width_us_var,
-            self.period_us_var,
+            self.off_time_var,
             self.num_pulses_var,
-            self.cooldown_span_us_var,
             self.decay_var,
             self.vhigh_var,
             self.mode_var,
         ):
-            var.trace_add("write", lambda *_: self._update_live_pulse_summary())
+            var.trace_add("write", lambda *_: self._schedule_pulse_summary())
         self._update_live_pulse_summary()
         self._on_mode_change()
 
@@ -1777,36 +1883,22 @@ class PmuLaserSmuReadGUI:
 
         self.routine_mode_params = ttk.Frame(mode_fr)
         self.routine_mode_params.pack(fill=tk.X, pady=4)
-        self.routine_period_row = self._row(self.routine_mode_params, "Period (µs)", self.period_us_var)
+        self.routine_off_row = self._time_row(
+            self.routine_mode_params, self.off_time_var, label="Off time"
+        )
         self.routine_npulses_row = self._row(
             self.routine_mode_params, "Num pulses", self.num_pulses_var
         )
 
         self.routine_cooldown_block = ttk.Frame(self.routine_mode_params)
-        self._row(self.routine_cooldown_block, "Cool-down over (µs)", self.cooldown_span_us_var)
-        rd_row = ttk.Frame(self.routine_cooldown_block)
-        rd_row.pack(fill=tk.X, pady=1)
-        ttk.Label(rd_row, text="Decay type", width=22).pack(side=tk.LEFT)
-        rd_combo = ttk.Combobox(
-            rd_row,
-            textvariable=self.decay_var,
-            values=("linear", "exponential", "quadratic"),
-            state="readonly",
-            width=12,
-        )
-        rd_combo.pack(side=tk.LEFT)
-        rd_combo.bind("<<ComboboxSelected>>", lambda *_: self._on_cooldown_change())
-        ttk.Label(
+        if not hasattr(self, "live_cooldown_info_var"):
+            self.live_cooldown_info_var = tk.StringVar(value="")
+        self._fill_cooldown_block(
             self.routine_cooldown_block,
-            textvariable=self.live_cooldown_info_var,
-            foreground="#555555",
-            justify=tk.LEFT,
-        ).pack(anchor=tk.W, pady=(2, 2))
-        self.routine_cd_fig = Figure(figsize=(3.2, 1.1), dpi=100)
-        self.routine_cd_ax = self.routine_cd_fig.add_subplot(111)
-        self.routine_cd_fig.subplots_adjust(left=0.14, right=0.98, top=0.88, bottom=0.28)
-        self.routine_cd_canvas = FigureCanvasTkAgg(self.routine_cd_fig, master=self.routine_cooldown_block)
-        self.routine_cd_canvas.get_tk_widget().pack(fill=tk.X, pady=(2, 0))
+            info_var=self.live_cooldown_info_var,
+            fig_attr="routine",
+            fig_h=1.1,
+        )
 
         pulse_summary = ttk.LabelFrame(left, text="Pulse that will fire", padding=6)
         pulse_summary.pack(fill=tk.X, pady=4)
@@ -1958,14 +2050,13 @@ class PmuLaserSmuReadGUI:
         self._update_routine_pulse_summary()
         for var in (
             self.width_us_var,
-            self.period_us_var,
+            self.off_time_var,
             self.num_pulses_var,
-            self.cooldown_span_us_var,
             self.decay_var,
             self.vhigh_var,
             self.mode_var,
         ):
-            var.trace_add("write", lambda *_: self._update_routine_pulse_summary())
+            var.trace_add("write", lambda *_: self._schedule_pulse_summary())
         self._on_mode_change()
 
     def _update_live_chunk_info(self) -> None:
@@ -1995,18 +2086,15 @@ class PmuLaserSmuReadGUI:
         if mode == "single":
             return f"Single pulse ON for {w}, Vhigh={p['vhigh']} V"
         if mode == "train":
+            off = format_time_compact(p["off_s"])
             return (
-                f"Train: {p['num_pulses']} pulses @ {format_time_compact(p['period_s'])} "
-                f"period, each ON {w}, Vhigh={p['vhigh']} V"
+                f"Train: {p['num_pulses']} pulses, each ON {w} / OFF {off}, "
+                f"Vhigh={p['vhigh']} V"
             )
+        n_cd = max(0, int(p["num_pulses"]) - 1)
         return (
-            f"Cool-down ({p.get('decay', 'linear')}): "
-            f"{p['num_pulses']} pulses, width "
-            f"{format_width_s(p.get('cd_start_width_s') or p['width_s'])}\u2192"
-            f"{format_width_s(p.get('cd_end_width_s') or p['width_s'])}, "
-            f"period {p['start_period_s'] * 1e6:.3g}\u2192"
-            f"{p['end_period_s'] * 1e6:.3g} µs, over "
-            f"{p.get('cooldown_span_s', 0) * 1e6:.3g} µs"
+            f"Cool-down: write {w} + {n_cd} typed pulse(s), "
+            f"total CD {format_width_s(p.get('cooldown_span_s', 0))}"
         )
 
     def _update_live_pulse_summary(self) -> None:
@@ -2118,7 +2206,9 @@ class PmuLaserSmuReadGUI:
                                 num_pulses=fire_params["num_pulses"],
                                 delay_before_s=fire_params["delay_before_s"],
                                 decay=fire_params.get("decay", "linear"),
-                                cooldown_span_s=fire_params.get("cooldown_span_s"),
+                                packing=fire_params.get("packing", "sparse"),
+                                cooldown_sequence=fire_params.get("cooldown_sequence"),
+                                cd_sequence=fire_params.get("cd_sequence") or "0",
                             )
                             chunk["fire_params"] = fire_params
                         except Exception as fire_exc:
@@ -2308,6 +2398,33 @@ class PmuLaserSmuReadGUI:
             f"({p['width_s']:.6g} s), Vhigh={p['vhigh']} V",
             flush=True,
         )
+        if p["mode"] == "train":
+            print(
+                f"[FIRE] Train {p['num_pulses']}x — ON {w} / "
+                f"OFF {format_time_compact(p['off_s'])} "
+                f"(period {format_time_compact(p['period_s'])})",
+                flush=True,
+            )
+        if p["mode"] == "cooldown":
+            seq = p.get("cooldown_sequence") or []
+            wire = p.get("cd_sequence") or "0"
+            print(
+                f"[FIRE] Cool-down {len(seq)} pulse(s) wire={wire!r}",
+                flush=True,
+            )
+            if not seq:
+                print("[FIRE]   (empty cool-down sequence)", flush=True)
+            else:
+                print(
+                    f"[FIRE]   after write OFF {format_time_compact(seq[0][0])}",
+                    flush=True,
+                )
+                for i, (d, pw) in enumerate(seq):
+                    print(
+                        f"[FIRE]   CD{i + 1}: delay={format_time_compact(d)}  "
+                        f"pulse={format_time_compact(pw)}",
+                        flush=True,
+                    )
         self._print_laser_levels("FIRE NOW")
         self._stream_fire_queue.put(p)
         self.live_fire_btn.configure(state=tk.DISABLED)
