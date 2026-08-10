@@ -2,6 +2,9 @@
 /Data_save_loc
 Json_Files/messaging_data.local.json
 
+# Legacy monolith left on disk after gui/ refactor (do not re-commit)
+/Measurement_GUI.py
+
 # Python
 __pycache__/
 *.py[cod]
@@ -21,17 +24,24 @@ env/
 
 # PyInstaller / executable build outputs (not Documents/build/ documentation)
 dist/
+build/
 /build/
 tools/**/dist/
 tools/**/build/
 Helpers/**/dist/
 Helpers/**/build/
+Helpers/**/exe*/
+Helpers/**/exe_*/
 *.pkg
+*.pyz
 warn-*.txt
 xref-*.html
+*.toc
 
 # Binaries and vendor bundles (install separately — see SETUP.md)
 *.exe
+*.dll
+*.pyd
 Equipment/Moku/Moku CLI/
 
 # AFM tools — raw data and generated outputs (regenerate locally)
@@ -39,6 +49,7 @@ tools/afm_3d_holes_protrusion/Data/
 tools/afm_3d_holes_protrusion/Output/
 tools/afm_curve_analysis/Data/
 tools/afm_curve_analysis/Output/
+tools/afm*/**/Output/
 *.ibw
 
 # Consolidated IV batch data on OneDrive (regenerate with tools/data_consolidation/consolidate.py)

@@ -1742,6 +1742,33 @@ class MeasurementGUI:
     def _clear_stats_plots(self) -> None:
         """Clear stats plots"""
         _clear_stats_plots(self)
+
+    def _reset_plots_for_new_run_main_thread(self, timeout_s: float = 1.0) -> None:
+        """Clear live/all-sweep plots on the Tk main thread and wait briefly.
+
+        Measurement runs on a worker thread; calling matplotlib clear/draw there
+        often fails to refresh, so the previous TSP sweep stays on screen.
+        """
+        import threading
+
+        done = threading.Event()
+
+        def _do_reset() -> None:
+            try:
+                self._reset_plots_for_new_run(self)
+            finally:
+                done.set()
+
+        try:
+            master = getattr(self, "master", None)
+            if master is not None and master.winfo_exists():
+                master.after(0, _do_reset)
+                done.wait(timeout=timeout_s)
+                return
+        except Exception:
+            pass
+        # Fallback if Tk is unavailable
+        self._reset_plots_for_new_run(self)
     
     def browse_sample_folder_for_analysis(self) -> None:
         """Browse for a sample folder to analyze retroactively."""
@@ -5120,8 +5147,9 @@ class MeasurementGUI:
         if not self.connected:
             self._show_message_async("showwarning", "Warning", "Not connected to Keithley!")
             return
-        # Reset graphs/buffers between runs
-        self._reset_plots_for_new_run(self)
+        # Reset graphs/buffers on the Tk main thread (matplotlib is not thread-safe;
+        # clearing from the worker left the previous TSP sweep visible).
+        self._reset_plots_for_new_run_main_thread()
         self.measuring = True
         self._set_measurement_feedback(True, "Acquiring data from instrument")
 

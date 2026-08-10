@@ -178,6 +178,11 @@ class PlotUpdaters:
                     else:
                         # Length mismatch - skip this update to avoid IndexError
                         self._update_line("rt_logilogv", [], [])
+                else:
+                    # Buffers cleared for a new run — blank lines so last sweep does not linger
+                    self._update_line("rt_iv", [], [])
+                    self._update_line("rt_logiv", [], [])
+                    self._update_line("rt_logilogv", [], [])
             time.sleep(self.interval_s)
 
     def _update_current_time_plot(self) -> None:
@@ -189,6 +194,8 @@ class PlotUpdaters:
                 n = min(len(t), len(c))
                 if n > 0:
                     self._update_line("ct_rt", t[:n], c[:n])
+                else:
+                    self._update_line("ct_rt", [], [])
             time.sleep(self.interval_s)
 
     def _update_temperature_plot(self) -> None:

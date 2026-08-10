@@ -267,6 +267,7 @@ class SingleMeasurementRunner:
                     )
             else:
                 def _on_point(v, i, t_s):
+                    # Keep all sweeps in live buffers so multi-sweep overlays stay visible
                     self.v_arr_disp.append(v)
                     self.c_arr_disp.append(i)
                     self.t_arr_disp.append(t_s)

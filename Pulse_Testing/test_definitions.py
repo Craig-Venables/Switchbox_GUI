@@ -363,6 +363,34 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
         },
         "plot_type": "retention",
     },
+    "Timed Retention": {
+        "function": "retention_test",
+        "only_for_systems": ["keithley2450", "keithley2450_sim", "keithley2400"],
+        "description": (
+            "SMU/TSP timed retention (2450 / 2400).\n"
+            "Pattern: Program pulse → read at t=0 → reads every N seconds until duration.\n"
+            "Default: every 60 s (1 min) for 10000 s (~2.8 h, ~167 reads). "
+            "Lower duration or raise interval for smoke tests.\n"
+            "Read Every / Duration are absolute seconds (not affected by ns/µs/ms unit)."
+        ),
+        "params": {
+            "pulse_voltage": {"default": 2.0, "label": "Program Pulse Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 0.1, "label": "Program Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "read_every_s": {
+                "default": 60.0,
+                "label": "Read Every (s) — 60 = every minute",
+                "type": "float",
+            },
+            "retention_duration_s": {
+                "default": 10000.0,
+                "label": "Retention Duration (s) (~2.8 h)",
+                "type": "float",
+            },
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "time_series",
+    },
     "Pulse → Multi-Read": {
         "function": "pulse_multi_read",
         "description": "Pattern: Initial Read → (Pulse × M) → Read × N\nMonitor state relaxation/drift after pulses",
