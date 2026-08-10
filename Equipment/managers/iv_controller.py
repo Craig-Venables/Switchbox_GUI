@@ -1292,21 +1292,30 @@ class IVControllerManager:
         
         sweep_idx = 0
         points_per_sweep = len(v_list) // config.sweeps if config.sweeps > 0 else len(v_list)
+        last_led_state: Optional[str] = None
+
+        # Apply optical once at start of first sweep (not every voltage point)
+        try:
+            led_state = context.get_led_state_for_sweep(0)
+            optical_ctrl.set_state(led_state == '1', power=context.power)
+            last_led_state = led_state
+        except Exception:
+            pass
         
         for i, v in enumerate(v_list):
             if context.check_stop():
                 break
             
-            # Check if we're starting a new sweep
+            # Check if we're starting a new sweep — update optical only then
             if i > 0 and i % points_per_sweep == 0:
                 sweep_idx += 1
-            
-            # Apply LED state for this sweep
-            led_state = context.get_led_state_for_sweep(sweep_idx)
-            try:
-                optical_ctrl.set_state(led_state == '1', power=context.power)
-            except Exception:
-                pass
+                try:
+                    led_state = context.get_led_state_for_sweep(sweep_idx)
+                    if led_state != last_led_state:
+                        optical_ctrl.set_state(led_state == '1', power=context.power)
+                        last_led_state = led_state
+                except Exception:
+                    pass
             
             # Apply source value
             try:
@@ -1314,7 +1323,8 @@ class IVControllerManager:
             except Exception:
                 pass
             
-            time.sleep(0.1)  # Brief settle
+            # Short settle; was 0.1s and dominated sweep time with laser serial spam
+            time.sleep(min(0.02, max(0.0, float(config.step_delay) * 0.25)))
             
             # Measure
             try:
@@ -2553,21 +2563,21 @@ class IVControllerManager:
     ) -> Tuple[List[float], List[float], List[float]]:
         """
         TSP script sweep for Keithley 2450.
-        
-        Uses TSP scripts when beneficial, streams output for live plotting.
+
+        Batches ~10 points per USB print and drains VISA on a dedicated thread
+        so live plotting can lag without stalling the instrument source loop.
         Falls back to point-by-point when LED/pausing needed.
         """
         from Measurements.sweep_patterns import build_sweep_values
         from Measurements.source_modes import SourceMode, apply_source
         from Measurements.optical_controller import OpticalController
         from Measurements.data_utils import normalize_measurement
-        import pyvisa
         
-        # Check if LED sequence or pausing needed - fall back to point-by-point
+        # Point-by-point only when pause or per-sweep LED sequence needs PC control.
+        # Multiple identical sweeps stay on the fast TSP path (looped below).
         needs_fine_control = (
-            (context.sequence is not None and len(context.sequence) > 0) or
-            config.pause_s > 0 or
-            config.sweeps > 1  # Multiple sweeps with different LED states
+            bool(context.sequence) or
+            config.pause_s > 0
         )
         
         if needs_fine_control:
@@ -2614,143 +2624,174 @@ class IVControllerManager:
             optical_ctrl.enable(context.power)
         
         try:
-            # Build TSP script for sweep
-            # Determine source mode
-            if context.source_mode == SourceMode.VOLTAGE:
-                source_func = "smu.FUNC_DC_VOLTAGE"
-                measure_func = "smu.FUNC_DC_CURRENT"
-            else:
-                source_func = "smu.FUNC_DC_CURRENT"
-                measure_func = "smu.FUNC_DC_VOLTAGE"
-            
-            # Build voltage list as TSP array
+            # Build voltage/current list as TSP array (Model 2450 TSP API — not Series 2600)
+            # Use explicit npoints: "#vlist" triggers -285 "unexpected symbol near #" on some 2450 paths
             v_list_str = "{" + ",".join([f"{v:.9g}" for v in v_list]) + "}"
-            delay_ms = int(config.step_delay * 1000)  # Convert to milliseconds
-            
-            # Build TSP script
+            npoints = len(v_list)
+            delay_s = float(config.step_delay)  # delay() takes seconds on 2450
+            script_name = "ivSweep2450"
+            # Batch prints: fewer USB frames so print() does not stall the source loop
+            # when live plotting/saving lags. Still updates the GUI every batch.
+            batch_n = self._iv_sweep_2450_batch_size(npoints)
+
             if context.source_mode == SourceMode.VOLTAGE:
-                # Voltage source mode
-                tsp_script = f"""
+                # Source V, measure I; emit BATCH:v,i,v,i,... every batch_n points
+                tsp_body = f"""
 smu.source.func = smu.FUNC_DC_VOLTAGE
-smu.source.autorangev = smu.AUTORANGE_ON
-smu.source.autorangei = smu.AUTORANGE_ON
-smu.source.limiti = {config.icc}
+smu.source.autorange = smu.ON
+smu.source.ilimit.level = {config.icc}
 smu.measure.func = smu.FUNC_DC_CURRENT
+smu.measure.autorange = smu.ON
 smu.source.output = smu.ON
 
 local vlist = {v_list_str}
-local delayval = {delay_ms}
+local delayval = {delay_s}
+local npoints = {npoints}
+local batchn = {batch_n}
+local chunk = ""
+local nchunk = 0
 
-for i = 1, #vlist do
-    smu.source.levelv = vlist[i]
-    delayN(delayval)
-    local measV = smu.measure.read(smu.FUNC_DC_VOLTAGE)
-    local measI = smu.measure.read(smu.FUNC_DC_CURRENT)
-    print(string.format('DATA:%0.9g,%0.12g', measV, measI))
+for i = 1, npoints do
+    smu.source.level = vlist[i]
+    delay(delayval)
+    local measI = smu.measure.read()
+    if nchunk == 0 then
+        chunk = string.format('%0.9g,%0.12g', vlist[i], measI)
+    else
+        chunk = chunk .. string.format(',%0.9g,%0.12g', vlist[i], measI)
+    end
+    nchunk = nchunk + 1
+    if nchunk >= batchn or i == npoints then
+        print(string.format('BATCH:%s', chunk))
+        chunk = ""
+        nchunk = 0
+    end
 end
 
+smu.source.level = 0
 smu.source.output = smu.OFF
 print('SWEEP_DONE')
 """
             else:
-                # Current source mode
-                tsp_script = f"""
+                # Source I, measure V; emit BATCH:v,i,v,i,... every batch_n points
+                tsp_body = f"""
 smu.source.func = smu.FUNC_DC_CURRENT
-smu.source.autorangev = smu.AUTORANGE_ON
-smu.source.autorangei = smu.AUTORANGE_ON
+smu.source.autorange = smu.ON
 smu.source.vlimit.level = {config.icc}
 smu.measure.func = smu.FUNC_DC_VOLTAGE
+smu.measure.autorange = smu.ON
 smu.source.output = smu.ON
 
 local ilist = {v_list_str}
-local delayval = {delay_ms}
+local delayval = {delay_s}
+local npoints = {npoints}
+local batchn = {batch_n}
+local chunk = ""
+local nchunk = 0
 
-for i = 1, #ilist do
-    smu.source.leveli = ilist[i]
-    delayN(delayval)
-    local measV = smu.measure.read(smu.FUNC_DC_VOLTAGE)
-    local measI = smu.measure.read(smu.FUNC_DC_CURRENT)
-    print(string.format('DATA:%0.9g,%0.12g', measV, measI))
+for i = 1, npoints do
+    smu.source.level = ilist[i]
+    delay(delayval)
+    local measV = smu.measure.read()
+    if nchunk == 0 then
+        chunk = string.format('%0.9g,%0.12g', measV, ilist[i])
+    else
+        chunk = chunk .. string.format(',%0.9g,%0.12g', measV, ilist[i])
+    end
+    nchunk = nchunk + 1
+    if nchunk >= batchn or i == npoints then
+        print(string.format('BATCH:%s', chunk))
+        chunk = ""
+        nchunk = 0
+    end
 end
 
+smu.source.level = 0
 smu.source.output = smu.OFF
 print('SWEEP_DONE')
 """
-            
-            # Execute TSP script with streaming output
+
             device = self.instrument.device
             original_timeout = device.timeout
-            
+            num_sweeps = max(1, int(config.sweeps))
+            aborted = False
+
             try:
-                # Set timeout for sweep
-                estimated_time = len(v_list) * config.step_delay + 5.0
-                device.timeout = int(estimated_time * 1000)
-                
-                # Clear buffer
-                device.write('*CLS')
-                
-                # Send TSP script line by line
-                script_lines = [line.strip() for line in tsp_script.strip().split('\n') 
-                               if line.strip() and not line.strip().startswith('--')]
-                
-                for line in script_lines:
-                    device.write(line)
-                
-                # Small delay to let script start
-                time.sleep(0.05)
-                
-                # Read output and parse DATA lines for live plotting
-                max_reads = len(v_list) * 2  # Allow some margin
-                for read_idx in range(max_reads):
-                    try:
-                        line = device.read().strip()
-                        
-                        if 'DATA:' in line:
-                            # Parse data line: DATA:v,i
-                            payload = line.split('DATA:')[1].strip()
-                            parts = payload.split(',')
-                            if len(parts) >= 2:
-                                v_meas = float(parts[0])
-                                i_meas = float(parts[1])
-                                
-                                # Normalize measurement
-                                try:
-                                    i_val = normalize_measurement(i_meas)
-                                except Exception:
-                                    i_val = float('nan')
-                                
-                                t_now = time.perf_counter() - start_time
-                                
-                                # Store based on source mode
-                                # TSP script returns: measV, measI
-                                # For voltage source: measV is source voltage, measI is measured current
-                                # For current source: measV is measured voltage, measI is source current
-                                if context.source_mode == SourceMode.VOLTAGE:
-                                    # Sourcing voltage, measuring current
-                                    v_arr.append(v_meas)  # Use measured voltage (should match source)
-                                    c_arr.append(i_val)
-                                    context.call_on_point(v_meas, i_val, t_now)
-                                else:
-                                    # Sourcing current, measuring voltage
-                                    v_arr.append(v_meas)  # Measured voltage
-                                    c_arr.append(i_meas)  # Source current
-                                    context.call_on_point(v_meas, i_meas, t_now)
-                                
-                                t_arr.append(t_now)
-                                
-                                if context.check_stop():
-                                    break
-                        
-                        elif 'SWEEP_DONE' in line or 'DONE' in line:
-                            break
-                    
-                    except (pyvisa.errors.VisaIOError, pyvisa.errors.VI_ERROR_TMO):
-                        # Timeout - may have finished
+                estimated_time = len(v_list) * config.step_delay * num_sweeps + 5.0
+                device.timeout = int(max(estimated_time, 10.0) * 1000)
+
+                # Clear instrument error queue (TSP; avoid SCPI *CLS)
+                try:
+                    device.write('errorqueue.clear()')
+                except Exception:
+                    pass
+
+                # Drop stale BATCH:/DATA:/SWEEP_DONE from prior runs before loading
+                self._flush_2450_output(device)
+
+                # Delete previous script if present, then load once via loadscript
+                device.write(f'if {script_name} ~= nil then script.delete("{script_name}") end')
+                time.sleep(0.01)
+                device.write(f'loadscript {script_name}')
+                for line in tsp_body.strip().split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('--'):
+                        device.write(line)
+                device.write('endscript')
+                time.sleep(0.02)
+
+                # Re-run the same loaded script for each identical sweep (fast path)
+                for sweep_i in range(num_sweeps):
+                    if context.check_stop():
+                        aborted = True
                         break
-            
+
+                    self._flush_2450_output(device)
+                    device.write(f'{script_name}()')
+
+                    got_done, got_data, stopped = self._consume_2450_iv_sweep_stream(
+                        device=device,
+                        context=context,
+                        source_mode=context.source_mode,
+                        step_delay_s=delay_s,
+                        start_time=start_time,
+                        v_arr=v_arr,
+                        c_arr=c_arr,
+                        t_arr=t_arr,
+                        normalize_measurement=normalize_measurement,
+                        SourceMode=SourceMode,
+                    )
+
+                    if stopped or context.check_stop():
+                        self._abort_2450_tsp_sweep(device)
+                        aborted = True
+                        break
+
+                    # Do not start the next sweep while this script may still be running
+                    try:
+                        device.write('waitcomplete()')
+                        time.sleep(0.05)
+                    except Exception:
+                        pass
+
+                    if not got_done:
+                        # Incomplete / timed out — stop leftover sourcing on the box
+                        self._abort_2450_tsp_sweep(device)
+                        aborted = True
+                        if sweep_i == 0 and not v_arr:
+                            err_msg = self._query_2450_tsp_errors(device)
+                            if err_msg:
+                                print(f"2450 TSP sweep error(s): {err_msg}")
+                        break
+
             finally:
+                if aborted:
+                    try:
+                        self._abort_2450_tsp_sweep(device)
+                    except Exception:
+                        pass
                 device.timeout = original_timeout
-        
+
         finally:
             optical_ctrl.disable()
             try:
@@ -2758,8 +2799,228 @@ print('SWEEP_DONE')
                 self.enable_output(False)
             except Exception:
                 pass
-        
+
         return v_arr, c_arr, t_arr
+
+    @staticmethod
+    def _iv_sweep_2450_batch_size(npoints: int) -> int:
+        """Points per BATCH print — small enough for live plot, large enough to avoid USB stall."""
+        npoints = max(1, int(npoints))
+        if npoints <= 5:
+            return npoints
+        return min(10, npoints)
+
+    @staticmethod
+    def _parse_2450_iv_pairs(payload: str) -> List[Tuple[float, float]]:
+        """Parse 'v,i' or 'v,i,v,i,...' payload into (v, i) pairs."""
+        parts = [p.strip() for p in payload.replace(';', ',').split(',') if p.strip()]
+        pairs: List[Tuple[float, float]] = []
+        for idx in range(0, len(parts) - 1, 2):
+            pairs.append((float(parts[idx]), float(parts[idx + 1])))
+        return pairs
+
+    def _consume_2450_iv_sweep_stream(
+        self,
+        device,
+        context: 'MeasurementContext',
+        source_mode,
+        step_delay_s: float,
+        start_time: float,
+        v_arr: List[float],
+        c_arr: List[float],
+        t_arr: List[float],
+        normalize_measurement,
+        SourceMode,
+    ) -> Tuple[bool, bool, bool]:
+        """
+        Drain 2450 IV output on a dedicated thread; apply batches on this thread.
+
+        Returns (got_done, got_data, stopped).
+        Dedicated VISA reads keep print() from blocking the instrument when
+        live on_point / GUI work is slow.
+        """
+        import queue
+        import threading
+        import pyvisa
+
+        line_q: "queue.Queue[Optional[str]]" = queue.Queue()
+        reader_done = threading.Event()
+
+        def _visa_reader() -> None:
+            try:
+                while True:
+                    try:
+                        line = device.read().strip()
+                    except pyvisa.errors.VisaIOError:
+                        break
+                    if not line:
+                        continue
+                    line_q.put(line)
+                    if 'SWEEP_DONE' in line:
+                        break
+            except Exception:
+                pass
+            finally:
+                reader_done.set()
+                line_q.put(None)
+
+        reader = threading.Thread(
+            target=_visa_reader, name="2450-iv-drain", daemon=True
+        )
+        reader.start()
+
+        got_done = False
+        got_data = False
+        stopped = False
+
+        def _apply_pairs(pairs: List[Tuple[float, float]]) -> bool:
+            """Append points and call on_point. Returns True if stop requested."""
+            nonlocal got_data
+            if not pairs:
+                return False
+            got_data = True
+            t_recv = time.perf_counter() - start_time
+            n = len(pairs)
+            dt = max(0.0, float(step_delay_s))
+            for j, (v_meas, i_meas) in enumerate(pairs):
+                try:
+                    i_val = normalize_measurement(i_meas)
+                except Exception:
+                    i_val = float('nan')
+
+                t_now = t_recv - (n - 1 - j) * dt
+                if t_now < 0:
+                    t_now = t_recv
+
+                if source_mode == SourceMode.VOLTAGE:
+                    v_arr.append(v_meas)
+                    c_arr.append(i_val)
+                    context.call_on_point(v_meas, i_val, t_now)
+                else:
+                    v_arr.append(v_meas)
+                    c_arr.append(i_meas)
+                    context.call_on_point(v_meas, i_meas, t_now)
+                t_arr.append(t_now)
+
+                if context.check_stop():
+                    return True
+            return False
+
+        def _handle_line(line: str) -> Optional[str]:
+            """Process one output line. Returns 'done'|'stop'|None."""
+            nonlocal got_done
+            if 'BATCH:' in line:
+                payload = line.split('BATCH:', 1)[1].strip()
+                if _apply_pairs(self._parse_2450_iv_pairs(payload)):
+                    return 'stop'
+            elif 'DATA:' in line:
+                # Legacy single-point lines (older scripts / mixed output)
+                payload = line.split('DATA:', 1)[1].strip()
+                if _apply_pairs(self._parse_2450_iv_pairs(payload)):
+                    return 'stop'
+            elif 'SWEEP_DONE' in line and got_data:
+                got_done = True
+                return 'done'
+            return None
+
+        try:
+            while True:
+                if context.check_stop():
+                    stopped = True
+                    break
+                try:
+                    line = line_q.get(timeout=0.2)
+                except queue.Empty:
+                    if not reader_done.is_set():
+                        continue
+                    # Reader finished — drain anything left
+                    while True:
+                        try:
+                            line = line_q.get_nowait()
+                        except queue.Empty:
+                            line = None
+                            break
+                        if line is None:
+                            break
+                        result = _handle_line(line)
+                        if result == 'stop':
+                            stopped = True
+                            break
+                        if result == 'done':
+                            break
+                    break
+
+                if line is None:
+                    break
+
+                result = _handle_line(line)
+                if result == 'stop':
+                    stopped = True
+                    break
+                if result == 'done':
+                    break
+        finally:
+            if stopped:
+                try:
+                    device.clear()
+                except Exception:
+                    pass
+            reader_done.wait(timeout=2.0)
+            if reader.is_alive():
+                try:
+                    device.clear()
+                except Exception:
+                    pass
+                reader.join(timeout=1.0)
+
+        return got_done, got_data, stopped
+
+    def _flush_2450_output(self, device) -> None:
+        """Drain leftover VISA output so stale BATCH/DATA/SWEEP_DONE cannot end a sweep early."""
+        try:
+            old_timeout = device.timeout
+            device.timeout = 100
+            try:
+                while True:
+                    device.read()
+            except Exception:
+                pass
+            device.timeout = old_timeout
+        except Exception:
+            pass
+
+    def _abort_2450_tsp_sweep(self, device) -> None:
+        """Abort leftover on-instrument script work and force output off."""
+        try:
+            try:
+                device.clear()
+            except Exception:
+                pass
+            self._flush_2450_output(device)
+            try:
+                device.write('smu.source.level = 0')
+                device.write('smu.source.output = smu.OFF')
+                device.write('waitcomplete()')
+            except Exception:
+                pass
+            self._flush_2450_output(device)
+        except Exception:
+            pass
+
+    def _query_2450_tsp_errors(self, device, max_errors: int = 5) -> str:
+        """Read and clear the 2450 TSP error queue; return a short summary string."""
+        messages = []
+        try:
+            for _ in range(max_errors):
+                device.write('print(errorqueue.next())')
+                time.sleep(0.02)
+                raw = device.read().strip()
+                if not raw or raw.startswith('0') or 'Queue Is Empty' in raw or 'No Error' in raw:
+                    break
+                messages.append(raw)
+        except Exception:
+            pass
+        return '; '.join(messages)
     
     def _do_pulse_measurement_2450(
         self,

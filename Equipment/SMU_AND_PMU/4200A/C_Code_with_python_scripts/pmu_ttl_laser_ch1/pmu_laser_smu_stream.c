@@ -2,7 +2,7 @@
 
 	MODULE NAME: pmu_laser_smu_stream
 	MODULE RETURN TYPE: int 
-	NUMBER OF PARMS: 27
+	NUMBER OF PARMS: 30
 	ARGUMENTS:
 		Vforce,	double,	Input,	0.2,	-200,	200
 		Ilimit,	double,	Input,	0.0001,	1e-9,	1.0
@@ -23,6 +23,9 @@
 		SampleInterval_s,	double,	Input,	0.05,	0.001,	10.0
 		FireNow,	int,	Input,	0,	0,	1
 		StopNow,	int,	Input,	0,	0,	1
+		SmuPulseNow,	int,	Input,	0,	0,	1
+		SmuPulseV,	double,	Input,	2.0,	-200,	200
+		SmuPulseWidth,	double,	Input,	0.001,	1e-6,	40.0
 		cdStartWidth,	double,	Input,	0.0,	0.0,	40.0
 		cdEndWidth,	double,	Input,	0.0,	0.0,	40.0
 		cdSequence,	char *,	Input,	"0",	,
@@ -64,6 +67,10 @@ sets FireNow=1 for that one call. This module then:
      lower-noise/faster, more consistent readings once you know roughly
      what current to expect. Invalid values are silently snapped to the
      nearest hardware range by the LPT driver.
+  1b. If SmuPulseNow: apply one SMU voltage pulse (pulsev at SmuPulseV for
+     SmuPulseWidth), then forcev back to Vforce (read bias). Use this for
+     electrical SET/RESET of the DUT while the live read continues — sign
+     of SmuPulseV selects polarity (e.g. +2 V / -2 V).
   2. If FireNow: build + fire the PMU CH1 TTL Segment ARB waveform (same
      single/train/cool-down shapes as pmu_laser_smu_run), then continue
      into this same chunk's sample loop so the transient is caught.
@@ -71,6 +78,9 @@ sets FireNow=1 for that one call. This module then:
   4. Return WITHOUT ramping the SMU to 0 V, so the bias stays continuous
      between chunks (no periodic force-down/force-up glitches). The SMU
      is only ramped to 0 V when the caller sends StopNow=1.
+
+SmuPulseNow and FireNow may both be 1 in the same chunk (SMU pulse first,
+then laser TTL, then samples).
 
 Fire-button latency = up to one chunk duration (NumPoints * SampleInterval_s)
 — i.e. how long Python is blocked waiting on the CURRENT chunk's EX call
@@ -602,6 +612,9 @@ int pmu_laser_smu_stream(
     double SampleInterval_s,
     int FireNow,
     int StopNow,
+    int SmuPulseNow,
+    double SmuPulseV,
+    double SmuPulseWidth,
     double cdStartWidth,
     double cdEndWidth,
     char *cdSequence,
@@ -636,6 +649,15 @@ int pmu_laser_smu_stream(
     if ( NumPointsTimestamps != NumPoints )
         return -1;
 
+    /* ---- Validate SMU set/reset pulse params only if pulsing ---- */
+    if (SmuPulseNow)
+    {
+        if (SmuPulseWidth < 1e-6 || SmuPulseWidth > 40.0)
+            return -1;
+        if (SmuPulseV < -200.0 || SmuPulseV > 200.0)
+            return -1;
+    }
+
     /* ---- Validate PMU pulse params only if we're actually firing ---- */
     if (FireNow)
     {
@@ -652,8 +674,8 @@ int pmu_laser_smu_stream(
     }
 
     if (debug)
-        printf("\npmu_laser_smu_stream: Vforce=%.4g FireNow=%d NumPoints=%d\n",
-               Vforce, FireNow, NumPoints);
+        printf("\npmu_laser_smu_stream: Vforce=%.4g FireNow=%d SmuPulseNow=%d NumPoints=%d\n",
+               Vforce, FireNow, SmuPulseNow, NumPoints);
 
     /* ================= STEP 1: re-assert SMU bias (every call, required) === */
     status = limiti(SMU1, Ilimit);
@@ -677,6 +699,21 @@ int pmu_laser_smu_stream(
     {
         forcev(SMU1, 0.0);
         return status;
+    }
+
+    /* ================= STEP 1b: optional SMU set/reset voltage pulse ======== */
+    if (SmuPulseNow)
+    {
+        if (debug)
+            printf("SmuPulse: %.4g V for %.6g s, then back to Vforce=%.4g\n",
+                   SmuPulseV, SmuPulseWidth, Vforce);
+        /* pulsev holds Amplitude for Width; SMU stays at Amplitude after. */
+        status = pulsev(SMU1, SmuPulseV, SmuPulseWidth);
+        if (status != 0)
+            return status;
+        status = forcev(SMU1, Vforce);
+        if (status != 0)
+            return status;
     }
 
     /* ================= STEP 2: fire PMU CH1 TTL pulse, if requested ========= */

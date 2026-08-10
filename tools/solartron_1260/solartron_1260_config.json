@@ -1,0 +1,18 @@
+{
+  "save_dir": "C:\\Users\\ppxcv1\\OneDrive - The University of Nottingham\\Documents\\Data_folder",
+  "sample_name": "D114",
+  "section": "B",
+  "device_number": "6",
+  "run_notes": "Pristine",
+  "gpib_address": "GPIB0::8::INSTR",
+  "timeout_ms": 60000,
+  "f_start_hz": 1.0,
+  "f_stop_hz": 1000000.0,
+  "points_per_decade": 20,
+  "ac_amplitude_v": 0.1,
+  "dc_bias_v": 0.0,
+  "settle_s": 0.3,
+  "bias_start_v": 0.0,
+  "bias_stop_v": 1.0,
+  "bias_step_v": 0.5
+}

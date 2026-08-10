@@ -705,9 +705,10 @@ tsp.clear_all_scripts()
 
 **Problem:** Error -286 (Runtime Error)
 
-**Cause:** Nil values in measurements or string formatting
+**Cause:** Writing Series 2600 TSP attributes on a 2450 (`autorangev`, `limiti`, `levelv`, …) → "Cannot modify this read-only item"; or nil values in string formatting.
 
 **Solution:**
+- Use 2450 API: `smu.source.autorange`, `smu.source.ilimit.level`, `smu.source.level`, `delay(seconds)`
 - Add nil checks in custom TSP scripts
 - Ensure measurement readings are valid before use
 - Add delay before measurements
@@ -767,7 +768,7 @@ print(error_msg)  # Should be "0, No error" if OK
 
 # Common error codes:
 # -285: TSP syntax error (mixing SCPI with TSP mode)
-# -286: TSP runtime error (nil values)
+# -286: TSP runtime error (2600 attrs on 2450, or nil values)
 # 1408: Script already exists
 # 5004: Measurement overflow (compliance)
 ```

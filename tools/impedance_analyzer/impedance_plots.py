@@ -40,6 +40,41 @@ def _has_cols(df: pd.DataFrame, *names: str) -> bool:
     return all(_col(df, n) is not None for n in names)
 
 
+def equalize_nyquist_axes(
+    ax: plt.Axes,
+    x: Optional[np.ndarray] = None,
+    y: Optional[np.ndarray] = None,
+    *,
+    pad: float = 0.05,
+) -> None:
+    """
+    Make Nyquist X and Y axes the same length (equal span) and 1:1 aspect.
+
+    Centers each axis on its data midpoint so Re and -Im share the same scale
+    length even when their ranges differ.
+    """
+    if x is not None and y is not None:
+        xv = np.asarray(x, dtype=float).ravel()
+        yv = np.asarray(y, dtype=float).ravel()
+        mask = np.isfinite(xv) & np.isfinite(yv)
+        xv, yv = xv[mask], yv[mask]
+        if xv.size == 0:
+            return
+        xmin, xmax = float(np.min(xv)), float(np.max(xv))
+        ymin, ymax = float(np.min(yv)), float(np.max(yv))
+    else:
+        xmin, xmax = ax.get_xlim()
+        ymin, ymax = ax.get_ylim()
+
+    xmid = 0.5 * (xmin + xmax)
+    ymid = 0.5 * (ymin + ymax)
+    half = 0.5 * max(xmax - xmin, ymax - ymin, 1e-30)
+    half *= 1.0 + pad
+    ax.set_xlim(xmid - half, xmid + half)
+    ax.set_ylim(ymid - half, ymid + half)
+    ax.set_aspect("equal", adjustable="box")
+
+
 def _ensure_axes(ax: Optional[plt.Axes] = None) -> plt.Axes:
     if ax is None:
         _, ax = plt.subplots()
@@ -306,14 +341,8 @@ def plot_nyquist(
     ax.set_xlabel("Re(Z) (Ω)")
     ax.set_ylabel("-Im(Z) (Ω)")
     ax.ticklabel_format(style='scientific', scilimits=(0, 0), useMathText=True, axis='both')
-    # Equal scale (1:1) on x and y so circles look circular
-    xlo, xhi = ax.get_xlim()
-    ylo, yhi = ax.get_ylim()
-    lo = min(xlo, ylo)
-    hi = max(xhi, yhi)
-    ax.set_xlim(lo, hi)
-    ax.set_ylim(lo, hi)
-    ax.set_aspect("equal", adjustable="box")
+    # Equal scale length on x and y so circles look circular
+    equalize_nyquist_axes(ax, re_z, -im_z)
     ax.grid(True, alpha=0.3)
     
     params = None

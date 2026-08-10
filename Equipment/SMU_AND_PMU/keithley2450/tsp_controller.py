@@ -119,6 +119,20 @@ class Keithley2450_TSP:
         """Query and return the device identity string using TSP."""
         if self.device:
             try:
+                # Drain leftover print() output (DATA:/SWEEP_DONE) so IDN is not polluted
+                old_timeout = self.device.timeout
+                try:
+                    self.device.timeout = 100
+                    while True:
+                        self.device.read()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        self.device.timeout = old_timeout
+                    except Exception:
+                        pass
+
                 self.device.write('print(localnode.model .. "," .. localnode.serialno .. "," .. localnode.version)')
                 time.sleep(0.02)
                 return "KEITHLEY INSTRUMENTS," + self.device.read().strip()

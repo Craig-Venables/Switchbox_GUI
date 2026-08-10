@@ -688,6 +688,9 @@ class PmuLaserSmuStreamSession:
         num_points: int,
         irange: float = 0.0,
         fire_now: bool = False,
+        smu_pulse_now: bool = False,
+        smu_pulse_v: float = 2.0,
+        smu_pulse_width_s: float = 0.001,
         mode: ModeName = "single",
         vhigh: float = 5.0,
         vlow: float = 0.0,
@@ -709,7 +712,7 @@ class PmuLaserSmuStreamSession:
         cooldown_sequence: Optional[list] = None,
         cd_sequence: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Run one chunk: (optionally fire the laser, then) sample NumPoints."""
+        """Run one chunk: (optionally SMU set/reset + laser fire, then) sample."""
         del packing, cooldown_span_s, num_cd_pulses, cd_start_width_s, cd_end_width_s
         if not self._connected or self._kxci is None:
             raise RuntimeError("Not connected — call connect() first")
@@ -753,6 +756,7 @@ class PmuLaserSmuStreamSession:
             pulse_dur = preview.total_duration_s
             laser_on_intervals = list(preview.laser_on_intervals)
 
+        smu_w = max(0.0, float(smu_pulse_width_s)) if smu_pulse_now else 0.0
         cmd = build_pmu_laser_smu_stream_ex_command(
             mode,
             vforce=vread,
@@ -773,13 +777,16 @@ class PmuLaserSmuStreamSession:
             sample_interval_s=sample_interval_s,
             fire_now=fire_now,
             stop_now=False,
+            smu_pulse_now=smu_pulse_now,
+            smu_pulse_v=smu_pulse_v,
+            smu_pulse_width_s=smu_w if smu_pulse_now else 0.001,
             num_points=num_points,
             decay=decay,
             cd_sequence=wire,
             irange=irange,
             library=self.usr_library,
         )
-        wait = max(0.5, pulse_dur + num_points * sample_interval_s + 0.5)
+        wait = max(0.5, smu_w + pulse_dur + num_points * sample_interval_s + 0.5)
         if self._t0_perf is None:
             self._t0_perf = time.perf_counter()
         rv, raw = _send_ex(self._kxci, cmd, wait_seconds=wait)
@@ -816,8 +823,13 @@ class PmuLaserSmuStreamSession:
 
         # Preview intervals are relative to local t=0 at fire. Map onto this
         # chunk's assigned time base (fire at first sample of a fire chunk).
+        # SMU set/reset (if any) happens before the laser in the C module, so
+        # place its marker just before the laser / first sample.
+        smu_pulse_interval: Optional[Tuple[float, float]] = None
+        t_fire = timestamps[0] if timestamps else t_start
+        if smu_pulse_now and smu_w > 0.0:
+            smu_pulse_interval = (t_fire - smu_w, t_fire)
         if fire_now and laser_on_intervals:
-            t_fire = timestamps[0]
             laser_on_intervals = [(a + t_fire, b + t_fire) for a, b in laser_on_intervals]
 
         voltages = [vread] * n_actual
@@ -830,6 +842,10 @@ class PmuLaserSmuStreamSession:
             "voltages": voltages,
             "resistances": resistances,
             "fired": bool(fire_now),
+            "smu_pulsed": bool(smu_pulse_now),
+            "smu_pulse_v": float(smu_pulse_v) if smu_pulse_now else None,
+            "smu_pulse_width_s": smu_w if smu_pulse_now else None,
+            "smu_pulse_interval": smu_pulse_interval,  # absolute, only if pulsed
             "laser_on_intervals": laser_on_intervals,  # absolute, only if fired
             "pmu_command": cmd,
             "pmu_return": rv,
