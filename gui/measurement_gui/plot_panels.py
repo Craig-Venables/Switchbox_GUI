@@ -1229,6 +1229,23 @@ class MeasurementPlotPanels:
             # Log activity
             self.log_graph_activity(f"Added sweep to 'All Sweeps': {label} ({len(v_arr)} points)")
 
+    def _recreate_realtime_line(self, name: str) -> None:
+        """Recreate the primary line (+ recent-dot) on a realtime axis after clear."""
+        ax = self.axes.get(name)
+        if ax is None:
+            return
+        if name == "tt_rt":
+            line, = ax.plot([], [], marker="x", markersize=3)
+        elif name == "rt_logilogv":
+            line, = ax.plot([], [], marker=".", color="r", markersize=3)
+        else:
+            line, = ax.plot([], [], marker=".", markersize=3)
+        self.lines[name] = line
+        setattr(self, f"line_{name}", line)
+        # ax.clear() removes old artists — always recreate the red "latest" marker
+        recent_dot, = ax.plot([], [], marker="o", color="red", markersize=8, linestyle="None", zorder=10)
+        self.recent_dots[name] = recent_dot
+
     def reset_for_new_sweep(self, gui: Optional[object] = None) -> None:
         """Clear only individual real-time graphs between sweeps (keeps combined graphs)."""
         # Clear data buffers if GUI reference provided
@@ -1257,10 +1274,8 @@ class MeasurementPlotPanels:
             if ax is None or canvas is None:
                 continue
             
-            # Clear the entire axis
             ax.clear()
             
-            # Reapply styling
             if name in axis_configs:
                 xlabel, ylabel, xscale, yscale = axis_configs[name]
                 self._style_axis(ax, xlabel, ylabel)
@@ -1269,19 +1284,11 @@ class MeasurementPlotPanels:
                 if yscale == "log":
                     ax.set_yscale("log")
             
-            # Recreate the line
-            if name == "tt_rt":
-                line, = ax.plot([], [], marker="x", markersize=3)
-            elif name == "rt_logilogv":
-                line, = ax.plot([], [], marker=".", color="r", markersize=3)
-            else:
-                line, = ax.plot([], [], marker=".", markersize=3)
-            
-            # Update the line reference
-            self.lines[name] = line
-            
-            # Redraw
-            canvas.draw()
+            self._recreate_realtime_line(name)
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
 
         self.last_sweep = ([], [])
 
@@ -1313,10 +1320,8 @@ class MeasurementPlotPanels:
             if ax is None or canvas is None:
                 continue
             
-            # Clear the entire axis
             ax.clear()
             
-            # Reapply styling
             if name in axis_configs:
                 xlabel, ylabel, xscale, yscale = axis_configs[name]
                 self._style_axis(ax, xlabel, ylabel)
@@ -1325,19 +1330,11 @@ class MeasurementPlotPanels:
                 if yscale == "log":
                     ax.set_yscale("log")
             
-            # Recreate the line
-            if name == "tt_rt":
-                line, = ax.plot([], [], marker="x", markersize=3)
-            elif name == "rt_logilogv":
-                line, = ax.plot([], [], marker=".", color="r", markersize=3)
-            else:
-                line, = ax.plot([], [], marker=".", markersize=3)
-            
-            # Update the line reference
-            self.lines[name] = line
-            
-            # Redraw
-            canvas.draw()
+            self._recreate_realtime_line(name)
+            try:
+                canvas.draw_idle()
+            except Exception:
+                pass
 
         # Clear combined graphs (all sweeps) for a completely new run
         for key in ["all_iv", "all_logiv"]:
@@ -1345,9 +1342,15 @@ class MeasurementPlotPanels:
             canvas = self.canvases.get(key)
             if ax and canvas:
                 ax.clear()
-                if key == "all_logiv":
+                if key == "all_iv":
+                    self._style_axis(ax, "Voltage (V)", "Current (A)")
+                elif key == "all_logiv":
                     ax.set_yscale("log")
-                canvas.draw()
+                    self._style_axis(ax, "Voltage (V)", "|Current| (A)")
+                try:
+                    canvas.draw_idle()
+                except Exception:
+                    pass
 
         self.last_sweep = ([], [])
 

@@ -137,14 +137,17 @@ to fire the laser on a button press. Instead, Python calls this module
 repeatedly (once per short "chunk") over one persistent GPIB session:
 
 ```text
-EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,fall,width,period,startPeriod,endPeriod,numPulses,delayBefore,vrange,PMU_ID,ClariusDebug,SampleInterval_s,FireNow,StopNow,cdStartWidth,cdEndWidth,,NumPoints,,NumPointsTimestamps)
+EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,fall,width,period,startPeriod,endPeriod,numPulses,delayBefore,vrange,PMU_ID,ClariusDebug,SampleInterval_s,FireNow,StopNow,SmuPulseNow,SmuPulseV,SmuPulseWidth,cdStartWidth,cdEndWidth,cdSequence,Irange,,NumPoints,,NumPointsTimestamps)
 ```
 
-25 parameters. Each call:
+30 parameters. Each call:
 
 1. Re-assert SMU bias (`forcev`) — **required every call** (same reason as
    `pmu_laser_smu_run`: the source doesn't stay "operational" across
    separate top-level EX/UL invocations).
+1b. If `SmuPulseNow=1`: `pulsev(SMU1, SmuPulseV, SmuPulseWidth)` then
+   `forcev` back to `Vforce` — electrical SET/RESET on the device while
+   live-reading (sign of `SmuPulseV` selects polarity).
 2. If `FireNow=1`: build + fire the PMU CH1 TTL waveform (same
    single/train/cool-down shapes), then continue into this chunk's sample
    loop so the transient is caught.
@@ -153,11 +156,14 @@ EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,
    force-down/force-up glitch between chunks). Only `StopNow=1` ramps
    down; send that once when the user clicks "Stop streaming".
 
+`SmuPulseNow` and `FireNow` may both be 1 in the same chunk (SMU pulse
+first, then laser TTL, then samples).
+
 `Timestamps` are **chunk-local** (`0 .. NumPoints * SampleInterval_s`); the
 Python side (`PmuLaserSmuStreamSession`) keeps a running master-timeline
-offset across chunks. "Fire Now" latency is bounded by the current chunk's
-duration, since Python can't send the fire request until the in-flight
-chunk's `EX` call returns.
+offset across chunks. "Fire Now" / SMU-pulse latency is bounded by the
+current chunk's duration, since Python can't send the request until the
+in-flight chunk's `EX` call returns.
 
 ### Return codes (`pmu_laser_smu_stream`)
 

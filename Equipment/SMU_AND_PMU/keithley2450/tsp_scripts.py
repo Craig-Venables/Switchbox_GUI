@@ -1596,7 +1596,6 @@ class Keithley2450_TSP_Scripts:
             
             # Create measurement script for this range
             # Follow Keithley manual order: measure function/range FIRST, then source settings
-            # Use autorange for source limit to avoid 5076/5077 errors
             self.tsp.device.write(f'loadscript rangeFinder{range_idx}')
             buffer_capacity = max(num_reads_per_range, 10)
             self.tsp.device.write('defbuffer1.clear()')
@@ -1610,14 +1609,8 @@ class Keithley2450_TSP_Scripts:
             self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
             self.tsp.device.write(f'smu.source.range = {v_range}')
             
-            # Step 3: Set source limit - use autorange for small ranges to avoid errors
-            # For ranges >= 100µA, set explicit limit; for smaller, use autorange
-            if i_range >= 100e-6:
-                # Large enough range - set explicit limit
-                self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
-            else:
-                # Very small range - use autorange to avoid 5076/5077 errors
-                self.tsp.device.write('smu.source.ilimit.autorange = smu.ON')
+            # Step 3: Set source current limit (2450 has no smu.source.ilimit.autorange)
+            self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
             
             self.tsp.device.write('smu.measure.nplc = 0.01')
             self.tsp.device.write('smu.measure.autozero.enable = smu.ON')  # Enable for accuracy

@@ -95,6 +95,13 @@ try:
         parse_time_value,
         parse_width_list,
     )
+    from interaction_routine import (
+        PROTOCOL_LABELS,
+        InteractionStep,
+        build_interaction_plan,
+        describe_interaction_plan,
+        protocol_needs_laser,
+    )
 except ImportError:
     from tools.pmu_laser_smu_read.waveform import (
         MAX_TTL_VHIGH,
@@ -129,6 +136,13 @@ except ImportError:
         generate_power_levels,
         parse_time_value,
         parse_width_list,
+    )
+    from tools.pmu_laser_smu_read.interaction_routine import (
+        PROTOCOL_LABELS,
+        InteractionStep,
+        build_interaction_plan,
+        describe_interaction_plan,
+        protocol_needs_laser,
     )
 
 try:
@@ -176,6 +190,17 @@ class PmuLaserSmuReadGUI:
         self.routine_widths_default = "100 ns, 1000 ns, 10000 ns, 100000 ns"
         self.section_default = "A"
         self.device_default = "1"
+        self.laser_port_default = "COM8"
+        self.laser_baud_default = "19200"
+        self.laser_manual_power_default = "10"
+        self.laser_align_pct_default = "5"
+        self.ix_protocol_default = "laser_effect"
+        self.ix_amplitude_default = "2.0"
+        self.ix_smu_width_default = "1 ms"
+        self.ix_interval_default = "5.0"
+        self.ix_repeats_default = "1"
+        self.ix_cycles_default = "20"
+        self.ix_widths_default = "100 µs, 1 ms, 10 ms"
         if self.config_path.exists():
             try:
                 data = json.loads(self.config_path.read_text(encoding="utf-8"))
@@ -184,6 +209,34 @@ class PmuLaserSmuReadGUI:
                 self.sample_default = data.get("sample_name", self.sample_default) or "untitled"
                 self.section_default = data.get("section", self.section_default) or "A"
                 self.device_default = str(data.get("device_number", self.device_default) or "1")
+                self.laser_port_default = str(data.get("laser_port", self.laser_port_default))
+                self.laser_baud_default = str(data.get("laser_baud", self.laser_baud_default))
+                self.laser_manual_power_default = str(
+                    data.get("laser_manual_power_pct", self.laser_manual_power_default)
+                )
+                self.laser_align_pct_default = str(
+                    data.get("laser_align_pct", self.laser_align_pct_default)
+                )
+                self.ix_protocol_default = str(
+                    data.get("ix_protocol", self.ix_protocol_default)
+                )
+                self.ix_amplitude_default = str(
+                    data.get("ix_amplitude_v", self.ix_amplitude_default)
+                )
+                self.ix_smu_width_default = str(
+                    data.get("ix_smu_width", self.ix_smu_width_default)
+                )
+                self.ix_interval_default = str(
+                    data.get("ix_interval_s", self.ix_interval_default)
+                )
+                self.ix_repeats_default = str(
+                    data.get("ix_repeats", self.ix_repeats_default)
+                )
+                self.ix_cycles_default = str(
+                    data.get("ix_cycles", self.ix_cycles_default)
+                )
+                if data.get("ix_widths"):
+                    self.ix_widths_default = str(data["ix_widths"])
                 self.routine_settle_default = str(
                     data.get("routine_settle_s", self.routine_settle_default)
                 )
@@ -234,6 +287,19 @@ class PmuLaserSmuReadGUI:
             payload["routine_step_pct"] = self.routine_power_step_var.get().strip()
             payload["routine_max_pct"] = self.routine_power_max_var.get().strip()
             payload["routine_widths"] = self.routine_widths_var.get().strip()
+        if hasattr(self, "laser_port_var"):
+            payload["laser_port"] = self.laser_port_var.get().strip()
+            payload["laser_baud"] = self.laser_baud_var.get().strip()
+            payload["laser_manual_power_pct"] = self.laser_manual_power_var.get().strip()
+            payload["laser_align_pct"] = self.laser_align_pct_var.get().strip()
+        if hasattr(self, "ix_protocol_var"):
+            payload["ix_protocol"] = self.ix_protocol_key()
+            payload["ix_amplitude_v"] = self.ix_amplitude_var.get().strip()
+            payload["ix_smu_width"] = self.ix_smu_width_var.get().strip()
+            payload["ix_interval_s"] = self.ix_interval_var.get().strip()
+            payload["ix_repeats"] = self.ix_repeats_var.get().strip()
+            payload["ix_cycles"] = self.ix_cycles_var.get().strip()
+            payload["ix_widths"] = self.ix_widths_var.get().strip()
         try:
             self.config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception:
@@ -331,11 +397,15 @@ class PmuLaserSmuReadGUI:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
+        conn_tab = ttk.Frame(self.notebook)
         run_tab = ttk.Frame(self.notebook)
         live_tab = ttk.Frame(self.notebook)
         routine_tab = ttk.Frame(self.notebook)
+        interaction_tab = ttk.Frame(self.notebook)
+        self.notebook.add(conn_tab, text="Connection")
         self.notebook.add(live_tab, text="Live / Manual Fire")
         self.notebook.add(routine_tab, text="Automated Routine")
+        self.notebook.add(interaction_tab, text="Laser ↔ SMU")
         self.notebook.add(run_tab, text="Single-shot Run")
 
         body = ttk.Panedwindow(run_tab, orient=tk.HORIZONTAL)
@@ -535,9 +605,13 @@ class PmuLaserSmuReadGUI:
         ):
             var.trace_add("write", lambda *_: self._schedule_preview())
 
+        self._build_connection_tab(conn_tab)
         self._build_live_tab(live_tab)
         self._build_routine_tab(routine_tab)
+        self._build_interaction_tab(interaction_tab)
         self._on_mode_change()
+        # Land on Live for day-to-day use; Connection is first in the strip for setup.
+        self.notebook.select(live_tab)
 
 
     def _get_cooldown_sequence_text(self) -> str:
@@ -634,6 +708,7 @@ class PmuLaserSmuReadGUI:
         self._pulse_summary_after_id = None
         self._update_live_pulse_summary()
         self._update_routine_pulse_summary()
+        self._update_ix_pulse_summary()
 
     def _row(self, parent: tk.Misc, label: str, var: tk.StringVar) -> ttk.Frame:
         fr = ttk.Frame(parent)
@@ -1130,6 +1205,7 @@ class PmuLaserSmuReadGUI:
             "single": "#1565c0",      # blue
             "train": "#ef6c00",       # orange
             "cooldown": "#7b1fa2",    # purple
+            "smu_pulse": "#c62828",   # red — electrical SET/RESET
         }.get(mode or "", "#2e7d32")
 
     @staticmethod
@@ -1137,6 +1213,15 @@ class PmuLaserSmuReadGUI:
         """Human-readable pulse-type label for graph annotations, e.g.
         'Laser ON (train, 10x)' — includes num_pulses for train/cool-down."""
         mode = info.get("mode", "?")
+        if mode == "smu_pulse":
+            params = info.get("params") or info
+            v = params.get("smu_pulse_v")
+            w = params.get("smu_pulse_width_s")
+            if v is not None and w is not None:
+                return f"SMU {float(v):+.3g} V / {format_time_compact(float(w))}"
+            if v is not None:
+                return f"SMU {float(v):+.3g} V"
+            return "SMU set/reset"
         n = info.get("num_pulses")
         if mode == "single":
             return "Laser ON (single)"
@@ -1472,10 +1557,157 @@ class PmuLaserSmuReadGUI:
                 "laser_fire": "0=none; N=Nth fire marked on nearest sample (no SMU read during pulse)",
             },
         }
+        rt_image_path: Optional[Path] = None
+        try:
+            if hasattr(self, "fig") and self.fig is not None:
+                rt_image_path = path.with_name(f"{path.stem}_Rt.png")
+                self.fig.savefig(rt_image_path, dpi=150, bbox_inches="tight")
+                meta["rt_image"] = str(rt_image_path)
+        except Exception:
+            rt_image_path = None
         meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
         self._save_config()
-        self.status_var.set(f"Saved {self._display_rel_path(path)}")
-        messagebox.showinfo("Saved", f"Wrote:\n{path}\n{meta_path}")
+        saved = [str(path), str(meta_path)]
+        if rt_image_path:
+            saved.append(str(rt_image_path))
+            self.status_var.set(f"Saved {self._display_rel_path(path)} + R(t) graph")
+        else:
+            self.status_var.set(f"Saved {self._display_rel_path(path)}")
+        messagebox.showinfo("Saved", "Wrote:\n" + "\n".join(saved))
+
+    # ---------------------------------------------------------------
+    # Connection tab (laser serial + GPIB reminders)
+    # ---------------------------------------------------------------
+    def _build_connection_tab(self, parent: ttk.Frame) -> None:
+        left = self._make_scrollable(parent)
+
+        info = self._collapsible_section(left, "How this works", expanded=True)
+        ttk.Label(
+            info,
+            text=(
+                "Connect instruments here before Live / Manual Fire or the\n"
+                "Automated Routine. GPIB address is also on the top bar\n"
+                "(Test GPIB). Laser serial (Oxxius) is controlled below —\n"
+                "Connect arms TTL modulation with emission ON so PMU TTL\n"
+                "pulses can gate the beam. Live / Manual Fire can change\n"
+                "current % without leaving that tab."
+            ),
+            justify=tk.LEFT,
+            wraplength=420,
+        ).pack(anchor=tk.W)
+
+        gpib_fr = ttk.LabelFrame(left, text="GPIB (4200A / KXCI)", padding=6)
+        gpib_fr.pack(fill=tk.X, pady=4)
+        ttk.Label(
+            gpib_fr,
+            text=(
+                "Address is shared with the top bar. Only one client may own\n"
+                "GPIB at a time (close Clarius remote / other tools first)."
+            ),
+            justify=tk.LEFT,
+            wraplength=420,
+            foreground="#555555",
+        ).pack(anchor=tk.W)
+        gpib_row = ttk.Frame(gpib_fr)
+        gpib_row.pack(fill=tk.X, pady=(6, 2))
+        ttk.Label(gpib_row, text="Address", width=10).pack(side=tk.LEFT)
+        ttk.Entry(gpib_row, textvariable=self.gpib_var, width=22).pack(side=tk.LEFT, padx=2)
+        ttk.Button(gpib_row, text="Test GPIB", command=self._test_gpib).pack(side=tk.LEFT, padx=4)
+        pmu_row = ttk.Frame(gpib_fr)
+        pmu_row.pack(fill=tk.X, pady=2)
+        ttk.Label(pmu_row, text="PMU_ID", width=10).pack(side=tk.LEFT)
+        ttk.Entry(pmu_row, textvariable=self.pmu_id_var, width=14).pack(side=tk.LEFT, padx=2)
+
+        laser_fr = ttk.LabelFrame(left, text="Laser (serial / Oxxius)", padding=6)
+        laser_fr.pack(fill=tk.X, pady=4)
+        conn_row = ttk.Frame(laser_fr)
+        conn_row.pack(fill=tk.X, pady=1)
+        ttk.Label(conn_row, text="Port", width=8).pack(side=tk.LEFT)
+        self.laser_port_var = tk.StringVar(value=self.laser_port_default)
+        ttk.Entry(conn_row, textvariable=self.laser_port_var, width=8).pack(side=tk.LEFT, padx=2)
+        ttk.Label(conn_row, text="Baud").pack(side=tk.LEFT, padx=(8, 2))
+        self.laser_baud_var = tk.StringVar(value=self.laser_baud_default)
+        ttk.Entry(conn_row, textvariable=self.laser_baud_var, width=8).pack(side=tk.LEFT, padx=2)
+
+        btn_row = ttk.Frame(laser_fr)
+        btn_row.pack(fill=tk.X, pady=2)
+        self.laser_connect_btn = ttk.Button(btn_row, text="Connect", command=self._connect_laser)
+        self.laser_connect_btn.pack(side=tk.LEFT, padx=2)
+        self.laser_disconnect_btn = ttk.Button(
+            btn_row, text="Disconnect", command=self._disconnect_laser, state=tk.DISABLED
+        )
+        self.laser_disconnect_btn.pack(side=tk.LEFT, padx=2)
+        self.laser_status_var = tk.StringVar(value="Disconnected")
+        ttk.Label(btn_row, textvariable=self.laser_status_var, foreground="#888888").pack(
+            side=tk.LEFT, padx=(10, 0)
+        )
+
+        emission_row = ttk.Frame(laser_fr)
+        emission_row.pack(fill=tk.X, pady=2)
+        ttk.Label(emission_row, text="Emission", width=8).pack(side=tk.LEFT)
+        self.laser_emission_on_btn = ttk.Button(
+            emission_row, text="On", width=4, command=self._laser_emission_on, state=tk.DISABLED
+        )
+        self.laser_emission_on_btn.pack(side=tk.LEFT, padx=2)
+        self.laser_emission_off_btn = ttk.Button(
+            emission_row, text="Off", width=4, command=self._laser_emission_off, state=tk.DISABLED
+        )
+        self.laser_emission_off_btn.pack(side=tk.LEFT, padx=2)
+
+        power_now_row = ttk.Frame(laser_fr)
+        power_now_row.pack(fill=tk.X, pady=2)
+        ttk.Label(power_now_row, text="Set current (%)", width=14).pack(side=tk.LEFT)
+        self.laser_manual_power_var = tk.StringVar(value=self.laser_manual_power_default)
+        ttk.Entry(power_now_row, textvariable=self.laser_manual_power_var, width=8).pack(
+            side=tk.LEFT, padx=2
+        )
+        self.laser_set_power_btn = ttk.Button(
+            power_now_row, text="Set now", command=self._laser_set_power_now, state=tk.DISABLED
+        )
+        self.laser_set_power_btn.pack(side=tk.LEFT, padx=2)
+
+        align_row = ttk.Frame(laser_fr)
+        align_row.pack(fill=tk.X, pady=2)
+        ttk.Label(align_row, text="Align (%)", width=14).pack(side=tk.LEFT)
+        self.laser_align_pct_var = tk.StringVar(value=self.laser_align_pct_default)
+        ttk.Entry(align_row, textvariable=self.laser_align_pct_var, width=8).pack(
+            side=tk.LEFT, padx=2
+        )
+        self.laser_align_on_btn = ttk.Button(
+            align_row, text="Align ON", width=9, command=self._laser_align_on, state=tk.DISABLED
+        )
+        self.laser_align_on_btn.pack(side=tk.LEFT, padx=2)
+        self.laser_align_off_btn = ttk.Button(
+            align_row,
+            text="Align OFF → TTL",
+            width=14,
+            command=self._laser_align_off,
+            state=tk.DISABLED,
+        )
+        self.laser_align_off_btn.pack(side=tk.LEFT, padx=2)
+        ttk.Label(
+            laser_fr,
+            text="Align ON: TTL mod off, CW beam at Align %. Align OFF re-arms TTL mod (emission ON).",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+            wraplength=420,
+        ).pack(anchor=tk.W, pady=(0, 2))
+
+        self.laser_restore_btn = ttk.Button(
+            laser_fr,
+            text="Restore manual control (front panel)",
+            command=self._laser_restore_manual,
+            state=tk.DISABLED,
+        )
+        self.laser_restore_btn.pack(fill=tk.X, pady=(4, 0))
+
+        if OxxiusLaser is None:
+            ttk.Label(
+                laser_fr,
+                text="pyserial is not available — laser control disabled.",
+                foreground="#a00000",
+            ).pack(anchor=tk.W, pady=(4, 0))
+            self.laser_connect_btn.configure(state=tk.DISABLED)
 
     # ---------------------------------------------------------------
     # Live / Manual Fire tab
@@ -1498,13 +1730,17 @@ class PmuLaserSmuReadGUI:
                 "session. Press 'Fire Pulse Now' anytime — the laser fires at\n"
                 "the START of the next chunk (latency \u2248 one chunk's\n"
                 "duration, since GPIB is one-command-at-a-time and can't be\n"
-                "interrupted mid-call). Change pulse type/shape below anytime\n"
-                "— even between fires — to alternate pulse types live\n"
-                "(shared with the Single-shot tab's PMU/Pulse mode panels).\n"
-                "Each fire is labelled with its pulse type on the graph, and\n"
-                "'Save live CSV' records the exact parameters used per fire.\n"
-                "Or use 'Preset experiment' below to auto-fire increasing\n"
-                "pulse widths on a timer instead of clicking manually."
+                "interrupted mid-call). Use 'Fire SMU Pulse' for a single\n"
+                "electrical SET/RESET voltage on the device (e.g. +2 V /\n"
+                "\u2212V), independent of the laser TTL. Set laser current %\n"
+                "in the Laser power panel below (connect the laser on the\n"
+                "Connection tab first). Change pulse type/shape below\n"
+                "anytime — even between fires — to alternate types live\n"
+                "(shared with the Single-shot tab's PMU/Pulse panels).\n"
+                "Each fire is labelled on the graph, and 'Save live CSV'\n"
+                "records the exact parameters used per fire. Or use 'Preset\n"
+                "experiment' below to auto-fire increasing pulse widths on\n"
+                "a timer instead of clicking manually."
             ),
             justify=tk.LEFT,
             wraplength=340,
@@ -1531,6 +1767,46 @@ class PmuLaserSmuReadGUI:
         ).pack(anchor=tk.W, pady=(2, 0))
         for var in (self.live_dt_var, self.live_chunk_var):
             var.trace_add("write", lambda *_: self._update_live_chunk_info())
+
+        # Laser power — same StringVars / handlers as the Connection tab.
+        live_laser = ttk.LabelFrame(left, text="Laser power (serial)", padding=6)
+        live_laser.pack(fill=tk.X, pady=4)
+        ttk.Label(
+            live_laser,
+            textvariable=self.laser_status_var,
+            foreground="#555555",
+            wraplength=340,
+        ).pack(anchor=tk.W)
+        live_pwr_row = ttk.Frame(live_laser)
+        live_pwr_row.pack(fill=tk.X, pady=(4, 2))
+        ttk.Label(live_pwr_row, text="Current (%)", width=12).pack(side=tk.LEFT)
+        ttk.Entry(live_pwr_row, textvariable=self.laser_manual_power_var, width=8).pack(
+            side=tk.LEFT, padx=2
+        )
+        self.live_laser_set_power_btn = ttk.Button(
+            live_pwr_row,
+            text="Set now",
+            command=self._laser_set_power_now,
+            state=tk.DISABLED,
+        )
+        self.live_laser_set_power_btn.pack(side=tk.LEFT, padx=2)
+        live_em_row = ttk.Frame(live_laser)
+        live_em_row.pack(fill=tk.X, pady=2)
+        ttk.Label(live_em_row, text="Emission", width=12).pack(side=tk.LEFT)
+        self.live_laser_emission_on_btn = ttk.Button(
+            live_em_row, text="On", width=4, command=self._laser_emission_on, state=tk.DISABLED
+        )
+        self.live_laser_emission_on_btn.pack(side=tk.LEFT, padx=2)
+        self.live_laser_emission_off_btn = ttk.Button(
+            live_em_row, text="Off", width=4, command=self._laser_emission_off, state=tk.DISABLED
+        )
+        self.live_laser_emission_off_btn.pack(side=tk.LEFT, padx=2)
+        ttk.Label(
+            live_laser,
+            text="Connect / Align / Restore are on the Connection tab.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+        ).pack(anchor=tk.W, pady=(2, 0))
 
         # PMU CH1 TTL shape — same StringVars as the Single-shot tab, so
         # editing here (or there) keeps both tabs in sync.
@@ -1611,6 +1887,47 @@ class PmuLaserSmuReadGUI:
             anchor=tk.W, pady=(4, 0)
         )
 
+        # SMU electrical set/reset — force a voltage pulse on the device
+        # (independent of the PMU laser TTL path).
+        smu_pulse = ttk.LabelFrame(left, text="SMU set / reset pulse", padding=6)
+        smu_pulse.pack(fill=tk.X, pady=4)
+        ttk.Label(
+            smu_pulse,
+            text=(
+                "One voltage pulse on the SMU (device), then back to Vread.\n"
+                "Use +V / \u2212V for SET vs RESET. While streaming: fires at\n"
+                "start of next chunk. When idle: one-shot GPIB pulse.\n"
+                "Requires rebuilt pmu_laser_smu_stream in Clarius."
+            ),
+            justify=tk.LEFT,
+            wraplength=340,
+            foreground="#555555",
+        ).pack(anchor=tk.W)
+        self.smu_pulse_v_var = tk.StringVar(value="2.0")
+        self.smu_pulse_width_var = tk.StringVar(value="1 ms")
+        self._row(smu_pulse, "Pulse V (V)", self.smu_pulse_v_var)
+        self._time_row(smu_pulse, self.smu_pulse_width_var, label="Pulse width")
+        ttk.Label(
+            smu_pulse,
+            text="Sign selects polarity (e.g. 2 or -2). Width e.g. 1 ms / 100 µs.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+        ).pack(anchor=tk.W, padx=(22, 0))
+        smu_btn_row = ttk.Frame(smu_pulse)
+        smu_btn_row.pack(fill=tk.X, pady=(6, 2))
+        self.live_smu_pulse_btn = ttk.Button(
+            smu_btn_row,
+            text="Fire SMU Pulse",
+            command=self._fire_smu_pulse,
+        )
+        self.live_smu_pulse_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2))
+        ttk.Button(
+            smu_btn_row, text="+V", width=4, command=lambda: self._smu_pulse_set_sign(+1)
+        ).pack(side=tk.LEFT, padx=1)
+        ttk.Button(
+            smu_btn_row, text="\u2212V", width=4, command=lambda: self._smu_pulse_set_sign(-1)
+        ).pack(side=tk.LEFT, padx=1)
+
         # Preset experiment: automatic pulse-width sweep. Uses the current
         # streaming session (must be streaming already, or this starts it)
         # and auto-fires on a timer, incrementing Width each time — so you
@@ -1679,6 +1996,7 @@ class PmuLaserSmuReadGUI:
         # where it left off.
         self._paused = False
         self._stream_pause_event = threading.Event()
+        self._smu_oneshot_pending = False
 
         # Width-sweep preset experiment state
         self._exp_active = False
@@ -1724,109 +2042,31 @@ class PmuLaserSmuReadGUI:
                 "SAME streaming session as Live / Manual Fire (only one GPIB\n"
                 "session can exist at a time — streaming starts automatically\n"
                 "if it isn't already running). Laser current % is set over serial\n"
-                "(Equipment/Laser_Controller/oxxius.py) between blocks — you\n"
-                "must Connect the laser below first. Connect arms TTL mod\n"
-                "with emission ON (needed for TTL gating). Watch the live\n"
-                "R(t) plot and click 'Stop routine' as soon as you see a\n"
-                "response — the laser is automatically restored to normal\n"
-                "manual (front panel wheel) control whenever the routine\n"
-                "stops or finishes."
+                "(Connection tab) between blocks — Connect the laser there\n"
+                "first. Connect arms TTL mod with emission ON (needed for\n"
+                "TTL gating). Watch the live R(t) plot and click 'Stop\n"
+                "routine' as soon as you see a response — the laser is\n"
+                "automatically restored to normal manual (front panel wheel)\n"
+                "control whenever the routine stops or finishes."
             ),
             justify=tk.LEFT,
             wraplength=340,
         ).pack(anchor=tk.W)
 
-        # --- Laser (serial) ---
-        laser_fr = ttk.LabelFrame(left, text="Laser (serial)", padding=6)
-        laser_fr.pack(fill=tk.X, pady=4)
-        conn_row = ttk.Frame(laser_fr)
-        conn_row.pack(fill=tk.X, pady=1)
-        ttk.Label(conn_row, text="Port", width=8).pack(side=tk.LEFT)
-        self.laser_port_var = tk.StringVar(value="COM8")
-        ttk.Entry(conn_row, textvariable=self.laser_port_var, width=8).pack(side=tk.LEFT, padx=2)
-        ttk.Label(conn_row, text="Baud").pack(side=tk.LEFT, padx=(8, 2))
-        self.laser_baud_var = tk.StringVar(value="19200")
-        ttk.Entry(conn_row, textvariable=self.laser_baud_var, width=8).pack(side=tk.LEFT, padx=2)
-
-        btn_row = ttk.Frame(laser_fr)
-        btn_row.pack(fill=tk.X, pady=2)
-        self.laser_connect_btn = ttk.Button(btn_row, text="Connect", command=self._connect_laser)
-        self.laser_connect_btn.pack(side=tk.LEFT, padx=2)
-        self.laser_disconnect_btn = ttk.Button(
-            btn_row, text="Disconnect", command=self._disconnect_laser, state=tk.DISABLED
-        )
-        self.laser_disconnect_btn.pack(side=tk.LEFT, padx=2)
-        self.laser_status_var = tk.StringVar(value="Disconnected")
-        ttk.Label(btn_row, textvariable=self.laser_status_var, foreground="#888888").pack(
-            side=tk.LEFT, padx=(10, 0)
-        )
-
-        emission_row = ttk.Frame(laser_fr)
-        emission_row.pack(fill=tk.X, pady=2)
-        ttk.Label(emission_row, text="Emission", width=8).pack(side=tk.LEFT)
-        self.laser_emission_on_btn = ttk.Button(
-            emission_row, text="On", width=4, command=self._laser_emission_on, state=tk.DISABLED
-        )
-        self.laser_emission_on_btn.pack(side=tk.LEFT, padx=2)
-        self.laser_emission_off_btn = ttk.Button(
-            emission_row, text="Off", width=4, command=self._laser_emission_off, state=tk.DISABLED
-        )
-        self.laser_emission_off_btn.pack(side=tk.LEFT, padx=2)
-
-        power_now_row = ttk.Frame(laser_fr)
-        power_now_row.pack(fill=tk.X, pady=2)
-        ttk.Label(power_now_row, text="Set current (%)", width=14).pack(side=tk.LEFT)
-        self.laser_manual_power_var = tk.StringVar(value="10")
-        ttk.Entry(power_now_row, textvariable=self.laser_manual_power_var, width=8).pack(
-            side=tk.LEFT, padx=2
-        )
-        self.laser_set_power_btn = ttk.Button(
-            power_now_row, text="Set now", command=self._laser_set_power_now, state=tk.DISABLED
-        )
-        self.laser_set_power_btn.pack(side=tk.LEFT, padx=2)
-
-        align_row = ttk.Frame(laser_fr)
-        align_row.pack(fill=tk.X, pady=2)
-        ttk.Label(align_row, text="Align (%)", width=14).pack(side=tk.LEFT)
-        self.laser_align_pct_var = tk.StringVar(value="5")
-        ttk.Entry(align_row, textvariable=self.laser_align_pct_var, width=8).pack(
-            side=tk.LEFT, padx=2
-        )
-        self.laser_align_on_btn = ttk.Button(
-            align_row, text="Align ON", width=9, command=self._laser_align_on, state=tk.DISABLED
-        )
-        self.laser_align_on_btn.pack(side=tk.LEFT, padx=2)
-        self.laser_align_off_btn = ttk.Button(
-            align_row,
-            text="Align OFF → TTL",
-            width=14,
-            command=self._laser_align_off,
-            state=tk.DISABLED,
-        )
-        self.laser_align_off_btn.pack(side=tk.LEFT, padx=2)
+        laser_note = ttk.LabelFrame(left, text="Laser", padding=6)
+        laser_note.pack(fill=tk.X, pady=4)
         ttk.Label(
-            laser_fr,
-            text="Align ON: TTL mod off, CW beam at Align %. Align OFF re-arms TTL mod (emission ON).",
+            laser_note,
+            text="Serial Connect / Align / Restore live on the Connection tab.",
             foreground="#555555",
-            font=("TkDefaultFont", 7),
             wraplength=340,
-        ).pack(anchor=tk.W, pady=(0, 2))
-
-        self.laser_restore_btn = ttk.Button(
-            laser_fr,
-            text="Restore manual control (front panel)",
-            command=self._laser_restore_manual,
-            state=tk.DISABLED,
-        )
-        self.laser_restore_btn.pack(fill=tk.X, pady=(4, 0))
-
-        if OxxiusLaser is None:
-            ttk.Label(
-                laser_fr,
-                text="pyserial is not available — laser control disabled.",
-                foreground="#a00000",
-            ).pack(anchor=tk.W, pady=(4, 0))
-            self.laser_connect_btn.configure(state=tk.DISABLED)
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            laser_note,
+            textvariable=self.laser_status_var,
+            foreground="#888888",
+            wraplength=340,
+        ).pack(anchor=tk.W, pady=(4, 0))
 
         # --- SMU bias + chunking (shared with Live tab) ---
         bias = ttk.LabelFrame(left, text="SMU bias + chunking", padding=6)
@@ -2059,6 +2299,450 @@ class PmuLaserSmuReadGUI:
             var.trace_add("write", lambda *_: self._schedule_pulse_summary())
         self._on_mode_change()
 
+    # ---------------------------------------------------------------
+    # Laser ↔ SMU interaction routines tab
+    # ---------------------------------------------------------------
+    def _build_interaction_tab(self, parent: ttk.Frame) -> None:
+        body = ttk.Panedwindow(parent, orient=tk.HORIZONTAL)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        left_host = ttk.Frame(body)
+        right = ttk.Frame(body, padding=4)
+        body.add(left_host, weight=1)
+        body.add(right, weight=2)
+        left = self._make_scrollable(left_host)
+
+        info = self._collapsible_section(left, "How this works", expanded=False)
+        ttk.Label(
+            info,
+            text=(
+                "Runs laser ↔ SMU ±V protocols on the SAME live stream as\n"
+                "Live / Manual Fire. Pick a protocol below. Shared SMU |V|\n"
+                "sets both polarities (+V / −V). Laser shape comes from the\n"
+                "Live tab (Width / Pulse type). Laser protocols need the\n"
+                "laser connected on the Connection tab; SMU-only protocols\n"
+                "do not. Pause freezes streaming + the plan timer."
+            ),
+            justify=tk.LEFT,
+            wraplength=340,
+        ).pack(anchor=tk.W)
+
+        proto_fr = ttk.LabelFrame(left, text="Protocol", padding=6)
+        proto_fr.pack(fill=tk.X, pady=4)
+        self._ix_protocol_keys = list(PROTOCOL_LABELS.keys())
+        self._ix_protocol_labels = [PROTOCOL_LABELS[k] for k in self._ix_protocol_keys]
+        default_label = PROTOCOL_LABELS.get(
+            self.ix_protocol_default, self._ix_protocol_labels[0]
+        )
+        self.ix_protocol_var = tk.StringVar(value=default_label)
+        ttk.Combobox(
+            proto_fr,
+            textvariable=self.ix_protocol_var,
+            values=self._ix_protocol_labels,
+            state="readonly",
+            width=36,
+        ).pack(fill=tk.X, pady=2)
+        self.ix_protocol_var.trace_add("write", lambda *_: self._on_ix_protocol_change())
+
+        shared = ttk.LabelFrame(left, text="Shared SMU pulse", padding=6)
+        shared.pack(fill=tk.X, pady=4)
+        self.ix_amplitude_var = tk.StringVar(value=self.ix_amplitude_default)
+        self.ix_smu_width_var = tk.StringVar(value=self.ix_smu_width_default)
+        self.ix_interval_var = tk.StringVar(value=self.ix_interval_default)
+        self._row(shared, "SMU |V| (V)", self.ix_amplitude_var)
+        self._time_row(shared, self.ix_smu_width_var, label="SMU pulse width")
+        self._row(shared, "Interval between steps (s)", self.ix_interval_var)
+        ttk.Label(
+            shared,
+            text="Polarity is always +|V| / −|V|. Interval applies after each stimulus.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+            wraplength=340,
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        # Protocol-specific blocks
+        self.ix_laser_effect_fr = ttk.LabelFrame(left, text="Laser-effect options", padding=6)
+        self.ix_laser_effect_fr.pack(fill=tk.X, pady=4)
+        self.ix_repeats_var = tk.StringVar(value=self.ix_repeats_default)
+        self._row(self.ix_laser_effect_fr, "Repeat ± pair (N)", self.ix_repeats_var)
+        ttk.Label(
+            self.ix_laser_effect_fr,
+            text=(
+                "Per polarity: SMU → Laser → wait → SMU → wait → Laser → wait\n"
+                "→ SMU → Laser → wait; then the opposite polarity."
+            ),
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+            wraplength=340,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
+
+        self.ix_cycles_fr = ttk.LabelFrame(left, text="Cycles", padding=6)
+        self.ix_cycles_fr.pack(fill=tk.X, pady=4)
+        self.ix_cycles_var = tk.StringVar(value=self.ix_cycles_default)
+        self._row(self.ix_cycles_fr, "Cycles (N)", self.ix_cycles_var)
+        ttk.Label(
+            self.ix_cycles_fr,
+            text="Used by Alternating ±V+laser and SMU endurance.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+        ).pack(anchor=tk.W)
+
+        self.ix_widths_fr = ttk.LabelFrame(left, text="SMU width sweep list", padding=6)
+        self.ix_widths_fr.pack(fill=tk.X, pady=4)
+        self.ix_widths_var = tk.StringVar(value=self.ix_widths_default)
+        ttk.Entry(self.ix_widths_fr, textvariable=self.ix_widths_var).pack(fill=tk.X, pady=2)
+        ttk.Label(
+            self.ix_widths_fr,
+            text="Comma list, e.g. 100 µs, 1 ms, 10 ms. At each width: +V then −V.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+            wraplength=340,
+        ).pack(anchor=tk.W)
+
+        laser_sum = ttk.LabelFrame(left, text="Laser (from Live tab)", padding=6)
+        laser_sum.pack(fill=tk.X, pady=4)
+        self._ix_laser_sum_fr = laser_sum
+        ttk.Label(
+            laser_sum,
+            textvariable=self.laser_status_var,
+            foreground="#888888",
+            wraplength=340,
+        ).pack(anchor=tk.W)
+        self.ix_pulse_summary_var = tk.StringVar(value="")
+        ttk.Label(
+            laser_sum,
+            textvariable=self.ix_pulse_summary_var,
+            wraplength=340,
+            foreground="#333333",
+        ).pack(anchor=tk.W, pady=(4, 0))
+        ttk.Label(
+            laser_sum,
+            text="Edit Width / Pulse type on Live / Manual Fire.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+        ).pack(anchor=tk.W, pady=(2, 0))
+        ix_pwr = ttk.Frame(laser_sum)
+        ix_pwr.pack(fill=tk.X, pady=(4, 0))
+        ttk.Label(ix_pwr, text="Current (%)", width=12).pack(side=tk.LEFT)
+        ttk.Entry(ix_pwr, textvariable=self.laser_manual_power_var, width=8).pack(
+            side=tk.LEFT, padx=2
+        )
+        self.ix_laser_set_power_btn = ttk.Button(
+            ix_pwr, text="Set now", command=self._laser_set_power_now, state=tk.DISABLED
+        )
+        self.ix_laser_set_power_btn.pack(side=tk.LEFT, padx=2)
+
+        bias = ttk.LabelFrame(left, text="SMU bias + chunking (shared)", padding=6)
+        bias.pack(fill=tk.X, pady=4)
+        self._row(bias, "Vread (V)", self.vread_var)
+        self._row(bias, "Ilimit (A)", self.ilimit_var)
+        self._row(bias, "Sample dt (s)", self.live_dt_var)
+        self._row(bias, "Chunk size (s)", self.live_chunk_var)
+
+        preview_row = ttk.Frame(left)
+        preview_row.pack(fill=tk.X, pady=4)
+        ttk.Button(preview_row, text="Preview plan", command=self._preview_ix_plan).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2)
+        )
+
+        ctrl = ttk.LabelFrame(left, text="Control", padding=6)
+        ctrl.pack(fill=tk.X, pady=4)
+        ctrl_row = ttk.Frame(ctrl)
+        ctrl_row.pack(fill=tk.X, pady=2)
+        self.ix_start_btn = ttk.Button(
+            ctrl_row, text="Start protocol", command=self._start_ix_routine
+        )
+        self.ix_start_btn.pack(side=tk.LEFT, padx=2)
+        self.ix_stop_btn = ttk.Button(
+            ctrl_row, text="Stop protocol", command=self._stop_ix_routine, state=tk.DISABLED
+        )
+        self.ix_stop_btn.pack(side=tk.LEFT, padx=2)
+        self.ix_stop_stream_btn = ttk.Button(
+            ctrl_row, text="Stop streaming", command=self._stop_streaming, state=tk.DISABLED
+        )
+        self.ix_stop_stream_btn.pack(side=tk.LEFT, padx=2)
+        self.ix_pause_btn = ttk.Button(
+            ctrl_row, text="\u23f8 Pause", command=self._toggle_pause, state=tk.DISABLED
+        )
+        self.ix_pause_btn.pack(side=tk.LEFT, padx=2)
+
+        self.ix_status_var = tk.StringVar(value="Idle")
+        ttk.Label(ctrl, textvariable=self.ix_status_var, wraplength=340).pack(
+            anchor=tk.W, pady=(4, 0)
+        )
+        self.ix_stream_status_var = tk.StringVar(value="Not streaming")
+        ttk.Label(
+            ctrl,
+            textvariable=self.ix_stream_status_var,
+            foreground="#555555",
+            wraplength=340,
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        ttk.Button(
+            left,
+            text="Save interaction CSV",
+            command=lambda: self._save_stream_csv(
+                getattr(self, "_ix_run_kind", None) or "interaction"
+            ),
+        ).pack(fill=tk.X, pady=(8, 2))
+
+        self.ix_fig = Figure(figsize=(7.5, 7), dpi=100)
+        self.ix_ax = self.ix_fig.add_subplot(111)
+        self.ix_fig.tight_layout(pad=2.0)
+        self.ix_canvas = FigureCanvasTkAgg(self.ix_fig, master=right)
+        self.ix_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        self._ix_active = False
+        self._ix_plan: List[InteractionStep] = []
+        self._ix_index = 0
+        self._ix_after_id: Optional[str] = None
+        self._ix_last_wait_ms: int = 200
+        self._ix_run_kind = "interaction_laser_effect"
+
+        self._on_ix_protocol_change()
+        self._update_ix_pulse_summary()
+        for var in (
+            self.width_us_var,
+            self.off_time_var,
+            self.num_pulses_var,
+            self.decay_var,
+            self.vhigh_var,
+            self.mode_var,
+        ):
+            var.trace_add("write", lambda *_: self._update_ix_pulse_summary())
+
+    def ix_protocol_key(self) -> str:
+        label = self.ix_protocol_var.get().strip()
+        for k, v in PROTOCOL_LABELS.items():
+            if v == label:
+                return k
+        return "laser_effect"
+
+    def _on_ix_protocol_change(self) -> None:
+        if not hasattr(self, "ix_laser_effect_fr"):
+            return
+        key = self.ix_protocol_key()
+        # Re-pack specific blocks just above the laser summary section.
+        anchor = getattr(self, "_ix_laser_sum_fr", None)
+        for fr in (self.ix_laser_effect_fr, self.ix_cycles_fr, self.ix_widths_fr):
+            fr.pack_forget()
+        pack_kw: Dict[str, Any] = {"fill": tk.X, "pady": 4}
+        if anchor is not None:
+            pack_kw["before"] = anchor
+        if key == "laser_effect":
+            self.ix_laser_effect_fr.pack(**pack_kw)
+        elif key in ("alt_polarity_laser", "smu_endurance"):
+            self.ix_cycles_fr.pack(**pack_kw)
+        elif key == "smu_width_sweep":
+            self.ix_widths_fr.pack(**pack_kw)
+        self._update_ix_pulse_summary()
+
+    def _update_ix_pulse_summary(self) -> None:
+        if not hasattr(self, "ix_pulse_summary_var"):
+            return
+        try:
+            self.ix_pulse_summary_var.set(self._pulse_summary_text())
+        except Exception as exc:
+            self.ix_pulse_summary_var.set(f"(fix laser pulse params: {exc})")
+
+    def _ix_build_plan(self) -> List[InteractionStep]:
+        key = self.ix_protocol_key()
+        amp = self._f(self.ix_amplitude_var)
+        width_s = parse_time_value(self.ix_smu_width_var.get())
+        interval_s = self._f(self.ix_interval_var)
+        repeats = int(float(self.ix_repeats_var.get().strip()))
+        cycles = int(float(self.ix_cycles_var.get().strip()))
+        return build_interaction_plan(
+            key,
+            amplitude_v=amp,
+            smu_width_s=width_s,
+            interval_s=interval_s,
+            repeats=repeats,
+            cycles=cycles,
+            widths_text=self.ix_widths_var.get(),
+        )
+
+    def _preview_ix_plan(self) -> None:
+        try:
+            plan = self._ix_build_plan()
+            interval_s = self._f(self.ix_interval_var)
+            text = describe_interaction_plan(
+                plan, protocol=self.ix_protocol_key(), interval_s=interval_s
+            )
+        except Exception as exc:
+            messagebox.showerror("Invalid protocol parameters", str(exc))
+            return
+        messagebox.showinfo("Laser ↔ SMU plan preview", text)
+
+    def _start_ix_routine(self) -> None:
+        if self._ix_active or self._routine_active:
+            return
+        key = self.ix_protocol_key()
+        if protocol_needs_laser(key) and self.laser is None:
+            messagebox.showerror(
+                "Laser ↔ SMU", "Connect the laser first (Connection tab)."
+            )
+            return
+        try:
+            plan = self._ix_build_plan()
+            interval_s = self._f(self.ix_interval_var)
+            if interval_s <= 0:
+                raise ValueError("Interval must be > 0")
+            if protocol_needs_laser(key):
+                # Validate laser pulse params now.
+                self._params()
+        except Exception as exc:
+            messagebox.showerror("Invalid protocol parameters", str(exc))
+            return
+
+        if not self._stream_active:
+            self._start_streaming()
+            if not self._stream_active:
+                # Worker connects async — wait briefly then arm.
+                pass
+
+        self._ix_plan = plan
+        self._ix_index = 0
+        self._ix_active = True
+        self._ix_run_kind = f"interaction_{key}"
+        self.ix_start_btn.configure(state=tk.DISABLED)
+        self.ix_stop_btn.configure(state=tk.NORMAL)
+        if hasattr(self, "ix_stop_stream_btn"):
+            self.ix_stop_stream_btn.configure(state=tk.NORMAL)
+        if hasattr(self, "ix_pause_btn"):
+            self.ix_pause_btn.configure(state=tk.NORMAL)
+
+        print("\n" + "=" * 60, flush=True)
+        print(f"[IX] START protocol={key} | {len(plan)} step(s) | interval={interval_s:g}s", flush=True)
+        print("=" * 60, flush=True)
+
+        self.ix_status_var.set(f"Armed — {len(plan)} step(s)")
+        self._ix_last_wait_ms = 200
+        self._save_config()
+        self._ix_after_id = self.root.after(200, self._ix_tick)
+
+    def _ix_tick(self) -> None:
+        if not self._ix_active:
+            return
+        if not self._stream_active:
+            # Streaming may still be connecting — retry briefly.
+            if self._stream_thread is not None and self._stream_thread.is_alive():
+                self.ix_status_var.set("Waiting for streaming to connect…")
+                self._ix_after_id = self.root.after(200, self._ix_tick)
+                return
+            print("[IX] STOP — streaming is not active", flush=True)
+            self.ix_status_var.set("Stopped — streaming is not active")
+            self._stop_ix_routine()
+            return
+        if self._paused:
+            return
+        key = self.ix_protocol_key()
+        if protocol_needs_laser(key) and self.laser is None:
+            print("[IX] STOP — laser disconnected", flush=True)
+            self.ix_status_var.set("Stopped — laser disconnected")
+            self._stop_ix_routine()
+            return
+        if self._ix_index >= len(self._ix_plan):
+            print("[IX] All steps done — finishing.", flush=True)
+            self._stop_ix_routine(complete=True)
+            return
+
+        step = self._ix_plan[self._ix_index]
+        self._ix_index += 1
+        n = len(self._ix_plan)
+        i = self._ix_index
+
+        try:
+            interval_s = max(0.05, self._f(self.ix_interval_var))
+        except Exception:
+            interval_s = 5.0
+
+        if step.kind == "wait":
+            wait_s = float(step.wait_s if step.wait_s is not None else interval_s)
+            wait_s = max(0.05, wait_s)
+            print(f"[IX] Step {i}/{n}: WAIT {wait_s:g}s — {step.label}", flush=True)
+            self.ix_status_var.set(f"Step {i}/{n}: wait {wait_s:.3g}s")
+            wait_ms = int(wait_s * 1000)
+        elif step.kind == "smu_pulse":
+            v = float(step.smu_v if step.smu_v is not None else 0.0)
+            w = float(step.smu_width_s if step.smu_width_s is not None else 0.001)
+            print(f"[IX] Step {i}/{n}: SMU {v:+.6g} V / {format_time_compact(w)}", flush=True)
+            self._stream_fire_queue.put(
+                {
+                    "kind": "smu_pulse",
+                    "mode": "smu_pulse",
+                    "smu_pulse_v": v,
+                    "smu_pulse_width_s": w,
+                }
+            )
+            self.ix_status_var.set(
+                f"Step {i}/{n}: SMU {v:+.3g} V / {format_time_compact(w)}"
+            )
+            # Next plan step is usually an explicit wait; use a short arm delay.
+            wait_ms = 50
+        else:  # laser_fire
+            try:
+                p = self._params()
+            except Exception as exc:
+                print(f"[IX] STOP — invalid laser params: {exc}", flush=True)
+                self.ix_status_var.set(f"Stopped — invalid laser params: {exc}")
+                self._stop_ix_routine()
+                return
+            if self.laser is not None:
+                try:
+                    self.laser.ensure_ttl_modulation()
+                except Exception as exc:
+                    print(f"[IX] STOP — could not arm TTL: {exc}", flush=True)
+                    self.ix_status_var.set(f"Stopped — TTL arm failed: {exc}")
+                    self._stop_ix_routine()
+                    return
+            print(f"[IX] Step {i}/{n}: LASER — {step.label}", flush=True)
+            self._print_laser_levels(f"IX FIRE {i}/{n}")
+            self._stream_fire_queue.put(p)
+            self.ix_status_var.set(f"Step {i}/{n}: laser fire")
+            wait_ms = 50
+
+        self._ix_last_wait_ms = wait_ms
+        self._ix_after_id = self.root.after(wait_ms, self._ix_tick)
+
+    def _stop_ix_routine(self, complete: bool = False) -> None:
+        was_active = self._ix_active
+        self._ix_active = False
+        if self._ix_after_id is not None:
+            try:
+                self.root.after_cancel(self._ix_after_id)
+            except Exception:
+                pass
+            self._ix_after_id = None
+        self.ix_start_btn.configure(state=tk.NORMAL)
+        self.ix_stop_btn.configure(state=tk.DISABLED)
+        n = len(self._ix_plan)
+        if was_active:
+            print("\n" + "=" * 60, flush=True)
+            if complete:
+                print(f"[IX] COMPLETE — {n} step(s) finished.", flush=True)
+                self.ix_status_var.set(
+                    f"Complete — {n} step(s). Streaming still running — "
+                    "Stop streaming, then Save interaction CSV."
+                )
+            else:
+                print(
+                    f"[IX] STOPPED early — after {self._ix_index}/{n} step(s).",
+                    flush=True,
+                )
+                self.ix_status_var.set(
+                    "Protocol stopped. If still streaming, Stop streaming then save."
+                )
+            if protocol_needs_laser(self.ix_protocol_key()) and self.laser is not None:
+                print("[IX] Restoring laser to manual control…", flush=True)
+                self._laser_restore_manual()
+            print("[IX] Done.", flush=True)
+            print("=" * 60 + "\n", flush=True)
+        if self._stream_active and hasattr(self, "ix_stop_stream_btn"):
+            self.ix_stop_stream_btn.configure(state=tk.NORMAL)
+        self._save_config()
+
     def _update_live_chunk_info(self) -> None:
         try:
             dt = self._f(self.live_dt_var)
@@ -2148,14 +2832,22 @@ class PmuLaserSmuReadGUI:
         self.live_start_btn.configure(state=tk.DISABLED)
         self.live_stop_btn.configure(state=tk.NORMAL)
         self.live_fire_btn.configure(state=tk.DISABLED)
+        if hasattr(self, "live_smu_pulse_btn"):
+            self.live_smu_pulse_btn.configure(state=tk.DISABLED)
         self.live_pause_btn.configure(state=tk.NORMAL, text="\u23f8 Pause")
         if hasattr(self, "routine_stop_stream_btn"):
             self.routine_stop_stream_btn.configure(state=tk.NORMAL)
         if hasattr(self, "routine_pause_btn"):
             self.routine_pause_btn.configure(state=tk.NORMAL, text="\u23f8 Pause")
+        if hasattr(self, "ix_stop_stream_btn"):
+            self.ix_stop_stream_btn.configure(state=tk.NORMAL)
+        if hasattr(self, "ix_pause_btn"):
+            self.ix_pause_btn.configure(state=tk.NORMAL, text="\u23f8 Pause")
         self.live_status_var.set("Connecting…")
         if hasattr(self, "routine_stream_status_var"):
             self.routine_stream_status_var.set("Connecting…")
+        if hasattr(self, "ix_stream_status_var"):
+            self.ix_stream_status_var.set("Connecting…")
         self._save_config()
 
         gpib_address = self.gpib_var.get().strip()
@@ -2188,29 +2880,45 @@ class PmuLaserSmuReadGUI:
                 try:
                     if fire_params is not None:
                         try:
-                            chunk = session.read_chunk(
-                                vread=vread,
-                                ilimit=ilimit,
-                                irange=irange,
-                                sample_interval_s=dt,
-                                num_points=chunk_points,
-                                fire_now=True,
-                                mode=fire_params["mode"],
-                                vhigh=fire_params["vhigh"],
-                                rise_s=fire_params["rise_s"],
-                                fall_s=fire_params["fall_s"],
-                                width_s=fire_params["width_s"],
-                                period_s=fire_params["period_s"],
-                                start_period_s=fire_params["start_period_s"],
-                                end_period_s=fire_params["end_period_s"],
-                                num_pulses=fire_params["num_pulses"],
-                                delay_before_s=fire_params["delay_before_s"],
-                                decay=fire_params.get("decay", "linear"),
-                                packing=fire_params.get("packing", "sparse"),
-                                cooldown_sequence=fire_params.get("cooldown_sequence"),
-                                cd_sequence=fire_params.get("cd_sequence") or "0",
-                            )
-                            chunk["fire_params"] = fire_params
+                            if fire_params.get("kind") == "smu_pulse":
+                                chunk = session.read_chunk(
+                                    vread=vread,
+                                    ilimit=ilimit,
+                                    irange=irange,
+                                    sample_interval_s=dt,
+                                    num_points=chunk_points,
+                                    fire_now=False,
+                                    smu_pulse_now=True,
+                                    smu_pulse_v=float(fire_params["smu_pulse_v"]),
+                                    smu_pulse_width_s=float(
+                                        fire_params["smu_pulse_width_s"]
+                                    ),
+                                )
+                                chunk["smu_pulse_params"] = fire_params
+                            else:
+                                chunk = session.read_chunk(
+                                    vread=vread,
+                                    ilimit=ilimit,
+                                    irange=irange,
+                                    sample_interval_s=dt,
+                                    num_points=chunk_points,
+                                    fire_now=True,
+                                    mode=fire_params["mode"],
+                                    vhigh=fire_params["vhigh"],
+                                    rise_s=fire_params["rise_s"],
+                                    fall_s=fire_params["fall_s"],
+                                    width_s=fire_params["width_s"],
+                                    period_s=fire_params["period_s"],
+                                    start_period_s=fire_params["start_period_s"],
+                                    end_period_s=fire_params["end_period_s"],
+                                    num_pulses=fire_params["num_pulses"],
+                                    delay_before_s=fire_params["delay_before_s"],
+                                    decay=fire_params.get("decay", "linear"),
+                                    packing=fire_params.get("packing", "sparse"),
+                                    cooldown_sequence=fire_params.get("cooldown_sequence"),
+                                    cd_sequence=fire_params.get("cd_sequence") or "0",
+                                )
+                                chunk["fire_params"] = fire_params
                         except Exception as fire_exc:
                             # Pulse failed — keep streaming SMU reads; don't
                             # tear down the whole session for a bad fire.
@@ -2253,19 +2961,29 @@ class PmuLaserSmuReadGUI:
             self._stop_width_sweep()
         if getattr(self, "_routine_active", False):
             self._stop_routine()
+        if getattr(self, "_ix_active", False):
+            self._stop_ix_routine()
         self._paused = False
         self._stream_pause_event.clear()
         self._stream_stop_event.set()
         self.live_stop_btn.configure(state=tk.DISABLED)
         self.live_fire_btn.configure(state=tk.DISABLED)
+        if hasattr(self, "live_smu_pulse_btn"):
+            self.live_smu_pulse_btn.configure(state=tk.DISABLED)
         self.live_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
         if hasattr(self, "routine_stop_stream_btn"):
             self.routine_stop_stream_btn.configure(state=tk.DISABLED)
         if hasattr(self, "routine_pause_btn"):
             self.routine_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
+        if hasattr(self, "ix_stop_stream_btn"):
+            self.ix_stop_stream_btn.configure(state=tk.DISABLED)
+        if hasattr(self, "ix_pause_btn"):
+            self.ix_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
         self.live_status_var.set("Stopping (ramping SMU to 0 V)…")
         if hasattr(self, "routine_stream_status_var"):
             self.routine_stream_status_var.set("Stopping (ramping SMU to 0 V)…")
+        if hasattr(self, "ix_stream_status_var"):
+            self.ix_stream_status_var.set("Stopping (ramping SMU to 0 V)…")
 
     def _update_pause_buttons(self) -> None:
         text = "\u25b6 Resume" if self._paused else "\u23f8 Pause"
@@ -2274,6 +2992,8 @@ class PmuLaserSmuReadGUI:
             self.live_pause_btn.configure(text=text, state=state)
         if hasattr(self, "routine_pause_btn"):
             self.routine_pause_btn.configure(text=text, state=state)
+        if hasattr(self, "ix_pause_btn"):
+            self.ix_pause_btn.configure(text=text, state=state)
 
     def _toggle_pause(self) -> None:
         if self._paused:
@@ -2299,6 +3019,13 @@ class PmuLaserSmuReadGUI:
                 pass
             self._routine_after_id = None
 
+        if getattr(self, "_ix_active", False) and getattr(self, "_ix_after_id", None) is not None:
+            try:
+                self.root.after_cancel(self._ix_after_id)
+            except Exception:
+                pass
+            self._ix_after_id = None
+
         if self._exp_active and self._exp_after_id is not None:
             try:
                 self.root.after_cancel(self._exp_after_id)
@@ -2307,18 +3034,29 @@ class PmuLaserSmuReadGUI:
             self._exp_after_id = None
 
         self.live_fire_btn.configure(state=tk.DISABLED)
+        if hasattr(self, "live_smu_pulse_btn"):
+            self.live_smu_pulse_btn.configure(state=tk.DISABLED)
         if hasattr(self, "routine_start_btn") and not self._routine_active:
             self.routine_start_btn.configure(state=tk.DISABLED)
+        if hasattr(self, "ix_start_btn") and not getattr(self, "_ix_active", False):
+            self.ix_start_btn.configure(state=tk.DISABLED)
         if hasattr(self, "exp_start_btn") and not self._exp_active:
             self.exp_start_btn.configure(state=tk.DISABLED)
         msg = "\u23f8 PAUSED — no new pulses/SMU reads; bias held steady. Click Resume to continue."
         self.live_status_var.set(msg)
         if hasattr(self, "routine_stream_status_var"):
             self.routine_stream_status_var.set(msg)
+        if hasattr(self, "ix_stream_status_var"):
+            self.ix_stream_status_var.set(msg)
         if self._routine_active:
             n = len(self._routine_plan)
             self.routine_status_var.set(
                 f"\u23f8 PAUSED at step {self._routine_index}/{n} — click Resume to continue"
+            )
+        if getattr(self, "_ix_active", False):
+            n = len(self._ix_plan)
+            self.ix_status_var.set(
+                f"\u23f8 PAUSED at step {self._ix_index}/{n} — click Resume to continue"
             )
         if self._exp_active:
             self.exp_status_var.set("\u23f8 Paused — click Resume to continue")
@@ -2337,6 +3075,12 @@ class PmuLaserSmuReadGUI:
             n = len(self._routine_plan)
             self.routine_status_var.set(f"Resumed — step {self._routine_index}/{n}")
 
+        if getattr(self, "_ix_active", False):
+            wait_ms = max(50, int(getattr(self, "_ix_last_wait_ms", 200)))
+            self._ix_after_id = self.root.after(wait_ms, self._ix_tick)
+            n = len(self._ix_plan)
+            self.ix_status_var.set(f"Resumed — step {self._ix_index}/{n}")
+
         if self._exp_active:
             try:
                 interval_s = max(0.05, self._f(self.exp_interval_var))
@@ -2347,13 +3091,19 @@ class PmuLaserSmuReadGUI:
 
         if self._stream_active:
             self.live_fire_btn.configure(state=tk.NORMAL)
+            if hasattr(self, "live_smu_pulse_btn"):
+                self.live_smu_pulse_btn.configure(state=tk.NORMAL)
         if hasattr(self, "routine_start_btn") and not self._routine_active:
             self.routine_start_btn.configure(state=tk.NORMAL)
+        if hasattr(self, "ix_start_btn") and not getattr(self, "_ix_active", False):
+            self.ix_start_btn.configure(state=tk.NORMAL)
         if hasattr(self, "exp_start_btn") and not self._exp_active:
             self.exp_start_btn.configure(state=tk.NORMAL)
         self.live_status_var.set("Resumed — streaming")
         if hasattr(self, "routine_stream_status_var"):
             self.routine_stream_status_var.set("Resumed — streaming")
+        if hasattr(self, "ix_stream_status_var"):
+            self.ix_stream_status_var.set("Resumed — streaming")
         self._update_pause_buttons()
         print("[PAUSE] Resumed.", flush=True)
 
@@ -2428,10 +3178,105 @@ class PmuLaserSmuReadGUI:
         self._print_laser_levels("FIRE NOW")
         self._stream_fire_queue.put(p)
         self.live_fire_btn.configure(state=tk.DISABLED)
+        if hasattr(self, "live_smu_pulse_btn"):
+            self.live_smu_pulse_btn.configure(state=tk.DISABLED)
         self.live_status_var.set(
             f"Fire pending — {p['mode']} ON for {w} at start of next chunk…"
         )
         self._update_live_pulse_summary()
+
+    def _smu_pulse_set_sign(self, sign: int) -> None:
+        """Flip Pulse V to +|V| or −|V| for quick SET vs RESET."""
+        try:
+            v = abs(float(self.smu_pulse_v_var.get().strip()))
+        except Exception:
+            v = 2.0
+        self.smu_pulse_v_var.set(f"{sign * v:g}")
+
+    def _smu_pulse_params(self) -> Dict[str, Any]:
+        v = float(self.smu_pulse_v_var.get().strip())
+        width_s = parse_time_value(self.smu_pulse_width_var.get())
+        if width_s < 1e-6 or width_s > 40.0:
+            raise ValueError("SMU pulse width must be between 1 µs and 40 s")
+        if abs(v) > 200.0:
+            raise ValueError("SMU pulse V must be within ±200 V")
+        return {
+            "kind": "smu_pulse",
+            "mode": "smu_pulse",
+            "smu_pulse_v": v,
+            "smu_pulse_width_s": width_s,
+        }
+
+    def _fire_smu_pulse(self) -> None:
+        """Queue (while streaming) or one-shot (idle) an SMU set/reset pulse."""
+        if self._paused:
+            self.live_status_var.set("SMU pulse skipped — resume streaming first")
+            return
+        try:
+            p = self._smu_pulse_params()
+        except Exception as exc:
+            messagebox.showerror("Invalid SMU pulse", str(exc))
+            return
+
+        v = p["smu_pulse_v"]
+        w = format_time_compact(p["smu_pulse_width_s"])
+        print(
+            f"[SMU PULSE] {v:+.6g} V for {w} ({p['smu_pulse_width_s']:.6g} s)",
+            flush=True,
+        )
+
+        if self._stream_active:
+            self._stream_fire_queue.put(p)
+            self.live_fire_btn.configure(state=tk.DISABLED)
+            self.live_smu_pulse_btn.configure(state=tk.DISABLED)
+            self.live_status_var.set(
+                f"SMU pulse pending — {v:+.3g} V / {w} at start of next chunk…"
+            )
+            return
+
+        # Idle one-shot: brief GPIB session, pulse, ramp down.
+        self.live_smu_pulse_btn.configure(state=tk.DISABLED)
+        self._smu_oneshot_pending = True
+        self.live_status_var.set(f"SMU pulse — {v:+.3g} V / {w}…")
+        gpib_address = self.gpib_var.get().strip()
+        pmu_id = self.pmu_id_var.get().strip() or "PMU1"
+        try:
+            vread = self._f(self.vread_var)
+            ilimit = self._f(self.ilimit_var)
+            irange = self._irange()
+        except Exception as exc:
+            self._smu_oneshot_pending = False
+            self.live_smu_pulse_btn.configure(state=tk.NORMAL)
+            messagebox.showerror("Invalid parameters", str(exc))
+            return
+
+        def worker() -> None:
+            session = PmuLaserSmuStreamSession(gpib_address=gpib_address, pmu_id=pmu_id)
+            try:
+                session.connect()
+                chunk = session.read_chunk(
+                    vread=vread,
+                    ilimit=ilimit,
+                    irange=irange,
+                    sample_interval_s=0.05,
+                    num_points=2,
+                    fire_now=False,
+                    smu_pulse_now=True,
+                    smu_pulse_v=float(p["smu_pulse_v"]),
+                    smu_pulse_width_s=float(p["smu_pulse_width_s"]),
+                )
+                self._stream_queue.put(("smu_oneshot_ok", (p, chunk)))
+            except Exception as exc:
+                self._stream_queue.put(("smu_oneshot_err", exc))
+            finally:
+                try:
+                    session.stop()
+                except Exception:
+                    pass
+
+        threading.Thread(target=worker, daemon=True).start()
+        # Poll once even if not streaming so the oneshot result is handled.
+        self.root.after(100, self._poll_stream_queue)
 
     def _poll_stream_queue(self) -> None:
         try:
@@ -2440,17 +3285,39 @@ class PmuLaserSmuReadGUI:
                 if kind == "connected":
                     self.live_status_var.set("Streaming…")
                     self.live_fire_btn.configure(state=tk.NORMAL)
+                    if hasattr(self, "live_smu_pulse_btn"):
+                        self.live_smu_pulse_btn.configure(state=tk.NORMAL)
                     if hasattr(self, "routine_stop_stream_btn"):
                         self.routine_stop_stream_btn.configure(state=tk.NORMAL)
                     if hasattr(self, "routine_stream_status_var"):
                         self.routine_stream_status_var.set("Streaming…")
+                    if hasattr(self, "ix_stop_stream_btn"):
+                        self.ix_stop_stream_btn.configure(state=tk.NORMAL)
+                    if hasattr(self, "ix_stream_status_var"):
+                        self.ix_stream_status_var.set("Streaming…")
                 elif kind == "chunk":
                     self._on_stream_chunk(payload)
                 elif kind == "fire_error":
                     # Pulse failed but streaming continues — surface it without
                     # a modal that blocks the live session.
                     self.live_fire_btn.configure(state=tk.NORMAL)
+                    if hasattr(self, "live_smu_pulse_btn"):
+                        self.live_smu_pulse_btn.configure(state=tk.NORMAL)
                     self.live_status_var.set(f"Fire failed (streaming continues): {payload}")
+                elif kind == "smu_oneshot_ok":
+                    self._smu_oneshot_pending = False
+                    p, _chunk = payload
+                    v = p.get("smu_pulse_v")
+                    w = format_time_compact(float(p.get("smu_pulse_width_s") or 0.0))
+                    if hasattr(self, "live_smu_pulse_btn"):
+                        self.live_smu_pulse_btn.configure(state=tk.NORMAL)
+                    self.live_status_var.set(f"SMU pulse done — {float(v):+.3g} V / {w}")
+                elif kind == "smu_oneshot_err":
+                    self._smu_oneshot_pending = False
+                    if hasattr(self, "live_smu_pulse_btn"):
+                        self.live_smu_pulse_btn.configure(state=tk.NORMAL)
+                    self.live_status_var.set(f"SMU pulse failed: {payload}")
+                    messagebox.showerror("SMU pulse failed", str(payload))
                 elif kind == "error":
                     self._stream_active = False
                     self._paused = False
@@ -2459,17 +3326,27 @@ class PmuLaserSmuReadGUI:
                         self._stop_width_sweep()
                     if getattr(self, "_routine_active", False):
                         self._stop_routine()
+                    if getattr(self, "_ix_active", False):
+                        self._stop_ix_routine()
                     self.live_start_btn.configure(state=tk.NORMAL)
                     self.live_stop_btn.configure(state=tk.DISABLED)
                     self.live_fire_btn.configure(state=tk.DISABLED)
+                    if hasattr(self, "live_smu_pulse_btn"):
+                        self.live_smu_pulse_btn.configure(state=tk.NORMAL)
                     self.live_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
                     if hasattr(self, "routine_stop_stream_btn"):
                         self.routine_stop_stream_btn.configure(state=tk.DISABLED)
                     if hasattr(self, "routine_pause_btn"):
                         self.routine_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
+                    if hasattr(self, "ix_stop_stream_btn"):
+                        self.ix_stop_stream_btn.configure(state=tk.DISABLED)
+                    if hasattr(self, "ix_pause_btn"):
+                        self.ix_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
                     self.live_status_var.set(f"Error: {payload}")
                     if hasattr(self, "routine_stream_status_var"):
                         self.routine_stream_status_var.set(f"Error: {payload}")
+                    if hasattr(self, "ix_stream_status_var"):
+                        self.ix_stream_status_var.set(f"Error: {payload}")
                     messagebox.showerror("Streaming error", str(payload))
                 elif kind == "stopped":
                     self._stream_active = False
@@ -2479,22 +3356,33 @@ class PmuLaserSmuReadGUI:
                         self._stop_width_sweep()
                     if getattr(self, "_routine_active", False):
                         self._stop_routine()
+                    if getattr(self, "_ix_active", False):
+                        self._stop_ix_routine()
                     self.live_start_btn.configure(state=tk.NORMAL)
                     self.live_stop_btn.configure(state=tk.DISABLED)
                     self.live_fire_btn.configure(state=tk.DISABLED)
+                    if hasattr(self, "live_smu_pulse_btn"):
+                        self.live_smu_pulse_btn.configure(state=tk.NORMAL)
                     self.live_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
                     if hasattr(self, "routine_stop_stream_btn"):
                         self.routine_stop_stream_btn.configure(state=tk.DISABLED)
                     if hasattr(self, "routine_pause_btn"):
                         self.routine_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
+                    if hasattr(self, "ix_stop_stream_btn"):
+                        self.ix_stop_stream_btn.configure(state=tk.DISABLED)
+                    if hasattr(self, "ix_pause_btn"):
+                        self.ix_pause_btn.configure(state=tk.DISABLED, text="\u23f8 Pause")
                     n = len(self._stream_t)
                     self.live_status_var.set(f"Stopped — {n} points collected")
                     if hasattr(self, "routine_stream_status_var"):
                         self.routine_stream_status_var.set(f"Stopped — {n} points collected")
+                    if hasattr(self, "ix_stream_status_var"):
+                        self.ix_stream_status_var.set(f"Stopped — {n} points collected")
         except queue.Empty:
             pass
 
-        if self._stream_active:
+        # Keep polling while streaming OR while a oneshot may still be in flight.
+        if self._stream_active or getattr(self, "_smu_oneshot_pending", False):
             self.root.after(100, self._poll_stream_queue)
 
     def _on_stream_chunk(self, chunk: Dict[str, Any]) -> None:
@@ -2505,6 +3393,29 @@ class PmuLaserSmuReadGUI:
         self._stream_i.extend(chunk.get("currents") or [])
         self._stream_v.extend(chunk.get("voltages") or [])
         self._stream_r.extend(chunk.get("resistances") or [])
+        if chunk.get("smu_pulsed"):
+            smu_params = chunk.get("smu_pulse_params") or {
+                "smu_pulse_v": chunk.get("smu_pulse_v"),
+                "smu_pulse_width_s": chunk.get("smu_pulse_width_s"),
+                "mode": "smu_pulse",
+            }
+            interval = chunk.get("smu_pulse_interval")
+            if interval:
+                self._stream_intervals.append(
+                    (float(interval[0]), float(interval[1]))
+                )
+                self._stream_fire_events.append(
+                    {
+                        "index": len(self._stream_fire_events) + 1,
+                        "t_start_s": float(interval[0]),
+                        "t_end_s": float(interval[1]),
+                        "mode": "smu_pulse",
+                        "mode_label": self._mode_label(
+                            {"mode": "smu_pulse", "params": smu_params}
+                        ),
+                        "params": smu_params,
+                    }
+                )
         if chunk.get("fired"):
             fire_params = chunk.get("fire_params") or {}
             for a, b in chunk.get("laser_on_intervals") or []:
@@ -2525,6 +3436,8 @@ class PmuLaserSmuReadGUI:
         # mid-routine / mid-stream (not only after a fired chunk).
         if self._stream_active and not self._paused:
             self.live_fire_btn.configure(state=tk.NORMAL)
+            if hasattr(self, "live_smu_pulse_btn"):
+                self.live_smu_pulse_btn.configure(state=tk.NORMAL)
         if local_t:
             self._stream_elapsed = float(local_t[-1])
 
@@ -2534,6 +3447,8 @@ class PmuLaserSmuReadGUI:
         self.live_status_var.set(status)
         if hasattr(self, "routine_stream_status_var"):
             self.routine_stream_status_var.set(status)
+        if hasattr(self, "ix_stream_status_var"):
+            self.ix_stream_status_var.set(status)
         self._redraw_all_stream_plots()
         self._update_live_pulse_summary()
 
@@ -2548,8 +3463,17 @@ class PmuLaserSmuReadGUI:
             self._redraw_stream_plot(
                 self.routine_ax, self.routine_canvas, "Live SMU resistance — automated routine"
             )
+        if hasattr(self, "ix_ax"):
+            self._redraw_stream_plot(
+                self.ix_ax, self.ix_canvas, "Live SMU resistance — Laser ↔ SMU"
+            )
 
     def _redraw_stream_plot(self, ax, canvas, title: str) -> None:
+        self._draw_stream_rt_on_ax(ax, title)
+        canvas.draw_idle()
+
+    def _draw_stream_rt_on_ax(self, ax, title: str) -> None:
+        """Draw shared stream R(t) + fire markers onto ``ax`` (no canvas flush)."""
         ax.clear()
         t = self._stream_t
         r = self._stream_r
@@ -2590,15 +3514,39 @@ class PmuLaserSmuReadGUI:
             ax.grid(True, which="both", alpha=0.3)
             if self._stream_intervals:
                 ax.legend(loc="best", fontsize=8)
-        canvas.draw_idle()
+
+    def _save_stream_rt_png(
+        self, path: Path, *, sample: str, run_n: int, run_kind: str
+    ) -> Optional[Path]:
+        """Write R(t) graph beside the CSV as ``<stem>_Rt.png``."""
+        if not self._stream_t or not self._stream_r:
+            return None
+        fig = Figure(figsize=(8.5, 5.5), dpi=150)
+        ax = fig.add_subplot(111)
+        title = f"{sample} — run {run_n} ({run_kind}) — R(t)"
+        self._draw_stream_rt_on_ax(ax, title)
+        fig.tight_layout()
+        out = path.with_name(f"{path.stem}_Rt.png")
+        fig.savefig(out, dpi=150, bbox_inches="tight")
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.close(fig)
+        except Exception:
+            pass
+        return out
 
     def _save_stream_csv(self, run_kind: str = "live_manual_fire") -> None:
         if not self._stream_t:
             messagebox.showwarning("No data", "Stream some data first.")
             return
-        path, meta_path, sample, run_n = self._allocate_save_paths(
-            "routine" if run_kind == "routine" else "live"
-        )
+        if run_kind == "routine":
+            path_kind = "routine"
+        elif str(run_kind).startswith("interaction"):
+            path_kind = "interaction"
+        else:
+            path_kind = "live"
+        path, meta_path, sample, run_n = self._allocate_save_paths(path_kind)
 
         fire_events: List[Dict[str, Any]] = []
         fire_times: List[float] = []
@@ -2616,6 +3564,8 @@ class PmuLaserSmuReadGUI:
                     "decay": params.get("decay"),
                     "num_pulses": params.get("num_pulses"),
                     "mode_label": ev.get("mode_label"),
+                    "smu_pulse_v": params.get("smu_pulse_v"),
+                    "smu_pulse_width_s": params.get("smu_pulse_width_s"),
                     "params": params,
                 }
             )
@@ -2655,6 +3605,14 @@ class PmuLaserSmuReadGUI:
         except Exception:
             image_path = None
 
+        rt_image_path: Optional[Path] = None
+        try:
+            rt_image_path = self._save_stream_rt_png(
+                path, sample=sample, run_n=run_n, run_kind=run_kind
+            )
+        except Exception:
+            rt_image_path = None
+
         meta = {
             "sample_name": sample,
             "section": self.section_var.get().strip() if hasattr(self, "section_var") else None,
@@ -2668,6 +3626,7 @@ class PmuLaserSmuReadGUI:
             "vread": self._f(self.vread_var) if self.vread_var.get().strip() else None,
             "irange": self._irange(),
             "pulse_image": str(image_path) if image_path else None,
+            "rt_image": str(rt_image_path) if rt_image_path else None,
             "csv_format": {
                 "table1": "laser_fires (#-commented rows)",
                 "table2": "data columns t_s,I_A,V_V,R_Ohm,laser_fire",
@@ -2677,12 +3636,23 @@ class PmuLaserSmuReadGUI:
         meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
         self._save_config()
         self._refresh_sample_list()
+        saved_lines = [str(path), str(meta_path)]
         if image_path:
-            self.status_var.set(f"Saved {self._display_rel_path(path)} + pulse image")
-            messagebox.showinfo("Saved", f"Wrote:\n{path}\n{meta_path}\n{image_path}")
+            saved_lines.append(str(image_path))
+        if rt_image_path:
+            saved_lines.append(str(rt_image_path))
+        extras = []
+        if image_path:
+            extras.append("pulse image")
+        if rt_image_path:
+            extras.append("R(t) graph")
+        if extras:
+            self.status_var.set(
+                f"Saved {self._display_rel_path(path)} + {' + '.join(extras)}"
+            )
         else:
             self.status_var.set(f"Saved {self._display_rel_path(path)}")
-            messagebox.showinfo("Saved", f"Wrote:\n{path}\n{meta_path}")
+        messagebox.showinfo("Saved", "Wrote:\n" + "\n".join(saved_lines))
 
     # ---------------------------------------------------------------
     # Preset experiment: automatic pulse-width sweep
@@ -2779,8 +3749,28 @@ class PmuLaserSmuReadGUI:
         return f"{value:.6g}"
 
     # ---------------------------------------------------------------
-    # Laser (serial, Oxxius) — used by the Automated Routine tab
+    # Laser (serial, Oxxius) — Connection tab + Live power controls
     # ---------------------------------------------------------------
+    def _laser_control_buttons(self) -> List[Any]:
+        """All laser action buttons (Connection + Live) to enable/disable together."""
+        buttons: List[Any] = []
+        for name in (
+            "laser_emission_on_btn",
+            "laser_emission_off_btn",
+            "laser_set_power_btn",
+            "laser_align_on_btn",
+            "laser_align_off_btn",
+            "laser_restore_btn",
+            "live_laser_set_power_btn",
+            "live_laser_emission_on_btn",
+            "live_laser_emission_off_btn",
+            "ix_laser_set_power_btn",
+        ):
+            btn = getattr(self, name, None)
+            if btn is not None:
+                buttons.append(btn)
+        return buttons
+
     def _connect_laser(self) -> None:
         if OxxiusLaser is None:
             messagebox.showerror("Laser", "pyserial is not installed — cannot connect.")
@@ -2815,15 +3805,9 @@ class PmuLaserSmuReadGUI:
         self.laser_status_var.set(f"Connected ({idn}) — TTL mod armed, emission ON")
         self.laser_connect_btn.configure(state=tk.DISABLED)
         self.laser_disconnect_btn.configure(state=tk.NORMAL)
-        for btn in (
-            self.laser_emission_on_btn,
-            self.laser_emission_off_btn,
-            self.laser_set_power_btn,
-            self.laser_align_on_btn,
-            self.laser_align_off_btn,
-            self.laser_restore_btn,
-        ):
+        for btn in self._laser_control_buttons():
             btn.configure(state=tk.NORMAL)
+        self._save_config()
 
     def _disconnect_laser(self) -> None:
         if self.laser is None:
@@ -2839,14 +3823,7 @@ class PmuLaserSmuReadGUI:
         self.laser_status_var.set("Disconnected")
         self.laser_connect_btn.configure(state=tk.NORMAL)
         self.laser_disconnect_btn.configure(state=tk.DISABLED)
-        for btn in (
-            self.laser_emission_on_btn,
-            self.laser_emission_off_btn,
-            self.laser_set_power_btn,
-            self.laser_align_on_btn,
-            self.laser_align_off_btn,
-            self.laser_restore_btn,
-        ):
+        for btn in self._laser_control_buttons():
             btn.configure(state=tk.DISABLED)
 
     def _laser_emission_on(self) -> None:
@@ -2868,12 +3845,12 @@ class PmuLaserSmuReadGUI:
             messagebox.showerror("Laser", f"Emission off failed: {exc}")
 
     def _laser_set_power_now(self) -> None:
-        """Manual one-off current-% set for pre-routine testing.
-
-        Leaves emission OFF (same idea as pulse-testing Set power): call
-        Emission On, or start the routine, when you want light.
-        """
+        """Set diode current % from Connection or Live. Leaves TTL/emission as-is."""
         if self.laser is None:
+            messagebox.showinfo(
+                "Laser",
+                "Connect the laser first on the Connection tab.",
+            )
             return
         try:
             current_pct = float(self.laser_manual_power_var.get().strip())
@@ -2882,9 +3859,8 @@ class PmuLaserSmuReadGUI:
             return
         try:
             self.laser.set_current_percent_for_ttl(current_pct)
-            self.laser_status_var.set(
-                f"Current set to {current_pct:.3g} % (emission OFF — click On or Start routine)"
-            )
+            self.laser_status_var.set(f"Current set to {current_pct:.3g} %")
+            self._save_config()
         except Exception as exc:
             messagebox.showerror("Laser", f"Set current failed: {exc}")
 
@@ -3093,9 +4069,14 @@ class PmuLaserSmuReadGUI:
     def _start_routine(self) -> None:
         if self._routine_active:
             return
+        if getattr(self, "_ix_active", False):
+            messagebox.showwarning(
+                "Routine", "Stop the Laser ↔ SMU protocol before starting this routine."
+            )
+            return
         if self.laser is None:
             messagebox.showerror(
-                "Routine", "Connect the laser first (Laser (serial) panel above)."
+                "Routine", "Connect the laser first (Connection tab)."
             )
             return
         try:

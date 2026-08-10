@@ -31,7 +31,7 @@
         }
     },
     "Lab_Laser-2450_TSP": {
-        "SMU_address": "USB0::0x05E6::0x2450::04496615::INSTR",
+        "SMU_address": "USB0::0x05E6::0x2450::04565858::INSTR",
         "SMU Type": "Keithley 2450",
         "optical": {
             "type": "Laser",

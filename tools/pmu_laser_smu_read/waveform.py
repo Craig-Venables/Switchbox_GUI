@@ -573,9 +573,10 @@ def build_pmu_laser_smu_run_ex_command(
 
 # Parameter positions (1-indexed) of the Imeas/Timestamps D_ARRAY_T outputs in
 # pmu_laser_smu_stream's argument list, for GP queries after each chunk EX call.
-# cdStartWidth + cdEndWidth + cdSequence + Irange sit before the output arrays.
-STREAM_GP_PARAM_IMEAS = 24
-STREAM_GP_PARAM_TIMESTAMPS = 26
+# After StopNow: SmuPulseNow + SmuPulseV + SmuPulseWidth, then
+# cdStartWidth + cdEndWidth + cdSequence + Irange, then the output arrays.
+STREAM_GP_PARAM_IMEAS = 27
+STREAM_GP_PARAM_TIMESTAMPS = 29
 
 
 def build_pmu_laser_smu_stream_ex_command(
@@ -599,6 +600,9 @@ def build_pmu_laser_smu_stream_ex_command(
     sample_interval_s: float,
     fire_now: bool = False,
     stop_now: bool = False,
+    smu_pulse_now: bool = False,
+    smu_pulse_v: float = 2.0,
+    smu_pulse_width_s: float = 0.001,
     num_points: int,
     decay: DecayName = "linear",
     cd_start_width_s: float = 0.0,
@@ -610,6 +614,9 @@ def build_pmu_laser_smu_stream_ex_command(
     """Build EX command for ONE CHUNK of pmu_laser_smu_stream.
 
     Cool-down shape is driven by ``cd_sequence`` (``width:delay;...``).
+    When ``smu_pulse_now`` is True the SMU applies ``smu_pulse_v`` for
+    ``smu_pulse_width_s`` (set/reset), then returns to ``vforce`` before
+    optional laser fire + sample loop.
     """
     vhigh = _clamp_vhigh(vhigh)
     mode_i = mode_to_int(mode, decay)
@@ -635,6 +642,9 @@ def build_pmu_laser_smu_stream_ex_command(
         format_param(sample_interval_s),
         format_param(1 if fire_now else 0),
         format_param(1 if stop_now else 0),
+        format_param(1 if smu_pulse_now else 0),
+        format_param(smu_pulse_v),
+        format_param(smu_pulse_width_s),
         format_param(cd_start_width_s),
         format_param(cd_end_width_s),
         seq,

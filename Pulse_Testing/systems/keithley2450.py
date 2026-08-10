@@ -203,6 +203,8 @@ class Keithley2450System(BaseMeasurementSystem):
         """Pattern: Pulse → Read @ t1 → Read @ t2 → Read @ t3..."""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
+        from .retention_intervals import normalize_timed_retention_params
+        params = normalize_timed_retention_params(params)
         return self.test_scripts.retention_test(**params)
     
     def pulse_multi_read(self, **params) -> Dict[str, Any]:

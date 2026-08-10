@@ -79,16 +79,17 @@ RPM is **only** on the laser pulse path. The SMU does not go through an RPM for 
 | **Train** | N pulses: **Width** = ON time, **Off time** = LOW gap between pulses (period = rise + width + fall + off) |
 | **Cool-down** | Write pulse = **Width**, then an explicit list: each line is `delay, pulse` (e.g. `1 us, 2 us`). The **first delay** is the OFF gap right after the write; then that pulse fires; then the next delay, etc. Preview shows TTL + red average-power. Hardware uses `cdSequence` (`delay:width;...` — rebuild Clarius if needed). |
 
-## Three tabs
+## Tabs
 
-Tab order (left to right): **Live / Manual Fire** opens first (the tab you'll
-use most for day-to-day testing), then **Automated Routine**, then
-**Single-shot Run**.
+Tab order (left to right): **Connection**, **Live / Manual Fire** (opens
+first), **Automated Routine**, **Laser ↔ SMU**, **Single-shot Run**.
 
 | Tab | Use for |
 |-----|---------|
-| **Live / Manual Fire** | Continuous SMU read with a **"Fire Pulse Now"** button — alternate/repeat pulses on demand while watching R(t) update live. See below. |
+| **Connection** | GPIB address / Test GPIB, PMU_ID, and **Laser (serial)** — Port/Baud, Connect, emission, current %, Align, Restore manual. |
+| **Live / Manual Fire** | Continuous SMU read with **"Fire Pulse Now"** (laser TTL) and **"Fire SMU Pulse"** (electrical set/reset), plus on-tab **laser current %** / emission. See below. |
 | **Automated Routine** | Unattended width × current-% sweep: fire a low-current pulse at increasing widths, then step diode current % up (serial) and repeat — see below. |
+| **Laser ↔ SMU** | Interaction / endurance protocols mixing laser TTL and SMU ±\|V\| pulses on the same live stream — see below. |
 | **Single-shot Run** | One bounded measurement: pre-laser baseline + fixed-duration post-laser read, single `EX` call, saved as one CSV. |
 
 ### Live / Manual Fire tab
@@ -105,6 +106,16 @@ round-trips; 0.05 s dt / 0.3 s chunks is a reasonable starting point.
 Manual Fire stays available while an Automated Routine is running (same
 streaming session). The pulse summary shows the parsed ON-time (e.g.
 `Single pulse ON for 5 s`).
+
+**SMU set / reset pulse:** the Live tab also has **Fire SMU Pulse** — a
+single voltage pulse on the SMU (device cables), independent of the PMU
+laser TTL. Set **Pulse V** (e.g. `2` or `-2`) and **Pulse width** (e.g.
+`1 ms`), then click the button (or use **+V** / **−V** to flip polarity
+for SET vs RESET). While streaming, the pulse runs at the start of the
+next chunk then returns to Vread and continues sampling; when idle it
+opens a brief one-shot GPIB session. Red dashed markers on the plot
+label SMU pulses. **Requires a rebuilt `pmu_laser_smu_stream` in Clarius**
+(new args: `SmuPulseNow`, `SmuPulseV`, `SmuPulseWidth`).
 
 **Width** is an editable dropdown (presets from 100 ns … 5 s, or type
 values like `250 ns` / `5 s`; a bare number still means µs). Hardware
@@ -151,9 +162,11 @@ if any — it falls under). The exact pulse parameters (mode, Vhigh, width,
 rise/fall, period, num_pulses, delay-before, ...) used for **every**
 individual fire are written both as `#`-prefixed comment lines at the top
 of the CSV (`pandas.read_csv(..., comment='#')` skips them) and in full in
-the companion `_meta.json`'s `fire_events` list. The Single-shot tab's
-**Save CSV** does the same for its one pulse (`pulse_parameters` in the
-CSV header comments / meta JSON).
+the companion `_meta.json`'s `fire_events` list. A matching
+**`<stem>_Rt.png`** of the R(t) graph (with fire markers) is saved beside
+the CSV (`rt_image` in meta). The Single-shot tab's **Save CSV** does the
+same for its one pulse (`pulse_parameters` in the CSV header comments /
+meta JSON) and also writes `<stem>_Rt.png` from the measurement figure.
 
 #### Preset experiment: pulse-width sweep
 
@@ -179,13 +192,15 @@ automatically if it isn't already running), and adds real serial control
 of the Oxxius laser (`Equipment/Laser_Controller/oxxius.py`) between
 blocks.
 
-**Laser (serial)** — Port/Baud + Connect/Disconnect (same driver used
-elsewhere in the repo, e.g. `gui/pulse_testing_gui`). On **Connect** the
+**Laser (serial)** — on the **Connection** tab: Port/Baud + Connect/Disconnect
+(same driver used elsewhere in the repo, e.g. `gui/pulse_testing_gui`).
+Live / Manual Fire also has **Current (%)** / **Set now** and Emission
+On/Off for day-to-day power changes without leaving that tab. On **Connect** the
 tool arms TTL-ready mode: power ceiling raised to the unit's rated max
 (`PM 330`, see below) → analog modulation OFF (`AM 0`) →
 digital modulation ON (`TTL 1`) → emission ON (`DL 1`). Emission must be
 ON for the TTL input to gate light. Manual controls: **Emission On/Off**,
-**Set current (%)** (sets `APC 0` + `CM <%>` without changing AM/TTL),
+**Set current (%)** (sets `CM <%>` without changing AM/TTL),
 **Align ON / Align OFF → TTL** (CW beam for optical alignment: `TTL 0`,
 current at the Align % field — default 5 % — emission ON; Align OFF
 re-arms `TTL 1` with emission ON), and **Restore manual control**.
@@ -263,7 +278,30 @@ renders and saves a `<stem>_pulses.png` alongside the CSV/meta —
 the same schematic pulse-train chart as **Visualize routine**, but built
 from the pulses actually fired during the run (bar height = current %
 that was armed, bar width = log-scaled actual pulse width). The image
-path is also recorded in the `_meta.json` under `pulse_image`.
+path is also recorded in the `_meta.json` under `pulse_image`. The live
+R(t) graph is always saved as `<stem>_Rt.png` (`rt_image` in meta) for
+live / routine / interaction saves.
+
+### Laser ↔ SMU tab
+
+Runs interaction / endurance protocols on the **same live stream** as Live /
+Manual Fire. Shared **SMU |V|** (default 2.0) sets both polarities (`+|V|` /
+`−|V|`). Laser pulse shape is taken from the Live tab (Width / Pulse type).
+**Preview plan** lists every step before you start.
+
+| Protocol | Sequence |
+|----------|----------|
+| **Laser-effect polarity blocks** | Per polarity `P`: SMU `P` → Laser → wait → SMU `P` → wait → Laser → wait → SMU `P` → Laser → wait; then the opposite polarity. Optional repeat of the whole ± pair. Requires laser connected. |
+| **Alternating ±V with laser** | `N` cycles of `+V` → wait → Laser → wait → `−V` → wait → Laser → wait. Requires laser. |
+| **SMU width sweep (± alternate)** | For each width in a comma list: `+|V|` → wait → `−|V|` → wait. No laser required. |
+| **SMU endurance (± fixed)** | `N` cycles of `+|V|` → wait → `−|V|` → wait at fixed SMU width. No laser required. |
+
+**Start protocol** auto-starts streaming if needed, queues SMU / laser stimuli
+through the existing Fire queue (markers on R(t) as usual), and supports the
+shared **Pause**. **Save interaction CSV** writes under
+`…/PMU_Laser_SMU_Testing/<N>-interaction_…` with `run_kind` like
+`interaction_laser_effect`. Laser-using protocols restore manual laser
+control when they stop (same as Automated Routine).
 
 ## Clarius — one library, two modules the tool calls
 
