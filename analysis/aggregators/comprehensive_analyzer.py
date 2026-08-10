@@ -539,8 +539,37 @@ class ComprehensiveAnalyzer:
             self._log(f"✗ Error in overall analysis: {str(e)}")
             import traceback
             traceback.print_exc()
+
+        # Aux measurements (Pulse / Solartron) — additive; failures must not alter IV results
+        self._run_aux_analysis_if_present()
         
         self._log("✓ Comprehensive analysis complete!")
+
+    def _run_aux_analysis_if_present(self) -> None:
+        """Discover and analyze Pulse_measurements / Solartron_1260 if present."""
+        try:
+            from analysis.aux.discovery import discover_aux_devices
+            from analysis.aux.api import analyze_sample_aux
+
+            locs = discover_aux_devices(self.sample_dir, kinds=("pulse", "solartron"))
+            if not locs:
+                self._log("No Pulse_measurements or Solartron_1260 folders found — skipping aux analysis")
+                return
+
+            self._log(
+                f"Running aux analysis for {len(locs)} device(s) with Pulse/Solartron data..."
+            )
+            analyze_sample_aux(
+                self.sample_dir,
+                kinds=("pulse", "solartron"),
+                save=True,
+                log=self._log,
+            )
+            self._log("✓ Aux analysis complete")
+        except Exception as e:
+            self._log(f"⚠ Aux analysis failed (IV results unchanged): {e}")
+            import traceback
+            traceback.print_exc()
 
 
 
