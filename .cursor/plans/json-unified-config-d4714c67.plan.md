@@ -1,4 +1,10 @@
-<!-- d4714c67-0e0e-4500-95bb-a26c2844b8c5 03de3f1b-0b51-40b6-96ff-53a97c16a1ec -->
+---
+name: Unified JSON Configuration System for Automated Testing
+overview: ""
+todos: []
+isProject: false
+---
+
 # Unified JSON Configuration System for Automated Testing
 
 ## Goal
