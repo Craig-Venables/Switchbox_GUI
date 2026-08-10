@@ -72,8 +72,31 @@ keithley.device.write('smu.source.level = 1.0')  # ✅ TSP command
 
 ---
 
-### Error -286: Runtime Error - Bad Argument
-**Cause:** `smu.measure.read()` returned `nil`, then `string.format()` tried to format it
+### Error -286: Runtime Error - Cannot Modify Read-Only Item
+**Most common cause (Lab_Laser-2450_TSP / Measurement GUI IV sweep):** Series **2600** TSP attribute names sent to a Model **2450**. The 2450 `smu.source` object rejects those writes as read-only.
+
+**Wrong (2600 API — do not use on 2450):**
+```lua
+smu.source.autorangev = smu.AUTORANGE_ON
+smu.source.autorangei = smu.AUTORANGE_ON
+smu.source.limiti = 1e-3
+smu.source.levelv = 1.0
+delayN(50)   -- milliseconds helper (2600)
+```
+
+**Fixed (2450 API):**
+```lua
+smu.source.func = smu.FUNC_DC_VOLTAGE
+smu.source.autorange = smu.ON
+smu.source.ilimit.level = 1e-3
+smu.source.level = 1.0
+delay(0.05)  -- seconds on 2450
+local i = smu.measure.read()  -- one return value
+```
+
+Also invalid on 2450: `smu.source.ilimit.autorange` (does not exist — always set `smu.source.ilimit.level`).
+
+**Other cause:** `smu.measure.read()` returned `nil`, then `string.format()` tried to format it.
 
 **Wrong:**
 ```lua
@@ -84,7 +107,7 @@ print(string.format("DATA:%.6e,%.6e", v, i))  -- i is nil → ERROR
 **Fixed:**
 ```lua
 i = smu.measure.read()    -- Get current (primary measurement)
-v = smu.measure.v         -- Get voltage from measure object
+v = smu.source.level      -- Source level (or measure voltage separately)
 if i ~= nil and v ~= nil then
   print(string.format("DATA:%.6e,%.6e", v, i))
 else

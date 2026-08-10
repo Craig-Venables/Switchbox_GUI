@@ -40,25 +40,15 @@ debugging / dry-run comparison) but the Python tool now only calls
 Cool-down `mode` ints (same in run / stream / ttl modules):
 `0` single, `1` train, `2` linear cool-down, `3` exponential, `4` quadratic.
 
-Cool-down design (current, Jul 2026): pulse 0 fires at the full `width` — a
-single/train pulse's confirmed-working on-time. From pulse 1 onward, BOTH
-the pulse **width** AND the **period** taper together, `cdStartWidth` →
-`cdEndWidth` and `startPeriod` → `endPeriod`, over the requested span,
-following the chosen decay shape. Python (`plan_cooldown` in `waveform.py`)
-derives `numPulses`/`startPeriod`/`endPeriod`/`cdStartWidth`/`cdEndWidth`
-from `width + rise + fall + span + decay`; the C side regenerates the exact
-same width/period curves per pulse (`ttl_cooldown_width` / mirrored in
-`pmu_laser_smu_run.c` / `pmu_laser_smu_stream.c`).
+Cool-down design (current, Aug 2026 — explicit sequence):
+pulse 0 is a full-`width` **write**. Pulses after that come from
+`cdSequence` (`delay:width;delay:width;...` in seconds). The first
+delay is the OFF gap immediately after the write; each later delay is
+the OFF before the next cool-down pulse. Python GUI lines are
+`delay, pulse`; wire uses `:` / `;` (no commas — those split EX args).
+Legacy cdStartWidth/cdEndWidth/startPeriod are unused for cool-down shape.
 
-`cdStartWidth` defaults to `width` itself (if `<= 0`), and `cdEndWidth`
-defaults to `MIN_WIDTH` (40 ns, the PMU's true hardware-minimum pulse
-width, if `<= 0`) — i.e. pulse count/width/spacing all scale directly with
-whatever `width` is set to, instead of the earlier (buggy) default that
-capped the very first cool-down pulse at a fixed ~200 ns regardless of
-`width`. If the requested span can't even fit two full-`width` pulses,
-`plan_cooldown` shrinks the *starting* width so a meaningful multi-pulse
-taper still fits, rather than forcing one oversized pulse into too little
-time (see `plan_cooldown`'s shrink-to-fit step in `waveform.py`).
+Empty / `"0"` sequence → write-only.
 
 ## Source files
 
@@ -147,14 +137,17 @@ to fire the laser on a button press. Instead, Python calls this module
 repeatedly (once per short "chunk") over one persistent GPIB session:
 
 ```text
-EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,fall,width,period,startPeriod,endPeriod,numPulses,delayBefore,vrange,PMU_ID,ClariusDebug,SampleInterval_s,FireNow,StopNow,cdStartWidth,cdEndWidth,,NumPoints,,NumPointsTimestamps)
+EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,fall,width,period,startPeriod,endPeriod,numPulses,delayBefore,vrange,PMU_ID,ClariusDebug,SampleInterval_s,FireNow,StopNow,SmuPulseNow,SmuPulseV,SmuPulseWidth,cdStartWidth,cdEndWidth,cdSequence,Irange,,NumPoints,,NumPointsTimestamps)
 ```
 
-25 parameters. Each call:
+30 parameters. Each call:
 
 1. Re-assert SMU bias (`forcev`) — **required every call** (same reason as
    `pmu_laser_smu_run`: the source doesn't stay "operational" across
    separate top-level EX/UL invocations).
+1b. If `SmuPulseNow=1`: `pulsev(SMU1, SmuPulseV, SmuPulseWidth)` then
+   `forcev` back to `Vforce` — electrical SET/RESET on the device while
+   live-reading (sign of `SmuPulseV` selects polarity).
 2. If `FireNow=1`: build + fire the PMU CH1 TTL waveform (same
    single/train/cool-down shapes), then continue into this chunk's sample
    loop so the transient is caught.
@@ -163,11 +156,14 @@ EX A_pmu_laser_smu_read pmu_laser_smu_stream(Vforce,Ilimit,mode,vhigh,vlow,rise,
    force-down/force-up glitch between chunks). Only `StopNow=1` ramps
    down; send that once when the user clicks "Stop streaming".
 
+`SmuPulseNow` and `FireNow` may both be 1 in the same chunk (SMU pulse
+first, then laser TTL, then samples).
+
 `Timestamps` are **chunk-local** (`0 .. NumPoints * SampleInterval_s`); the
 Python side (`PmuLaserSmuStreamSession`) keeps a running master-timeline
-offset across chunks. "Fire Now" latency is bounded by the current chunk's
-duration, since Python can't send the fire request until the in-flight
-chunk's `EX` call returns.
+offset across chunks. "Fire Now" / SMU-pulse latency is bounded by the
+current chunk's duration, since Python can't send the request until the
+in-flight chunk's `EX` call returns.
 
 ### Return codes (`pmu_laser_smu_stream`)
 

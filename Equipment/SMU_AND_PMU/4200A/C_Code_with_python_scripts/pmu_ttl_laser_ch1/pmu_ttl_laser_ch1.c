@@ -2,7 +2,7 @@
 
 	MODULE NAME: pmu_ttl_laser_ch1
 	MODULE RETURN TYPE: int
-	NUMBER OF PARMS: 16
+	NUMBER OF PARMS: 17
 	ARGUMENTS:
 		mode,	int,	Input,	0,	0,	4
 		vhigh,	double,	Input,	5.0,	0.0,	5.0
@@ -20,10 +20,12 @@
 		ClariusDebug,	int,	Input,	0,	0,	1
 		cdStartWidth,	double,	Input,	0.0,	0.0,	40.0
 		cdEndWidth,	double,	Input,	0.0,	0.0,	40.0
+		cdSequence,	char *,	Input,	"0",	,
 	INCLUDES:
 #include "keithley.h"
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 	END USRLIB MODULE INFORMATION
 */
 /* USRLIB MODULE HELP DESCRIPTION
@@ -36,18 +38,16 @@ No measurement on the PMU; pair with SMU BiasTimedRead for resistance.
 Modes:
   0 = single pulse   (width + rise/fall; period unused)
   1 = pulse train    (numPulses × width at period)
-  2 = cool-down linear      (width AND period ramp start->end)
-  3 = cool-down exponential (width/period = start * (end/start)^f)
-  4 = cool-down quadratic   (width/period = start + (end-start)*f^2)
-  Cool-down: pulse 0 is IDENTICAL to a single/train pulse (width == "width",
-  the on-time already known to reach the laser). From pulse 1 onward, BOTH
-  the pulse width AND the period taper together from cdStartWidth (default:
-  "width" itself, if cdStartWidth <= 0) down to cdEndWidth (default:
-  MIN_WIDTH = 40 ns, the true hardware floor, if cdEndWidth <= 0), following
-  the selected decay shape — i.e. progressively smaller, more widely spaced
-  pulses. Anchoring the taper's start to "width" (instead of a fixed ns-scale
-  constant) means pulse count/width/spacing all scale with whatever "width"
-  is set to.
+  2 = cool-down linear      (write + multipulse tail)
+  3 = cool-down exponential (write + multipulse tail)
+  4 = cool-down quadratic   (write + multipulse tail)
+  Cool-down (Blu-ray-style under TTL): pulse 0 is a full-Width WRITE
+  (identical to single). Pulses 1..N are a dense multipulse cool-down
+  tail whose on-time decays cdStartWidth -> cdEndWidth (defaults:
+  0.1*width -> MIN_WIDTH=40 ns if <=0), packed at near-minimum legal
+  period per pulse. Average laser power falls off quickly after the
+  write; Python plans numPulses / cd* / startPeriod / endPeriod so the
+  cool-down span is a chosen % of Width.
 
 Safety: vhigh must stay within 0..5 V (standard TTL into laser gate).
 CH2 is programmed to hold 0 V in software only — leave CH2 physically unconnected.
@@ -69,6 +69,7 @@ END USRLIB MODULE HELP DESCRIPTION */
 #include "keithley.h"
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 void __stdcall Sleep(unsigned long dwMilliseconds);
 
@@ -103,20 +104,21 @@ static void free_seg_arrays(
     if (measstop) free(measstop);
 }
 
-/* Cool-down per-pulse WIDTH: pulse 0 == start (the confirmed-working "width"
-   by default), tapering down to end (MIN_WIDTH by default) over n pulses,
-   following the same start/end interpolation as the period ramp (mode
-   2=linear, 3=exponential, 4=quadratic). Mirrors waveform.py's
-   cooldown_value_at()/cooldown_widths() exactly so the C-generated train
-   matches the Python-side preview. */
+/* Cool-down TAIL per-pulse WIDTH (index i over n cool-down pulses — does
+   NOT include the leading write pulse). Defaults: start = 0.1*orig,
+   end = MIN_WIDTH. Mirrors waveform.py cooldown_value_at()/cooldown_widths(). */
 static double ttl_cooldown_width(
     int i, int n, double orig, double cdStartWidth, double cdEndWidth, int mode)
 {
-    double start_w = (cdStartWidth > 0.0) ? cdStartWidth : orig;
+    double start_w = (cdStartWidth > 0.0) ? cdStartWidth : (0.1 * orig);
     double end_w = (cdEndWidth > 0.0) ? cdEndWidth : MIN_WIDTH;
     double f;
     double w;
 
+    if (start_w < MIN_WIDTH)
+        start_w = MIN_WIDTH;
+    if (start_w > orig)
+        start_w = orig;
     if (end_w > start_w)
         end_w = start_w;
     if (n <= 1)
@@ -133,6 +135,55 @@ static double ttl_cooldown_width(
     if (w < MIN_WIDTH)
         w = MIN_WIDTH;
     return w;
+}
+
+/* Parse cdSequence "delay:width;delay:width;..." into arrays.
+   delays[j] = OFF before cool-down pulse j (after write for j==0).
+   widths[j] = on-time of cool-down pulse j.
+   Returns number of cool-down pulses (0 if empty / "0"). */
+static int ttl_parse_cd_sequence(
+    const char *seq, double *widths, double *delays, int max_n)
+{
+    const char *p;
+    int n = 0;
+
+    if (!seq || !seq[0])
+        return 0;
+    if (seq[0] == '0' && seq[1] == '\0')
+        return 0;
+
+    p = seq;
+    while (*p && n < max_n)
+    {
+        char *end = NULL;
+        double d, w;
+
+        while (*p == ' ' || *p == '\t' || *p == ';')
+            p++;
+        if (!*p)
+            break;
+        d = strtod(p, &end);
+        if (end == p)
+            break;
+        p = end;
+        if (*p != ':')
+            break;
+        p++;
+        w = strtod(p, &end);
+        if (end == p)
+            break;
+        p = end;
+        if (w < MIN_WIDTH)
+            w = MIN_WIDTH;
+        if (d < MIN_SEG_TIME)
+            d = MIN_SEG_TIME;
+        delays[n] = d;
+        widths[n] = w;
+        n++;
+        if (*p == ';')
+            p++;
+    }
+    return n;
 }
 
 /* Append one segment; returns 0 on success, -5 if full. */
@@ -176,7 +227,8 @@ int pmu_ttl_laser_ch1(
     char *PMU_ID,
     int ClariusDebug,
     double cdStartWidth,
-    double cdEndWidth)
+    double cdEndWidth,
+    char *cdSequence)
 {
 /* USRLIB MODULE CODE */
     int debug = (ClariusDebug == 1) ? 1 : 0;
@@ -193,6 +245,9 @@ int pmu_ttl_laser_ch1(
     double this_width;
     double off_t;
     double total_dur;
+    double cd_w[MAX_PULSES];
+    double cd_d[MAX_PULSES];
+    int n_cd_seq = 0;
     double *startv = NULL;
     double *stopv = NULL;
     double *segtime = NULL;
@@ -236,22 +291,16 @@ int pmu_ttl_laser_ch1(
     }
     else if (mode >= 2)
     {
-        /* Cool-down widths taper cdStartWidth -> cdEndWidth (defaulting to
-           width_t -> MIN_WIDTH), NOT a constant width_t — validate
-           start_p/end_p against the actual (possibly much smaller) per-
-           pulse widths they'll be paired with, not the full "width". */
-        double cd_start_w = (cdStartWidth > 0.0) ? cdStartWidth : width_t;
-        double cd_end_w = (cdEndWidth > 0.0) ? cdEndWidth : MIN_WIDTH;
-        if (cd_end_w > cd_start_w)
-            cd_end_w = cd_start_w;
-        start_p = startPeriod;
-        end_p = endPeriod;
-        /* Auto-bump (don't hard-fail): EX args may arrive slightly short of
-           the legal minimum after limited-precision formatting on the host. */
-        if (start_p < (rise_t + cd_start_w + fall_t + MIN_SEG_TIME))
-            start_p = rise_t + cd_start_w + fall_t + MIN_SEG_TIME;
-        if (end_p < (rise_t + cd_end_w + fall_t + MIN_SEG_TIME))
-            end_p = rise_t + cd_end_w + fall_t + MIN_SEG_TIME;
+        /* Explicit cool-down sequence: write + (width:delay) pairs from cdSequence.
+           Legacy cdStartWidth/cdEndWidth/startPeriod/endPeriod ignored for shape. */
+        (void)cdStartWidth;
+        (void)cdEndWidth;
+        (void)startPeriod;
+        (void)endPeriod;
+        n_cd_seq = ttl_parse_cd_sequence(cdSequence, cd_w, cd_d, MAX_PULSES - 1);
+        n_pulses = 1 + n_cd_seq;
+        start_p = rise_t + width_t + fall_t + MIN_SEG_TIME;
+        end_p = start_p;
     }
     else
     {
@@ -312,42 +361,40 @@ int pmu_ttl_laser_ch1(
 
     for (i = 0; i < n_pulses; i++)
     {
-        double this_period;
         if (mode >= 2)
         {
-            /* Cool-down: pulse WIDTH tapers cdStartWidth -> cdEndWidth
-               (default: width_t -> MIN_WIDTH) in lock-step with the period
-               ramp below, so both on-time and off-time shrink/expand
-               together over the train — see ttl_cooldown_width(). */
-            this_width = ttl_cooldown_width(i, n_pulses, width_t,
-                                             cdStartWidth, cdEndWidth, mode);
-            if (n_pulses == 1)
-                this_period = start_p;
+            /* Pulse 0 = write; first delay = gap after write. */
+            if (i == 0)
+            {
+                this_width = width_t;
+                off_t = (n_cd_seq > 0) ? cd_d[0] : MIN_SEG_TIME;
+            }
             else
             {
-                double f = (double)i / (double)(n_pulses - 1);
-                if (mode == 3) /* exponential */
-                    this_period = (start_p > 0.0) ? start_p * pow(end_p / start_p, f) : end_p;
-                else if (mode == 4) /* quadratic */
-                    this_period = start_p + (end_p - start_p) * (f * f);
-                else /* linear (mode 2) */
-                    this_period = start_p + (end_p - start_p) * f;
+                int j = i - 1;
+                this_width = cd_w[j];
+                if (this_width < MIN_WIDTH)
+                    this_width = MIN_WIDTH;
+                if (j + 1 < n_cd_seq)
+                    off_t = cd_d[j + 1];
+                else
+                    off_t = MIN_SEG_TIME;
+                if (off_t < MIN_SEG_TIME)
+                    off_t = MIN_SEG_TIME;
             }
         }
         else if (mode == 1)
         {
             this_width = width_t;
-            this_period = period_t;
+            off_t = period_t - (rise_t + this_width + fall_t);
+            if (off_t < MIN_SEG_TIME)
+                off_t = MIN_SEG_TIME;
         }
         else
         {
             this_width = width_t;
-            this_period = rise_t + width_t + fall_t + MIN_SEG_TIME;
-        }
-
-        off_t = this_period - (rise_t + this_width + fall_t);
-        if (off_t < MIN_SEG_TIME)
             off_t = MIN_SEG_TIME;
+        }
 
         /* rise */
         if (add_seg(&idx, n_seg, startv, stopv, segtime, ssrctrl, segtrigout,

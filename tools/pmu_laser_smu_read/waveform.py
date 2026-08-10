@@ -2,29 +2,15 @@
 
 Times are in seconds. Levels are binary (vlow / vhigh).
 
-Cool-down UX: pulse 0 of a cool-down train is IDENTICAL to a single/train
-shot — full **Width**, the on-time already confirmed to reach the laser.
-From there, EVERY subsequent pulse's on-time (Width) AND off-time (period)
-decay/expand together, start → end, over the **Cool-down over** span,
-following the chosen decay shape — i.e. progressively smaller, more widely
-spaced pulses, which is what "turn the laser on and off to gradually cool
-the device" actually means.
-
-Crucially, the decay's starting point is pinned to width_s itself (NOT a
-fixed ns-scale constant): an earlier version capped the very first
-cool-down pulse at a hardcoded ~200 ns regardless of the user's Width, so
-pulse widths (and therefore pulse count/spacing) barely changed no matter
-what Width was set to. Anchoring the taper to width_s means a big Width
-gets a slow, big-to-small taper and a small Width barely tapers at all —
-exactly the "cool-down pulses should be tied to the sweep Width" behavior
-that's expected. If the requested cool-down span can't even fit two
-full-Width pulses, the taper's starting width shrinks automatically so a
-meaningful multi-pulse ramp still fits (see plan_cooldown's shrink-to-fit
-step) instead of forcing one giant pulse into too little time.
-
-The last pulse decays down toward MIN_WIDTH_S, the PMU's true hardware
-minimum pulse width — a real instrument limit, not a policy choice.
+Cool-down UX:
+  Pulse 0 is a full **Width** write pulse. Pulses after that are an
+  explicit user sequence of (delay-before, pulse width) pairs — typed in
+  the GUI as one `delay, pulse` line per pulse. The first delay is the
+  cool-down gap right after the write. Preview and hardware play that
+  list exactly (no auto packing / % envelope).
 """
+
+
 
 from __future__ import annotations
 
@@ -32,7 +18,9 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Sequence, Tuple
 
 ModeName = Literal["single", "train", "cooldown"]
-DecayName = Literal["linear", "exponential", "quadratic"]
+DecayName = Literal["linear", "exponential", "quadratic", "fixed"]
+# Kept for API compatibility; cool-down always uses the linear duty envelope.
+PackingName = Literal["sparse", "dense"]
 
 MAX_TTL_VHIGH = 5.0
 MIN_SEG_S = 20e-9
@@ -46,9 +34,15 @@ MIN_RISE_FALL_S = 20e-9
 # seg_arb limit 2048; waveform uses ~4 segments/pulse + overhead
 MAX_PULSES = 500
 MAX_SEGMENTS = 2048
+# Default first cool-down pulse on-time as a fraction of the write Width.
+CD_START_FRACTION = 0.1
+# Legacy constant (unused by envelope packing); kept for importers.
+CD_SPARSE_START_DUTY = 0.2
 
 # EX / C mode ints: 0=single, 1=train, 2=cooldown linear, 3=exp, 4=quadratic
-_COOLDOWN_MODE_INT = {"linear": 2, "exponential": 3, "quadratic": 4}
+# "fixed" cool-down widths use linear mode int on the wire (C still gets
+# cdStart==cdEnd so every cool-down pulse has the same on-time).
+_COOLDOWN_MODE_INT = {"linear": 2, "exponential": 3, "quadratic": 4, "fixed": 2}
 
 
 @dataclass(frozen=True)
@@ -150,7 +144,7 @@ def cooldown_value_at(
     decay: DecayName,
 ) -> float:
     """Interpolate start→end over n points with the given decay shape."""
-    if n <= 1:
+    if n <= 1 or decay == "fixed" or abs(start - end) < 1e-18:
         return float(start)
     f = i / (n - 1)
     if decay == "linear":
@@ -191,10 +185,25 @@ def cooldown_periods(
 
 
 def format_width_s(w: float) -> str:
-    """Human-readable width for GUI info (ns below 1 µs, else µs)."""
+    """Human-readable width for GUI info (ns / µs / ms / s)."""
     if w < 1e-6:
         return f"{w * 1e9:.3g} ns"
-    return f"{w * 1e6:.3g} µs"
+    if w < 1e-3:
+        return f"{w * 1e6:.3g} µs"
+    if w < 1.0:
+        return f"{w * 1e3:.3g} ms"
+    return f"{w:.3g} s"
+
+
+# Re-export explicit cool-down sequence API (manual pulse/delay list).
+from tools.pmu_laser_smu_read.cooldown_seq import (  # noqa: E402
+    DEFAULT_COOLDOWN_SEQUENCE_TEXT,
+    CooldownPlan,
+    avg_power_polyline,
+    format_cooldown_sequence_wire,
+    parse_cooldown_sequence,
+    plan_cooldown_sequence,
+)
 
 
 def resolve_cooldown_width_bounds(
@@ -202,23 +211,11 @@ def resolve_cooldown_width_bounds(
     cd_start_width_s: float | None = None,
     cd_end_width_s: float | None = None,
 ) -> Tuple[float, float]:
-    """Resolve the cool-down pulse-WIDTH decay bounds.
-
-    Defaults tie BOTH ends to the main pulse Width, instead of a fixed
-    ns-scale constant that ignored it:
-      - start = width_s  -> pulse 0 is exactly the confirmed-working, full
-        on-time pulse (identical to a single/train shot); the taper then
-        shrinks from there.
-      - end   = MIN_WIDTH_S -> the last pulse shrinks down to the PMU's
-        true hardware-minimum pulse width (a real instrument limit, not a
-        policy choice).
-    Explicit >0 overrides (kept for the EX API / back-compat) win.
-    """
-    cd_start = (
-        float(cd_start_width_s)
-        if cd_start_width_s is not None and cd_start_width_s > 0
-        else float(width_s)
-    )
+    """Legacy helper; prefer explicit ``parse_cooldown_sequence``."""
+    if cd_start_width_s is not None and cd_start_width_s > 0:
+        cd_start = float(cd_start_width_s)
+    else:
+        cd_start = max(MIN_WIDTH_S, CD_START_FRACTION * float(width_s))
     cd_end = (
         float(cd_end_width_s)
         if cd_end_width_s is not None and cd_end_width_s > 0
@@ -226,28 +223,11 @@ def resolve_cooldown_width_bounds(
     )
     cd_start = max(MIN_WIDTH_S, cd_start)
     cd_end = max(MIN_WIDTH_S, cd_end)
+    if cd_start > width_s:
+        cd_start = float(width_s)
     if cd_end > cd_start:
         cd_end = cd_start
     return cd_start, cd_end
-
-
-def cooldown_widths(
-    n: int,
-    *,
-    cd_start_width_s: float,
-    cd_end_width_s: float,
-    decay: DecayName = "linear",
-) -> List[float]:
-    """Per-pulse WIDTH for an n-pulse cool-down train, decaying
-    cd_start_width_s -> cd_end_width_s (pulse 0 == cd_start_width_s exactly,
-    i.e. the same on-time as a single/train shot when using the defaults
-    from resolve_cooldown_width_bounds)."""
-    if n <= 0:
-        return []
-    return [
-        max(MIN_WIDTH_S, cooldown_value_at(i, n, cd_start_width_s, cd_end_width_s, decay))
-        for i in range(n)
-    ]
 
 
 def plan_cooldown(
@@ -255,124 +235,33 @@ def plan_cooldown(
     width_s: float,
     rise_s: float,
     fall_s: float,
-    span_s: float,
+    span_s: float = 0.0,
     decay: DecayName = "linear",
+    packing: PackingName = "sparse",
+    num_cd_pulses: int | None = None,
     cd_start_width_s: float | None = None,
     cd_end_width_s: float | None = None,
+    sequence: Sequence[Tuple[float, float]] | None = None,
 ) -> Tuple[int, float, float, List[float], float, float]:
-    """Plan a cool-down train: N pulses whose WIDTH decays
-    ``cd_start_width_s`` → ``cd_end_width_s`` (pulse 0 == the full,
-    confirmed-working on-time == ``width_s`` by default) while the PERIOD
-    (off-time) simultaneously expands ``start_period_s`` → ``end_period_s``,
-    over ``span_s``, following ``decay``.
-
-    Both bounds default to being anchored to ``width_s`` (see
-    resolve_cooldown_width_bounds): a big Width gets a slow, big-to-small
-    taper; a small Width barely tapers at all — pulse count, spacing, AND
-    per-pulse on-time all scale with whatever Width the user actually set,
-    instead of a fixed ns-scale constant that used to make the taper nearly
-    independent of Width.
-
-    Shrink-to-fit: if span_s can't even fit two full-Width pulses, the
-    STARTING width is shrunk (not the whole train forced to one giant
-    pulse) so a meaningful multi-pulse taper still fits in the time given —
-    i.e. "use smaller pulses" when the cool-down span is small relative to
-    the main Width.
-
-    Returns (num_pulses, start_period_s, end_period_s, periods,
-             cd_start_width_s, cd_end_width_s) — the last two are the
-    RESOLVED (possibly shrunk-to-fit) bounds actually used. Callers MUST
-    pass these on to build_preview()/the EX command builders so the widths
-    reported in the preview match what the C module will actually generate.
-    """
+    """Compatibility wrapper — use ``plan_cooldown_sequence``."""
+    del span_s, decay, packing, num_cd_pulses, cd_start_width_s, cd_end_width_s
     validate_timing(width_s=width_s, rise_s=rise_s, fall_s=fall_s)
-    if span_s <= 0:
-        raise ValueError("cool-down span must be > 0")
-
-    cd_start, cd_end = resolve_cooldown_width_bounds(
-        width_s, cd_start_width_s, cd_end_width_s
+    write_period = ensure_period_s(
+        min_period_s(width_s=width_s, rise_s=rise_s, fall_s=fall_s),
+        width_s=width_s,
+        rise_s=rise_s,
+        fall_s=fall_s,
     )
-
-    def _min_p(w: float) -> float:
-        return min_period_s(width_s=w, rise_s=rise_s, fall_s=fall_s)
-
-    # Shrink-to-fit: if the span can't even fit ~2 pulses at the starting
-    # (full) width, drop the starting width until 2 pulses fit.
-    if span_s < 2.0 * _min_p(cd_start) and cd_start > MIN_WIDTH_S:
-        w_fit = span_s / 2.0 - rise_s - fall_s - MIN_SEG_S
-        if w_fit >= MIN_WIDTH_S:
-            cd_start = min(cd_start, w_fit)
-            if cd_end > cd_start:
-                cd_end = cd_start
-        else:
-            cd_start = MIN_WIDTH_S
-            cd_end = MIN_WIDTH_S
-
-    start_p = _min_p(cd_start)
-    # Bump above the exact floor so EX formatting / float round-trip can't
-    # push startPeriod just under the C module's minimum check (that was
-    # returning -1 and never firing cool-down).
-    start_p = ensure_period_s(start_p, width_s=cd_start, rise_s=rise_s, fall_s=fall_s)
-    if span_s <= start_p:
-        # Span too short even for a single pulse at the (possibly shrunk)
-        # starting width — just the one pulse.
-        return 1, start_p, start_p, [start_p], cd_start, cd_end
-
-    end_min_p = ensure_period_s(
-        _min_p(cd_end), width_s=cd_end, rise_s=rise_s, fall_s=fall_s
+    if not sequence:
+        return 1, write_period, write_period, [write_period], MIN_WIDTH_S, MIN_WIDTH_S
+    plan = plan_cooldown_sequence(
+        width_s=width_s, rise_s=rise_s, fall_s=fall_s, sequence=sequence
     )
-    # Aim for a handful-to-dozens of pulses depending on span vs. pulse
-    # width; the tail period grows well past the tightest packing so the
-    # last gaps are meaningfully longer than the first.
-    end_guess = max(end_min_p, start_p * 1.5, span_s * 0.2)
-    n_guess = max(2, int(round(2.0 * span_s / (start_p + end_guess))))
-    n_guess = min(n_guess, MAX_PULSES)
-
-    def _widths(n_total: int) -> List[float]:
-        return cooldown_widths(
-            n_total, cd_start_width_s=cd_start, cd_end_width_s=cd_end, decay=decay
-        )
-
-    def _periods(n_total: int, end_period: float, widths: List[float]) -> List[float]:
-        raw = cooldown_periods(n_total, start_p, end_period, decay)
-        return [
-            ensure_period_s(p, width_s=w, rise_s=rise_s, fall_s=fall_s)
-            for p, w in zip(raw, widths)
-        ]
-
-    def _fit_end(n_total: int, widths: List[float]) -> float:
-        """Binary-search end_p so sum(periods) ≈ span_s."""
-        lo = start_p * 1.001
-        hi = max(lo * 1.5, span_s)
-        best = lo
-        for _ in range(40):
-            mid = 0.5 * (lo + hi)
-            total = sum(_periods(n_total, mid, widths))
-            best = mid
-            if abs(total - span_s) / max(span_s, 1e-15) < 0.01:
-                break
-            if total > span_s:
-                hi = mid
-            else:
-                lo = mid
-        return best
-
-    n = 2
-    widths = _widths(2)
-    end_p = max(start_p * 1.5, span_s)
-    for trial_n in range(n_guess, 1, -1):
-        trial_widths = _widths(trial_n)
-        fit = _fit_end(trial_n, trial_widths)
-        total = sum(_periods(trial_n, fit, trial_widths))
-        if total <= span_s * 1.05:
-            n = trial_n
-            end_p = fit
-            widths = trial_widths
-            break
-
-    end_p = max(end_p, start_p)
-    periods = _periods(n, end_p, widths)
-    return n, start_p, end_p, periods, cd_start, cd_end
+    periods = [rise_s + w + fall_s + off for w, off in zip(plan.widths, plan.offs)]
+    cd0 = plan.sequence[0][1] if plan.sequence else MIN_WIDTH_S
+    cd1 = plan.sequence[-1][1] if plan.sequence else MIN_WIDTH_S
+    p1 = periods[1] if len(periods) > 1 else write_period
+    return plan.num_pulses, p1, periods[-1], periods, cd0, cd1
 
 
 def estimate_cooldown_num_pulses(
@@ -384,29 +273,14 @@ def estimate_cooldown_num_pulses(
     end_period_s: float | None = None,
     duration_s: float,
     decay: DecayName = "linear",
+    sequence: Sequence[Tuple[float, float]] | None = None,
 ) -> int:
-    """Estimate pulse count for a cool-down of duration_s (legacy + new callers)."""
-    if start_period_s is None or end_period_s is None:
-        n, _, _, _, _, _ = plan_cooldown(
-            width_s=width_s,
-            rise_s=rise_s,
-            fall_s=fall_s,
-            span_s=duration_s,
-            decay=decay,
-        )
-        return n
+    """Pulse count for cool-down (1 write + len(sequence))."""
+    del start_period_s, end_period_s, duration_s, decay
+    if sequence is not None:
+        return min(1 + len(sequence), MAX_PULSES)
     validate_timing(width_s=width_s, rise_s=rise_s, fall_s=fall_s)
-    start_period_s = ensure_period_s(
-        start_period_s, width_s=width_s, rise_s=rise_s, fall_s=fall_s
-    )
-    end_period_s = ensure_period_s(
-        end_period_s, width_s=width_s, rise_s=rise_s, fall_s=fall_s
-    )
-    avg = 0.5 * (start_period_s + end_period_s)
-    if avg <= 0:
-        raise ValueError("invalid cool-down periods")
-    n = max(1, int(round(duration_s / avg)))
-    return min(n, MAX_PULSES)
+    return 1
 
 
 def build_preview(
@@ -423,15 +297,20 @@ def build_preview(
     num_pulses: int = 1,
     delay_before_s: float = 0.0,
     decay: DecayName = "linear",
+    packing: PackingName = "sparse",
     cooldown_span_s: float | None = None,
+    num_cd_pulses: int | None = None,
     cd_start_width_s: float | None = None,
     cd_end_width_s: float | None = None,
+    cooldown_sequence: Sequence[Tuple[float, float]] | None = None,
 ) -> WaveformPreview:
     """Build a timeline preview of HIGH/LOW segments and laser-on intervals."""
+    del cooldown_span_s, num_cd_pulses, cd_start_width_s, cd_end_width_s
     vhigh = _clamp_vhigh(vhigh)
     validate_timing(width_s=width_s, rise_s=rise_s, fall_s=fall_s)
 
     widths: List[float]
+    offs: List[float] | None = None
     if mode == "single":
         n = 1
         periods = [rise_s + width_s + fall_s + MIN_SEG_S]
@@ -440,49 +319,22 @@ def build_preview(
         n = max(1, int(num_pulses))
         if n > MAX_PULSES:
             raise ValueError(f"num_pulses ({n}) exceeds max {MAX_PULSES} (seg_arb limit)")
-        validate_timing(width_s=width_s, rise_s=rise_s, fall_s=fall_s)
         period_s = ensure_period_s(period_s, width_s=width_s, rise_s=rise_s, fall_s=fall_s)
         periods = [period_s] * n
         widths = [width_s] * n
     elif mode == "cooldown":
-        if cooldown_span_s is not None and cooldown_span_s > 0:
-            n, start_period_s, end_period_s, periods, cd_start, cd_end = plan_cooldown(
-                width_s=width_s,
-                rise_s=rise_s,
-                fall_s=fall_s,
-                span_s=cooldown_span_s,
-                decay=decay,
-                cd_start_width_s=cd_start_width_s,
-                cd_end_width_s=cd_end_width_s,
-            )
-            widths = cooldown_widths(
-                n, cd_start_width_s=cd_start, cd_end_width_s=cd_end, decay=decay
-            )
-        else:
-            n = max(1, int(num_pulses))
-            if n > MAX_PULSES:
-                raise ValueError(f"num_pulses ({n}) exceeds max {MAX_PULSES} (seg_arb limit)")
-            validate_timing(width_s=width_s, rise_s=rise_s, fall_s=fall_s)
-            cd_start, cd_end = resolve_cooldown_width_bounds(
-                width_s, cd_start_width_s, cd_end_width_s
-            )
-            widths = cooldown_widths(
-                n, cd_start_width_s=cd_start, cd_end_width_s=cd_end, decay=decay
-            )
-            start_period_s = ensure_period_s(
-                start_period_s, width_s=widths[0], rise_s=rise_s, fall_s=fall_s
-            )
-            end_period_s = ensure_period_s(
-                end_period_s, width_s=widths[-1], rise_s=rise_s, fall_s=fall_s
-            )
-            if end_period_s < start_period_s:
-                end_period_s = start_period_s
-            periods = [
-                ensure_period_s(p, width_s=w, rise_s=rise_s, fall_s=fall_s)
-                for p, w in zip(
-                    cooldown_periods(n, start_period_s, end_period_s, decay), widths
-                )
-            ]
+        seq = list(cooldown_sequence or [])
+        plan = plan_cooldown_sequence(
+            width_s=width_s, rise_s=rise_s, fall_s=fall_s, sequence=seq
+        )
+        n = plan.num_pulses
+        widths = plan.widths
+        offs = plan.offs
+        periods = [rise_s + w + fall_s + off for w, off in zip(widths, offs)]
+        if periods:
+            start_period_s = periods[1] if len(periods) > 1 else periods[0]
+            end_period_s = periods[-1]
+        del packing, decay  # sequence is authoritative
     else:
         raise ValueError(f"unknown mode: {mode}")
 
@@ -492,7 +344,7 @@ def build_preview(
     if t > 0:
         segments.append(Segment(0.0, t, vlow))
 
-    for p, w in zip(periods, widths):
+    for i, (p, w) in enumerate(zip(periods, widths)):
         t_rise0 = t
         t += rise_s
         segments.append(Segment(t_rise0, t, vhigh))
@@ -504,7 +356,10 @@ def build_preview(
         t_fall0 = t
         t += fall_s
         segments.append(Segment(t_fall0, t, vlow))
-        off = p - (rise_s + w + fall_s)
+        if offs is not None:
+            off = offs[i]
+        else:
+            off = p - (rise_s + w + fall_s)
         if off < MIN_SEG_S:
             off = MIN_SEG_S
         t_off0 = t
@@ -606,22 +461,17 @@ def build_pmu_ex_command(
     decay: DecayName = "linear",
     cd_start_width_s: float = 0.0,
     cd_end_width_s: float = 0.0,
+    cd_sequence: str = "",
     library: str = DEFAULT_USR_LIBRARY,
 ) -> str:
     """Build EX command for pmu_ttl_laser_ch1.
 
-    cd_start_width_s / cd_end_width_s set the cool-down pulse-WIDTH decay
-    bounds (pulse 0 = cd_start_width_s, last pulse = cd_end_width_s,
-    decaying per ``decay``) — ignored for mode in {single, train}. Leave at
-    0.0 to let the C module default to width_s / MIN_WIDTH respectively
-    (matching resolve_cooldown_width_bounds on the Python side); pass the
-    RESOLVED values from plan_cooldown() when using an auto span so the
-    fired pulses match the preview exactly (plan_cooldown may shrink the
-    starting width to fit a short span).
+    Cool-down shape is driven by ``cd_sequence`` (``width:delay;...``).
     """
     vhigh = _clamp_vhigh(vhigh)
     mode_i = mode_to_int(mode, decay)
     n = 1 if mode == "single" else max(1, int(num_pulses))
+    seq = (cd_sequence or "").strip() or "0"
     params: Sequence[str] = [
         format_param(mode_i),
         format_param(vhigh),
@@ -635,21 +485,20 @@ def build_pmu_ex_command(
         format_param(n),
         format_param(delay_before_s),
         format_param(vrange),
-        pmu_id,  # unquoted: matches the working ACraig10_PMU_Waveform_SegArb
-        # EX convention in kxci_scripts.py (quoting the char* param made
-        # LPTIsInCurrentConfiguration("\"PMU1\"") fail -> return -2).
+        pmu_id,
         format_param(int(clarius_debug)),
         format_param(cd_start_width_s),
         format_param(cd_end_width_s),
+        seq,
     ]
     return f"EX {library} pmu_ttl_laser_ch1({','.join(params)})"
 
 
 # Parameter positions (1-indexed) of the Imeas/Timestamps D_ARRAY_T outputs in
 # pmu_laser_smu_run's argument list, for GP queries after the EX call.
-# cdStartWidth + cdEndWidth + Irange are inserted before the output arrays.
-RUN_GP_PARAM_IMEAS = 23
-RUN_GP_PARAM_TIMESTAMPS = 25
+# cdStartWidth + cdEndWidth + cdSequence + Irange sit before the output arrays.
+RUN_GP_PARAM_IMEAS = 24
+RUN_GP_PARAM_TIMESTAMPS = 26
 
 
 def build_pmu_laser_smu_run_ex_command(
@@ -677,27 +526,19 @@ def build_pmu_laser_smu_run_ex_command(
     decay: DecayName = "linear",
     cd_start_width_s: float = 0.0,
     cd_end_width_s: float = 0.0,
+    cd_sequence: str = "",
     irange: float = 0.0,
     library: str = DEFAULT_USR_LIBRARY,
 ) -> str:
-    """Build EX command for pmu_laser_smu_run (SMU bias + PMU TTL + SMU read,
-    all in ONE EX call so the SMU source stays "operational" throughout —
-    see pmu_laser_smu_run.c for why the split-EX-call approach failed with
-    LPT status -160).
+    """Build EX command for pmu_laser_smu_run (SMU bias + PMU TTL + SMU read).
 
-    num_points is the TOTAL sample count (pre + post); num_pre_points of
-    those are taken BEFORE the laser fires (baseline), the rest after.
-
-    cd_start_width_s / cd_end_width_s set the cool-down pulse-WIDTH decay
-    bounds — see build_pmu_ex_command's docstring for details.
-
-    irange is SMU1's current MEASUREMENT range (separate from ilimit, the
-    compliance limit): 0.0 = autorange (default), > 0.0 = fixed range for
-    lower-noise/faster reads once you know roughly what current to expect.
+    Cool-down shape is driven by ``cd_sequence`` (``width:delay;...`` wire
+    string). ``cd_start_width_s`` / ``cd_end_width_s`` are unused legacy args.
     """
     vhigh = _clamp_vhigh(vhigh)
     mode_i = mode_to_int(mode, decay)
     n = 1 if mode == "single" else max(1, int(num_pulses))
+    seq = (cd_sequence or "").strip() or "0"
     params: Sequence[str] = [
         format_param(vforce),
         format_param(ilimit),
@@ -720,6 +561,7 @@ def build_pmu_laser_smu_run_ex_command(
         format_param(int(num_pre_points)),
         format_param(cd_start_width_s),
         format_param(cd_end_width_s),
+        seq,  # cdSequence char* — unquoted; uses : and ; only (no commas)
         format_param(irange),
         "",  # Imeas output array
         format_param(num_points),
@@ -731,9 +573,10 @@ def build_pmu_laser_smu_run_ex_command(
 
 # Parameter positions (1-indexed) of the Imeas/Timestamps D_ARRAY_T outputs in
 # pmu_laser_smu_stream's argument list, for GP queries after each chunk EX call.
-# cdStartWidth + cdEndWidth + Irange are inserted before the output arrays.
-STREAM_GP_PARAM_IMEAS = 23
-STREAM_GP_PARAM_TIMESTAMPS = 25
+# After StopNow: SmuPulseNow + SmuPulseV + SmuPulseWidth, then
+# cdStartWidth + cdEndWidth + cdSequence + Irange, then the output arrays.
+STREAM_GP_PARAM_IMEAS = 27
+STREAM_GP_PARAM_TIMESTAMPS = 29
 
 
 def build_pmu_laser_smu_stream_ex_command(
@@ -757,31 +600,28 @@ def build_pmu_laser_smu_stream_ex_command(
     sample_interval_s: float,
     fire_now: bool = False,
     stop_now: bool = False,
+    smu_pulse_now: bool = False,
+    smu_pulse_v: float = 2.0,
+    smu_pulse_width_s: float = 0.001,
     num_points: int,
     decay: DecayName = "linear",
     cd_start_width_s: float = 0.0,
     cd_end_width_s: float = 0.0,
+    cd_sequence: str = "",
     irange: float = 0.0,
     library: str = DEFAULT_USR_LIBRARY,
 ) -> str:
-    """Build EX command for ONE CHUNK of pmu_laser_smu_stream (live/manual-fire
-    continuous SMU read, with an optional PMU TTL laser fire at the start of
-    this chunk). Call this repeatedly, in a loop, over a single persistent
-    KXCI session — see pmu_laser_smu_stream.c for why chunking is necessary
-    (KXCI/GPIB has no mid-call interrupt/abort).
+    """Build EX command for ONE CHUNK of pmu_laser_smu_stream.
 
-    num_points is this chunk's sample count (NOT a running total).
-
-    cd_start_width_s / cd_end_width_s set the cool-down pulse-WIDTH decay
-    bounds — see build_pmu_ex_command's docstring for details.
-
-    irange is SMU1's current MEASUREMENT range (separate from ilimit, the
-    compliance limit): 0.0 = autorange (default), > 0.0 = fixed range for
-    lower-noise/faster reads once you know roughly what current to expect.
+    Cool-down shape is driven by ``cd_sequence`` (``width:delay;...``).
+    When ``smu_pulse_now`` is True the SMU applies ``smu_pulse_v`` for
+    ``smu_pulse_width_s`` (set/reset), then returns to ``vforce`` before
+    optional laser fire + sample loop.
     """
     vhigh = _clamp_vhigh(vhigh)
     mode_i = mode_to_int(mode, decay)
     n = 1 if mode == "single" else max(1, int(num_pulses))
+    seq = (cd_sequence or "").strip() or "0"
     params: Sequence[str] = [
         format_param(vforce),
         format_param(ilimit),
@@ -802,8 +642,12 @@ def build_pmu_laser_smu_stream_ex_command(
         format_param(sample_interval_s),
         format_param(1 if fire_now else 0),
         format_param(1 if stop_now else 0),
+        format_param(1 if smu_pulse_now else 0),
+        format_param(smu_pulse_v),
+        format_param(smu_pulse_width_s),
         format_param(cd_start_width_s),
         format_param(cd_end_width_s),
+        seq,
         format_param(irange),
         "",  # Imeas output array
         format_param(num_points),

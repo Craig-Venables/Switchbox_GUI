@@ -81,6 +81,9 @@ class OpticalController:
         Example:
             >>> optical_ctrl.enable(power=2.5)  # 2.5 mW laser
         """
+        # Skip redundant serial traffic (laser DL/AM/PM is slow)
+        if self._current_state and abs(float(power) - float(self._current_power)) < 1e-9:
+            return
         try:
             if self.optical is not None:
                 # Use optical excitation system (works for both LED and Laser)
@@ -114,6 +117,9 @@ class OpticalController:
         Example:
             >>> optical_ctrl.disable()
         """
+        # Already off — do not re-send laser restore (DL 0 / AM 1 / PM 100)
+        if not self._current_state:
+            return
         try:
             if self.optical is not None:
                 self.optical.set_enabled(False)
