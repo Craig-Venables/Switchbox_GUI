@@ -38,34 +38,62 @@ warnings.filterwarnings('ignore', category=optimize.OptimizeWarning, message='Co
 warnings.filterwarnings('ignore', message='.*On entry to DLASCLS.*')
 
 
+def _positive_finite(arr):
+    """Filter a sequence to positive finite floats, skipping None/NaN/inf/<=0."""
+    if arr is None:
+        return []
+    out = []
+    for x in arr:
+        if x is None:
+            continue
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v) and v > 0:
+            out.append(v)
+    return out
+
+
+def _finite_values(arr):
+    """Filter a sequence to finite floats, skipping None/NaN/inf."""
+    if arr is None:
+        return []
+    out = []
+    for x in arr:
+        if x is None:
+            continue
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            out.append(v)
+    return out
+
+
 def safe_mean(arr, default=0.0):
-    """Safely compute mean, handling empty arrays and invalid values."""
-    if arr is None or len(arr) == 0:
+    """Safely compute mean, handling empty arrays, None, and invalid values."""
+    cleaned = _finite_values(arr)
+    if not cleaned:
         return default
-    arr = np.array(arr)
-    arr = arr[np.isfinite(arr)]
-    if len(arr) == 0:
-        return default
-    return float(np.mean(arr))
+    return float(np.mean(cleaned))
 
 
 def safe_std(arr, default=0.0):
-    """Safely compute standard deviation, handling empty arrays and invalid values."""
-    if arr is None or len(arr) == 0:
+    """Safely compute standard deviation, handling empty arrays, None, and invalid values."""
+    cleaned = _finite_values(arr)
+    if len(cleaned) < 2:
         return default
-    arr = np.array(arr)
-    arr = arr[np.isfinite(arr)]
-    if len(arr) < 2:
-        return default
-    return float(np.std(arr))
+    return float(np.std(cleaned))
 
 
 def safe_var(arr, default=0.0):
-    """Safely compute variance, handling empty arrays and invalid values."""
-    if arr is None or len(arr) == 0:
+    """Safely compute variance, handling empty arrays, None, and invalid values."""
+    cleaned = _finite_values(arr)
+    if len(cleaned) < 2:
         return default
-    arr = np.array(arr)
-    arr = arr[np.isfinite(arr)]
+    arr = np.array(cleaned)
     if len(arr) < 2:
         return default
     return float(np.var(arr))
@@ -176,6 +204,9 @@ class SweepAnalyzer:
         self.classification_explanation = {}
         self.classification_reasoning = ""  # Detailed explanation of classification
         self.classification_warnings = []  # Red flags for inconsistent features
+        self.metrics_quarantined = False  # Hard flag: resistance metrics physically implausible
+        self.quarantine_reasons = []  # Why metrics_quarantined was set
+        self._last_ron_roff_meta = {}  # Diagnostics from most recent on_off_values call
         self.switching_strength = 0.0  # Continuous score 0-100 for switching quality
         
         # === ENHANCED CLASSIFICATION (Phase 1) ===
@@ -227,6 +258,13 @@ class SweepAnalyzer:
         self.pinch_offset = None  # |I| near V≈0
         self.noise_floor = None  # std(I) at low |V|
         self.slope_exponent_stats = {}  # stats of n = dlogI/dlogV
+        # Literature-style NDR shape metrics (I/Imax, primary negative-slope segment)
+        self.ndr_norm_slope = None
+        self.ndr_depth = None
+        self.ndr_v_start = None
+        self.ndr_v_end = None
+        self.ndr_peak_to_valley = None
+        self.ndr_segment_count = None
         self.last_report = None  # cache for the most recent generated report
 
         # Process based on measurement type
@@ -447,14 +485,33 @@ class SweepAnalyzer:
 
         # Calculate degradation metrics
         if len(self.ron) > 1:
-            # Resistance state degradation
-            ron_degradation = (self.ron[-1] - self.ron[0]) / self.ron[0] if self.ron[0] > 0 else 0
-            roff_degradation = (self.roff[-1] - self.roff[0]) / self.roff[0] if self.roff[0] > 0 else 0
+            # Resistance state degradation (skip None sentinels)
+            r0 = self.ron[0]
+            rn = self.ron[-1]
+            o0 = self.roff[0]
+            on = self.roff[-1]
+            w0 = self.on_off[0] if self.on_off else None
+            wn = self.on_off[-1] if self.on_off else None
+            ron_degradation = (
+                (rn - r0) / r0
+                if r0 is not None and rn is not None and r0 > 0
+                else None
+            )
+            roff_degradation = (
+                (on - o0) / o0
+                if o0 is not None and on is not None and o0 > 0
+                else None
+            )
+            window_degradation = (
+                (wn - w0) / w0
+                if w0 is not None and wn is not None and w0 > 0
+                else None
+            )
 
             self.state_degradation = {
                 'ron_degradation': ron_degradation,
                 'roff_degradation': roff_degradation,
-                'window_degradation': (self.on_off[-1] - self.on_off[0]) / self.on_off[0] if self.on_off[0] > 0 else 0,
+                'window_degradation': window_degradation,
                 'cycles_to_50_percent': self._calculate_cycles_to_failure(0.5),
                 'cycles_to_90_percent': self._calculate_cycles_to_failure(0.9)
             }
@@ -1138,7 +1195,17 @@ class SweepAnalyzer:
             # state yet switch between them.  Evidence of genuine state
             # changes (high symmetric on/off, or figure-8 double zero
             # crossing) means linear/ohmic penalties should not apply.
+            #
+            # Also: LRS / post-forming devices often show only a *small*
+            # hysteresis loop (area below the adaptive detector) while
+            # still switching ~≥1.5× between Ron/Roff at µA currents.
+            # Treat that as memory evidence so they classify memristive
+            # (weak) rather than conductive + hard −45 penalty.
             _mean_on_off = safe_mean(self.on_off, default=1.0)
+            _i_p95 = (
+                float(np.percentile(np.abs(self.current), 95))
+                if len(self.current) > 0 else 0.0
+            )
 
             # Guard: A strongly rectifying device (>10x polarity
             # asymmetry) can inflate on_off through rectification, not
@@ -1146,11 +1213,19 @@ class SweepAnalyzer:
             _rect_ratio = self._weak_rectification_ratio()
             _is_strongly_rectifying = _rect_ratio > 10.0
 
+            _lrs_modest_window = (
+                self.classification_features.get('switching_behavior')
+                and _mean_on_off >= 1.5
+                and not _is_strongly_rectifying
+                and _i_p95 > 1e-7  # same 100 nA floor as lrs_cycling
+            )
+
             _has_memory_evidence = (
                 self.classification_features.get('switching_behavior')
                 and (
                     (_mean_on_off > 10 and not _is_strongly_rectifying)
                     or _has_dblx
+                    or _lrs_modest_window
                 )
             )
 
@@ -1181,6 +1256,13 @@ class SweepAnalyzer:
                     scores['memristive'] += weights.get(
                         'memristive_penalty_switching_moderate_ratio', -5.0
                     )
+                    # LRS / small-loop: modest Ron↔Roff at µA currents is
+                    # real memory even when loop area is below threshold.
+                    # Bonus keeps memristive above UNCERTAIN_THRESHOLD.
+                    if _lrs_modest_window:
+                        scores['memristive'] += weights.get(
+                            'memristive_bonus_lrs_modest_window', 30.0
+                        )
                 else:
                     scores['memristive'] += weights.get(
                         'memristive_penalty_switching_without_hysteresis', -45.0
@@ -1253,7 +1335,12 @@ class SweepAnalyzer:
             # Score conductive characteristics (updated per user requirements)
             # Conductive: Non-linear, non-ohmic, non-memristive, non-memcapacitive, non-capacitive
             # i.e., nonlinear but without hysteresis/switching (cannot be explained by capacitive or memristive)
-            if not self.classification_features['has_hysteresis']:
+            # When LRS/modest Ron-Roff switching is present, skip the no-hysteresis
+            # conductive bonus — that pattern is better explained as weak memristive.
+            if (
+                not self.classification_features['has_hysteresis']
+                and not _has_memory_evidence
+            ):
                 scores['conductive'] += weights.get('conductive_no_hysteresis', 30.0)
             if self.classification_features['nonlinear_iv'] and not self.classification_features['switching_behavior']:
                 scores['conductive'] += weights.get('conductive_nonlinear_no_switching', 40.0)
@@ -1265,11 +1352,12 @@ class SweepAnalyzer:
             # switch between states without showing a clear hysteresis loop in the IV curve.
             # Without this bonus, such devices score conductive=30 which falls below
             # UNCERTAIN_THRESHOLD=40 → they get misclassified as uncertain.
-            # Only apply when not better explained by memristive (no hysteresis evidence).
+            # Skip when memory evidence already routes the sweep toward memristive.
             if (
                 self.classification_features.get('switching_behavior', False)
                 and not self.classification_features.get('has_hysteresis', False)
                 and not self.classification_features.get('pinched_hysteresis', False)
+                and not _has_memory_evidence
             ):
                 scores['conductive'] += weights.get('conductive_has_switching', 15.0)
 
@@ -1825,20 +1913,33 @@ class SweepAnalyzer:
             # Switching ratio (Roff/Ron)
             # This indicates the memory window - higher is better for digital memory
             # Typical good values: >10 for ReRAM, >100 for excellent devices
-            if idx < len(self.ron) and self.ron[idx] > 0:
+            # None when Ron is missing/invalid — never invent a sentinel ratio.
+            if (
+                idx < len(self.ron)
+                and idx < len(self.roff)
+                and self.ron[idx] is not None
+                and self.roff[idx] is not None
+                and self.ron[idx] > 0
+            ):
                 ratio = self.roff[idx] / self.ron[idx]
-                self.switching_ratio.append(ratio)
+                self.switching_ratio.append(float(ratio))
             else:
-                self.switching_ratio.append(1.0)
+                self.switching_ratio.append(None)
 
             # Window margin: (Roff - Ron) / Ron
             # Normalized memory window - indicates how much the resistance changes
             # Values >1 indicate >100% change in resistance
-            if idx < len(self.ron) and self.ron[idx] > 0:
+            if (
+                idx < len(self.ron)
+                and idx < len(self.roff)
+                and self.ron[idx] is not None
+                and self.roff[idx] is not None
+                and self.ron[idx] > 0
+            ):
                 margin = (self.roff[idx] - self.ron[idx]) / self.ron[idx]
-                self.window_margin.append(margin)
+                self.window_margin.append(float(margin))
             else:
-                self.window_margin.append(0.0)
+                self.window_margin.append(None)
 
             # Rectification ratio: I(+V) / I(-V)
             # Indicates diode-like behavior - symmetric devices have ratio ~1
@@ -1918,6 +2019,12 @@ class SweepAnalyzer:
             except Exception:
                 pass
 
+            # Normalized NDR-region slope (I/Imax overlay comparison)
+            try:
+                self._calculate_ndr_normalized_slope(v, i)
+            except Exception:
+                pass
+
             # Switching polarity (very heuristic): compare |Von| vs |Voff|
             if self.von and self.voff:
                 if (np.mean(self.von) > 0 and np.mean(self.voff) < 0) or (np.mean(self.von) < 0 and np.mean(self.voff) > 0):
@@ -1962,6 +2069,79 @@ class SweepAnalyzer:
                 pass
         except Exception:
             pass
+
+    def _calculate_ndr_normalized_slope(self, v, i):
+        """
+        Normalize I by max(|I|), find the longest contiguous NDR segment
+        (dI_norm/dV < 0 with |dV| above noise), and fit a linear slope there.
+
+        Primary segment rule: among contiguous negative-slope runs with at least
+        3 edges, pick the one with largest |ΔV| span (ties → more points).
+        """
+        v = np.asarray(v, dtype=float)
+        i = np.asarray(i, dtype=float)
+        if len(v) < 5 or len(i) != len(v):
+            return
+
+        i_max = float(np.max(np.abs(i)))
+        if not np.isfinite(i_max) or i_max < 1e-18:
+            return
+        i_norm = i / i_max
+
+        dv = np.diff(v)
+        di = np.diff(i_norm)
+        valid = np.abs(dv) > 1e-12
+        slope = np.full(di.shape, np.nan, dtype=float)
+        slope[valid] = di[valid] / dv[valid]
+        ndr = valid & (slope < 0)
+        self.ndr_segment_count = int(0)
+
+        # Contiguous True runs in ndr
+        segments = []
+        start = None
+        for idx, flag in enumerate(ndr.tolist()):
+            if flag and start is None:
+                start = idx
+            elif not flag and start is not None:
+                segments.append((start, idx))  # [start, idx)
+                start = None
+        if start is not None:
+            segments.append((start, len(ndr)))
+
+        segments = [(a, b) for a, b in segments if (b - a) >= 3]
+        self.ndr_segment_count = int(len(segments))
+        if not segments:
+            return
+
+        def _span(seg):
+            a, b = seg
+            # edge indices a..b-1 map to sample points a..b
+            return abs(float(v[b] - v[a])), (b - a)
+
+        best = max(segments, key=_span)
+        a, b = best
+        # Points covering the edges: a .. b inclusive
+        vs = v[a : b + 1]
+        ins = i_norm[a : b + 1]
+        if len(vs) < 3:
+            return
+
+        # Linear fit I_norm = m * V + c  (raw V so slope units are 1/V)
+        try:
+            m, _c = np.polyfit(vs, ins, 1)
+        except Exception:
+            return
+        self.ndr_norm_slope = float(m)
+        self.ndr_v_start = float(vs[0])
+        self.ndr_v_end = float(vs[-1])
+        self.ndr_depth = float(abs(np.max(ins) - np.min(ins)))
+
+        i_peak = float(np.max(np.abs(ins)))
+        i_valley = float(np.min(np.abs(ins)))
+        if i_valley > 1e-12:
+            self.ndr_peak_to_valley = float(i_peak / i_valley)
+        else:
+            self.ndr_peak_to_valley = None
 
     def _calculate_retention_score(self):
         """
@@ -2324,36 +2504,46 @@ POWER CHARACTERISTICS:
             dict: Dictionary containing mean and standard deviation for key metrics
         """
         summary = {
-            # Resistance metrics
-            'mean_ron': np.mean(self.ron),
-            'std_ron': np.std(self.ron),
-            'mean_roff': np.mean(self.roff),
-            'std_roff': np.std(self.roff),
+            # Resistance metrics (None-aware)
+            'mean_ron': safe_mean(self.ron, default=None),
+            'std_ron': safe_std(self.ron, default=None),
+            'mean_roff': safe_mean(self.roff, default=None),
+            'std_roff': safe_std(self.roff, default=None),
+            'n_ron': len(_positive_finite(self.ron)),
+            'n_roff': len(_positive_finite(self.roff)),
 
             # On/Off ratio metrics
-            'mean_on_off_ratio': np.mean(self.on_off),
-            'std_on_off_ratio': np.std(self.on_off),
+            'mean_on_off_ratio': safe_mean(self.on_off, default=None),
+            'std_on_off_ratio': safe_std(self.on_off, default=None),
+            'n_on_off': len(_positive_finite(self.on_off)),
 
             # Area metrics
-            'total_area': np.sum(self.areas),
-            'avg_normalized_area': np.mean(self.normalized_areas),
-            'std_normalized_area': np.std(self.normalized_areas),
+            'total_area': float(np.sum(self.areas)) if self.areas else 0.0,
+            'avg_normalized_area': safe_mean(self.normalized_areas, default=0.0),
+            'std_normalized_area': safe_std(self.normalized_areas, default=0.0),
 
             # Resistance at specific voltages
-            'mean_r_02V': np.mean([x for x in self.r_02V if x is not None]),
-            'std_r_02V': np.std([x for x in self.r_02V if x is not None]),
-            'mean_r_05V': np.mean([x for x in self.r_05V if x is not None]),
-            'std_r_05V': np.std([x for x in self.r_05V if x is not None]),
+            'mean_r_02V': safe_mean(self.r_02V, default=None),
+            'std_r_02V': safe_std(self.r_02V, default=None),
+            'mean_r_05V': safe_mean(self.r_05V, default=None),
+            'std_r_05V': safe_std(self.r_05V, default=None),
 
             # General device metrics
             'num_loops': self.num_loops,
-            'max_current': np.max(np.abs(self.current)),
-            'max_voltage': np.max(np.abs(self.voltage)),
+            'max_current': float(np.max(np.abs(self.current))) if self.current is not None and len(self.current) else 0.0,
+            'max_voltage': float(np.max(np.abs(self.voltage))) if self.voltage is not None and len(self.voltage) else 0.0,
 
             # Coefficient of variation (CV = std/mean) for key metrics
-            'cv_on_off_ratio': np.std(self.on_off) / np.mean(self.on_off) if np.mean(self.on_off) != 0 else None,
-            'cv_normalized_area': np.std(self.normalized_areas) / np.mean(self.normalized_areas) if np.mean(
-                self.normalized_areas) != 0 else None,
+            'cv_on_off_ratio': (
+                (safe_std(self.on_off) / safe_mean(self.on_off))
+                if safe_mean(self.on_off) not in (0, None) else None
+            ),
+            'cv_normalized_area': (
+                (safe_std(self.normalized_areas) / safe_mean(self.normalized_areas))
+                if safe_mean(self.normalized_areas) not in (0, None) else None
+            ),
+            'metrics_quarantined': bool(getattr(self, 'metrics_quarantined', False)),
+            'quarantine_reasons': list(getattr(self, 'quarantine_reasons', None) or []),
         }
 
         # Add new metrics to summary
@@ -2413,11 +2603,14 @@ POWER CHARACTERISTICS:
             # caclulate the on and off volatge and resistance
             r_on, r_off, v_on, v_off = self.on_off_values(sub_v_array, sub_c_array)
 
-            self.ron.append(float(r_on))
-            self.roff.append(float(r_off))
-            self.von.append(float(v_on))
-            self.voff.append(float(v_off))
-            self.on_off.append(float(r_off / r_on) if r_on > 0 else 0)  # Fixed: should be Roff/Ron
+            self.ron.append(float(r_on) if r_on is not None else None)
+            self.roff.append(float(r_off) if r_off is not None else None)
+            self.von.append(float(v_on) if v_on is not None else None)
+            self.voff.append(float(v_off) if v_off is not None else None)
+            if r_on is not None and r_off is not None and r_on > 0:
+                self.on_off.append(float(r_off / r_on))
+            else:
+                self.on_off.append(None)  # Never invent a sentinel ratio
 
             # get resistance values at 0.2V (For conductivity)
             self.r_02V.append(self.get_resistance_at_voltage(0.2))
@@ -2468,77 +2661,152 @@ POWER CHARACTERISTICS:
 
         return ps_area_enclosed, ng_area_enclosed, area_enclosed, norm_area_enclosed
 
-    def on_off_values(self, voltage_data, current_data):
+    def on_off_values(
+        self,
+        voltage_data,
+        current_data,
+        *,
+        v_tol: float = 0.05,
+        i_floor: float = 1e-12,
+        v_read_cap: float = 0.2,
+        v_read_frac: float = 0.2,
+        v_min_abs: float = 0.05,
+    ):
         """
-        Calculates r on off and v on off values for an individual device
+        Branch-aware Ron/Roff at a fixed read voltage.
+
+        Intended quantity: resistance in ohms (Ω) as median |V/I| near ±V_read
+        on the forward (dV>0) and reverse (dV<0) branches of one loop.
+
+        Returns
+        -------
+        (ron, roff, von, voff)
+            ron/roff may be None when a branch has no admissible points.
+            von/voff are threshold-crossing estimates (may be 0.0 if unknown).
+
+        Diagnostics from the most recent call are stored on
+        ``self._last_ron_roff_meta``.
         """
-        # Initialize default values
-        resistance_on_value = 0
-        resistance_off_value = 0
-        voltage_on_value = 0
-        voltage_off_value = 0
+        voltage_data = np.asarray(voltage_data, dtype=float)
+        current_data = np.asarray(current_data, dtype=float)
+        meta = {
+            "method": "branch_median_at_vread",
+            "v_read": None,
+            "n_forward": 0,
+            "n_reverse": 0,
+            "r_forward": None,
+            "r_reverse": None,
+            "note": None,
+        }
+        self._last_ron_roff_meta = meta
 
-        # Convert to numpy arrays if needed
-        voltage_data = np.array(voltage_data)
-        current_data = np.array(current_data)
+        if len(voltage_data) < 3 or len(current_data) < 3:
+            meta["note"] = "too_few_points"
+            return None, None, 0.0, 0.0
 
-        # Get the maximum voltage value
-        max_voltage = round(max(voltage_data), 1) if len(voltage_data) > 0 else 0
+        vmax = float(np.max(np.abs(voltage_data)))
+        if not np.isfinite(vmax) or vmax <= 0:
+            meta["note"] = "zero_voltage_span"
+            return None, None, 0.0, 0.0
 
-        # Catch edge case for just negative sweep only
-        if max_voltage == 0:
-            max_voltage = abs(round(min(voltage_data), 1)) if len(voltage_data) > 0 else 0
+        # Cap read voltage so we stay away from the origin singularity and
+        # also away from high-V compliance regions when Vmax is large.
+        v_read = max(float(v_min_abs), min(float(v_read_frac) * vmax, float(v_read_cap)))
+        meta["v_read"] = v_read
 
-        if max_voltage == 0:
-            return 0, 0, 0, 0
+        # Branch by voltage derivative (forward = rising V, reverse = falling V).
+        dv = np.diff(voltage_data)
+        # Align branch labels with sample midpoints; pad last with previous.
+        branch = np.empty(len(voltage_data), dtype=int)  # +1 forward, -1 reverse, 0 flat
+        branch[:-1] = np.sign(dv)
+        branch[-1] = branch[-2] if len(branch) > 1 else 0
 
-        # Set the threshold value to 0.2 times the maximum voltage
-        threshold = round(0.2 * max_voltage, 2)
+        def _branch_median_R(sign: int):
+            """Median |V/I| near ±V_read on one branch, with admission floors."""
+            mask = branch == sign
+            if not np.any(mask):
+                return None, 0
+            vv = voltage_data[mask]
+            ii = current_data[mask]
+            # Prefer +V_read; fall back to -V_read if that band is empty.
+            near_pos = np.abs(vv - v_read) <= float(v_tol)
+            near_neg = np.abs(vv + v_read) <= float(v_tol)
+            band = near_pos if np.any(near_pos) else near_neg
+            if not np.any(band):
+                return None, 0
+            vv_b = vv[band]
+            ii_b = ii[band]
+            admit = (np.abs(vv_b) >= float(v_min_abs)) & (np.abs(ii_b) >= float(i_floor))
+            if not np.any(admit):
+                return None, 0
+            with np.errstate(divide="ignore", invalid="ignore"):
+                r = np.abs(vv_b[admit] / ii_b[admit])
+            r = r[np.isfinite(r) & (r > 0)]
+            if len(r) == 0:
+                return None, 0
+            return float(np.median(r)), int(len(r))
 
-        # Filter the voltage and current data to include values within the threshold
-        filtered_voltage = []
-        filtered_current = []
-        for index in range(len(voltage_data)):
-            if -threshold < voltage_data[index] < threshold:
-                filtered_voltage.append(voltage_data[index])
-                filtered_current.append(current_data[index])
+        r_fwd, n_fwd = _branch_median_R(+1)
+        r_rev, n_rev = _branch_median_R(-1)
+        meta["n_forward"] = n_fwd
+        meta["n_reverse"] = n_rev
+        meta["r_forward"] = r_fwd
+        meta["r_reverse"] = r_rev
 
-        resistance_magnitudes = []
-        for idx in range(len(filtered_voltage)):
-            if filtered_voltage[idx] != 0 and filtered_current[idx] != 0:
-                resistance_magnitudes.append(abs(filtered_voltage[idx] / filtered_current[idx]))
+        vals = [r for r in (r_fwd, r_rev) if r is not None]
+        if len(vals) == 0:
+            meta["note"] = "no_admissible_branch_points"
+            resistance_on_value = None
+            resistance_off_value = None
+        elif len(vals) == 1:
+            # Single branch only (e.g. half-sweep) — no HRS/LRS contrast.
+            meta["note"] = "single_branch_only"
+            resistance_on_value = vals[0]
+            resistance_off_value = vals[0]
+        else:
+            resistance_on_value = min(vals)   # LRS
+            resistance_off_value = max(vals)  # HRS
+            if n_fwd == 0 or n_rev == 0:
+                meta["note"] = "one_branch_empty"
 
-        if not resistance_magnitudes:
-            # Handle the case when the list is empty
-            print("Warning: No valid resistance values found.")
-            return 0, 0, 0, 0
+        # Von / Voff: threshold-crossing on each branch (prefer over steepest gradient).
+        # SET-like: on forward branch, first point where |I| exceeds 50% of branch peak.
+        # RESET-like: on reverse branch, first point where |I| falls below 50% of peak.
+        voltage_on_value = 0.0
+        voltage_off_value = 0.0
+        try:
+            fwd_mask = branch == +1
+            rev_mask = branch == -1
+            if np.any(fwd_mask):
+                i_fwd = np.abs(current_data[fwd_mask])
+                v_fwd = voltage_data[fwd_mask]
+                peak = float(np.max(i_fwd)) if len(i_fwd) else 0.0
+                if peak > float(i_floor):
+                    thr = 0.5 * peak
+                    crossed = np.where(i_fwd >= thr)[0]
+                    if len(crossed):
+                        voltage_on_value = float(v_fwd[crossed[0]])
+            if np.any(rev_mask):
+                i_rev = np.abs(current_data[rev_mask])
+                v_rev = voltage_data[rev_mask]
+                peak = float(np.max(i_rev)) if len(i_rev) else 0.0
+                if peak > float(i_floor):
+                    thr = 0.5 * peak
+                    # First point (in reverse chronological order of the branch)
+                    # where current drops below half-peak after having been above.
+                    above = i_rev >= thr
+                    if np.any(above):
+                        # Find first drop below thr after the peak region starts
+                        start = int(np.argmax(above))
+                        below_after = np.where(~above[start:])[0]
+                        if len(below_after):
+                            voltage_off_value = float(v_rev[start + below_after[0]])
+                        else:
+                            voltage_off_value = float(v_rev[int(np.argmax(i_rev))])
+        except Exception:
+            pass
 
-        # Store the minimum and maximum resistance values (Ron is lower, Roff is higher)
-        resistance_on_value = min(resistance_magnitudes)
-        resistance_off_value = max(resistance_magnitudes)
-
-        # Calculate the gradients for each data point
-        gradients = []
-        for idx in range(len(voltage_data) - 1):
-            if voltage_data[idx + 1] - voltage_data[idx] != 0:
-                gradients.append(
-                    (current_data[idx + 1] - current_data[idx]) / (voltage_data[idx + 1] - voltage_data[idx]))
-
-        if gradients:
-            # Find the maximum and minimum gradient values
-            half_point = int(len(gradients) / 2)
-            if half_point > 0:
-                max_gradient = max(gradients[:half_point])
-                min_gradient = min(gradients)
-
-                # Use the maximum and minimum gradient values to determine the on and off voltages
-                for idx in range(len(gradients)):
-                    if gradients[idx] == max_gradient:
-                        voltage_off_value = voltage_data[idx]
-                    if gradients[idx] == min_gradient:
-                        voltage_on_value = voltage_data[idx]
-
-        # Return the calculated Ron and Roff values and on and off voltages
+        self._last_ron_roff_meta = meta
         return resistance_on_value, resistance_off_value, voltage_on_value, voltage_off_value
 
     def detect_and_split_loops(self, v_data, c_data):
@@ -2958,8 +3226,9 @@ POWER CHARACTERISTICS:
 
         # Check for switching behavior (ENHANCED with quality scoring)
         try:
-            if self.on_off and len(self.on_off) > 0:
-                mean_onoff = np.mean([r for r in self.on_off if r > 0])
+            positive_onoff = _positive_finite(self.on_off)
+            if positive_onoff:
+                mean_onoff = float(np.mean(positive_onoff))
                 
                 # Binary check (backward compatibility)
                 features['switching_behavior'] = mean_onoff > 1.5
@@ -3034,9 +3303,14 @@ POWER CHARACTERISTICS:
         # Detect abrupt current jump (electroforming event signature)
         try:
             jump, jump_ratio, v_onset = self._detect_current_jump()
-            features['current_jump_detected'] = jump
+            features['current_jump_detected'] = bool(jump)
             features['current_jump_ratio'] = float(jump_ratio)
-            features['forming_voltage_onset'] = float(v_onset) if v_onset is not None else None
+            # Only expose onset when a jump was actually detected — otherwise
+            # near-zero onsets (0.0 / 0.05 V) mislead forming summaries.
+            if features['current_jump_detected'] and v_onset is not None:
+                features['forming_voltage_onset'] = float(v_onset)
+            else:
+                features['forming_voltage_onset'] = None
         except Exception as e:
             debug_print(f"[DIAGNOSTIC] Error in current jump detection: {e}")
             features['current_jump_detected'] = False
@@ -3261,7 +3535,7 @@ POWER CHARACTERISTICS:
                 #  - Series resistance, - Contact effects, - Measurement offsets)
                 has_strong_switching = False
                 if self.on_off and len(self.on_off) > 0:
-                    mean_onoff = np.mean([r for r in self.on_off if r > 0])
+                    mean_onoff = np.mean(_positive_finite(self.on_off)) if _positive_finite(self.on_off) else 0.0
                     has_strong_switching = mean_onoff > 2.0  # ON/OFF > 2
                 
                 # Adaptive threshold based on switching strength
@@ -3800,18 +4074,20 @@ POWER CHARACTERISTICS:
             'device_type': self.device_type,
             'classification_confidence': self.classification_confidence,
             'conduction_mechanism': self.conduction_mechanism,
-            'switching_ratio_mean': np.mean(self.switching_ratio) if self.switching_ratio else 0,
-            'window_margin_mean': np.mean(self.window_margin) if self.window_margin else 0,
-            'rectification_ratio_mean': np.mean(self.rectification_ratio) if self.rectification_ratio else 1,
-            'nonlinearity_mean': np.mean(self.nonlinearity_factor) if self.nonlinearity_factor else 0,
-            'asymmetry_mean': np.mean(self.asymmetry_factor) if self.asymmetry_factor else 0,
-            'power_consumption_mean': np.mean(self.power_consumption) if self.power_consumption else 0,
-            'energy_per_switch_mean': np.mean(self.energy_per_switch) if self.energy_per_switch else 0,
+            'switching_ratio_mean': safe_mean(self.switching_ratio, default=None),
+            'window_margin_mean': safe_mean(self.window_margin, default=None),
+            'rectification_ratio_mean': safe_mean(self.rectification_ratio, default=1.0),
+            'nonlinearity_mean': safe_mean(self.nonlinearity_factor, default=0.0),
+            'asymmetry_mean': safe_mean(self.asymmetry_factor, default=0.0),
+            'power_consumption_mean': safe_mean(self.power_consumption, default=0.0),
+            'energy_per_switch_mean': safe_mean(self.energy_per_switch, default=0.0),
             'retention_score': self.retention_score,
             'endurance_score': self.endurance_score,
             'compliance_current': self.compliance_current,
             'has_pinched_hysteresis': self.classification_features.get('pinched_hysteresis', False),
-            'has_switching_behavior': self.classification_features.get('switching_behavior', False)
+            'has_switching_behavior': self.classification_features.get('switching_behavior', False),
+            'metrics_quarantined': bool(getattr(self, 'metrics_quarantined', False)),
+            'quarantine_reasons': list(getattr(self, 'quarantine_reasons', None) or []),
         }
 
         return metrics
@@ -3979,6 +4255,12 @@ POWER CHARACTERISTICS:
                 'pinch_offset': self.pinch_offset,
                 'noise_floor': self.noise_floor,
                 'slope_exponent_stats': self.slope_exponent_stats,
+                'ndr_norm_slope': self.ndr_norm_slope,
+                'ndr_depth': self.ndr_depth,
+                'ndr_v_start': self.ndr_v_start,
+                'ndr_v_end': self.ndr_v_end,
+                'ndr_peak_to_valley': self.ndr_peak_to_valley,
+                'ndr_segment_count': self.ndr_segment_count,
             }
 
         return out
@@ -4369,7 +4651,7 @@ POWER CHARACTERISTICS:
         # 3. Switching behavior (20 points max)
         switching_score = 0.0
         if self.on_off and len(self.on_off) > 0:
-            mean_ratio = np.mean([r for r in self.on_off if r > 0])
+            mean_ratio = np.mean(_positive_finite(self.on_off)) if _positive_finite(self.on_off) else 0.0
             # Score based on ON/OFF ratio (log scale)
             # 1.5 → 0 pts, 10 → 15 pts, 100 → 20 pts, >1000 → 20 pts
             if mean_ratio > 1.5:
@@ -4380,8 +4662,8 @@ POWER CHARACTERISTICS:
         # 4. Memory window quality (15 points max) - will be refined in _assess_memory_window_quality
         window_score = 0.0
         if self.ron and self.roff:
-            ron_mean = np.mean([r for r in self.ron if r > 0])
-            roff_mean = np.mean([r for r in self.roff if r > 0])
+            ron_mean = np.mean(_positive_finite(self.ron)) if _positive_finite(self.ron) else 0.0
+            roff_mean = np.mean(_positive_finite(self.roff)) if _positive_finite(self.roff) else 0.0
             if ron_mean > 0:
                 window_margin = (roff_mean - ron_mean) / ron_mean
                 # 0.5 → 5 pts, 1 → 10 pts, 10 → 15 pts
@@ -4489,8 +4771,8 @@ POWER CHARACTERISTICS:
             self.memory_window_quality = {'available': False}
             return
         
-        ron_array = np.array([r for r in self.ron if r > 0])
-        roff_array = np.array([r for r in self.roff if r > 0])
+        ron_array = np.array(_positive_finite(self.ron))
+        roff_array = np.array(_positive_finite(self.roff))
         
         if len(ron_array) == 0 or len(roff_array) == 0:
             self.memory_window_quality = {'available': False}
@@ -4738,8 +5020,9 @@ POWER CHARACTERISTICS:
                 )
         
         # Check for switching region visibility
-        if self.on_off:
-            max_ratio = max(self.on_off) if self.on_off else 1.0
+        positive_onoff = _positive_finite(self.on_off)
+        if positive_onoff:
+            max_ratio = max(positive_onoff)
             if max_ratio < 1.2:
                 self.classification_warnings.append(
                     f"Very small resistance change detected (max ratio={max_ratio:.2f}). "
@@ -4748,34 +5031,75 @@ POWER CHARACTERISTICS:
     
     def _validate_physical_plausibility(self):
         """
-        Check for physically reasonable values (warning system).
-        
-        Checks:
-        - Resistance in reasonable range (1e-2 to 1e12 Ω)
-        - Switching voltage reasonable (< 100V for organics, < 10V typical)
-        - Power dissipation realistic
+        Check for physically reasonable values; promote hard failures to quarantine.
+
+        Quarantine triggers (metrics_quarantined=True):
+        - Ron below 1e-2 Ω (pinch-region singularity / unit pathology)
+        - HRS/LRS ratio above 1e7
+        - HRS < LRS (ordering inversion)
+        - No admissible branch points (all Ron/Roff None)
         """
-        # Check resistance ranges
-        if self.ron:
-            ron_mean = np.mean([r for r in self.ron if r > 0])
-            if ron_mean < 1e-2:
+        self.metrics_quarantined = False
+        self.quarantine_reasons = []
+
+        ron_vals = _positive_finite(self.ron)
+        roff_vals = _positive_finite(self.roff)
+        meta = getattr(self, "_last_ron_roff_meta", None) or {}
+
+        if not ron_vals and not roff_vals:
+            reason = "no_admissible_ron_roff"
+            self.quarantine_reasons.append(reason)
+            if meta.get("note"):
+                self.quarantine_reasons.append(f"ron_roff_meta:{meta['note']}")
+            self.classification_warnings.append(
+                "No admissible Ron/Roff points (branch-aware read-voltage method)."
+            )
+        else:
+            ron_mean = float(np.mean(ron_vals)) if ron_vals else None
+            roff_mean = float(np.mean(roff_vals)) if roff_vals else None
+
+            if ron_mean is not None and ron_mean < 1e-2:
+                reason = f"ron_below_1e-2 ({ron_mean:.3e}Ω)"
+                self.quarantine_reasons.append(reason)
                 self.classification_warnings.append(
-                    f"Unusually low ON resistance ({ron_mean:.2e}Ω). Check measurement setup."
+                    f"Unusually low ON resistance ({ron_mean:.2e}Ω). Quarantined."
                 )
-            elif ron_mean > 1e12:
+            elif ron_mean is not None and ron_mean > 1e12:
                 self.classification_warnings.append(
                     f"Extremely high ON resistance ({ron_mean:.2e}Ω). Device may be damaged or not forming."
                 )
-        
-        if self.roff:
-            roff_mean = np.mean([r for r in self.roff if r > 0])
-            if roff_mean > 1e15:
+
+            if roff_mean is not None and roff_mean > 1e15:
                 self.classification_warnings.append(
                     f"Extremely high OFF resistance ({roff_mean:.2e}Ω). Approaching open circuit."
                 )
+
+            if ron_mean is not None and roff_mean is not None:
+                if roff_mean < ron_mean:
+                    reason = f"hrs_lt_lrs (roff={roff_mean:.3e} < ron={ron_mean:.3e})"
+                    self.quarantine_reasons.append(reason)
+                    self.classification_warnings.append(
+                        "HRS < LRS (resistance ordering inverted). Quarantined."
+                    )
+                elif ron_mean > 0:
+                    ratio = roff_mean / ron_mean
+                    if ratio > 1e7:
+                        reason = f"ratio_above_1e7 ({ratio:.3e})"
+                        self.quarantine_reasons.append(reason)
+                        self.classification_warnings.append(
+                            f"Implausible HRS/LRS ratio ({ratio:.2e}). Quarantined."
+                        )
+
+        # Also quarantine if any loop reported a zero-admissible-branch note
+        if meta.get("note") in ("no_admissible_branch_points", "zero_voltage_span", "too_few_points"):
+            if meta["note"] not in "".join(self.quarantine_reasons):
+                self.quarantine_reasons.append(f"ron_roff_meta:{meta['note']}")
+
+        if self.quarantine_reasons:
+            self.metrics_quarantined = True
         
         # Check switching voltages
-        v_max = np.max(np.abs(self.voltage))
+        v_max = np.max(np.abs(self.voltage)) if self.voltage is not None and len(self.voltage) else 0.0
         if v_max > 50:
             self.classification_warnings.append(
                 f"High switching voltage ({v_max:.1f}V). Unusual for most memristive devices."
@@ -4881,25 +5205,29 @@ POWER CHARACTERISTICS:
                     'conduction_mechanism': self.conduction_mechanism,
                 },
                 'resistance': {
-                    'ron_mean': float(np.mean(self.ron)) if self.ron and len(self.ron) > 0 else None,
-                    'roff_mean': float(np.mean(self.roff)) if self.roff and len(self.roff) > 0 else None,
-                    'switching_ratio': float(np.mean(self.switching_ratio)) if self.switching_ratio and len(self.switching_ratio) > 0 else None,
-                    'on_off_ratio': float(np.mean(self.on_off)) if self.on_off and len(self.on_off) > 0 else None,
+                    'ron_mean': safe_mean(self.ron, default=None),
+                    'roff_mean': safe_mean(self.roff, default=None),
+                    'switching_ratio': safe_mean(self.switching_ratio, default=None),
+                    'on_off_ratio': safe_mean(self.on_off, default=None),
+                    'ron_n': len(_positive_finite(self.ron)),
+                    'roff_n': len(_positive_finite(self.roff)),
                 },
                 'voltage': {
-                    'von_mean': float(np.mean(self.von)) if self.von and len(self.von) > 0 else None,
-                    'voff_mean': float(np.mean(self.voff)) if self.voff and len(self.voff) > 0 else None,
+                    'von_mean': safe_mean(self.von, default=None),
+                    'voff_mean': safe_mean(self.voff, default=None),
                     'max_voltage': float(np.max(np.abs(self.voltage))) if self.voltage is not None and len(self.voltage) > 0 else None,
                 },
                 'hysteresis': {
                     'has_hysteresis': self.classification_features.get('has_hysteresis', False),
                     'pinched': self.classification_features.get('pinched_hysteresis', False),
-                    'normalized_area': float(np.mean(self.normalized_areas)) if self.normalized_areas and len(self.normalized_areas) > 0 else None,
+                    'normalized_area': safe_mean(self.normalized_areas, default=None),
                 },
                 'quality': {
                     'memory_window_quality': self.memory_window_quality.get('overall_quality_score') if self.memory_window_quality else None,
                     'stability': self.memory_window_quality.get('avg_stability') if self.memory_window_quality else None,
                 },
+                'metrics_quarantined': bool(getattr(self, 'metrics_quarantined', False)),
+                'quarantine_reasons': list(getattr(self, 'quarantine_reasons', None) or []),
                 'warnings': self.classification_warnings.copy() if self.classification_warnings else []
             }
             

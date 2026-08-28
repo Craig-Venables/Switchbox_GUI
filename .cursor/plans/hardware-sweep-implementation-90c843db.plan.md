@@ -1,4 +1,13 @@
-<!-- 90c843db-c55d-4ab0-aaf2-8a5ff090b454 57c7f225-3b1a-46f8-bbd1-7a52824241b3 -->
+---
+name: Hardware Voltage Sweep Implementation Plan
+overview: ""
+todos:
+  - id: 6aea33a1-9fc3-4a20-91f2-e71b573e8893
+    content: "Test Phase 3: full end-to-end testing with GUI, plotting, and all features"
+    status: pending
+isProject: false
+---
+
 # Hardware Voltage Sweep Implementation Plan
 
 **🆕 UPDATED:** October 14, 2025 - Plan modernized to use new modular utilities!
@@ -503,8 +512,3 @@ def run_iv_sweep_v2(self, keithley, config: SweepConfig, optical=None, psu=None,
 - `Changes_Ai_Fixes/REFACTORING_COMPLETE.md` - What was refactored
 - `Changes_Ai_Fixes/QUICK_REFERENCE.md` - How to use new utilities
 - `Changes_Ai_Fixes/GUI_REFACTORING_PLAN.md` - Future GUI improvements
-
-### To-dos
-
-- [ ] Test Phase 2: test hardware sweep with various configurations and measure speedup
-- [ ] Test Phase 3: full end-to-end testing with GUI, plotting, and all features
