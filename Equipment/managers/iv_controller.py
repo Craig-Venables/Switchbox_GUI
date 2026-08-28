@@ -2564,8 +2564,9 @@ class IVControllerManager:
         """
         TSP script sweep for Keithley 2450.
 
-        Batches ~10 points per USB print and drains VISA on a dedicated thread
-        so live plotting can lag without stalling the instrument source loop.
+        Prints one DATA line per step for live plotting. A high-priority VISA
+        drain thread reads the instrument; GUI on_point runs on the consumer
+        side so plotting never blocks the measurement stream.
         Falls back to point-by-point when LED/pausing needed.
         """
         from Measurements.sweep_patterns import build_sweep_values
@@ -2630,12 +2631,11 @@ class IVControllerManager:
             npoints = len(v_list)
             delay_s = float(config.step_delay)  # delay() takes seconds on 2450
             script_name = "ivSweep2450"
-            # Batch prints: fewer USB frames so print() does not stall the source loop
-            # when live plotting/saving lags. Still updates the GUI every batch.
+            # 1–2 points per USB print (live plot); high-priority drain keeps the loop moving
             batch_n = self._iv_sweep_2450_batch_size(npoints)
 
             if context.source_mode == SourceMode.VOLTAGE:
-                # Source V, measure I; emit BATCH:v,i,v,i,... every batch_n points
+                # Source V, measure I; print every 1–2 points
                 tsp_body = f"""
 smu.source.func = smu.FUNC_DC_VOLTAGE
 smu.source.autorange = smu.ON
@@ -2662,7 +2662,7 @@ for i = 1, npoints do
     end
     nchunk = nchunk + 1
     if nchunk >= batchn or i == npoints then
-        print(string.format('BATCH:%s', chunk))
+        print(string.format('DATA:%s', chunk))
         chunk = ""
         nchunk = 0
     end
@@ -2673,7 +2673,7 @@ smu.source.output = smu.OFF
 print('SWEEP_DONE')
 """
             else:
-                # Source I, measure V; emit BATCH:v,i,v,i,... every batch_n points
+                # Source I, measure V; print every 1–2 points
                 tsp_body = f"""
 smu.source.func = smu.FUNC_DC_CURRENT
 smu.source.autorange = smu.ON
@@ -2700,7 +2700,7 @@ for i = 1, npoints do
     end
     nchunk = nchunk + 1
     if nchunk >= batchn or i == npoints then
-        print(string.format('BATCH:%s', chunk))
+        print(string.format('DATA:%s', chunk))
         chunk = ""
         nchunk = 0
     end
@@ -2804,11 +2804,9 @@ print('SWEEP_DONE')
 
     @staticmethod
     def _iv_sweep_2450_batch_size(npoints: int) -> int:
-        """Points per BATCH print — small enough for live plot, large enough to avoid USB stall."""
+        """Points per USB print — keep at 1–2 for live plot; never large batches."""
         npoints = max(1, int(npoints))
-        if npoints <= 5:
-            return npoints
-        return min(10, npoints)
+        return 1 if npoints == 1 else min(2, npoints)
 
     @staticmethod
     def _parse_2450_iv_pairs(payload: str) -> List[Tuple[float, float]]:
@@ -2818,6 +2816,21 @@ print('SWEEP_DONE')
         for idx in range(0, len(parts) - 1, 2):
             pairs.append((float(parts[idx]), float(parts[idx + 1])))
         return pairs
+
+    @staticmethod
+    def _raise_thread_priority_windows() -> None:
+        """Best-effort: bump current thread priority so VISA drain stays ahead of GUI work."""
+        import sys
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            # THREAD_PRIORITY_HIGHEST = 2
+            ctypes.windll.kernel32.SetThreadPriority(
+                ctypes.windll.kernel32.GetCurrentThread(), 2
+            )
+        except Exception:
+            pass
 
     def _consume_2450_iv_sweep_stream(
         self,
@@ -2833,11 +2846,11 @@ print('SWEEP_DONE')
         SourceMode,
     ) -> Tuple[bool, bool, bool]:
         """
-        Drain 2450 IV output on a dedicated thread; apply batches on this thread.
+        High-priority VISA drain + separate consumer for live on_point.
 
         Returns (got_done, got_data, stopped).
-        Dedicated VISA reads keep print() from blocking the instrument when
-        live on_point / GUI work is slow.
+        The drain thread only reads the instrument; plotting/GUI callbacks run
+        on this (consumer) thread so they cannot stall print() on the 2450.
         """
         import queue
         import threading
@@ -2847,6 +2860,7 @@ print('SWEEP_DONE')
         reader_done = threading.Event()
 
         def _visa_reader() -> None:
+            self._raise_thread_priority_windows()
             try:
                 while True:
                     try:
@@ -2914,7 +2928,6 @@ print('SWEEP_DONE')
                 if _apply_pairs(self._parse_2450_iv_pairs(payload)):
                     return 'stop'
             elif 'DATA:' in line:
-                # Legacy single-point lines (older scripts / mixed output)
                 payload = line.split('DATA:', 1)[1].strip()
                 if _apply_pairs(self._parse_2450_iv_pairs(payload)):
                     return 'stop'
@@ -2929,7 +2942,7 @@ print('SWEEP_DONE')
                     stopped = True
                     break
                 try:
-                    line = line_q.get(timeout=0.2)
+                    line = line_q.get(timeout=0.05)
                 except queue.Empty:
                     if not reader_done.is_set():
                         continue

@@ -807,7 +807,7 @@ class Keithley2400_SCPI_Scripts:
                       pulse_width: float = 0.01,
                       clim: float = 100e-3,
                       **kwargs) -> Dict[str, Any]:
-        """Pattern: Pulse → Read @ t1 → Read @ t2 → Read @ t3...
+        """Pattern: Initial state read → program pulse → post-pulse read → timed reads.
         
         Args:
             pulse_voltage: Pulse voltage (V)
@@ -828,7 +828,7 @@ class Keithley2400_SCPI_Scripts:
             if total_time > 60:
                 read_intervals.extend([120.0, 300.0, 600.0])
         
-        print(f"Starting retention_test: {len(read_intervals)} read intervals")
+        print(f"Starting retention_test: baseline → pulse → {len(read_intervals)} timed reads")
         
         v_range = max(abs(pulse_voltage), abs(read_voltage)) * 1.2
         v_range = max(min(v_range, 200.0), 0.2)
@@ -838,31 +838,46 @@ class Keithley2400_SCPI_Scripts:
         voltages = []
         currents = []
         resistances = []
+        operations = []
+        t_start = time.time()
+
+        # 1) Initial state before programming
+        v, i, r = self._read(read_voltage, icc=clim)
+        timestamps.append(time.time() - t_start)
+        voltages.append(v)
+        currents.append(i)
+        resistances.append(r)
+        operations.append('baseline')
         
-        start_time = time.time()
-        pulse_time = time.time()
-        
-        # Initial pulse
+        # 2) Program pulse
         self._pulse(pulse_voltage, pulse_width, icc=clim)
         
-        # Reads at specified intervals
+        # 3) Immediate post-pulse read + timed reads (wait clock from end of pulse)
+        t0 = time.time()
+        v, i, r = self._read(read_voltage, icc=clim)
+        timestamps.append(time.time() - t_start)
+        voltages.append(v)
+        currents.append(i)
+        resistances.append(r)
+        operations.append('post_pulse')
+
         for interval in read_intervals:
-            # Wait until interval
-            elapsed = time.time() - pulse_time
+            elapsed = time.time() - t0
             wait_time = interval - elapsed
             if wait_time > 0:
                 time.sleep(wait_time)
             
-            # Read
             v, i, r = self._read(read_voltage, icc=clim)
-            t = time.time() - start_time
-            timestamps.append(t)
+            timestamps.append(time.time() - t_start)
             voltages.append(v)
             currents.append(i)
             resistances.append(r)
+            operations.append('retention')
         
         self.controller.set_voltage(0.0, Icc=clim)
-        return self._format_results(timestamps, voltages, currents, resistances)
+        return self._format_results(
+            timestamps, voltages, currents, resistances, operation=operations
+        )
     
     def pulse_multi_read(self, pulse_voltage: float = 1.5,
                         pulse_width: float = 0.01,

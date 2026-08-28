@@ -114,29 +114,42 @@ def _plot_time_series(gui):
     
     valid_times, valid_resistances = zip(*valid_data)
     
-    # Special handling for SMU Retention: plot resistance over time (no pulse_types)
-    if test_name in ("SMU: Retention", "⚠️ SMU Retention"):
-        # Retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3...
-        # Timestamps are relative to start (initial read at t=0), plot resistance over time
+    operations = gui.last_results.get('operation') or []
+    # Timed Retention / SMU Retention: highlight initial state vs after-pulse reads
+    if test_name in ("SMU: Retention", "⚠️ SMU Retention", "Timed Retention") or (
+        operations and any(op in ('baseline', 'post_pulse', 'retention') for op in operations)
+    ):
         if timestamps and resistances:
-            # Plot resistance over time
-            # Mark initial read (first point) with different style
-            if len(timestamps) > 0:
-                # Plot initial read with different marker
-                gui.ax.plot(timestamps[0], resistances[0], 'go', markersize=10, 
+            if operations and len(operations) == len(timestamps):
+                base_i = [i for i, op in enumerate(operations) if op == 'baseline']
+                after_i = [i for i, op in enumerate(operations) if op != 'baseline']
+                if base_i:
+                    gui.ax.plot(
+                        [timestamps[i] for i in base_i],
+                        [resistances[i] for i in base_i],
+                        'go', markersize=10, markeredgewidth=2,
+                        label='Initial state', alpha=0.8, zorder=3,
+                    )
+                if after_i:
+                    gui.ax.plot(
+                        [timestamps[i] for i in after_i],
+                        [resistances[i] for i in after_i],
+                        'o-', color='blue', markersize=6, linewidth=2,
+                        label='After pulse', alpha=0.8,
+                    )
+            elif len(timestamps) > 0:
+                gui.ax.plot(timestamps[0], resistances[0], 'go', markersize=10,
                            markeredgewidth=2, label='Initial Read', alpha=0.8, zorder=3)
-                # Plot subsequent reads
                 if len(timestamps) > 1:
-                    gui.ax.plot(timestamps[1:], resistances[1:], 'o-', color='blue', 
+                    gui.ax.plot(timestamps[1:], resistances[1:], 'o-', color='blue',
                                markersize=6, linewidth=2, label='After Pulse', alpha=0.8)
             else:
-                # Fallback if no data
-                gui.ax.plot(timestamps, resistances, 'o-', color='blue', markersize=6, 
+                gui.ax.plot(timestamps, resistances, 'o-', color='blue', markersize=6,
                            linewidth=2, label='Resistance', alpha=0.8)
-            
+
             gui.ax.set_xlabel('Time Since Start (s)')
             gui.ax.set_ylabel('Resistance (Ω)')
-            gui.ax.set_title('SMU Retention: Resistance vs Time (Initial Read → Pulse → Reads)')
+            gui.ax.set_title(f'{test_name}: Initial state → pulse → timed reads')
             gui.ax.grid(True, alpha=0.3)
             gui.ax.legend(loc='best')
             

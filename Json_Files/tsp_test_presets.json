@@ -1,5 +1,5 @@
 {
-  "Read → Write → Read": {
+  "Read \u00e2\u2020\u2019 Write \u00e2\u2020\u2019 Read": {
     "DUT 1us write": {
       "pulse_voltage": 1.0,
       "pulse_width": 1.0,
@@ -147,6 +147,26 @@
       "read_width": 2.0,
       "read_rise_time": 0.1,
       "pulse_rise_time": 0.1
+    },
+    "longassendurance": {
+      "set_voltage": 2.5,
+      "reset_voltage": -2.5,
+      "pulse_width": 1.0,
+      "read_voltage": 0.3,
+      "num_cycles": 10000,
+      "delay_between": 0.001,
+      "clim": 0.001,
+      "plot_y_axis": "resistance"
+    },
+    "longassendurance(100k)": {
+      "set_voltage": 2.8,
+      "reset_voltage": -2.8,
+      "pulse_width": 1.0,
+      "read_voltage": 0.3,
+      "num_cycles": 100000,
+      "delay_between": 0.001,
+      "clim": 0.001,
+      "plot_y_axis": "resistance"
     }
   },
   "Retention": {
@@ -389,7 +409,7 @@
       "clim": 0.0001
     }
   },
-  "Pulse Train → Read": {
+  "Pulse Train \u00e2\u2020\u2019 Read": {
     "general": {
       "pulse_voltage": 1.5,
       "num_pulses_per_read": 5,
@@ -449,7 +469,7 @@
       "enable_debug_output": true
     }
   },
-  "Pulse → Multi-Read": {
+  "Pulse \u00e2\u2020\u2019 Multi-Read": {
     "simple": {
       "pulse_voltage": -3.0,
       "pulse_width": 1000.0,
@@ -476,6 +496,32 @@
       "pattern_repeats": 3,
       "laser_sync_offset_s": 0.0,
       "measurement_init_time_s": 0.6
+    }
+  },
+  "Timed Retention": {
+    "retenetion boyys": {
+      "pulse_voltage": 2.5,
+      "pulse_width": 10.0,
+      "read_voltage": 0.3,
+      "read_every_s": 30.0,
+      "retention_duration_s": 5000.0,
+      "clim": 0.01
+    },
+    "retention 55hrs": {
+      "pulse_voltage": 2.8,
+      "pulse_width": 10.0,
+      "read_voltage": 0.3,
+      "read_every_s": 60.0,
+      "retention_duration_s": 200000.0,
+      "clim": 0.001
+    },
+    "test": {
+      "pulse_voltage": 2.8,
+      "pulse_width": 10.0,
+      "read_voltage": 0.3,
+      "read_every_s": 60.0,
+      "retention_duration_s": 20.0,
+      "clim": 0.001
     }
   }
 }

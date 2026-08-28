@@ -31,15 +31,63 @@ from origin_export import export_origin_csv, export_origin_csv_with_corrected  #
 
 from auto_compare import refresh_compare_for_run  # noqa: E402
 from engine import SweepResult, bias_tag  # noqa: E402
-from paths import allocate_run_directory, sanitize_notes  # noqa: E402
+from paths import DEFAULT_DATA_ROOT, allocate_run_directory, sanitize_notes  # noqa: E402
 
 
 def _auto_compare_safe(run_dir: Path) -> None:
     """Refresh device-level Origin compare CSVs/plots; never fail the save."""
     try:
         refresh_compare_for_run(run_dir, quiet=True)
+    except Exception as exc:
+        print(f"auto_compare failed (save kept): {exc}", file=sys.stderr)
+
+
+def _device_folder_from_run(run_dir: Path) -> Path:
+    """.../<sample>/<section>/<device>/Solartron_1260/<N>-... → device folder."""
+    run_dir = Path(run_dir)
+    if run_dir.parent.name == "Solartron_1260":
+        return run_dir.parent.parent
+    return run_dir.parent
+
+
+def _log_solartron_event(
+    run_dir: Path,
+    *,
+    sample: str,
+    section: str,
+    device: str,
+    measurement_type: str = "Solartron 1260",
+    file_path: Optional[Path] = None,
+) -> None:
+    """Append one line to the device folder log.txt / log.csv timeline."""
+    try:
+        from Measurements.data_saver import MeasurementDataSaver
     except Exception:
-        pass
+        return
+    try:
+        if file_path is None:
+            origin = Path(run_dir) / "origin_data"
+            csvs = []
+            if origin.is_dir():
+                csvs = sorted(
+                    p
+                    for p in origin.glob("*.csv")
+                    if not p.stem.lower().endswith(("_open", "_short"))
+                )
+            file_path = csvs[0] if csvs else Path(run_dir)
+        saver = MeasurementDataSaver(default_base=DEFAULT_DATA_ROOT)
+        saver.log_measurement_event(
+            _device_folder_from_run(run_dir),
+            filename=file_path.name,
+            file_path=file_path,
+            measurement_type=measurement_type,
+            status="saved",
+            sample_name=sample,
+            section=section,
+            device_number=str(device),
+        )
+    except Exception as exc:
+        print(f"device log failed (save kept): {exc}", file=sys.stderr)
 
 
 def ensure_run_directory(run_dir: Path) -> Path:
@@ -150,6 +198,7 @@ def export_run_bundle(
     include_bias_in_name: bool = True,
     meta_extra: Optional[Dict[str, Any]] = None,
     auto_compare: bool = True,
+    log_to_device: bool = True,
 ) -> Path:
     """
     Save under:
@@ -221,6 +270,14 @@ def export_run_bundle(
     write_run_meta(run_dir, meta)
     if auto_compare:
         _auto_compare_safe(run_dir)
+    if log_to_device:
+        _log_solartron_event(
+            run_dir,
+            sample=safe_sample,
+            section=section,
+            device=device,
+            measurement_type="Solartron 1260",
+        )
     return run_dir
 
 
@@ -256,6 +313,7 @@ def export_bias_series_bundle(
             run_dir=run_dir,
             include_bias_in_name=True,
             auto_compare=False,  # once after full series
+            log_to_device=False,
             meta_extra={
                 **(meta_extra or {}),
                 "run_index": run_index,
@@ -289,4 +347,12 @@ def export_bias_series_bundle(
             },
         )
     _auto_compare_safe(run_dir)
+    _log_solartron_event(
+        run_dir,
+        sample=safe_sample,
+        section=section,
+        device=device,
+        measurement_type="Solartron 1260",
+        file_path=run_dir,
+    )
     return run_dir

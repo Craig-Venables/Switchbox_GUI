@@ -9,7 +9,6 @@ Called automatically after each measurement export. Also usable standalone:
 from __future__ import annotations
 
 import re
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -236,15 +235,25 @@ def write_eis_analyser_txt(df: pd.DataFrame, path: Path) -> Path:
     return path
 
 
+def _unlink_glob(folder: Path, pattern: str) -> None:
+    """Delete matching files in-place. Do not rmtree the folder — OneDrive denies that."""
+    if not folder.is_dir():
+        return
+    for old in folder.glob(pattern):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+
+
 def export_eis_analyser_folder(series_list: List[Series], leaf: Path) -> Path:
     """
     Rebuild <leaf>/eis_analyser/*.txt — one spectrum per file for eissa1.exe.
-    Clears the folder first so removed runs do not linger.
+    Clears old .txt files first so removed runs do not linger.
     """
     out = Path(leaf) / "eis_analyser"
-    if out.exists():
-        shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
+    _unlink_glob(out, "*.txt")
 
     used: set[str] = set()
     for s in series_list:

@@ -186,7 +186,7 @@ Potential additions:
 """
 
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from Equipment.SMU_AND_PMU.keithley2450.tsp_controller import Keithley2450_TSP
 
 
@@ -1875,108 +1875,102 @@ class Keithley2450_TSP_Scripts:
                       read_voltage: float = 0.2,
                       read_intervals: List[float] = None,
                       clim: float = 100e-3) -> Dict:
-        """Retention test. Initial pulse on-instrument, reads at PC-controlled intervals."""
+        """Retention: baseline read → program pulse → post-pulse read → timed reads."""
         if read_intervals is None:
             read_intervals = [1, 10, 100, 1000, 10000]
         
-        print(f"Starting retention test: {len(read_intervals)} reads over {read_intervals[-1]}s")
+        print(
+            f"Starting retention test: baseline → {pulse_voltage}V pulse → "
+            f"{len(read_intervals)} timed reads (last at {read_intervals[-1]}s)"
+        )
         
-        start_time = time.time()
-        
-        # Upload simple read script (reused for each read)
-        self.tsp.device.write('if retentionRead ~= nil then script.delete("retentionRead") end')
-        time.sleep(0.01)
-        
-        self.tsp.device.write('loadscript retentionRead')
-        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
-        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
-        self.tsp.device.write('smu.source.output = smu.ON')
-        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
-        self.tsp.device.write('smu.measure.nplc = 0.01')
-        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
-        # Initial pulse
-        self.tsp.device.write(f'smu.source.level = {pulse_voltage}')
-        self.tsp.device.write(f'delay({pulse_width})')
-        self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write('delay(0.001)')
-        # Initial read
-        self.tsp.device.write(f'smu.source.level = {read_voltage}')
-        self.tsp.device.write('local i = smu.measure.read()')
-        self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write(f'print(string.format("%.6e,%.6e", {read_voltage}, i))')
-        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
-        self.tsp.device.write('smu.source.output = smu.OFF')
-        self.tsp.device.write('endscript')
-        
-        # Execute initial pulse and read
-        print(f"  Setting initial state: {pulse_voltage}V pulse")
-        self.tsp.device.write('retentionRead()')
-        self.tsp.device.write('waitcomplete()')
-        time.sleep(0.05)
-        
-        timestamps = []
-        voltages = []
-        currents = []
-        resistances = []
-        
-        # Get initial read
-        response = self.tsp.device.read().strip()
-        parts = response.split(',')
-        v = float(parts[0])
-        i = float(parts[1])
-        r = v / i if abs(i) > 1e-12 else 1e12
-        
-        # Initial read at t=0
-        ts = 0.0
-        timestamps.append(ts)
-        voltages.append(v)
-        currents.append(i)
-        resistances.append(r)
-        print(f"  t=0s: R = {r:.2e} Ω")
-        
-        # Create simple read-only script for subsequent reads
-        self.tsp.device.write('if retentionReadOnly ~= nil then script.delete("retentionReadOnly") end')
-        time.sleep(0.01)
-        
-        self.tsp.device.write('loadscript retentionReadOnly')
-        self.tsp.device.write('smu.source.output = smu.ON')
-        self.tsp.device.write(f'smu.source.level = {read_voltage}')
-        self.tsp.device.write('local i = smu.measure.read()')
-        self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write(f'print(string.format("%.6e,%.6e", {read_voltage}, i))')
-        self.tsp.device.write('smu.source.output = smu.OFF')
-        self.tsp.device.write('endscript')
-        
-        # PC-controlled interval reads
-        last_time = time.time()
-        for interval in read_intervals:
-            wait_time = interval - (time.time() - last_time)
-            if wait_time > 0:
-                print(f"  Waiting {wait_time:.1f}s until next read...")
-                time.sleep(wait_time)
-            
-            self.tsp.device.write('retentionReadOnly()')
-            self.tsp.device.write('waitcomplete()')
-            time.sleep(0.02)
-            
-            response = self.tsp.device.read().strip()
-            parts = response.split(',')
-            v = float(parts[0])
-            i = float(parts[1])
+        timestamps: List[float] = []
+        voltages: List[float] = []
+        currents: List[float] = []
+        resistances: List[float] = []
+        operations: List[str] = []
+
+        def _append_point(ts: float, v: float, i: float, op: str) -> None:
             r = v / i if abs(i) > 1e-12 else 1e12
-            
-            # Use actual interval time (defined by user)
-            ts = interval
             timestamps.append(ts)
             voltages.append(v)
             currents.append(i)
             resistances.append(r)
-            print(f"  t={interval}s: R = {r:.2e} Ω")
-            
-            last_time = time.time()
-        
+            operations.append(op)
+            print(f"  [{op}] t={ts:.3g}s: R = {r:.2e} Ω")
+
+        def _run_read_script(script_name: str) -> Tuple[float, float]:
+            self.tsp.device.write(f'{script_name}()')
+            self.tsp.device.write('waitcomplete()')
+            time.sleep(0.02)
+            response = self.tsp.device.read().strip()
+            parts = response.split(',')
+            return float(parts[0]), float(parts[1])
+
+        # Shared read-only script (baseline + post-pulse + timed reads)
+        self.tsp.device.write('if retentionReadOnly ~= nil then script.delete("retentionReadOnly") end')
+        time.sleep(0.01)
+        self.tsp.device.write('loadscript retentionReadOnly')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
+        self.tsp.device.write('smu.measure.nplc = 0.01')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        self.tsp.device.write(f'smu.source.level = {read_voltage}')
+        self.tsp.device.write('local i = smu.measure.read()')
+        self.tsp.device.write('smu.source.level = 0')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write(f'print(string.format("%.6e,%.6e", {read_voltage}, i))')
+        self.tsp.device.write('endscript')
+
+        # Absolute clock for unique timestamps; wait schedule is relative to pulse end.
+        t_start = time.time()
+
+        # 1) Initial state (before programming)
+        print("  Measuring initial state (pre-pulse)...")
+        v, i = _run_read_script('retentionReadOnly')
+        _append_point(time.time() - t_start, v, i, 'baseline')
+
+        # 2) Program pulse only
+        self.tsp.device.write('if retentionProgram ~= nil then script.delete("retentionProgram") end')
+        time.sleep(0.01)
+        self.tsp.device.write('loadscript retentionProgram')
+        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
+        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
+        self.tsp.device.write('smu.source.output = smu.ON')
+        self.tsp.device.write(f'smu.source.level = {pulse_voltage}')
+        self.tsp.device.write(f'delay({pulse_width})')
+        self.tsp.device.write('smu.source.level = 0')
+        self.tsp.device.write('smu.source.output = smu.OFF')
+        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
+        self.tsp.device.write('endscript')
+
+        print(f"  Programming: {pulse_voltage}V for {pulse_width}s")
+        self.tsp.device.write('retentionProgram()')
+        self.tsp.device.write('waitcomplete()')
+        time.sleep(0.02)
+
+        # 3) Retention wait clock from end of pulse; timestamps from t_start
+        t0 = time.time()
+        v, i = _run_read_script('retentionReadOnly')
+        _append_point(time.time() - t_start, v, i, 'post_pulse')
+
+        for interval in read_intervals:
+            wait_time = float(interval) - (time.time() - t0)
+            if wait_time > 0:
+                print(f"  Waiting {wait_time:.1f}s until t={interval:g}s after pulse...")
+                time.sleep(wait_time)
+
+            v, i = _run_read_script('retentionReadOnly')
+            _append_point(time.time() - t_start, v, i, 'retention')
+
         print("✓ Retention test complete")
-        return self._format_results(timestamps, voltages, currents, resistances)
+        return self._format_results(
+            timestamps, voltages, currents, resistances, operation=operations
+        )
     
     def multi_pulse_then_read(self, pulse_voltage: float = 1.0,
                              num_pulses_per_read: int = 10,

@@ -687,7 +687,7 @@ class PulseDiagramHelper:
         self._set_preview_ylim(voltages + [r_v, p_v, 0])
 
     def _draw_timed_retention(self, params):
-        """Draw SMU/TSP timed retention: program pulse → read @ t=0 → regular interval reads.
+        """Draw SMU/TSP timed retention: init read → program pulse → timed reads.
 
         Uses equal schematic spacing between a few sample markers; title shows period/duration.
         """
@@ -714,23 +714,29 @@ class PulseDiagramHelper:
             intervals = [60.0, 120.0, 180.0]
         every_s = float(params.get('read_every_s', 60.0))
         duration_s = float(params.get('retention_duration_s', intervals[-1]))
-        # Show first few + last so the schematic stays readable
         if len(intervals) <= 6:
             show = list(intervals)
         else:
             show = list(intervals[:4]) + [intervals[-1]]
 
-        # Schematic pulse width so a 100 µs program is visible next to second-scale labels
         vis_pulse = max(pulse_width, 0.02)
         vis_read = 0.015
         vis_gap = 0.04
 
-        # Program pulse
+        # 1) Initial state read (before program)
+        read_start = t
+        read_end = t + vis_read
+        read_markers.append(((read_start + read_end) / 2, 'init'))
+        times.extend([read_start, read_start, read_end, read_end])
+        voltages.extend([0, read_v, read_v, 0])
+        t = read_end + 0.01
+
+        # 2) Program pulse
         times.extend([t, t, t + vis_pulse, t + vis_pulse])
         voltages.extend([0, pulse_v, pulse_v, 0])
         t += vis_pulse + 0.005
 
-        # Immediate read at t=0 (after program)
+        # 3) Immediate post-pulse read (t=0 after program)
         read_start = t
         read_end = t + vis_read
         read_markers.append(((read_start + read_end) / 2, 't=0'))
@@ -769,8 +775,8 @@ class PulseDiagramHelper:
             pw_txt = f'{pulse_width * 1e9:.3g} ns'
         n_reads = len(intervals)
         self.ax.set_title(
-            f'Timed Retention: {pulse_v:g} V @ {pw_txt} → every {every_s:g}s for {duration_s:g}s '
-            f'({n_reads} reads)',
+            f'Timed Retention: init → {pulse_v:g} V @ {pw_txt} → every {every_s:g}s '
+            f'for {duration_s:g}s ({n_reads} reads)',
             fontsize=8,
         )
         self.ax.grid(True, alpha=0.3)
