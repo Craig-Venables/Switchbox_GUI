@@ -11,7 +11,7 @@ from .pm100d import (
     make_pm100d_resource,
     find_pm100d_resource,
 )
-from .laser_power_calibration import (
+from .digital_laser_power_calibration import (
     load_calibration,
     get_actual_mw,
     get_setpoint_for_actual_mw,

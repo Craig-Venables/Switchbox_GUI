@@ -1526,6 +1526,7 @@ class TSPTestingGUI(tk.Toplevel):
             
             # Bind entry to update diagram when changed
             var.trace_add("write", lambda *args: self.update_pulse_diagram())
+            var.trace_add("write", lambda *args: self._update_timed_retention_eta())
             
             # Store original label and whether this is a time param for 4200A
             self.param_vars[param_name] = {
@@ -1591,6 +1592,29 @@ class TSPTestingGUI(tk.Toplevel):
                     row = add_param_row(param_name, param_info, row)
         
         self.params_frame.columnconfigure(1, weight=1)
+
+        # Timed / Log Retention / Volatile Screening: live wall-clock estimate
+        self.timed_retention_eta_var = None
+        self.timed_retention_eta_label = None
+        eta_funcs = ("retention_test", "log_retention_test", "volatile_screening_test")
+        test_func = TEST_FUNCTIONS.get(test_name, {}).get("function", "")
+        if test_func in eta_funcs or (
+            "read_every_s" in self.param_vars and "retention_duration_s" in self.param_vars
+        ):
+            self.timed_retention_eta_var = tk.StringVar(value="")
+            self.timed_retention_eta_label = tk.Label(
+                self.params_frame,
+                textvariable=self.timed_retention_eta_var,
+                anchor="w",
+                fg="#0b5",
+                font=("TkDefaultFont", 9, "bold"),
+                wraplength=420,
+                justify=tk.LEFT,
+            )
+            self.timed_retention_eta_label.grid(
+                row=row, column=0, columnspan=2, sticky="ew", padx=5, pady=(6, 4)
+            )
+            self._update_timed_retention_eta()
         
         # Update preset dropdown for new test type
         if hasattr(self, 'preset_dropdown'):
@@ -1598,6 +1622,41 @@ class TSPTestingGUI(tk.Toplevel):
 
         if hasattr(self, "refresh_params_canvas"):
             self.refresh_params_canvas()
+
+    def _update_timed_retention_eta(self):
+        """Refresh estimated wall-clock time for retention-related tests."""
+        if not getattr(self, "timed_retention_eta_var", None):
+            return
+        test_name = self.test_var.get() if hasattr(self, "test_var") else ""
+        func = TEST_FUNCTIONS.get(test_name, {}).get("function", "")
+        try:
+            if func == "log_retention_test":
+                from Pulse_Testing.systems.retention_intervals import format_log_retention_eta
+                t_max = float(self.param_vars["t_max_s"]["var"].get())
+                num_reads = int(self.param_vars["num_reads"]["var"].get())
+                self.timed_retention_eta_var.set(format_log_retention_eta(t_max, num_reads))
+                return
+            if func == "volatile_screening_test":
+                from Pulse_Testing.systems.retention_intervals import format_volatile_screening_eta
+                burst = float(self.param_vars["burst_t_max_s"]["var"].get())
+                num_reads = int(self.param_vars["num_reads"]["var"].get())
+                include_tail = bool(self.param_vars.get("include_slow_tail", {}).get("var", tk.BooleanVar(value=False)).get())
+                t_max = float(self.param_vars["t_max_s"]["var"].get()) if "t_max_s" in self.param_vars else burst
+                self.timed_retention_eta_var.set(
+                    format_volatile_screening_eta(
+                        burst, num_reads, include_slow_tail=include_tail, t_max_s=t_max
+                    )
+                )
+                return
+            if "read_every_s" not in getattr(self, "param_vars", {}) or "retention_duration_s" not in self.param_vars:
+                self.timed_retention_eta_var.set("")
+                return
+            every = float(self.param_vars["read_every_s"]["var"].get())
+            duration = float(self.param_vars["retention_duration_s"]["var"].get())
+            from Pulse_Testing.systems.retention_intervals import format_timed_retention_eta
+            self.timed_retention_eta_var.set(format_timed_retention_eta(every, duration))
+        except Exception:
+            self.timed_retention_eta_var.set("Estimated time: enter valid schedule parameters")
     
     def get_test_parameters(self):
         """Extract and validate parameters"""
@@ -1846,6 +1905,20 @@ class TSPTestingGUI(tk.Toplevel):
             self._log_pmu_endurance_check(results, params)
         if func_name == "retention_test" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
             self._log_pmu_retention_check(results, params)
+        if func_name == "volatile_screening_test":
+            vs = results.get("volatile_screening") or {}
+            verdict = vs.get("verdict", "unknown")
+            self.log(f"  Volatile screening verdict: {verdict}")
+            if vs.get("retention_fraction_final") is not None:
+                self.log(f"    f_final={vs['retention_fraction_final']:.3f}")
+            if vs.get("retention_fraction_100ms") is not None:
+                self.log(f"    f@100ms={vs['retention_fraction_100ms']:.3f}")
+        if func_name == "log_retention_test" and results.get("retention_fit"):
+            fit = results["retention_fit"]
+            self.log(
+                f"  Log fit: R²={fit.get('r_squared', 0):.4f}, "
+                f"alpha={fit.get('alpha', 0):.4g}"
+            )
 
         self.last_results = results
         self.last_results["test_name"] = self.test_var.get()
@@ -2105,6 +2178,28 @@ class TSPTestingGUI(tk.Toplevel):
                         sample_name_for_metadata = str(fallback_name).strip()
             
             # Prepare metadata
+            extra_notes = []
+            if self.last_results.get("retention_fit"):
+                fit = self.last_results["retention_fit"]
+                extra_notes.append(
+                    f"Log retention fit: R0={fit.get('r0')}, alpha={fit.get('alpha')}, "
+                    f"R_squared={fit.get('r_squared')}"
+                )
+            if self.last_results.get("volatile_screening"):
+                vs = self.last_results["volatile_screening"]
+                extra_notes.append(f"Verdict: {vs.get('verdict')}")
+                for key in (
+                    "retention_fraction_final",
+                    "retention_fraction_early",
+                    "retention_fraction_100ms",
+                    "relaxation_time_50pct",
+                    "switch_ratio",
+                ):
+                    if vs.get(key) is not None:
+                        extra_notes.append(f"{key}: {vs.get(key)}")
+            if extra_notes:
+                notes = (notes + "\n" if notes else "") + "\n".join(extra_notes)
+
             metadata = {
                 'sample': sample_name_for_metadata,
                 'device': self.device_label,
@@ -2732,6 +2827,27 @@ class TSPTestingGUI(tk.Toplevel):
         button_frame.pack(fill=tk.X)
         ttk.Button(button_frame, text="Close", command=popup.destroy).pack()
     
+    @staticmethod
+    def _format_seconds_for_filename(seconds: float) -> str:
+        """Pick ns/us/ms/s for a duration in seconds (e.g. 1e-7 -> '100ns')."""
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            return ""
+        if seconds < 0:
+            seconds = abs(seconds)
+        if seconds >= 1.0:
+            text = f"{seconds:.3g}"
+            return f"{text}s"
+        if seconds >= 1e-3:
+            text = f"{seconds * 1e3:.3g}"
+            return f"{text}ms"
+        if seconds >= 1e-6:
+            text = f"{seconds * 1e6:.3g}"
+            return f"{text}us"
+        text = f"{seconds * 1e9:.3g}"
+        return f"{text}ns"
+
     def _generate_test_details(self, params: dict) -> str:
         """
         Generate test details string for filename (max 3 most important parameters).
@@ -2740,7 +2856,7 @@ class TSPTestingGUI(tk.Toplevel):
             params: Test parameters dictionary
         
         Returns:
-            str: Formatted test details (e.g., "1.5V_100us_10cyc")
+            str: Formatted test details (e.g., "1.5V_100ns_10cyc")
         """
         details = []
         
@@ -2765,32 +2881,19 @@ class TSPTestingGUI(tk.Toplevel):
         # Check for SMU retention/endurance duration parameters first (these are in seconds)
         if 'pulse_duration' in params:
             # SMU retention test: pulse_duration is in seconds
-            pd = params['pulse_duration']
-            if pd >= 1.0:
-                details.append(f"{pd:.1f}s")
-            elif pd >= 1e-3:
-                details.append(f"{pd*1e3:.0f}ms")
-            else:
-                details.append(f"{pd*1e6:.0f}us")
+            details.append(self._format_seconds_for_filename(params['pulse_duration']))
         elif 'set_duration' in params or 'reset_duration' in params:
             # SMU endurance test: set_duration and reset_duration are in seconds
             # Use set_duration as primary (most important), include reset if different
             if 'set_duration' in params:
-                sd = params['set_duration']
-                if sd >= 1.0:
-                    details.append(f"{sd:.1f}s")
-                elif sd >= 1e-3:
-                    details.append(f"{sd*1e3:.0f}ms")
-                else:
-                    details.append(f"{sd*1e6:.0f}us")
+                details.append(self._format_seconds_for_filename(params['set_duration']))
             # If reset_duration is different and significant, could add it, but keep max 3 params
         elif 'pulse_width' in params:
-            # Regular PMU tests: pulse_width is in microseconds
-            pw = params['pulse_width']
-            if pw >= 1e-3:
-                details.append(f"{pw*1e3:.0f}ms")
-            else:
-                details.append(f"{pw*1e6:.0f}us")
+            # GUI save params: 4200 PMU stores pulse_width in µs; 2450/other store seconds.
+            pw = float(params['pulse_width'])
+            is_4200_pmu = getattr(self, "current_system_name", None) in KEITHLEY4200_PMU_TIMING_SYSTEMS
+            seconds = pw * 1e-6 if is_4200_pmu else pw
+            details.append(self._format_seconds_for_filename(seconds))
         
         # Number of pulses/cycles/reads (pick one that exists)
         for key in ['num_pulses', 'num_cycles', 'num_reads']:
@@ -2800,7 +2903,7 @@ class TSPTestingGUI(tk.Toplevel):
                 details.append(f"{val}{short_name}")
                 break  # Only include one count parameter
         
-        return "_".join(details[:3])  # Max 3 parameters
+        return "_".join(d for d in details[:3] if d)  # Max 3 parameters
     
     def update_pulse_diagram(self):
         """Update the pulse pattern diagram based on selected test and parameters"""
@@ -2866,6 +2969,7 @@ class TSPTestingGUI(tk.Toplevel):
             
             self.pulse_diagram_helper.draw(test_name, params, self.current_system_name)
             self.diagram_canvas.draw()
+            self._update_timed_retention_eta()
         except Exception as e:
             self.diagram_ax.clear()
             self.diagram_ax.text(0.5, 0.5, f"Diagram error:\n{str(e)}", ha='center', va='center', fontsize=8)

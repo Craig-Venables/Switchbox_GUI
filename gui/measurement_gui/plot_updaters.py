@@ -166,11 +166,12 @@ class PlotUpdaters:
 
                         abs_voltages = np.abs(np.array(voltages, dtype=float))
                         abs_voltages[abs_voltages == 0] = 1e-12
-                        # Filter voltage: only show >= 0.1V
+                        # Filter voltage: only show >= 0.1V (user requirement)
                         voltage_mask = abs_voltages >= 0.1
-                        if voltage_mask.size == abs_currents.size:
+                        # Safety check: ensure abs_currents and voltage_mask have matching lengths
+                        if voltage_mask.size == np.asarray(abs_currents).size:
                             filtered_voltages = abs_voltages[voltage_mask]
-                            filtered_currents = abs_currents[voltage_mask]
+                            filtered_currents = np.asarray(abs_currents)[voltage_mask]
                             if filtered_voltages.size > 0:
                                 self._update_line(
                                     "rt_logilogv",
@@ -179,9 +180,10 @@ class PlotUpdaters:
                                 )
                             else:
                                 self._update_line("rt_logilogv", [], [])
-            except Exception:
-                # Never let a bad/racy update kill the live plotter thread.
-                pass
+                        else:
+                            # Length mismatch - skip this update to avoid IndexError
+                            self._update_line("rt_logilogv", [], [])
+
             time.sleep(self.interval_s)
 
     def _update_current_time_plot(self) -> None:
@@ -193,6 +195,8 @@ class PlotUpdaters:
                 n = min(len(t), len(c))
                 if n > 0:
                     self._update_line("ct_rt", t[:n], c[:n])
+                else:
+                    self._update_line("ct_rt", [], [])
             time.sleep(self.interval_s)
 
     def _update_temperature_plot(self) -> None:

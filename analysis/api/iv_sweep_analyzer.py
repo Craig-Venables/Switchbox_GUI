@@ -38,6 +38,44 @@ Example Usage:
 
 import json
 import numpy as np
+
+
+def _mean_n(arr, default=None):
+    """Mean of finite values, skipping None; returns (mean_or_default, n)."""
+    if arr is None:
+        return default, 0
+    cleaned = []
+    for x in arr:
+        if x is None:
+            continue
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            cleaned.append(v)
+    if not cleaned:
+        return default, 0
+    return float(np.mean(cleaned)), len(cleaned)
+
+
+def _std_n(arr, default=None):
+    """Std of finite values, skipping None; returns (std_or_default, n)."""
+    if arr is None:
+        return default, 0
+    cleaned = []
+    for x in arr:
+        if x is None:
+            continue
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v):
+            cleaned.append(v)
+    if len(cleaned) < 2:
+        return default, len(cleaned)
+    return float(np.std(cleaned)), len(cleaned)
 from typing import Dict, List, Optional, Union, Any
 
 # REQUIRED: sweep_analyzer.py must be available - this is the core analysis engine
@@ -242,6 +280,32 @@ class IVSweepAnalyzer:
         
         return self.extracted_data
     
+    def _resistance_metrics_payload(self) -> Dict[str, Any]:
+        """None-aware resistance rollups with sample counts (n)."""
+        ron_m, ron_n = _mean_n(self.analyzer.ron)
+        ron_s, _ = _std_n(self.analyzer.ron)
+        roff_m, roff_n = _mean_n(self.analyzer.roff)
+        roff_s, _ = _std_n(self.analyzer.roff)
+        sr_m, sr_n = _mean_n(self.analyzer.switching_ratio)
+        oo_m, oo_n = _mean_n(self.analyzer.on_off)
+        wm_m, wm_n = _mean_n(self.analyzer.window_margin)
+        return {
+            "ron_mean": ron_m,
+            "ron_std": ron_s,
+            "ron_n": ron_n,
+            "roff_mean": roff_m,
+            "roff_std": roff_s,
+            "roff_n": roff_n,
+            "switching_ratio_mean": sr_m,
+            "switching_ratio_n": sr_n,
+            "switching_ratio_std": _std_n(self.analyzer.switching_ratio)[0],
+            "on_off_ratio_mean": oo_m,
+            "on_off_ratio_n": oo_n,
+            "window_margin_mean": wm_m,
+            "window_margin_n": wm_n,
+            "ron_roff_meta": getattr(self.analyzer, "_last_ron_roff_meta", None) or {},
+        }
+
     def _extract_all_information(self, device_name: Optional[str] = None) -> Dict[str, Any]:
         """
         Extract all available information from the analyzer.
@@ -274,6 +338,22 @@ class IVSweepAnalyzer:
                 'breakdown': self.analyzer.classification_breakdown if hasattr(self.analyzer, 'classification_breakdown') else {},
                 'conduction_mechanism': self.analyzer.conduction_mechanism,
                 'model_r2': float(self.analyzer.model_parameters.get('R2', 0)) if isinstance(self.analyzer.model_parameters, dict) else 0.0,
+                'conduction_model_fits': {
+                    name: {
+                        'R2': float((data or {}).get('R2') or 0.0),
+                        **{
+                            k: float(v)
+                            for k, v in (data or {}).items()
+                            if k != 'R2'
+                            and isinstance(v, (int, float, np.floating, np.integer))
+                            and np.isfinite(float(v))
+                            and k in ('n', 'R', 'a', 'beta', 'b', 'phi', 'A', 'B')
+                        },
+                    }
+                    for name, data in (
+                        getattr(self.analyzer, 'all_model_fits', None) or {}
+                    ).items()
+                },
                 'features': self.analyzer.classification_features if hasattr(self.analyzer, 'classification_features') else {},
                 'explanation': self.analyzer.classification_explanation if hasattr(self.analyzer, 'classification_explanation') else {},
                 # === ENHANCED CLASSIFICATION (Phase 1) ===
@@ -285,20 +365,13 @@ class IVSweepAnalyzer:
                 'hysteresis_shape': self.analyzer.hysteresis_shape_features if hasattr(self.analyzer, 'hysteresis_shape_features') else {},
                 'adaptive_thresholds': self.analyzer.adaptive_thresholds if hasattr(self.analyzer, 'adaptive_thresholds') else {},
                 'warnings': self.analyzer.classification_warnings if hasattr(self.analyzer, 'classification_warnings') else [],
+                'metrics_quarantined': bool(getattr(self.analyzer, 'metrics_quarantined', False)),
+                'quarantine_reasons': list(getattr(self.analyzer, 'quarantine_reasons', None) or []),
             },
-            'resistance_metrics': {
-                'ron_mean': float(np.mean(self.analyzer.ron)) if self.analyzer.ron is not None and len(self.analyzer.ron) > 0 else 0.0,
-                'ron_std': float(np.std(self.analyzer.ron)) if self.analyzer.ron is not None and len(self.analyzer.ron) > 0 else 0.0,
-                'roff_mean': float(np.mean(self.analyzer.roff)) if self.analyzer.roff is not None and len(self.analyzer.roff) > 0 else 0.0,
-                'roff_std': float(np.std(self.analyzer.roff)) if self.analyzer.roff is not None and len(self.analyzer.roff) > 0 else 0.0,
-                'switching_ratio_mean': float(np.mean(self.analyzer.switching_ratio)) if self.analyzer.switching_ratio is not None and len(self.analyzer.switching_ratio) > 0 else 0.0,
-                'switching_ratio_std': float(np.std(self.analyzer.switching_ratio)) if self.analyzer.switching_ratio is not None and len(self.analyzer.switching_ratio) > 0 else 0.0,
-                'on_off_ratio_mean': float(np.mean(self.analyzer.on_off)) if self.analyzer.on_off is not None and len(self.analyzer.on_off) > 0 else 0.0,
-                'window_margin_mean': float(np.mean(self.analyzer.window_margin)) if self.analyzer.window_margin is not None and len(self.analyzer.window_margin) > 0 else 0.0,
-            },
+            'resistance_metrics': self._resistance_metrics_payload(),
             'voltage_metrics': {
-                'von_mean': float(np.mean(self.analyzer.von)) if self.analyzer.von is not None and len(self.analyzer.von) > 0 else 0.0,
-                'voff_mean': float(np.mean(self.analyzer.voff)) if self.analyzer.voff is not None and len(self.analyzer.voff) > 0 else 0.0,
+                'von_mean': (_mean_n(self.analyzer.von)[0] if self.analyzer.von is not None else None) or 0.0,
+                'voff_mean': (_mean_n(self.analyzer.voff)[0] if self.analyzer.voff is not None else None) or 0.0,
                 'max_voltage': float(np.max(np.abs(self.analyzer.voltage))) if self.analyzer.voltage is not None and len(self.analyzer.voltage) > 0 else 0.0,
                 'min_voltage': float(np.min(np.abs(self.analyzer.voltage))) if self.analyzer.voltage is not None and len(self.analyzer.voltage) > 0 else 0.0,
             },
@@ -324,6 +397,7 @@ class IVSweepAnalyzer:
         
         # Add research-level diagnostics if available
         if self.analysis_level == 'research' and hasattr(self.analyzer, 'switching_polarity'):
+            ses = getattr(self.analyzer, 'slope_exponent_stats', None) or {}
             extracted['research_diagnostics'] = {
                 'switching_polarity': self.analyzer.switching_polarity,
                 'ndr_index': float(self.analyzer.ndr_index) if self.analyzer.ndr_index is not None else None,
@@ -332,6 +406,17 @@ class IVSweepAnalyzer:
                 'loop_similarity_score': float(self.analyzer.loop_similarity_score) if self.analyzer.loop_similarity_score is not None else None,
                 'pinch_offset': float(self.analyzer.pinch_offset) if self.analyzer.pinch_offset is not None else None,
                 'noise_floor': float(self.analyzer.noise_floor) if self.analyzer.noise_floor is not None else None,
+                'slope_exponent_stats': {
+                    'mean_n': float(ses['mean_n']) if ses.get('mean_n') is not None else None,
+                    'std_n': float(ses['std_n']) if ses.get('std_n') is not None else None,
+                    'max_n': float(ses['max_n']) if ses.get('max_n') is not None else None,
+                } if ses else {},
+                'ndr_norm_slope': float(self.analyzer.ndr_norm_slope) if getattr(self.analyzer, 'ndr_norm_slope', None) is not None else None,
+                'ndr_depth': float(self.analyzer.ndr_depth) if getattr(self.analyzer, 'ndr_depth', None) is not None else None,
+                'ndr_v_start': float(self.analyzer.ndr_v_start) if getattr(self.analyzer, 'ndr_v_start', None) is not None else None,
+                'ndr_v_end': float(self.analyzer.ndr_v_end) if getattr(self.analyzer, 'ndr_v_end', None) is not None else None,
+                'ndr_peak_to_valley': float(self.analyzer.ndr_peak_to_valley) if getattr(self.analyzer, 'ndr_peak_to_valley', None) is not None else None,
+                'ndr_segment_count': int(self.analyzer.ndr_segment_count) if getattr(self.analyzer, 'ndr_segment_count', None) is not None else None,
             }
         
         # Add validation results if available

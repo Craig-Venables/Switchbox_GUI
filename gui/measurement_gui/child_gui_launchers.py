@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Optional
 
@@ -78,15 +79,31 @@ def open_device_visualizer(gui: Any) -> None:
             sample_path = gui._get_sample_save_directory(sample_name)
         except Exception:
             sample_path = None
-    try:
-        from tools.device_visualizer.device_visualizer_app import launch_visualizer
 
-        launch_visualizer(sample_path=sample_path)
-    except Exception as exc:
-        import traceback
+    def _run_visualizer() -> None:
+        try:
+            from tools.device_visualizer.device_visualizer_app import launch_visualizer
 
-        traceback.print_exc()
-        messagebox.showerror("Device Visualizer", f"Could not open Device Visualizer:\n{exc}")
+            launch_visualizer(sample_path=sample_path)
+        except Exception as exc:
+            import traceback
+
+            traceback.print_exc()
+
+            def _show_error() -> None:
+                messagebox.showerror(
+                    "Device Visualizer",
+                    f"Could not open Device Visualizer:\n{exc}",
+                    parent=gui.master,
+                )
+
+            try:
+                gui.master.after(0, _show_error)
+            except Exception:
+                pass
+
+    # Qt runs its own event loop; keep Tk responsive by launching in a worker thread.
+    threading.Thread(target=_run_visualizer, daemon=True, name="DeviceVisualizer").start()
 
 
 def open_oscilloscope_pulse(gui: Any) -> None:

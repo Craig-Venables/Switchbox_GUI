@@ -45,7 +45,14 @@ class PulseDiagramHelper:
         elif func == "endurance_burst_test":
             self._draw_endurance(params)
         elif func == "retention_test":
-            self._draw_pmu_retention(params)
+            if self._system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
+                self._draw_pmu_retention(params)
+            else:
+                self._draw_timed_retention(params)
+        elif func == "log_retention_test":
+            self._draw_log_retention(params)
+        elif func == "volatile_screening_test":
+            self._draw_volatile_screening(params)
         elif func == "smu_slow_pulse_measure":
             self._draw_smu_slow_pulse_measure(params)
         elif func == "smu_endurance":
@@ -682,7 +689,198 @@ class PulseDiagramHelper:
         if times_plot.size > 0:
             self.ax.set_xlim(0, times_plot[-1] * 1.1)
         self._set_preview_ylim(voltages + [r_v, p_v, 0])
+
+    def _draw_timed_retention(self, params):
+        """Draw SMU/TSP timed retention: init read → program pulse → timed reads.
+
+        Uses equal schematic spacing between a few sample markers; title shows period/duration.
+        """
+        t = 0.0
+        times, voltages = [], []
+        read_markers = []  # (t_center, label)
+        pulse_v = float(params.get('pulse_voltage', 2.0))
+        read_v = float(params.get('read_voltage', 0.2))
+        pulse_width = max(float(params.get('pulse_width', 100e-6)), 1e-9)
+
+        raw_intervals = params.get('read_intervals')
+        if raw_intervals:
+            if isinstance(raw_intervals, str):
+                intervals = [float(x.strip()) for x in raw_intervals.split(',') if x.strip()]
+            else:
+                intervals = [float(x) for x in raw_intervals]
+        else:
+            every = float(params.get('read_every_s', 60.0))
+            duration = float(params.get('retention_duration_s', 10000.0))
+            from Pulse_Testing.systems.retention_intervals import build_regular_read_intervals
+            intervals = build_regular_read_intervals(every, duration)
+
+        if not intervals:
+            intervals = [60.0, 120.0, 180.0]
+        every_s = float(params.get('read_every_s', 60.0))
+        duration_s = float(params.get('retention_duration_s', intervals[-1]))
+        if len(intervals) <= 6:
+            show = list(intervals)
+        else:
+            show = list(intervals[:4]) + [intervals[-1]]
+
+        vis_pulse = max(pulse_width, 0.02)
+        vis_read = 0.015
+        vis_gap = 0.04
+
+        # 1) Initial state read (before program)
+        read_start = t
+        read_end = t + vis_read
+        read_markers.append(((read_start + read_end) / 2, 'init'))
+        times.extend([read_start, read_start, read_end, read_end])
+        voltages.extend([0, read_v, read_v, 0])
+        t = read_end + 0.01
+
+        # 2) Program pulse
+        times.extend([t, t, t + vis_pulse, t + vis_pulse])
+        voltages.extend([0, pulse_v, pulse_v, 0])
+        t += vis_pulse + 0.005
+
+        # 3) Immediate post-pulse read (t=0 after program)
+        read_start = t
+        read_end = t + vis_read
+        read_markers.append(((read_start + read_end) / 2, 't=0'))
+        times.extend([read_start, read_start, read_end, read_end])
+        voltages.extend([0, read_v, read_v, 0])
+        t = read_end
+
+        for interval in show:
+            t += vis_gap
+            read_start = t
+            read_end = t + vis_read
+            if interval >= 60 and abs(interval / 60.0 - round(interval / 60.0)) < 1e-6:
+                label = f'{interval/60:g}min'
+            else:
+                label = f'{interval:g}s'
+            read_markers.append(((read_start + read_end) / 2, label))
+            times.extend([read_start, read_start, read_end, read_end])
+            voltages.extend([0, read_v, read_v, 0])
+            t = read_end
+
+        times_arr = np.array(times)
+        self.ax.plot(times_arr, voltages, 'brown', linewidth=2)
+        self.ax.fill_between(times_arr, 0, voltages, alpha=0.25, color='brown')
+        for rt, label in read_markers:
+            self.ax.plot(rt, read_v, 'ro', markersize=6)
+            self.ax.annotate(label, (rt, read_v), textcoords='offset points',
+                             xytext=(0, 8), ha='center', fontsize=7, color='darkred')
+        self.ax.set_xlabel('Time (schematic)')
+        self.ax.set_ylabel('Voltage (V)')
+        pw_us = pulse_width * 1e6
+        if pw_us >= 1000:
+            pw_txt = f'{pulse_width * 1e3:.3g} ms'
+        elif pw_us >= 1:
+            pw_txt = f'{pw_us:.3g} µs'
+        else:
+            pw_txt = f'{pulse_width * 1e9:.3g} ns'
+        n_reads = len(intervals)
+        self.ax.set_title(
+            f'Timed Retention: init → {pulse_v:g} V @ {pw_txt} → every {every_s:g}s '
+            f'for {duration_s:g}s ({n_reads} reads)',
+            fontsize=8,
+        )
+        self.ax.grid(True, alpha=0.3)
+        if times_arr.size > 0:
+            self.ax.set_xlim(0, times_arr[-1] * 1.15)
+        self._set_preview_ylim(voltages + [read_v, pulse_v, 0])
     
+    def _draw_log_retention(self, params):
+        """Log-spaced retention diagram (compressed time axis)."""
+        from Pulse_Testing.systems.retention_intervals import build_logarithmic_read_intervals
+        raw = params.get("read_intervals")
+        if raw and str(raw).strip():
+            intervals = [float(x.strip()) for x in str(raw).split(",") if x.strip()]
+        else:
+            intervals = build_logarithmic_read_intervals(
+                float(params.get("t_min_s", 0.1)),
+                float(params.get("t_max_s", 86400.0)),
+                int(params.get("num_reads", 80)),
+                include_early_burst=bool(params.get("include_early_burst", True)),
+            )
+        if not intervals:
+            intervals = [0.1, 1.0, 10.0, 100.0]
+        show = list(intervals[:5]) + ([intervals[-1]] if len(intervals) > 5 else [])
+        pulse_v = float(params.get("pulse_voltage", 2.0))
+        t = 0.0
+        times, voltages = [], []
+        read_v = float(params.get("read_voltage", 0.2))
+        vis_read = 0.015
+        vis_pulse = 0.03
+        for label in ("init", "t=0"):
+            times.extend([t, t, t + vis_read, t + vis_read])
+            voltages.extend([0, read_v, read_v, 0])
+            t += vis_read + 0.01
+        times.extend([t, t, t + vis_pulse, t + vis_pulse])
+        voltages.extend([0, pulse_v, pulse_v, 0])
+        t += vis_pulse + 0.01
+        for i, _ in enumerate(show):
+            times.extend([t, t, t + vis_read, t + vis_read])
+            voltages.extend([0, read_v, read_v, 0])
+            t += vis_read + 0.04 * (1 + i * 0.3)
+        times_arr = np.array(times)
+        self.ax.plot(times_arr, voltages, "b-", linewidth=1.5)
+        self.ax.fill_between(times_arr, 0, voltages, alpha=0.25, color="steelblue")
+        self.ax.set_xlabel("Time (diagram units — reads log-spaced in data)")
+        self.ax.set_ylabel("Voltage (V)")
+        self.ax.set_title(
+            f"Log Retention: {len(intervals)} reads, t={intervals[0]:g}…{intervals[-1]:g} s",
+            fontsize=8,
+        )
+        self.ax.grid(True, alpha=0.3)
+        self._set_preview_ylim(voltages + [read_v, pulse_v, 0])
+
+    def _draw_volatile_screening(self, params):
+        """Volatile screening: dense burst reads + optional slow tail."""
+        from Pulse_Testing.systems.retention_intervals import build_schedule_intervals
+        raw = params.get("read_intervals")
+        parsed = [float(x.strip()) for x in str(raw).split(",") if x.strip()] if raw and str(raw).strip() else []
+        burst_max = float(params.get("burst_t_max_s", 5.0))
+        if parsed:
+            burst = parsed
+        else:
+            burst = build_schedule_intervals(
+                str(params.get("schedule_mode", "log")),
+                float(params.get("t_min_s", 0.001)),
+                burst_max,
+                int(params.get("num_reads", 50)),
+            )
+        n_show = min(len(burst), 8)
+        pulse_v = float(params.get("pulse_voltage", 2.0))
+        read_v = float(params.get("read_voltage", 0.2))
+        t = 0.0
+        times, voltages = [], []
+        vis_read = 0.012
+        vis_pulse = 0.025
+        for _ in range(2):
+            times.extend([t, t, t + vis_read, t + vis_read])
+            voltages.extend([0, read_v, read_v, 0])
+            t += vis_read + 0.008
+        times.extend([t, t, t + vis_pulse, t + vis_pulse])
+        voltages.extend([0, pulse_v, pulse_v, 0])
+        t += vis_pulse + 0.008
+        for i in range(n_show):
+            times.extend([t, t, t + vis_read, t + vis_read])
+            voltages.extend([0, read_v, read_v, 0])
+            t += vis_read + 0.015 * (1.0 + 0.2 * i)
+        tail_note = ""
+        if params.get("include_slow_tail"):
+            tail_note = f" + slow tail from {params.get('slow_tail_start_s', 10)} s"
+        times_arr = np.array(times)
+        self.ax.plot(times_arr, voltages, color="darkorange", linewidth=1.5)
+        self.ax.fill_between(times_arr, 0, voltages, alpha=0.25, color="orange")
+        self.ax.set_xlabel("Time (diagram units — burst uses instrument delays)")
+        self.ax.set_ylabel("Voltage (V)")
+        self.ax.set_title(
+            f"Volatile Screening: {len(burst)} burst reads to {burst_max:g} s{tail_note}",
+            fontsize=8,
+        )
+        self.ax.grid(True, alpha=0.3)
+        self._set_preview_ylim(voltages + [read_v, pulse_v, 0])
+
     def _draw_smu_retention(self, params):
         """Draw SMU retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3..."""
         t = 0

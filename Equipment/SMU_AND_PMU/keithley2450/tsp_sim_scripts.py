@@ -337,7 +337,220 @@ class Keithley2450_TSP_Sim_Scripts:
             icc=icc,
             smu_type="Keithley 2450",
         )
-        return self._format_results(t_arr, v_arr, c_arr)
+        ops = ["baseline"] + ["post_pulse"] + ["retention"] * max(0, len(t_arr) - 2)
+        return self._format_results(t_arr, v_arr, c_arr, extras={"operation": ops[: len(t_arr)]})
+
+    def log_retention_test(
+        self,
+        pulse_voltage: float = 2.0,
+        pulse_width: float = 100e-6,
+        read_voltage: float = 0.2,
+        read_intervals: Optional[Iterable[float]] = None,
+        clim: float = 100e-3,
+        **_,
+    ) -> Dict:
+        from Pulse_Testing.systems.retention_intervals import fit_log_retention_decay
+
+        intervals = list(read_intervals or [0.1, 1, 10, 100, 1000])
+        pv = self._validate_voltage(pulse_voltage)
+        pw = self._validate_pulse_width(pulse_width)
+        rv = self._validate_voltage(read_voltage)
+        icc = self._validate_current_limit(clim)
+
+        timestamps: List[float] = []
+        voltages: List[float] = []
+        currents: List[float] = []
+        operations: List[str] = []
+        t = 0.0
+        r_base = 1e6
+        r_prog = 5e5
+
+        self.tsp.enable_output(True)
+        self.tsp.set_voltage(rv, icc)
+        self.tsp.advance_time(0.001)
+        i0 = rv / r_base
+        timestamps.append(t)
+        voltages.append(rv)
+        currents.append(i0)
+        operations.append("baseline")
+
+        self.tsp.set_voltage(pv, icc)
+        self.tsp.advance_time(pw)
+        self.tsp.set_voltage(0.0, icc)
+        t += pw + 0.001
+
+        self.tsp.set_voltage(rv, icc)
+        self.tsp.advance_time(0.001)
+        ip = rv / r_prog
+        timestamps.append(t)
+        voltages.append(rv)
+        currents.append(ip)
+        operations.append("post_pulse")
+
+        abs_t = 0.0
+        for interval in intervals:
+            wait = max(0.0, float(interval) - abs_t)
+            if wait > 0:
+                self.tsp.advance_time(wait)
+                t += wait
+                abs_t = float(interval)
+            r_t = r_prog * (1.0 + 0.02 * math.log1p(abs_t))
+            i_t = rv / r_t
+            timestamps.append(t)
+            voltages.append(rv)
+            currents.append(i_t)
+            operations.append("retention")
+            self.tsp.set_voltage(0.0, icc)
+
+        self.tsp.enable_output(False)
+        resistances = [v / i if abs(i) > 1e-15 else float("inf") for v, i in zip(voltages, currents)]
+        result: Dict = {
+            "timestamps": timestamps,
+            "voltages": voltages,
+            "currents": currents,
+            "resistances": resistances,
+            "operation": operations,
+        }
+        post_idx = [i for i, op in enumerate(operations) if op == "post_pulse"]
+        t_pulse = timestamps[post_idx[0]] if post_idx else None
+        fit = fit_log_retention_decay(
+            timestamps, resistances, operations, t_pulse_end=t_pulse
+        )
+        if fit:
+            result["retention_fit"] = fit
+        result["read_intervals_used"] = intervals
+        return result
+
+    def volatile_screening_test(
+        self,
+        pulse_voltage: float = 2.0,
+        pulse_width: float = 100e-6,
+        read_voltage: float = 0.2,
+        clim: float = 100e-3,
+        burst_intervals: Optional[List[float]] = None,
+        burst_wait_deltas: Optional[List[float]] = None,
+        slow_tail_intervals: Optional[List[float]] = None,
+        retention_threshold: float = 0.85,
+        min_switch_ratio: float = 0.05,
+        **_,
+    ) -> Dict:
+        from Pulse_Testing.systems.retention_intervals import (
+            classify_volatile_screening,
+            intervals_to_wait_deltas,
+        )
+
+        if burst_intervals is None and burst_wait_deltas is None:
+            burst_intervals = [0.001, 0.01, 0.1, 1.0, 5.0]
+        if burst_wait_deltas is None:
+            burst_wait_deltas = intervals_to_wait_deltas(burst_intervals or [])
+
+        pv = self._validate_voltage(pulse_voltage)
+        pw = self._validate_pulse_width(pulse_width)
+        rv = self._validate_voltage(read_voltage)
+        icc = self._validate_current_limit(clim)
+
+        timestamps: List[float] = []
+        voltages: List[float] = []
+        currents: List[float] = []
+        operations: List[str] = []
+        t = 0.0
+
+        self.tsp.enable_output(True)
+        self.tsp.set_voltage(rv, icc)
+        self.tsp.advance_time(0.001)
+        v0 = self.tsp.measure_voltage()
+        i0 = self.tsp.measure_current()
+        timestamps.append(t)
+        voltages.append(v0)
+        currents.append(i0)
+        operations.append("baseline")
+
+        self.tsp.set_voltage(pv, icc)
+        self.tsp.advance_time(pw)
+        self.tsp.set_voltage(0.0, icc)
+
+        t += pw + 0.001
+        self.tsp.set_voltage(rv, icc)
+        self.tsp.advance_time(0.001)
+        vp = self.tsp.measure_voltage()
+        ip = self.tsp.measure_current()
+        timestamps.append(t)
+        voltages.append(vp)
+        currents.append(ip)
+        operations.append("post_pulse")
+
+        r_base = v0 / i0 if abs(i0) > 1e-12 else 1e6
+        r_prog = vp / ip if abs(ip) > 1e-12 else 1e5
+        delta_r = r_prog - r_base
+
+        abs_t = 0.0
+        for delta in burst_wait_deltas:
+            self.tsp.advance_time(float(delta))
+            abs_t += float(delta)
+            t += float(delta)
+            self.tsp.set_voltage(rv, icc)
+            self.tsp.advance_time(0.001)
+            v = self.tsp.measure_voltage()
+            i = self.tsp.measure_current()
+            timestamps.append(t)
+            voltages.append(v)
+            currents.append(i)
+            operations.append("retention")
+            self.tsp.set_voltage(0.0, icc)
+
+        if slow_tail_intervals:
+            for interval in slow_tail_intervals:
+                wait = max(0.0, float(interval) - abs_t)
+                if wait > 0:
+                    self.tsp.advance_time(wait)
+                    t += wait
+                    abs_t = float(interval)
+                self.tsp.set_voltage(rv, icc)
+                self.tsp.advance_time(0.001)
+                v = self.tsp.measure_voltage()
+                i = self.tsp.measure_current()
+                timestamps.append(t)
+                voltages.append(v)
+                currents.append(i)
+                operations.append("slow_tail")
+                self.tsp.set_voltage(0.0, icc)
+
+        self.tsp.enable_output(False)
+
+        resistances = [
+            (v / i) if abs(i) > 1e-12 else float("inf") for v, i in zip(voltages, currents)
+        ]
+        # Simulate volatile decay on retention points for realistic screening
+        for idx, op in enumerate(operations):
+            if op in ("retention", "slow_tail") and delta_r != 0:
+                post_t = timestamps[[i for i, o in enumerate(operations) if o == "post_pulse"][0]]
+                dt = max(0.0, timestamps[idx] - post_t)
+                frac = math.exp(-dt / 0.05)
+                r_tgt = r_base + delta_r * frac
+                resistances[idx] = r_tgt
+                currents[idx] = voltages[idx] / r_tgt if r_tgt else currents[idx]
+
+        result: Dict = {
+            "timestamps": timestamps,
+            "voltages": voltages,
+            "currents": currents,
+            "resistances": resistances,
+            "operation": operations,
+        }
+        post_idx = [i for i, op in enumerate(operations) if op == "post_pulse"]
+        t_pulse = timestamps[post_idx[0]] if post_idx else None
+        result["volatile_screening"] = classify_volatile_screening(
+            timestamps,
+            resistances,
+            operations,
+            retention_threshold=retention_threshold,
+            min_switch_ratio=min_switch_ratio,
+            t_pulse_end=t_pulse,
+        )
+        result["read_intervals_used"] = list(burst_intervals or [])
+        if slow_tail_intervals:
+            result["slow_tail_intervals_used"] = list(slow_tail_intervals)
+        return result
 
     def voltage_amplitude_sweep(
         self,

@@ -1,0 +1,46 @@
+{
+  "camera_backend": "uc480",
+  "camera_index": 0,
+  "camera_serial": "4102827807",
+  "resolution": [
+    1280,
+    720
+  ],
+  "exposure": 6.2e-05,
+  "camera_gain": 1.0,
+  "gain_boost": false,
+  "calibration": {
+    "mode": "two_point",
+    "um_per_pixel": 2.7979971387496323,
+    "reference_distance_um": 200.0,
+    "point_a": [
+      449.3397009966777,
+      269.42056074766356
+    ],
+    "point_b": [
+      520.8114617940199,
+      268.3551401869159
+    ]
+  },
+  "stage": {
+    "z_motor_serial": "27254172",
+    "z_motor_scale": 34304,
+    "z_min_mm": 0.0,
+    "z_max_mm": 25.0,
+    "z_jog_step_mm": 0.1,
+    "z_speed_mm_s": 2.0,
+    "z_accel_mm_s2": 3.0
+  },
+  "analysis": {
+    "roi_half_size_px": 30,
+    "background_subtract": true,
+    "analysis_fps": 10,
+    "display_zoom": 8.0,
+    "click_magnification": 8.0,
+    "manual_spot_center": true,
+    "spot_center_x": 706.0,
+    "spot_center_y": 417.0,
+    "sensor_roi_width": 255,
+    "sensor_roi_height": 256
+  }
+}

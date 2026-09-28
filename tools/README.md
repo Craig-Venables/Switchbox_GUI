@@ -1,6 +1,8 @@
 # Standalone tools
 
-Optional utilities that live outside the main `main.py` application. Each tool has its own folder under `tools/` with a **snake_case** name (no spaces).
+Utilities kept beside the main application for convenience. They are not part of `main.py`. Each tool is self-contained enough to live in its own repository; they share this repo so they are easy to run in the lab.
+
+Each tool has its own folder under `tools/` with a **snake_case** name (no spaces).
 
 > **Legacy note:** Older copies with spaces in the name (e.g. `afm curve analysis`, `Impedence Analyzer`) were removed. Use the underscore paths listed below.
 
@@ -14,12 +16,16 @@ Optional utilities that live outside the main `main.py` application. Each tool h
 | [`hp4140b_gui/`](hp4140b_gui/) | HP 4140B pA meter / SMU GUI | `python tools/hp4140b_gui/run_gui.py` |
 | [`camera_stream_standalone/`](camera_stream_standalone/) | USB camera stream viewer | `python tools/camera_stream_standalone/camera_stream_app.py` |
 | [`connection_check_standalone/`](connection_check_standalone/) | Connection check without main app | `python tools/connection_check_standalone/Connection_Check_Standalone.py` |
-| [`tsp_testing_gui_standalone_v1/`](tsp_testing_gui_standalone_v1/) | Legacy Keithley 2450 TSP GUI | `python tools/tsp_testing_gui_standalone_v1/main.py` |
+| [`tsp_gui/`](tsp_gui/) | **2450 TSP pulse GUI** (USB + Oxxius laser) | `python tools/tsp_gui/main.py` |
+| [`tsp_testing_gui_standalone_v1/`](tsp_testing_gui_standalone_v1/) | Legacy Keithley 2450 TSP GUI (prefer `tsp_gui/`) | `python tools/tsp_testing_gui_standalone_v1/main.py` |
 | [`data_analysis_pulse_2450/`](data_analysis_pulse_2450/) | TSP / pulse data analysis GUI | `python tools/data_analysis_pulse_2450/main.py` |
 | [`classification_validation/`](classification_validation/) | Classifier weight tuning & validation | `python tools/classification_validation/launch_gui.py` |
 | [`device_visualizer/`](device_visualizer/) | Qt device yield / IV gallery viewer | `python tools/device_visualizer/device_visualizer_app.py` |
 | [`filament_jump_finder/`](filament_jump_finder/) | Detect large current jumps in IV data | `python -m tools.filament_jump_finder` |
+| [`historical_yield_analysis/`](historical_yield_analysis/) | Thesis yield / composition timeline from manual Excel labels (cached) | `python tools/historical_yield_analysis/launch_gui.py` |
+| [`sample_yield_plots/`](sample_yield_plots/) | Yield vs polymer fraction and phase separation | `python tools/sample_yield_plots/main.py` |
 | [`impedance_analyzer/`](impedance_analyzer/) | SMaRT impedance CSV / `.dat` plots | `python tools/impedance_analyzer/visualise_csv.py` |
+| [`solartron_1260/`](solartron_1260/) | Solartron SI 1260 live C–f sweeps (SMaRT replacement, PyQt5) | `python tools/solartron_1260/run_gui.py` |
 | [`ito_analysis/`](ito_analysis/) | ITO sample comparison plots | `python tools/ito_analysis/ITO.py` |
 | [`afm_3d_holes_protrusion/`](afm_3d_holes_protrusion/) | AFM hole / protrusion batch analysis | `python tools/afm_3d_holes_protrusion/main.py` |
 | [`afm_curve_analysis/`](afm_curve_analysis/) | AFM line-profile comparison | `python tools/afm_curve_analysis/main.py` |
@@ -28,6 +34,9 @@ Optional utilities that live outside the main `main.py` application. Each tool h
 | [`gordon_temperature/`](gordon_temperature/) | Gordon–Taylor blend Tg plot | `python tools/gordon_temperature/gordon_temp.py` |
 | [`optical_timing_calibration/`](optical_timing_calibration/) | Optical pulse timing from saved data | `python tools/optical_timing_calibration/analyze_optical_result.py <file>` |
 | [`fg_test/`](fg_test/) | SDG1032X FG config smoke test | `python tools/fg_test/test_fg_config.py` |
+| [`pmu_laser_smu_read/`](pmu_laser_smu_read/) | 4200 PMU CH1 TTL laser + SMU continuous R(t) | `python tools/pmu_laser_smu_read/run_gui.py` |
+| [`laser_beam_width/`](laser_beam_width/) | Overhead camera laser spot width (FWHM / 1/e²) | `python tools/laser_beam_width/main.py` |
+| [`laser_power_sweep/`](laser_power_sweep/) | Oxxius digital power sweep + PM100D (+ optional power density) | `python tools/laser_power_sweep/main.py` |
 | [`Lines_of_code/`](Lines_of_code/) | Repo line-count report | `python tools/Lines_of_code/count_lines_of_code.py` |
 
 ## Integrated with Measurement GUI
@@ -57,6 +66,8 @@ To add a new hardware tool, see [Documents/guides/GUI_EXTENSION_GUIDE.md](../Doc
 | **classification_validation** | Tune classifier weights against labelled test files | [README](classification_validation/README.md), [QUICK_START](classification_validation/QUICK_START.md) |
 | **device_visualizer** | Browse device folders, yield heatmaps, plot gallery | [README](device_visualizer/README.md) |
 | **filament_jump_finder** | Find filament-forming jumps in IV sweeps | Run with `python -m tools.filament_jump_finder --sample <path>` |
+| **historical_yield_analysis** | Index split data roots, cache classifications, plot yield evolution | [README](historical_yield_analysis/README.md) |
+| **sample_yield_plots** | Box and scatter plots of device yield against polymer fraction and phase separation | [README](sample_yield_plots/README.md) |
 | **impedance_analyzer** | Open/short corrected impedance plots | [README](impedance_analyzer/README.md) |
 | **ito_analysis** | Compare ITO deposition batches | [README_ITO_ANALYSIS](ito_analysis/README_ITO_ANALYSIS.md) |
 | **optical_timing_calibration** | Derive timing from optical readout files | [README](optical_timing_calibration/README.md) |
@@ -80,7 +91,10 @@ See [afm_3d_holes_protrusion/README.md](afm_3d_holes_protrusion/README.md) and [
 | **hp4140b_gui** | HP 4140B |
 | **camera_stream_standalone** | USB camera (PyInstaller build supported) |
 | **connection_check_standalone** | Multiplexer / SMU wiring check |
-| **tsp_testing_gui_standalone_v1** | Keithley 2450 TSP (self-contained copy of drivers) |
+| **tsp_gui** | Keithley 2450 TSP pulse + Oxxius laser (USB; preferred) |
+| **tsp_testing_gui_standalone_v1** | Legacy 2450 TSP copy — prefer **tsp_gui** |
+| **pmu_laser_smu_read** | 4200 PMU CH1 TTL laser + SMU continuous R(t) (KXCI) |
+| **solartron_1260** | Solartron SI 1260 impedance / capacitance (GPIB, PyQt5) |
 
 ## Packaging (PyInstaller)
 
@@ -99,6 +113,7 @@ Build artefacts land in each tool's `dist/` folder (gitignored). See [Documents/
 | Tool | Purpose |
 |------|---------|
 | **fg_test** | Verify Siglent SDG1032X accepts Laser FG Scope settings |
+| **pmu_laser_smu_read** | PMU TTL laser gate + SMU R(t) over KXCI |
 | **Lines_of_code** | Generate `lines_of_code_report.txt` for the repo |
 
 ## Folder conventions

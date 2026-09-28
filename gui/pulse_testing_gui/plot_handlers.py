@@ -25,6 +25,8 @@ def plot_by_type(gui: Any, plot_type: str) -> None:
         "pot_dep_cycle": _plot_pot_dep_cycle,
         "endurance": _plot_endurance,
         "retention": _plot_retention,
+        "log_retention": _plot_log_retention,
+        "volatile_screening": _plot_volatile_screening,
         "relaxation_reads": _plot_relaxation_reads,
         "relaxation_all": _plot_relaxation_all,
         "relaxation": _plot_relaxation,
@@ -114,29 +116,42 @@ def _plot_time_series(gui):
     
     valid_times, valid_resistances = zip(*valid_data)
     
-    # Special handling for SMU Retention: plot resistance over time (no pulse_types)
-    if test_name in ("SMU: Retention", "⚠️ SMU Retention"):
-        # Retention test: Initial Read → Pulse → Read @ t1 → Read @ t2 → Read @ t3...
-        # Timestamps are relative to start (initial read at t=0), plot resistance over time
+    operations = gui.last_results.get('operation') or []
+    # Timed Retention / SMU Retention: highlight initial state vs after-pulse reads
+    if test_name in ("SMU: Retention", "⚠️ SMU Retention", "Timed Retention") or (
+        operations and any(op in ('baseline', 'post_pulse', 'retention') for op in operations)
+    ):
         if timestamps and resistances:
-            # Plot resistance over time
-            # Mark initial read (first point) with different style
-            if len(timestamps) > 0:
-                # Plot initial read with different marker
-                gui.ax.plot(timestamps[0], resistances[0], 'go', markersize=10, 
+            if operations and len(operations) == len(timestamps):
+                base_i = [i for i, op in enumerate(operations) if op == 'baseline']
+                after_i = [i for i, op in enumerate(operations) if op != 'baseline']
+                if base_i:
+                    gui.ax.plot(
+                        [timestamps[i] for i in base_i],
+                        [resistances[i] for i in base_i],
+                        'go', markersize=10, markeredgewidth=2,
+                        label='Initial state', alpha=0.8, zorder=3,
+                    )
+                if after_i:
+                    gui.ax.plot(
+                        [timestamps[i] for i in after_i],
+                        [resistances[i] for i in after_i],
+                        'o-', color='blue', markersize=6, linewidth=2,
+                        label='After pulse', alpha=0.8,
+                    )
+            elif len(timestamps) > 0:
+                gui.ax.plot(timestamps[0], resistances[0], 'go', markersize=10,
                            markeredgewidth=2, label='Initial Read', alpha=0.8, zorder=3)
-                # Plot subsequent reads
                 if len(timestamps) > 1:
-                    gui.ax.plot(timestamps[1:], resistances[1:], 'o-', color='blue', 
+                    gui.ax.plot(timestamps[1:], resistances[1:], 'o-', color='blue',
                                markersize=6, linewidth=2, label='After Pulse', alpha=0.8)
             else:
-                # Fallback if no data
-                gui.ax.plot(timestamps, resistances, 'o-', color='blue', markersize=6, 
+                gui.ax.plot(timestamps, resistances, 'o-', color='blue', markersize=6,
                            linewidth=2, label='Resistance', alpha=0.8)
-            
+
             gui.ax.set_xlabel('Time Since Start (s)')
             gui.ax.set_ylabel('Resistance (Ω)')
-            gui.ax.set_title('SMU Retention: Resistance vs Time (Initial Read → Pulse → Reads)')
+            gui.ax.set_title(f'{test_name}: Initial state → pulse → timed reads')
             gui.ax.grid(True, alpha=0.3)
             gui.ax.legend(loc='best')
             
@@ -642,6 +657,168 @@ def _plot_retention(gui):
     gui.ax.legend()
     gui.ax.grid(True, alpha=0.3)
     _configure_measurement_y_scale(gui.ax, plotted_y, y_mode)
+
+
+def _time_since_pulse(gui) -> tuple:
+    """Return timestamps relative to post_pulse and the post_pulse absolute time."""
+    timestamps = list(gui.last_results.get("timestamps", []))
+    operations = gui.last_results.get("operation") or []
+    post_idx = [i for i, op in enumerate(operations) if op == "post_pulse"]
+    t_pulse = timestamps[post_idx[0]] if post_idx else None
+    if t_pulse is None:
+        return timestamps, None
+    return [max(0.0, t - t_pulse) for t in timestamps], t_pulse
+
+
+def _plot_retention_phases(gui, *, log_x: bool = False, title_suffix: str = "") -> None:
+    """Shared baseline / post-pulse / retention plot with optional log-x since pulse."""
+    test_name = gui.last_results.get("test_name", "Retention")
+    timestamps = gui.last_results.get("timestamps", [])
+    resistances = gui.last_results.get("resistances", [])
+    operations = gui.last_results.get("operation") or []
+
+    t_since, t_pulse = _time_since_pulse(gui)
+    x_plot = []
+    y_plot = []
+    colors = []
+    for i, (t, r, op) in enumerate(zip(timestamps, resistances, operations or ["retention"] * len(timestamps))):
+        if r is None or math.isnan(r) or math.isinf(r):
+            continue
+        if op == "baseline":
+            x_plot.append(0.0 if log_x else timestamps[i])
+            y_plot.append(r)
+            colors.append("green")
+        elif op == "post_pulse":
+            x_plot.append(1e-6 if log_x else (t_since[i] if t_pulse is not None else timestamps[i]))
+            y_plot.append(r)
+            colors.append("blue")
+        else:
+            x_val = t_since[i] if t_pulse is not None else timestamps[i]
+            if log_x and x_val <= 0:
+                x_val = 1e-6
+            x_plot.append(x_val)
+            y_plot.append(r)
+            colors.append("darkorange" if op == "slow_tail" else "steelblue")
+
+    if not x_plot:
+        gui.ax.text(0.5, 0.5, "No valid data", ha="center", va="center", transform=gui.ax.transAxes)
+        return
+
+    base_x = [x for x, c in zip(x_plot, colors) if c == "green"]
+    base_y = [y for y, c in zip(y_plot, colors) if c == "green"]
+    if base_x:
+        gui.ax.plot(base_x, base_y, "go", markersize=10, markeredgewidth=2, label="Baseline", zorder=3)
+    ret_x = [x for x, c in zip(x_plot, colors) if c != "green"]
+    ret_y = [y for y, c in zip(y_plot, colors) if c != "green"]
+    if ret_x:
+        gui.ax.plot(ret_x, ret_y, "o-", color="blue", markersize=5, linewidth=1.5, label="After pulse")
+
+    gui.ax.set_xlabel("Time since pulse (s)" if log_x or t_pulse is not None else "Time (s)")
+    gui.ax.set_ylabel("Resistance (Ω)")
+    gui.ax.set_title(f"{test_name}{title_suffix}")
+    gui.ax.grid(True, alpha=0.3)
+    gui.ax.legend(loc="best")
+    if log_x:
+        positive_x = [x for x in ret_x if x > 0]
+        if positive_x:
+            gui.ax.set_xscale("log")
+    pos_y = [y for y in y_plot if y > 0]
+    if pos_y:
+        gui.ax.set_yscale("log")
+
+
+def _plot_log_retention(gui):
+    """Log retention: log-time axis since pulse + optional fit overlay."""
+    _plot_retention_phases(gui, log_x=True, title_suffix=" — log-spaced retention")
+    fit = gui.last_results.get("retention_fit")
+    if not fit:
+        return
+    t_since, _ = _time_since_pulse(gui)
+    ret_t = [max(1e-6, t) for t in t_since[2:]] if len(t_since) > 2 else []
+    if not ret_t:
+        return
+    r0 = float(fit.get("r0", 0))
+    alpha = float(fit.get("alpha", 0))
+    import numpy as np
+    t_fit = np.logspace(np.log10(min(ret_t)), np.log10(max(ret_t)), 100)
+    r_fit = r0 * (1.0 + alpha * np.log1p(t_fit))
+    gui.ax.plot(t_fit, r_fit, "r--", linewidth=1.5, label=f"Fit R²={fit.get('r_squared', 0):.3f}")
+    gui.ax.legend(loc="best")
+    r2 = fit.get("r_squared")
+    if r2 is not None:
+        gui.ax.text(
+            0.02, 0.98,
+            f"R₀={r0:.2e} Ω\nα={alpha:.4g}\nR²={r2:.4f}",
+            transform=gui.ax.transAxes,
+            va="top",
+            fontsize=8,
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+        )
+
+
+def _plot_volatile_screening(gui):
+    """Volatile screening: retention fraction reference lines + verdict."""
+    test_name = gui.last_results.get("test_name", "Volatile Screening")
+    timestamps = gui.last_results.get("timestamps", [])
+    resistances = gui.last_results.get("resistances", [])
+    operations = gui.last_results.get("operation") or []
+    screening = gui.last_results.get("volatile_screening") or {}
+
+    base_idx = [i for i, op in enumerate(operations) if op == "baseline"]
+    post_idx = [i for i, op in enumerate(operations) if op == "post_pulse"]
+    if not base_idx or not post_idx:
+        _plot_retention_phases(gui, log_x=True)
+        return
+
+    r_base = float(resistances[base_idx[0]])
+    r_prog = float(resistances[post_idx[0]])
+    delta = r_prog - r_base
+    t_pulse = timestamps[post_idx[0]]
+
+    t_since = []
+    f_frac = []
+    for i, op in enumerate(operations):
+        if op in ("retention", "slow_tail", "post_pulse"):
+            t = max(1e-6, timestamps[i] - t_pulse) if op != "post_pulse" else 1e-6
+            if op == "post_pulse":
+                t = 1e-6
+            frac = (resistances[i] - r_base) / delta if abs(delta) > 1e-15 else 0.0
+            t_since.append(t)
+            f_frac.append(frac)
+
+    if t_since:
+        gui.ax.plot(t_since, f_frac, "o-", color="darkorange", markersize=5, linewidth=1.5, label="Retention fraction")
+        for level, lbl in ((1.0, "100%"), (0.85, "85%"), (0.5, "50%")):
+            gui.ax.axhline(level, color="gray", linestyle="--", alpha=0.5, linewidth=0.8)
+            gui.ax.text(t_since[-1], level, f" {lbl}", va="center", fontsize=7, color="gray")
+        gui.ax.set_xscale("log")
+        gui.ax.set_ylim(-0.05, 1.1)
+    gui.ax.set_xlabel("Time since pulse (s)")
+    gui.ax.set_ylabel("Retention fraction f(t)")
+    verdict = screening.get("verdict", "")
+    gui.ax.set_title(f"{test_name} — {verdict}")
+    gui.ax.grid(True, alpha=0.3)
+    gui.ax.legend(loc="best")
+
+    lines = []
+    if screening.get("retention_fraction_100ms") is not None:
+        lines.append(f"f@100ms={screening['retention_fraction_100ms']:.2f}")
+    if screening.get("relaxation_time_50pct") is not None:
+        t50 = screening["relaxation_time_50pct"]
+        if t50 < 1:
+            lines.append(f"τ₅₀={t50 * 1e3:.1f} ms")
+        else:
+            lines.append(f"τ₅₀={t50:.2g} s")
+    if screening.get("switch_ratio") is not None:
+        lines.append(f"switch={screening['switch_ratio']:.2f}")
+    if lines:
+        gui.ax.text(
+            0.02, 0.02, " | ".join(lines),
+            transform=gui.ax.transAxes,
+            fontsize=8,
+            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.9),
+        )
+
 
 def _plot_relaxation(gui):
     """Plot relaxation measurements (old plot type for backward compatibility)"""

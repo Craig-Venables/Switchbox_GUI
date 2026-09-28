@@ -1,8 +1,19 @@
 import serial
 import time
 
+# True rated max optical power of the LBX unit normally used with the
+# TTL/ACC (current-%) workflow (tools/pmu_laser_smu_read). PM is an
+# absolute power CEILING enforced by the firmware in ALL modes (APC *and*
+# ACC) — if it's left at a lower leftover value (e.g. the 100 mW used for
+# manual/analog-wheel control elsewhere in this driver), CM (current %)
+# gets silently clamped once the resulting power would exceed that
+# ceiling, so "100% current" does NOT mean "100% of the laser's rated
+# output". Set this to your unit's actual rated power (see its label/
+# datasheet) if it's not a 330 mW model.
+TTL_FULL_POWER_MW = 330
+
 class OxxiusLaser:
-    def __init__(self, port="COM3", baud=38400, timeout=1.0, safe_power_mw=10):
+    def __init__(self, port="COM3", baud=38400, timeout=1.0, safe_power_mw=10, verbose=True):
         """
         Initialise connection to Oxxius laser.
         Adjust 'port' and 'baud' depending on your hardware.
@@ -12,7 +23,10 @@ class OxxiusLaser:
         system is turned back on, we set a safe power level as soon as we
         connect. Pass safe_power_mw=10 (default) to set 10 mW on connect, or
         None to leave the hardware power unchanged.
+
+        verbose: If True (default), print every serial command and reply.
         """
+        self.verbose = verbose
         self.ser = serial.Serial(
             port=port,
             baudrate=baud,
@@ -32,9 +46,14 @@ class OxxiusLaser:
 
     def send_command(self, cmd):
         """Send a command string and return the reply as text."""
+        if self.verbose:
+            print(f"[LASER] >> {cmd}", flush=True)
         self.ser.write((cmd + "\n").encode("ascii"))
         reply = self.ser.read_until(b"\r\n")
-        return reply.decode("ascii", errors="ignore").strip()
+        text = reply.decode("ascii", errors="ignore").strip()
+        if self.verbose:
+            print(f"[LASER] << {text!r}", flush=True)
+        return text
 
     # =======================
     # Basic info & control
@@ -116,16 +135,73 @@ class OxxiusLaser:
         return self.send_command(f"PM {value}")
 
     def get_power(self):
-        """Query power setpoint/reading (?P)."""
+        """Query measured output power in mW (?P)."""
         return self.send_command("?P")
 
+    def get_power_setpoint(self):
+        """Query power setpoint / ceiling in mW (?SP)."""
+        return self.send_command("?SP")
+
     def set_current(self, value):
-        """Set diode current (if in current mode)."""
-        return self.send_command(f"I {value}")
+        """Set diode current as % of nominal (0–125). Uses CM (not saved to EEPROM).
+
+        CM = Automatic Current Control setpoint as a *percent of the laser's
+        nominal diode current* (not mA, and not optical power %). In ACC
+        mode (APC 0) this is what sets how bright the beam is when TTL
+        gates the emission on. Typical range 0–100 (up to 125 on some
+        firmwares). Distinct from PM/SP, which are absolute power in mW.
+        """
+        # Firmware expects an integer percent; "I …" is not a valid LBX command.
+        pct = int(round(float(value)))
+        return self.send_command(f"CM {pct}")
 
     def get_current(self):
-        """Query diode current (?I)."""
-        return self.send_command("?I")
+        """Query diode current setpoint in mA (?SC)."""
+        return self.send_command("?SC")
+
+    def get_current_percent(self):
+        """Query diode current setpoint as % of nominal (?CM)."""
+        return self.send_command("?CM")
+
+    def query_levels(self):
+        """Snapshot of current-% / current-mA / measured power / power setpoint.
+
+        Used when logging a pulse fire so the terminal shows what the laser
+        was actually set to (CM / ?SC) and what power it reported (?P / ?SP).
+        Returns a dict of raw reply strings (never raises — missing queries
+        become None).
+        """
+        out = {
+            "cm_pct": None,
+            "current_ma": None,
+            "power_mw": None,
+            "power_setpoint_mw": None,
+        }
+        try:
+            out["cm_pct"] = self.get_current_percent()
+        except Exception:
+            pass
+        try:
+            out["current_ma"] = self.get_current()
+        except Exception:
+            pass
+        try:
+            out["power_mw"] = self.get_power()
+        except Exception:
+            pass
+        try:
+            out["power_setpoint_mw"] = self.get_power_setpoint()
+        except Exception:
+            pass
+        return out
+
+    def digital_modulation_on(self):
+        """Enable TTL digital modulation (TTL 1). Alias CW 0 on some firmwares."""
+        return self.send_command("TTL 1")
+
+    def digital_modulation_off(self):
+        """Disable TTL digital modulation / CW beam (TTL 0). Alias CW 1 on some firmwares."""
+        return self.send_command("TTL 0")
 
     # =======================
     # Status & errors
@@ -196,8 +272,175 @@ class OxxiusLaser:
         time.sleep(0.1)
         results['AM'] = self.send_command("AM 0")
         time.sleep(0.1)
-        results['DM'] = self.send_command("DM 0")
+        results['TTL'] = self.digital_modulation_off()
         time.sleep(0.1)
+        return results
+
+    def prepare_for_ttl_modulation(self, full_power_mw=TTL_FULL_POWER_MW):
+        """
+        Arm the laser for external TTL gating via the digital modulation input.
+
+        Sequence: set power ceiling (PM <full_power_mw>) → analog modulation
+        OFF (AM 0) → digital modulation ON (TTL 1) → emission ON (DL 1).
+        Emission must be ON for the TTL input to gate light; LOW TTL = off,
+        HIGH TTL = on at the current/power setpoint.
+
+        Why set PM here: PM is an absolute power CEILING enforced by the
+        firmware in ALL modes, including ACC (current-%, what this method
+        arms). If PM was left at a lower leftover value from a previous
+        session (e.g. 100 mW, the standard manual/analog-wheel default),
+        CM (current %) silently clamps once the resulting power would
+        exceed that ceiling — so "100% current" would NOT mean "100% of
+        the laser's rated output". Setting PM to the unit's true rated max
+        power here ensures the full CM range (0-100%, or up to 125% of
+        nominal) maps to genuine 0-100%+ of rated output, uncapped.
+
+        Note: LBX firmware uses ``TTL``, not ``DM`` (``DM`` returns ``????``).
+
+        Args:
+            full_power_mw: Power ceiling to set (mW) — default is this
+                unit's rated max (see TTL_FULL_POWER_MW at module level;
+                change that constant, or pass a value here, if your laser
+                is not a 330 mW model).
+
+        Returns:
+            dict: Results of each command.
+        """
+        results = {}
+        if self.verbose:
+            print(
+                f"[LASER] === prepare_for_ttl_modulation (PM {full_power_mw}, "
+                "TTL 1, ACC, emission ON) ===",
+                flush=True,
+            )
+        # Emission must be OFF to change APC; then arm TTL and turn emission
+        # back ON — required for the TTL input to gate light.
+        results['emission_off'] = self.emission_off()
+        time.sleep(0.05)
+        # Raise the power ceiling BEFORE arming ACC/TTL so CM% is never
+        # silently clamped by a lower leftover PM value.
+        results['power'] = self.set_power(full_power_mw)
+        time.sleep(0.1)
+        results['AM'] = self.send_command("AM 0")
+        time.sleep(0.1)
+        results['APC'] = self.send_command("APC 0")
+        time.sleep(0.1)
+        results['TTL'] = self.digital_modulation_on()
+        time.sleep(0.1)
+        results['emission_on'] = self.emission_on()
+        time.sleep(0.1)
+        # Verify TTL actually stuck — some firmwares ignore TTL while still
+        # settling after APC/AM changes. Retry once if needed.
+        try:
+            ttl_q = self.send_command("?TTL")
+            results['TTL_query'] = ttl_q
+            if "1" not in str(ttl_q):
+                if self.verbose:
+                    print(
+                        f"[LASER] TTL not armed after prepare ({ttl_q!r}) — retrying TTL 1 + DL 1",
+                        flush=True,
+                    )
+                results['TTL_retry'] = self.digital_modulation_on()
+                time.sleep(0.1)
+                results['emission_on_retry'] = self.emission_on()
+                time.sleep(0.1)
+                results['TTL_query_retry'] = self.send_command("?TTL")
+        except Exception as exc:
+            results['TTL_verify_error'] = str(exc)
+        return results
+
+    def ensure_ttl_modulation(self, full_power_mw=TTL_FULL_POWER_MW):
+        """Make sure TTL digital modulation + emission are armed.
+
+        Queries ``?TTL`` first. If already on, only re-asserts emission ON
+        (cheap). If off / unknown / query fails, runs the full
+        ``prepare_for_ttl_modulation`` sequence so ACC + PM ceiling + TTL
+        are definitely correct.
+
+        Returns:
+            dict: Results of commands / queries performed.
+        """
+        results = {"already_armed": False}
+        try:
+            ttl_q = self.send_command("?TTL")
+            results['TTL_query'] = ttl_q
+            if "1" in str(ttl_q):
+                results['already_armed'] = True
+                results['emission_on'] = self.emission_on()
+                if self.verbose:
+                    print("[LASER] ensure_ttl: already TTL=1 — emission ON re-asserted", flush=True)
+                return results
+            if self.verbose:
+                print(
+                    f"[LASER] ensure_ttl: TTL not on ({ttl_q!r}) — full re-arm",
+                    flush=True,
+                )
+        except Exception as exc:
+            results['TTL_query_error'] = str(exc)
+            if self.verbose:
+                print(f"[LASER] ensure_ttl: query failed ({exc}) — full re-arm", flush=True)
+        results.update(self.prepare_for_ttl_modulation(full_power_mw=full_power_mw))
+        return results
+
+    def set_current_percent_for_ttl(self, percent):
+        """
+        Set diode current percent (``CM``) while leaving AM/TTL/emission alone.
+
+        Call after prepare_for_ttl_modulation() (which puts the unit in ACC /
+        APC 0). Do **not** re-send APC here — while emission is ON the firmware
+        returns ``Not authorized`` and a DL0/DL1 dance would interrupt TTL.
+
+        Args:
+            percent: Current setpoint in percent (typically 0–100).
+
+        Returns:
+            dict: Results of each command.
+        """
+        results = {}
+        pct = int(round(float(percent)))
+        if self.verbose:
+            print(f"[LASER] set current → {pct}% (CM, leave emission/TTL as-is)", flush=True)
+        results['current'] = self.set_current(pct)
+        time.sleep(0.1)
+        return results
+
+    def enter_alignment_mode(self, percent=5):
+        """
+        Continuous low-power beam for optical alignment (no TTL gating).
+
+        LBX command set (Annex A):
+          AM 0 → TTL 0 (CW) → APC 0 (ACC) → CM <percent> → DL 1
+
+        ``DM`` / ``I`` are not valid on this firmware (they return ``????``).
+
+        Call prepare_for_ttl_modulation() afterwards to return to experiment
+        mode (TTL 1 with emission ON).
+
+        Args:
+            percent: Alignment current setpoint in percent (default 5).
+
+        Returns:
+            dict: Results of each command.
+        """
+        results = {}
+        pct = int(round(float(percent)))
+        if self.verbose:
+            print(f"[LASER] === Align ON @ {pct}% ===", flush=True)
+        # Change APC / TTL only with emission off (avoids "Not authorized")
+        results['emission_off'] = self.emission_off()
+        time.sleep(0.05)
+        results['AM'] = self.send_command("AM 0")
+        time.sleep(0.1)
+        results['TTL'] = self.digital_modulation_off()
+        time.sleep(0.1)
+        results['APC'] = self.send_command("APC 0")
+        time.sleep(0.1)
+        results['current'] = self.set_current(pct)
+        time.sleep(0.1)
+        results['emission_on'] = self.emission_on()
+        time.sleep(0.1)
+        if self.verbose:
+            print(f"[LASER] === Align ON done (replies: {results}) ===", flush=True)
         return results
 
     def set_to_analog_modulation_mode(self, power_mw=100):
@@ -206,7 +449,7 @@ class OxxiusLaser:
         
         This is the standard state the laser should be left in:
         - Analog modulation ON (AM 1) - allows front panel wheel control
-        - Digital modulation OFF (DM 0)
+        - Digital modulation OFF (TTL 0)
         - Power control mode ON (APC 1)
         - Power set to specified value (default 100 mW)
         - Emission should remain ON
@@ -223,20 +466,23 @@ class OxxiusLaser:
         """
         results = {}
         try:
-            # Set to power control mode
+            # APC changes require emission off on this firmware
+            results['emission_off'] = self.emission_off()
+            time.sleep(0.05)
+
             results['APC'] = self.send_command("APC 1")
             time.sleep(0.1)
             
-            # Enable analog modulation (allows front panel wheel control)
             results['AM'] = self.send_command("AM 1")
             time.sleep(0.1)
             
-            # Disable digital modulation
-            results['DM'] = self.send_command("DM 0")
+            results['TTL'] = self.digital_modulation_off()
             time.sleep(0.1)
             
-            # Set power level
             results['power'] = self.set_power(power_mw)
+            time.sleep(0.1)
+
+            results['emission_on'] = self.emission_on()
             time.sleep(0.1)
             
         except Exception as e:
@@ -254,7 +500,7 @@ class OxxiusLaser:
         Standard final state:
         - Emission: ON
         - Analog modulation: ON (AM 1)
-        - Digital modulation: OFF (DM 0)
+        - Digital modulation: OFF (TTL 0)
         - Power control: ON (APC 1)
         - Power: 100 mW (front panel wheel controls 0-100% of this)
         
@@ -264,11 +510,7 @@ class OxxiusLaser:
         """
         if restore_to_manual_control:
             try:
-                # Ensure emission is ON
-                self.emission_on()
-                time.sleep(0.1)
-                
-                # Set to analog modulation mode with 100 mW power
+                # set_to_analog_modulation_mode handles emission off→APC→on
                 self.set_to_analog_modulation_mode(power_mw=100)
                 
             except Exception:
@@ -315,8 +557,8 @@ if __name__ == "__main__":
         print(f"   Result: {result}")
         
         # Disable digital modulation
-        print("   Disabling digital modulation (DM 0)...")
-        result = laser.send_command("DM 0")
+        print("   Disabling digital modulation (TTL 0)...")
+        result = laser.digital_modulation_off()
         print(f"   Result: {result}")
         
         # Set power to 5 mW
@@ -395,7 +637,7 @@ and leave the system in a good state for the next user:
 1. CONNECT to laser (COM4, 19200 baud)
 2. QUERY identity, status, and errors
 3. SET to power control mode: APC 1
-4. SET to digital control: AM 0, DM 0
+4. SET to digital control: AM 0, TTL 0
 5. SET power level (e.g., 5 mW for testing)
 6. TURN laser ON: DL 1
 7. WAIT 2 seconds (safety delay)
@@ -420,7 +662,7 @@ The laser should ALWAYS be left in this state when closing/disconnecting:
 
 - Emission: ON (DL 1)
 - Analog modulation: ON (AM 1)
-- Digital modulation: OFF (DM 0)
+- Digital modulation: OFF (TTL 0)
 - Power control: ON (APC 1)
 - Power: 100 mW
 
@@ -445,18 +687,19 @@ When setting power levels:
 3. Always set power BEFORE enabling analog modulation if you want a specific
    maximum value.
 
-COMMAND REFERENCE
+COMMAND REFERENCE (LBX Annex A)
 -----------------
-- DL 1: Turn emission ON
-- DL 0: Turn emission OFF (avoid after enabling analog modulation)
-- APC 1: Enable automatic power control
-- APC 0: Disable automatic power control
-- AM 1: Enable analog modulation (front panel wheel control)
-- AM 0: Disable analog modulation (digital/software control)
-- DM 1: Enable digital modulation
-- DM 0: Disable digital modulation
-- PM <value>: Set power in mW
-- ?P: Query current power setting
+- DL 1 / DL 0: Emission ON / OFF
+- APC 1 / APC 0: Power mode / Current mode (ACC)
+- AM 1 / AM 0: Analog modulation ON / OFF
+- TTL 1 / TTL 0: Digital (TTL) modulation ON / OFF  (NOT "DM" — returns ????)
+- CW 1 / CW 0: Alternate aliases (CW 1 = digital mod OFF, CW 0 = ON)
+- PM <mW>: Set power without EEPROM wear
+- CM <%>: Set diode current percent of nominal (0–125)  (NOT "I" — returns ????)
+- C <%>: Same as CM but saves to EEPROM
+- ?P / ?SC / ?SP: Query measured power / current setpoint (mA) / power setpoint
+- ???? reply: command not understood
+- "Not authorized": often means APC was changed while emission was ON
 
 SERIAL PULSE TIMING (MINIMUM PULSE WIDTH)
 ------------------------------------------

@@ -1,6 +1,6 @@
 # Refactoring – Remaining Work
 
-This document tracks outstanding refactoring tasks for the Switchbox GUI project. See `TODO.md` for general feature requests and known issues.
+This document tracks outstanding refactoring tasks for the Switchbox GUI project.
 
 ---
 
@@ -8,7 +8,7 @@ This document tracks outstanding refactoring tasks for the Switchbox GUI project
 
 - **Phase 1 Layout Builder**: Removed duplicate sequential controls; extracted custom_measurement_section, conditional_config_helpers; removed legacy methods (_build_connection_section, _build_mode_selection, _build_top_banner, _build_signal_messaging, build_all_panels)
 - **Phase 2 Measurement GUI**: Extracted custom_sweeps.py, messaging_handlers.py, conditional_testing.py
-- **Documentation**: Module docstrings, README updates, `TODO.md` consolidation
+- **Documentation**: Module docstrings and README updates
 - **Archive**: Legacy code moved to `archive/`
 - **Deprecation shims**: `IV_Analysis`, `Sample_Analysis` → `analysis`
 - **Naming fixes**: `Measurments` → `Measurements` shim (root `Measurments/` re-exports `Measurements`)

@@ -1,0 +1,13 @@
+# AFM 3D holes / protrusion analyser
+# Install with:
+#   py -3.10 -m pip install -r tools/afm_3d_holes_protrusion/requirements.txt
+#
+# matplotlib is only needed for launch_gui.py (live preview).
+# kaleido is optional: Plotly PNG export if SAVE_PNGS is enabled.
+
+numpy>=1.23
+pandas>=2.0
+scipy>=1.10
+plotly>=5.0
+igor2>=0.5
+matplotlib>=3.7

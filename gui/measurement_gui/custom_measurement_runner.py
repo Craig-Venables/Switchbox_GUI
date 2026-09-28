@@ -42,8 +42,11 @@ def run_custom_measurement(gui: Any) -> None:
             messagebox.showwarning("Warning", "Not connected to Keithley!")
             return
 
-        # Reset graphs/buffers between runs
-        gui._reset_plots_for_new_run(gui)
+        # Reset graphs/buffers between runs (Tk main thread — matplotlib is not thread-safe)
+        if hasattr(gui, "_reset_plots_for_new_run_main_thread"):
+            gui._reset_plots_for_new_run_main_thread()
+        else:
+            gui._reset_plots_for_new_run(gui)
 
         if gui.single_device_flag:
             response = messagebox.askquestion(
@@ -937,8 +940,11 @@ def run_custom_measurement(gui: Any) -> None:
 
 
             # Always mark measurement complete in GUI
-            gui.measuring = False
-            gui._set_measurement_feedback(False)
+            if hasattr(gui, "_finish_measurement_ui"):
+                gui._finish_measurement_ui()
+            else:
+                gui.measuring = False
+                gui._set_measurement_feedback(False)
             if gui.telegram.is_enabled():
                 combined = getattr(gui, '_last_combined_summary_path', None)
                 gui.telegram.start_post_measurement_worker(save_dir, combined)
