@@ -64,6 +64,9 @@ tools/historical_yield_analysis/cache/
 tools/historical_yield_analysis/output/
 tools/historical_yield_analysis/config.json
 
+# Sample yield plots (regenerate with tools/sample_yield_plots/main.py)
+tools/sample_yield_plots/output/
+
 # OS
 .DS_Store
 Thumbs.db

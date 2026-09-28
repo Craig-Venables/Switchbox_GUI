@@ -1,6 +1,8 @@
 # Standalone tools
 
-Optional utilities that live outside the main `main.py` application. Each tool has its own folder under `tools/` with a **snake_case** name (no spaces).
+Utilities kept beside the main application for convenience. They are not part of `main.py`. Each tool is self-contained enough to live in its own repository; they share this repo so they are easy to run in the lab.
+
+Each tool has its own folder under `tools/` with a **snake_case** name (no spaces).
 
 > **Legacy note:** Older copies with spaces in the name (e.g. `afm curve analysis`, `Impedence Analyzer`) were removed. Use the underscore paths listed below.
 
@@ -21,6 +23,7 @@ Optional utilities that live outside the main `main.py` application. Each tool h
 | [`device_visualizer/`](device_visualizer/) | Qt device yield / IV gallery viewer | `python tools/device_visualizer/device_visualizer_app.py` |
 | [`filament_jump_finder/`](filament_jump_finder/) | Detect large current jumps in IV data | `python -m tools.filament_jump_finder` |
 | [`historical_yield_analysis/`](historical_yield_analysis/) | Thesis yield / composition timeline from manual Excel labels (cached) | `python tools/historical_yield_analysis/launch_gui.py` |
+| [`sample_yield_plots/`](sample_yield_plots/) | Yield vs polymer fraction and phase separation | `python tools/sample_yield_plots/main.py` |
 | [`impedance_analyzer/`](impedance_analyzer/) | SMaRT impedance CSV / `.dat` plots | `python tools/impedance_analyzer/visualise_csv.py` |
 | [`solartron_1260/`](solartron_1260/) | Solartron SI 1260 live C–f sweeps (SMaRT replacement, PyQt5) | `python tools/solartron_1260/run_gui.py` |
 | [`ito_analysis/`](ito_analysis/) | ITO sample comparison plots | `python tools/ito_analysis/ITO.py` |
@@ -64,6 +67,7 @@ To add a new hardware tool, see [Documents/guides/GUI_EXTENSION_GUIDE.md](../Doc
 | **device_visualizer** | Browse device folders, yield heatmaps, plot gallery | [README](device_visualizer/README.md) |
 | **filament_jump_finder** | Find filament-forming jumps in IV sweeps | Run with `python -m tools.filament_jump_finder --sample <path>` |
 | **historical_yield_analysis** | Index split data roots, cache classifications, plot yield evolution | [README](historical_yield_analysis/README.md) |
+| **sample_yield_plots** | Box and scatter plots of device yield against polymer fraction and phase separation | [README](sample_yield_plots/README.md) |
 | **impedance_analyzer** | Open/short corrected impedance plots | [README](impedance_analyzer/README.md) |
 | **ito_analysis** | Compare ITO deposition batches | [README_ITO_ANALYSIS](ito_analysis/README_ITO_ANALYSIS.md) |
 | **optical_timing_calibration** | Derive timing from optical readout files | [README](optical_timing_calibration/README.md) |

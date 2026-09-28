@@ -27,6 +27,7 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 
 ## Reference ([`reference/`](reference/))
 
+- **[SYSTEM_OVERVIEW.md](reference/SYSTEM_OVERVIEW.md)** — instruments, measurement types, and GUI detail (formerly the long root README)  
 - **[MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md](reference/MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md)** — main app flow: `main.py` → Sample → Measurement GUI (start here for architecture)  
 - **[PULSE_TESTING_GUI_REFERENCE.md](reference/PULSE_TESTING_GUI_REFERENCE.md)**  
 - **[OSCILLOSCOPE_PULSE_GUI_REFERENCE.md](reference/OSCILLOSCOPE_PULSE_GUI_REFERENCE.md)**  
@@ -53,7 +54,7 @@ Material for **operators**, **developers**, **AI assistants**, and **release bui
 
 ## Standalone tools ([`../tools/`](../tools/))
 
-- **[tools/README.md](../tools/README.md)** — index of all optional utilities (run commands, categories, PyInstaller builds)  
+- **[tools/README.md](../tools/README.md)** — index of standalone utilities (separate from the main app; each could be its own repo)  
 - Hardware tools integrated in Measurement GUI: `tools/Display/`, `tools/LED_testing/`  
 - Analysis: `tools/data_analysis_pulse_2450/`, `tools/device_visualizer/`, `tools/classification_validation/`  
 - Setup: `tools/maps_create/`, `tools/equipment_address_location/`  

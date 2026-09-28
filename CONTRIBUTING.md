@@ -15,7 +15,7 @@ This document is for anyone taking over maintenance of the Switchbox Measurement
 | `plotting/` | Plotting utilities |
 | `Pulse_Testing/` | Multi-instrument pulse routing |
 | `Json_Files/` | Runtime configuration |
-| `tools/` | Standalone utilities (canonical location for optional tools) |
+| `tools/` | Standalone utilities, separate from the main app (each could be its own repo) |
 | `packaging/` | PyInstaller specs and build scripts (`build_exe.py`, Pulse Testing GUI builds) |
 | `Helpers/` | **Deprecated redirect** — see [Helpers/README.md](Helpers/README.md); all code moved to `tools/`, `analysis/`, or `plotting/` |
 | `archive/` | Old code kept for reference only — not used by the main app |
@@ -27,7 +27,7 @@ This document is for anyone taking over maintenance of the Switchbox Measurement
 1. Follow [SETUP.md](SETUP.md) on a clean machine.
 2. Read [Documents/README.md](Documents/README.md) for the doc index.
 3. Read [Documents/reference/MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md](Documents/reference/MEASUREMENT_AND_SAMPLE_GUI_REFERENCE.md) for app flow.
-4. Check [TODO.md](TODO.md) and [Documents/development/REFACTOR_REMAINING.md](Documents/development/REFACTOR_REMAINING.md) for known work.
+4. Check [Documents/development/REFACTOR_REMAINING.md](Documents/development/REFACTOR_REMAINING.md) for known refactoring work.
 
 ## Running tests
 
@@ -65,7 +65,7 @@ See [Documents/build/BUILD_INSTRUCTIONS.md](Documents/build/BUILD_INSTRUCTIONS.m
 
 ## Reporting issues
 
-Track feature requests and bugs in [TODO.md](TODO.md) or your team's issue tracker. Include:
+Track feature requests and bugs in your team's issue tracker. Include:
 
 - Python version
 - Instrument configuration (`system_configs.json` preset name)
