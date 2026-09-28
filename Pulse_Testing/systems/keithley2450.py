@@ -206,6 +206,22 @@ class Keithley2450System(BaseMeasurementSystem):
         from .retention_intervals import normalize_timed_retention_params
         params = normalize_timed_retention_params(params)
         return self.test_scripts.retention_test(**params)
+
+    def log_retention_test(self, **params) -> Dict[str, Any]:
+        """Pattern: Log-spaced retention reads for publication decay fitting."""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        from .retention_intervals import normalize_log_retention_params
+        params = normalize_log_retention_params(params)
+        return self.test_scripts.log_retention_test(**params)
+
+    def volatile_screening_test(self, **params) -> Dict[str, Any]:
+        """Pattern: Fast on-instrument burst + optional slow tail + volatile verdict."""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        from .retention_intervals import normalize_volatile_screening_params
+        params = normalize_volatile_screening_params(params)
+        return self.test_scripts.volatile_screening_test(**params)
     
     def pulse_multi_read(self, **params) -> Dict[str, Any]:
         """Pattern: N pulses then many reads"""

@@ -60,6 +60,17 @@ WIDTH_PRESETS = (
 _OLD_DEFAULT_SAVE = Path.home() / "Documents" / "data" / "pmu_laser_smu_read"
 _OLD_TOOL_DATA_ROOT = DEFAULT_DATA_ROOT / "pmu_laser_smu_read"
 
+# Default location for laser beam-width measurement datasets.
+LASER_WIDTH_DEFAULT_DIR = (
+    Path.home()
+    / "OneDrive - The University of Nottingham"
+    / "Documents"
+    / "Phd"
+    / "1) Projects"
+    / "9) GST project"
+    / "laser_Width"
+)
+
 try:
     from waveform import (
         MAX_TTL_VHIGH,
@@ -173,6 +184,11 @@ class PmuLaserSmuReadGUI:
         # Laser (serial, Oxxius) — shared across the Automated Routine tab.
         self.laser: Optional[Any] = None
 
+        # Beam-width & power-calibration state (populated by the Live tab panel).
+        self._selected_beam: Optional[Dict[str, float]] = None   # {w_x_um, w_y_um, fwhm_x_um, ...}
+        self._power_cal_coeffs: Optional[tuple] = None            # (slope, intercept) linear fit %→mW
+        self._power_cal_points: List[tuple] = []                  # [(pct, mw), ...]
+
         self._load_config()
         self._build()
         self._on_mode_change()
@@ -182,6 +198,8 @@ class PmuLaserSmuReadGUI:
     def _load_config(self) -> None:
         self.gpib_default = "GPIB0::17::INSTR"
         self.pmu_id_default = "PMU1"
+        self.beam_folder_default = str(LASER_WIDTH_DEFAULT_DIR)
+        self.power_cal_text_default = ""
         self.routine_settle_default = "5.0"
         self.routine_interval_default = "5.0"
         self.routine_start_pct_default = "10"
@@ -254,6 +272,15 @@ class PmuLaserSmuReadGUI:
                 )
                 if data.get("routine_widths"):
                     self.routine_widths_default = str(data["routine_widths"])
+                if data.get("beam_folder"):
+                    self.beam_folder_default = str(data["beam_folder"])
+                if data.get("power_cal_text"):
+                    self.power_cal_text_default = str(data["power_cal_text"])
+                # Restore power-cal coefficients
+                cal_pts = data.get("power_cal_points", [])
+                if cal_pts:
+                    self._power_cal_points = [tuple(p) for p in cal_pts]
+                    self._power_cal_coeffs = self._fit_cal_points(self._power_cal_points)
                 save = data.get("save_dir")
                 if save:
                     save_path = Path(save)
@@ -300,6 +327,15 @@ class PmuLaserSmuReadGUI:
             payload["ix_repeats"] = self.ix_repeats_var.get().strip()
             payload["ix_cycles"] = self.ix_cycles_var.get().strip()
             payload["ix_widths"] = self.ix_widths_var.get().strip()
+        if hasattr(self, "beam_folder_var"):
+            payload["beam_folder"] = self.beam_folder_var.get().strip()
+        if hasattr(self, "_power_cal_text"):
+            try:
+                payload["power_cal_text"] = self._power_cal_text.get("1.0", tk.END).strip()
+            except Exception:
+                pass
+        if self._power_cal_points:
+            payload["power_cal_points"] = [list(p) for p in self._power_cal_points]
         try:
             self.config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         except Exception:
@@ -785,6 +821,521 @@ class PmuLaserSmuReadGUI:
         refresh()
         return body
 
+    def _collapsible_lf(
+        self,
+        parent: tk.Misc,
+        title: str,
+        *,
+        expanded: bool = True,
+        padding: int = 6,
+    ) -> ttk.Frame:
+        """Collapsible section that looks and feels like a LabelFrame.
+
+        Returns the inner body frame — pack widgets into it just like a
+        LabelFrame body.  Starts expanded by default (pass ``expanded=False``
+        to start collapsed).
+        """
+        outer = ttk.Frame(parent)
+        outer.pack(fill=tk.X, pady=2)
+
+        state = {"expanded": bool(expanded)}
+        body = ttk.Frame(outer, padding=(padding, 2, padding, padding),
+                         relief="groove", borderwidth=1)
+
+        def _refresh() -> None:
+            if state["expanded"]:
+                toggle.configure(text=f"▼  {title}")
+                body.pack(fill=tk.X, padx=1)
+            else:
+                toggle.configure(text=f"▶  {title}")
+                body.pack_forget()
+
+        def _on_toggle() -> None:
+            state["expanded"] = not state["expanded"]
+            _refresh()
+
+        toggle = ttk.Button(outer, command=_on_toggle)
+        toggle.pack(fill=tk.X)
+        _refresh()
+        return body
+
+    # ---------------------------------------------------------------
+    # Beam-width & Power calibration panel
+    # ---------------------------------------------------------------
+    def _build_beam_power_section(self, parent: tk.Misc) -> None:
+        """Collapsible 'Beam & Power calibration' panel in the Live tab."""
+        sec = self._collapsible_lf(parent, "Beam & Power calibration", expanded=False)
+
+        # ---- Beam width dataset ----
+        ttk.Label(sec, text="Beam width dataset", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.W)
+
+        folder_row = ttk.Frame(sec)
+        folder_row.pack(fill=tk.X, pady=2)
+        ttk.Label(folder_row, text="Folder", width=8).pack(side=tk.LEFT)
+        self.beam_folder_var = tk.StringVar(value=self.beam_folder_default)
+        ttk.Entry(folder_row, textvariable=self.beam_folder_var, width=28).pack(
+            side=tk.LEFT, padx=2, fill=tk.X, expand=True
+        )
+        ttk.Button(folder_row, text="Browse", command=self._browse_beam_folder).pack(side=tk.LEFT, padx=2)
+        ttk.Button(folder_row, text="\u21bb", width=2, command=self._refresh_beam_datasets).pack(side=tk.LEFT)
+
+        dataset_row = ttk.Frame(sec)
+        dataset_row.pack(fill=tk.X, pady=2)
+        ttk.Label(dataset_row, text="Dataset", width=8).pack(side=tk.LEFT)
+        self.beam_dataset_var = tk.StringVar()
+        self.beam_dataset_combo = ttk.Combobox(
+            dataset_row, textvariable=self.beam_dataset_var, state="readonly", width=36
+        )
+        self.beam_dataset_combo.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        self.beam_dataset_var.trace_add("write", lambda *_: self._on_beam_dataset_change())
+
+        ttk.Label(
+            sec,
+            text="Pick a subfolder/measurement. Datasets are beam_width_*.json files.",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+            wraplength=340,
+        ).pack(anchor=tk.W)
+
+        self.beam_info_var = tk.StringVar(value="No dataset selected.")
+        ttk.Label(
+            sec,
+            textvariable=self.beam_info_var,
+            foreground="#1a4e6e",
+            wraplength=340,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(4, 2))
+
+        # ---- Power meter calibration ----
+        ttk.Separator(sec, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
+        ttk.Label(sec, text="Power meter calibration", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.W)
+
+        # Primary: load from an existing laser_power_sweep CSV
+        ttk.Label(
+            sec,
+            text="Load from laser_power_sweep CSV (set_current_pct + measured_mw columns):",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+            wraplength=340,
+        ).pack(anchor=tk.W)
+        load_row = ttk.Frame(sec)
+        load_row.pack(fill=tk.X, pady=2)
+        ttk.Button(
+            load_row, text="Load sweep CSV…", command=self._load_power_sweep_csv
+        ).pack(side=tk.LEFT, padx=2)
+        ttk.Button(
+            load_row, text="Clear", command=self._clear_power_calibration
+        ).pack(side=tk.LEFT, padx=2)
+
+        # Secondary / fallback: manual (%, mW) pairs
+        ttk.Label(
+            sec,
+            text="— or enter (%, mW) pairs manually (one per line, comma-separated):",
+            foreground="#555555",
+            font=("TkDefaultFont", 7),
+        ).pack(anchor=tk.W, pady=(4, 0))
+
+        self._power_cal_text = tk.Text(sec, height=4, width=22, font=("Consolas", 9))
+        if self.power_cal_text_default:
+            self._power_cal_text.insert("1.0", self.power_cal_text_default)
+        self._power_cal_text.pack(fill=tk.X, pady=(2, 2))
+
+        man_btn_row = ttk.Frame(sec)
+        man_btn_row.pack(fill=tk.X, pady=2)
+        ttk.Button(man_btn_row, text="Fit & Apply", command=self._fit_power_calibration).pack(
+            side=tk.LEFT, padx=2
+        )
+
+        self.power_cal_status_var = tk.StringVar(value="No calibration applied.")
+        ttk.Label(
+            sec,
+            textvariable=self.power_cal_status_var,
+            foreground="#555555",
+            wraplength=340,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        # ---- Live derived quantities ----
+        ttk.Separator(sec, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=4)
+        ttk.Label(sec, text="Estimated quantities at current %", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.W)
+        self.power_intensity_var = tk.StringVar(value="—")
+        ttk.Label(
+            sec,
+            textvariable=self.power_intensity_var,
+            foreground="#1a6b2e",
+            wraplength=340,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W, pady=(2, 0))
+
+        # Wire updates
+        self.laser_manual_power_var.trace_add("write", lambda *_: self._update_power_intensity_display())
+
+        self._refresh_beam_datasets()
+        self._update_power_intensity_display()
+
+    # ---- Beam dataset helpers ----
+
+    def _browse_beam_folder(self) -> None:
+        folder = filedialog.askdirectory(
+            title="Select laser_Width folder",
+            initialdir=self.beam_folder_var.get() if hasattr(self, "beam_folder_var") else str(LASER_WIDTH_DEFAULT_DIR),
+        )
+        if folder:
+            self.beam_folder_var.set(folder)
+            self._refresh_beam_datasets()
+
+    def _refresh_beam_datasets(self) -> None:
+        if not hasattr(self, "beam_dataset_combo"):
+            return
+        folder = Path(self.beam_folder_var.get().strip()) if hasattr(self, "beam_folder_var") else LASER_WIDTH_DEFAULT_DIR
+        entries: list[tuple[str, Path]] = []
+        if folder.is_dir():
+            for jf in sorted(folder.rglob("beam_width_*.json")):
+                relative = jf.relative_to(folder)
+                parts = list(relative.parts)
+                # Label: "subfolder / timestamp" or just "timestamp" if top-level
+                label = " / ".join(parts[:-1] + [jf.stem.replace("beam_width_", "")])
+                entries.append((label, jf))
+        self._beam_dataset_entries = entries
+        labels = [e[0] for e in entries]
+        self.beam_dataset_combo.configure(values=labels)
+        if labels:
+            self.beam_dataset_combo.current(0)
+            self._on_beam_dataset_change()
+        else:
+            self.beam_info_var.set("No beam_width_*.json files found in folder.")
+            self._selected_beam = None
+            self._update_power_intensity_display()
+
+    def _on_beam_dataset_change(self) -> None:
+        if not hasattr(self, "_beam_dataset_entries") or not self._beam_dataset_entries:
+            return
+        sel = self.beam_dataset_var.get()
+        path: Optional[Path] = None
+        for label, p in self._beam_dataset_entries:
+            if label == sel:
+                path = p
+                break
+        if path is None or not path.exists():
+            self.beam_info_var.set("File not found.")
+            self._selected_beam = None
+            self._update_power_intensity_display()
+            return
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            fit = raw.get("fit", {})
+            cal = raw.get("calibration", {})
+            um_per_px = float(cal.get("um_per_pixel", 1.0))
+            sigma_x_um = float(fit["sigma_x"]) * um_per_px
+            sigma_y_um = float(fit["sigma_y"]) * um_per_px
+            # 1/e² radius: w = 2σ (standard Gaussian beam convention)
+            w_x_um = 2.0 * sigma_x_um
+            w_y_um = 2.0 * sigma_y_um
+            fwhm_x_um = float(fit.get("fwhm_x_px", fit["sigma_x"] * 2.355)) * um_per_px
+            fwhm_y_um = float(fit.get("fwhm_y_px", fit["sigma_y"] * 2.355)) * um_per_px
+            e2_x_um = float(fit.get("e2_x_px", fit["sigma_x"] * 4.0)) * um_per_px
+            e2_y_um = float(fit.get("e2_y_px", fit["sigma_y"] * 4.0)) * um_per_px
+            r2 = float(fit.get("r2_2d", float("nan")))
+            ok = fit.get("ok", True)
+            self._selected_beam = {
+                "sigma_x_um": sigma_x_um,
+                "sigma_y_um": sigma_y_um,
+                "w_x_um": w_x_um,
+                "w_y_um": w_y_um,
+                "fwhm_x_um": fwhm_x_um,
+                "fwhm_y_um": fwhm_y_um,
+                "e2_x_um": e2_x_um,
+                "e2_y_um": e2_y_um,
+                "um_per_px": um_per_px,
+            }
+            area_e2 = math.pi * w_x_um * w_y_um / 2.0  # effective Gaussian area (π w_x w_y / 2)
+            warn = "" if ok else "  ⚠ Poor fit"
+            self.beam_info_var.set(
+                f"FWHM  x={fwhm_x_um:.2f} µm  y={fwhm_y_um:.2f} µm\n"
+                f"1/e²Ø  x={e2_x_um:.2f} µm  y={e2_y_um:.2f} µm\n"
+                f"1/e² radii  w_x={w_x_um:.2f} µm  w_y={w_y_um:.2f} µm\n"
+                f"Gaussian area  A = π·w_x·w_y/2 = {area_e2:.1f} µm²\n"
+                f"Calibration: {um_per_px:.4f} µm/px  |  R²={r2:.3f}{warn}"
+            )
+        except Exception as exc:
+            self._selected_beam = None
+            self.beam_info_var.set(f"Error reading {path.name}: {exc}")
+        self._update_power_intensity_display()
+
+    # ---- Power calibration helpers ----
+
+    @staticmethod
+    def _fit_cal_points(points: list) -> Optional[tuple]:
+        """Linear fit of (pct, mw) points → (slope, intercept). Returns None if < 2 points."""
+        if len(points) < 2:
+            return None
+        n = len(points)
+        sx = sum(p[0] for p in points)
+        sy = sum(p[1] for p in points)
+        sxx = sum(p[0] ** 2 for p in points)
+        sxy = sum(p[0] * p[1] for p in points)
+        denom = n * sxx - sx * sx
+        if abs(denom) < 1e-15:
+            return None
+        slope = (n * sxy - sx * sy) / denom
+        intercept = (sy - slope * sx) / n
+        return (slope, intercept)
+
+    def _load_power_sweep_csv(self) -> None:
+        """Open a laser_power_sweep CSV and extract (set_current_pct, measured_mw) pairs."""
+        # Default dir: try the GST project folder next to laser_Width, then the
+        # laser_power_sweep tool's save_dir from its own config, then home.
+        init_dir = str(Path.home())
+        try:
+            beam_folder = Path(self.beam_folder_var.get().strip() if hasattr(self, "beam_folder_var") else str(LASER_WIDTH_DEFAULT_DIR))
+            # Walk up from laser_Width and look for a sibling laser_power_sweep folder
+            for parent in [beam_folder.parent, beam_folder.parent.parent]:
+                candidate = parent / "laser_power_sweep"
+                if candidate.is_dir():
+                    init_dir = str(candidate)
+                    break
+        except Exception:
+            pass
+        if init_dir == str(Path.home()):
+            try:
+                _lps_cfg_path = _SCRIPT_DIR.parent / "laser_power_sweep" / "laser_power_sweep_config.json"
+                _lps_save_dir = json.loads(_lps_cfg_path.read_text(encoding="utf-8")).get("save_dir", "")
+                if _lps_save_dir and Path(_lps_save_dir).is_dir():
+                    init_dir = _lps_save_dir
+            except Exception:
+                pass
+
+        path = filedialog.askopenfilename(
+            title="Select laser_power_sweep CSV",
+            initialdir=init_dir,
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            all_ok, skipped_thresh, skipped_status = self._parse_power_sweep_csv(Path(path))
+        except Exception as exc:
+            messagebox.showerror("Load power sweep CSV", f"Failed to read {path}:\n{exc}")
+            return
+        if not all_ok:
+            messagebox.showerror(
+                "Load power sweep CSV",
+                "No valid (set_current_pct, measured_mw) rows with status OK found.\n"
+                "Make sure this is a TTL-current-% sweep CSV from the laser_power_sweep tool.",
+            )
+            return
+        # Populate the manual text box so the user can see / edit what was loaded.
+        self._power_cal_text.delete("1.0", tk.END)
+        self._power_cal_text.insert(
+            "1.0",
+            "\n".join(f"{pct:.4g}, {mw:.5g}" for pct, mw in all_ok),
+        )
+        # Fit and apply directly.
+        coeffs = self._fit_cal_points(all_ok)
+        if coeffs is None:
+            messagebox.showerror("Load power sweep CSV", "Fit failed — need at least 2 points.")
+            return
+        self._power_cal_points = all_ok
+        self._power_cal_coeffs = coeffs
+        slope, intercept = coeffs
+        r2 = self._cal_r2(all_ok, slope, intercept)
+        notes = []
+        if skipped_thresh:
+            notes.append(f"{skipped_thresh} sub-threshold row(s) excluded (<0.5 mW)")
+        if skipped_status:
+            notes.append(f"{skipped_status} non-OK row(s) skipped")
+        note_str = ("  [" + ", ".join(notes) + "]") if notes else ""
+        self.power_cal_status_var.set(
+            f"Loaded {len(all_ok)} pts from {Path(path).name}{note_str}\n"
+            f"Linear fit: P = {slope:.4g}×% + {intercept:.4g} mW  (R²={r2:.4f})"
+        )
+        self._update_power_intensity_display()
+        self._schedule_pulse_summary()
+        self._save_config()
+
+    @staticmethod
+    def _parse_power_sweep_csv(path: Path) -> tuple:
+        """Parse a laser_power_sweep CSV.
+
+        Returns (points, n_skipped_threshold, n_skipped_status) where:
+          points              — list of (pct, mw) tuples kept for fitting
+          n_skipped_threshold — rows discarded because measured_mw < 0.5 mW
+                                (sub-threshold / laser off readings)
+          n_skipped_status    — rows discarded because status != OK
+        """
+        import csv as _csv
+        THRESH_MW = 0.5  # below this the laser is clearly off / below threshold
+        points: list = []
+        n_skip_thresh = 0
+        n_skip_status = 0
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                status = row.get("status", "OK").strip().upper()
+                if status != "OK":
+                    n_skip_status += 1
+                    continue
+                pct_raw = row.get("set_current_pct", "").strip()
+                mw_raw = row.get("measured_mw", "").strip()
+                if not pct_raw or not mw_raw:
+                    continue
+                try:
+                    pct = float(pct_raw)
+                    mw = float(mw_raw)
+                except ValueError:
+                    continue
+                if not (0 <= pct <= 100) or mw < 0:
+                    continue
+                if mw < THRESH_MW:
+                    n_skip_thresh += 1
+                    continue
+                points.append((pct, mw))
+        return points, n_skip_thresh, n_skip_status
+
+    def _fit_power_calibration(self) -> None:
+        raw = self._power_cal_text.get("1.0", tk.END).strip()
+        points: list[tuple] = []
+        errors: list[str] = []
+        for i, line in enumerate(raw.splitlines(), start=1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                pct_s, mw_s = line.split(",", 1)
+                pct = float(pct_s.strip())
+                mw = float(mw_s.strip())
+                if not (0 <= pct <= 100):
+                    errors.append(f"Line {i}: % must be 0–100 (got {pct})")
+                    continue
+                if mw < 0:
+                    errors.append(f"Line {i}: mW must be ≥ 0 (got {mw})")
+                    continue
+                points.append((pct, mw))
+            except Exception:
+                errors.append(f"Line {i}: can't parse '{line}' — expected '%, mW'")
+        if errors:
+            messagebox.showerror("Power calibration", "Errors:\n" + "\n".join(errors))
+            return
+        if len(points) < 2:
+            messagebox.showerror(
+                "Power calibration", "Need at least 2 (%, mW) pairs for a linear fit."
+            )
+            return
+        coeffs = self._fit_cal_points(points)
+        if coeffs is None:
+            messagebox.showerror("Power calibration", "Fit failed (degenerate data).")
+            return
+        self._power_cal_points = points
+        self._power_cal_coeffs = coeffs
+        slope, intercept = coeffs
+        r2 = self._cal_r2(points, slope, intercept)
+        self.power_cal_status_var.set(
+            f"Linear fit: P = {slope:.4g}×% + {intercept:.4g} mW  (R²={r2:.4f}, {len(points)} pts)"
+        )
+        self._update_power_intensity_display()
+        self._schedule_pulse_summary()
+        self._save_config()
+
+    def _clear_power_calibration(self) -> None:
+        self._power_cal_points = []
+        self._power_cal_coeffs = None
+        self._power_cal_text.delete("1.0", tk.END)
+        self.power_cal_status_var.set("Calibration cleared.")
+        self._update_power_intensity_display()
+        self._schedule_pulse_summary()
+
+    @staticmethod
+    def _cal_r2(points: list, slope: float, intercept: float) -> float:
+        y_mean = sum(p[1] for p in points) / len(points)
+        ss_tot = sum((p[1] - y_mean) ** 2 for p in points)
+        ss_res = sum((p[1] - (slope * p[0] + intercept)) ** 2 for p in points)
+        return 1.0 - ss_res / ss_tot if ss_tot > 0 else 1.0
+
+    def _estimated_power_mw(self, pct: Optional[float] = None) -> Optional[float]:
+        """Extrapolate mW for the given % (or the current laser_manual_power_var)."""
+        if self._power_cal_coeffs is None:
+            return None
+        if pct is None:
+            try:
+                pct = float(self.laser_manual_power_var.get().strip())
+            except Exception:
+                return None
+        slope, intercept = self._power_cal_coeffs
+        return max(0.0, slope * pct + intercept)
+
+    def _laser_current_pct(self) -> Optional[float]:
+        """Current % the GUI is set to fire at (Live / Connection field)."""
+        if not hasattr(self, "laser_manual_power_var"):
+            return None
+        try:
+            return float(self.laser_manual_power_var.get().strip())
+        except Exception:
+            return None
+
+    def _stamp_laser_power_on_params(
+        self, p: Dict[str, Any], current_pct: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """Attach laser current % and calibrated optical power to a fire-params dict."""
+        pct = current_pct if current_pct is not None else self._laser_current_pct()
+        if pct is not None:
+            p["laser_current_pct"] = pct
+        p_mw = self._estimated_power_mw(pct)
+        if p_mw is not None:
+            p["laser_power_mw"] = p_mw
+        res = self._estimated_peak_intensity(pct)
+        if res is not None:
+            p["peak_intensity_mw_um2"] = res["peak_mw_um2"]
+            p["peak_intensity_W_cm2"] = res["peak_w_cm2"]
+            p["beam_area_um2"] = res["area_um2"]
+        return p
+
+    def _estimated_peak_intensity(
+        self, pct: Optional[float] = None
+    ) -> Optional[Dict[str, float]]:
+        """Return dict with keys: power_mw, area_um2, peak_mw_um2, peak_mw_cm2, peak_w_cm2."""
+        p_mw = self._estimated_power_mw(pct)
+        b = self._selected_beam
+        if p_mw is None or b is None:
+            return None
+        w_x = b["w_x_um"]
+        w_y = b["w_y_um"]
+        if w_x <= 0 or w_y <= 0:
+            return None
+        # Effective area for a 2D elliptical Gaussian: A = π w_x w_y / 2
+        area_um2 = math.pi * w_x * w_y / 2.0
+        peak_mw_um2 = p_mw / area_um2
+        peak_mw_cm2 = peak_mw_um2 * 1e8
+        peak_w_cm2 = peak_mw_cm2 / 1e3
+        return {
+            "power_mw": p_mw,
+            "area_um2": area_um2,
+            "peak_mw_um2": peak_mw_um2,
+            "peak_mw_cm2": peak_mw_cm2,
+            "peak_w_cm2": peak_w_cm2,
+        }
+
+    def _format_intensity_line(self) -> str:
+        """Human-readable string for the derived quantities display."""
+        res = self._estimated_peak_intensity()
+        if res is None:
+            missing = []
+            if self._power_cal_coeffs is None:
+                missing.append("power calibration")
+            if self._selected_beam is None:
+                missing.append("beam dataset")
+            return "—  (need: " + ", ".join(missing) + ")" if missing else "—"
+        return (
+            f"Power ≈ {res['power_mw']:.3g} mW  |  "
+            f"Area = {res['area_um2']:.1f} µm²\n"
+            f"Peak intensity ≈ {res['peak_mw_um2']:.4g} mW/µm²\n"
+            f"              = {res['peak_mw_cm2']:.3g} mW/cm²\n"
+            f"              = {res['peak_w_cm2']:.3g} W/cm²"
+        )
+
+    def _update_power_intensity_display(self) -> None:
+        if hasattr(self, "power_intensity_var"):
+            self.power_intensity_var.set(self._format_intensity_line())
+
     def _show_wiring_help(self) -> None:
         try:
             from wiring_help import WIRING_HELP_TEXT, draw_wiring_diagram
@@ -995,7 +1546,7 @@ class PmuLaserSmuReadGUI:
             if hasattr(self, "live_cooldown_info_var"):
                 self.live_cooldown_info_var.set(info)
 
-        return {
+        out = {
             "gpib_address": self.gpib_var.get().strip(),
             "pmu_id": self.pmu_id_var.get().strip() or "PMU1",
             "mode": mode,
@@ -1023,6 +1574,7 @@ class PmuLaserSmuReadGUI:
             "delay_before_s": self._f(self.delay_ms_var) * 1e-3,
             "laser_fire_delay_s": self._f(self.fire_delay_ms_var) * 1e-3,
         }
+        return self._stamp_laser_power_on_params(out)
 
     @staticmethod
     def _pick_time_unit(total_s: float) -> Tuple[float, str]:
@@ -1448,6 +2000,14 @@ class PmuLaserSmuReadGUI:
         1) `#`-prefixed laser_fires table (index + pulse params)
         2) data table with a laser_fire column (0 / 1 / 2 / …)
         """
+        def _opt(value: Any) -> str:
+            if value is None or value == "":
+                return ""
+            try:
+                return f"{float(value):.8g}"
+            except (TypeError, ValueError):
+                return str(value)
+
         with path.open("w", newline="", encoding="utf-8") as f:
             f.write(f"# sample_name: {sample_name}\n")
             f.write(f"# run_kind: {run_kind}\n")
@@ -1457,7 +2017,8 @@ class PmuLaserSmuReadGUI:
             f.write("# --- laser_fires (table 1; pandas: comment='#') ---\n")
             f.write(
                 "# fire_index,t_fire_s,mode,decay,width_s,vhigh_V,num_pulses,"
-                "period_s,rise_s,fall_s,mode_label,params_json\n"
+                "period_s,rise_s,fall_s,laser_current_pct,laser_power_mw,"
+                "peak_I_mW_um2,peak_I_W_cm2,mode_label,params_json\n"
             )
             for ev in fire_events:
                 params = ev.get("params") or {}
@@ -1474,6 +2035,14 @@ class PmuLaserSmuReadGUI:
                         f"{float(params.get('period_s', 0.0) or 0.0):.8g}",
                         f"{float(params.get('rise_s', 0.0) or 0.0):.8g}",
                         f"{float(params.get('fall_s', 0.0) or 0.0):.8g}",
+                        _opt(
+                            params.get("laser_current_pct", ev.get("laser_current_pct"))
+                        ),
+                        _opt(
+                            params.get("laser_power_mw", ev.get("laser_power_mw"))
+                        ),
+                        _opt(params.get("peak_intensity_mw_um2")),
+                        _opt(params.get("peak_intensity_W_cm2")),
                         ev.get("mode_label", ""),
                         json.dumps(params, default=str),
                     ]
@@ -1746,8 +2315,7 @@ class PmuLaserSmuReadGUI:
             wraplength=340,
         ).pack(anchor=tk.W)
 
-        bias = ttk.LabelFrame(left, text="SMU bias + chunking", padding=6)
-        bias.pack(fill=tk.X, pady=4)
+        bias = self._collapsible_lf(left, "SMU bias + chunking", expanded=True)
         self._row(bias, "Vread (V)", self.vread_var)
         self._row(bias, "Ilimit (A)", self.ilimit_var)
         self._row(bias, "Current range (A)", self.irange_var)
@@ -1769,8 +2337,7 @@ class PmuLaserSmuReadGUI:
             var.trace_add("write", lambda *_: self._update_live_chunk_info())
 
         # Laser power — same StringVars / handlers as the Connection tab.
-        live_laser = ttk.LabelFrame(left, text="Laser power (serial)", padding=6)
-        live_laser.pack(fill=tk.X, pady=4)
+        live_laser = self._collapsible_lf(left, "Laser power (serial)", expanded=True)
         ttk.Label(
             live_laser,
             textvariable=self.laser_status_var,
@@ -1808,10 +2375,12 @@ class PmuLaserSmuReadGUI:
             font=("TkDefaultFont", 7),
         ).pack(anchor=tk.W, pady=(2, 0))
 
+        # Beam & power calibration panel
+        self._build_beam_power_section(left)
+
         # PMU CH1 TTL shape — same StringVars as the Single-shot tab, so
         # editing here (or there) keeps both tabs in sync.
-        live_pmu = ttk.LabelFrame(left, text="PMU CH1 TTL", padding=6)
-        live_pmu.pack(fill=tk.X, pady=4)
+        live_pmu = self._collapsible_lf(left, "PMU CH1 TTL", expanded=True)
         self._row(live_pmu, "Vhigh (V)", self.vhigh_var)
         self._width_row(live_pmu, self.width_us_var)
         self._row(live_pmu, "Rise (ns)", self.rise_ns_var)
@@ -1819,8 +2388,7 @@ class PmuLaserSmuReadGUI:
         self._row(live_pmu, "PMU delay before (ms)", self.delay_ms_var)
 
         # Pulse type selector — same self.mode_var as the Single-shot tab.
-        live_mode_fr = ttk.LabelFrame(left, text="Pulse type (fires on 'Fire Pulse Now')", padding=6)
-        live_mode_fr.pack(fill=tk.X, pady=4)
+        live_mode_fr = self._collapsible_lf(left, "Pulse type (fires on 'Fire Pulse Now')", expanded=True)
         for label, val in (
             ("Single", "single"),
             ("Train", "train"),
@@ -1847,8 +2415,7 @@ class PmuLaserSmuReadGUI:
             self.live_cooldown_block, info_var=self.live_cooldown_info_var, fig_attr="live"
         )
 
-        pulse_summary = ttk.LabelFrame(left, text="Pulse that will fire", padding=6)
-        pulse_summary.pack(fill=tk.X, pady=4)
+        pulse_summary = self._collapsible_lf(left, "Pulse that will fire", expanded=True)
         self.live_pulse_summary_var = tk.StringVar(value="")
         ttk.Label(
             pulse_summary,
@@ -1859,8 +2426,7 @@ class PmuLaserSmuReadGUI:
 
         # Control sits above the optional width-sweep so Start/Stop/Fire stay
         # visible without scrolling past collapsed (or expanded) sections.
-        ctrl = ttk.LabelFrame(left, text="Control", padding=6)
-        ctrl.pack(fill=tk.X, pady=4)
+        ctrl = self._collapsible_lf(left, "Control", expanded=True)
         row1 = ttk.Frame(ctrl)
         row1.pack(fill=tk.X, pady=2)
         self.live_start_btn = ttk.Button(row1, text="Start streaming", command=self._start_streaming)
@@ -1889,8 +2455,7 @@ class PmuLaserSmuReadGUI:
 
         # SMU electrical set/reset — force a voltage pulse on the device
         # (independent of the PMU laser TTL path).
-        smu_pulse = ttk.LabelFrame(left, text="SMU set / reset pulse", padding=6)
-        smu_pulse.pack(fill=tk.X, pady=4)
+        smu_pulse = self._collapsible_lf(left, "SMU set / reset pulse", expanded=False)
         ttk.Label(
             smu_pulse,
             text=(
@@ -2014,6 +2579,7 @@ class PmuLaserSmuReadGUI:
             self.decay_var,
             self.vhigh_var,
             self.mode_var,
+            self.laser_manual_power_var,
         ):
             var.trace_add("write", lambda *_: self._schedule_pulse_summary())
         self._update_live_pulse_summary()
@@ -2053,8 +2619,7 @@ class PmuLaserSmuReadGUI:
             wraplength=340,
         ).pack(anchor=tk.W)
 
-        laser_note = ttk.LabelFrame(left, text="Laser", padding=6)
-        laser_note.pack(fill=tk.X, pady=4)
+        laser_note = self._collapsible_lf(left, "Laser", expanded=True)
         ttk.Label(
             laser_note,
             text="Serial Connect / Align / Restore live on the Connection tab.",
@@ -2069,8 +2634,7 @@ class PmuLaserSmuReadGUI:
         ).pack(anchor=tk.W, pady=(4, 0))
 
         # --- SMU bias + chunking (shared with Live tab) ---
-        bias = ttk.LabelFrame(left, text="SMU bias + chunking", padding=6)
-        bias.pack(fill=tk.X, pady=4)
+        bias = self._collapsible_lf(left, "SMU bias + chunking", expanded=False)
         self._row(bias, "Vread (V)", self.vread_var)
         self._row(bias, "Ilimit (A)", self.ilimit_var)
         self._row(bias, "Current range (A)", self.irange_var)
@@ -2087,8 +2651,7 @@ class PmuLaserSmuReadGUI:
         )
 
         # --- PMU CH1 TTL (shared; Width is routine-controlled) ---
-        pmu = ttk.LabelFrame(left, text="PMU CH1 TTL", padding=6)
-        pmu.pack(fill=tk.X, pady=4)
+        pmu = self._collapsible_lf(left, "PMU CH1 TTL", expanded=False)
         self._row(pmu, "Vhigh (V)", self.vhigh_var)
         self._row(pmu, "Rise (ns)", self.rise_ns_var)
         self._row(pmu, "Fall (ns)", self.fall_ns_var)
@@ -2110,8 +2673,7 @@ class PmuLaserSmuReadGUI:
         ).pack(anchor=tk.W, padx=(2, 0))
 
         # --- Pulse type (shared mode_var) ---
-        mode_fr = ttk.LabelFrame(left, text="Pulse type (fires during the routine)", padding=6)
-        mode_fr.pack(fill=tk.X, pady=4)
+        mode_fr = self._collapsible_lf(left, "Pulse type (fires during the routine)", expanded=False)
         for label, val in (
             ("Single", "single"),
             ("Train", "train"),
@@ -2140,8 +2702,7 @@ class PmuLaserSmuReadGUI:
             fig_h=1.1,
         )
 
-        pulse_summary = ttk.LabelFrame(left, text="Pulse that will fire", padding=6)
-        pulse_summary.pack(fill=tk.X, pady=4)
+        pulse_summary = self._collapsible_lf(left, "Pulse that will fire", expanded=True)
         self.routine_pulse_summary_var = tk.StringVar(value="")
         ttk.Label(
             pulse_summary,
@@ -2151,8 +2712,24 @@ class PmuLaserSmuReadGUI:
         ).pack(anchor=tk.W)
 
         # --- Routine: width x current-% sweep ---
-        routine_fr = ttk.LabelFrame(left, text="Routine: width \u00d7 current % sweep", padding=6)
-        routine_fr.pack(fill=tk.X, pady=4)
+        routine_fr = self._collapsible_lf(left, "Routine: width \u00d7 current % sweep", expanded=True)
+
+        ttk.Label(routine_fr, text="Sweep order", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.W, pady=(0, 2))
+        self.routine_sweep_order_var = tk.StringVar(value="power_outer")
+        order_row = ttk.Frame(routine_fr)
+        order_row.pack(fill=tk.X, pady=(0, 6))
+        ttk.Radiobutton(
+            order_row,
+            text="Power → Width  (for each power: fire all widths)",
+            value="power_outer",
+            variable=self.routine_sweep_order_var,
+        ).pack(anchor=tk.W)
+        ttk.Radiobutton(
+            order_row,
+            text="Width → Power  (for each width: try all powers)",
+            value="width_outer",
+            variable=self.routine_sweep_order_var,
+        ).pack(anchor=tk.W)
 
         ttk.Label(routine_fr, text="Pulse widths", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.W)
         gen_row = ttk.Frame(routine_fr)
@@ -2327,8 +2904,7 @@ class PmuLaserSmuReadGUI:
             wraplength=340,
         ).pack(anchor=tk.W)
 
-        proto_fr = ttk.LabelFrame(left, text="Protocol", padding=6)
-        proto_fr.pack(fill=tk.X, pady=4)
+        proto_fr = self._collapsible_lf(left, "Protocol", expanded=True)
         self._ix_protocol_keys = list(PROTOCOL_LABELS.keys())
         self._ix_protocol_labels = [PROTOCOL_LABELS[k] for k in self._ix_protocol_keys]
         default_label = PROTOCOL_LABELS.get(
@@ -2344,8 +2920,7 @@ class PmuLaserSmuReadGUI:
         ).pack(fill=tk.X, pady=2)
         self.ix_protocol_var.trace_add("write", lambda *_: self._on_ix_protocol_change())
 
-        shared = ttk.LabelFrame(left, text="Shared SMU pulse", padding=6)
-        shared.pack(fill=tk.X, pady=4)
+        shared = self._collapsible_lf(left, "Shared SMU pulse", expanded=True)
         self.ix_amplitude_var = tk.StringVar(value=self.ix_amplitude_default)
         self.ix_smu_width_var = tk.StringVar(value=self.ix_smu_width_default)
         self.ix_interval_var = tk.StringVar(value=self.ix_interval_default)
@@ -2360,7 +2935,9 @@ class PmuLaserSmuReadGUI:
             wraplength=340,
         ).pack(anchor=tk.W, pady=(2, 0))
 
-        # Protocol-specific blocks
+        # Protocol-specific blocks — these are shown/hidden dynamically by
+        # _on_ix_protocol_change, so they remain plain LabelFrames whose
+        # pack geometry the protocol-switch logic can manage directly.
         self.ix_laser_effect_fr = ttk.LabelFrame(left, text="Laser-effect options", padding=6)
         self.ix_laser_effect_fr.pack(fill=tk.X, pady=4)
         self.ix_repeats_var = tk.StringVar(value=self.ix_repeats_default)
@@ -2400,9 +2977,9 @@ class PmuLaserSmuReadGUI:
             wraplength=340,
         ).pack(anchor=tk.W)
 
-        laser_sum = ttk.LabelFrame(left, text="Laser (from Live tab)", padding=6)
-        laser_sum.pack(fill=tk.X, pady=4)
-        self._ix_laser_sum_fr = laser_sum
+        laser_sum = self._collapsible_lf(left, "Laser (from Live tab)", expanded=True)
+        # Store both the body (laser_sum) and a sentinel for dynamic packing
+        self._ix_laser_sum_fr = laser_sum.master  # outer container, used as pack anchor
         ttk.Label(
             laser_sum,
             textvariable=self.laser_status_var,
@@ -2433,8 +3010,7 @@ class PmuLaserSmuReadGUI:
         )
         self.ix_laser_set_power_btn.pack(side=tk.LEFT, padx=2)
 
-        bias = ttk.LabelFrame(left, text="SMU bias + chunking (shared)", padding=6)
-        bias.pack(fill=tk.X, pady=4)
+        bias = self._collapsible_lf(left, "SMU bias + chunking (shared)", expanded=False)
         self._row(bias, "Vread (V)", self.vread_var)
         self._row(bias, "Ilimit (A)", self.ilimit_var)
         self._row(bias, "Sample dt (s)", self.live_dt_var)
@@ -2446,8 +3022,7 @@ class PmuLaserSmuReadGUI:
             side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 2)
         )
 
-        ctrl = ttk.LabelFrame(left, text="Control", padding=6)
-        ctrl.pack(fill=tk.X, pady=4)
+        ctrl = self._collapsible_lf(left, "Control", expanded=True)
         ctrl_row = ttk.Frame(ctrl)
         ctrl_row.pack(fill=tk.X, pady=2)
         self.ix_start_btn = ttk.Button(
@@ -2762,23 +3337,44 @@ class PmuLaserSmuReadGUI:
             self.live_chunk_info_var.set("")
 
     def _pulse_summary_text(self) -> str:
-        """Human-readable one-liner describing whatever pulse would fire
-        right now, shared by the Live tab and the Automated Routine tab."""
+        """Human-readable summary of the pulse + laser power + intensity.
+
+        Shared by the Live tab, Automated Routine tab and Laser↔SMU tab.
+        """
         p = self._params()
         mode = p["mode"]
         w = format_time_compact(p["width_s"])
+
+        # Laser power % and optional derived intensity
+        try:
+            pwr_pct = float(self.laser_manual_power_var.get().strip())
+            pwr_str = f"  |  Laser {pwr_pct:.3g} %"
+        except Exception:
+            pwr_pct = None
+            pwr_str = ""
+
+        # Estimated power / intensity lines (if beam + cal available)
+        intensity_lines = ""
+        res = self._estimated_peak_intensity()
+        if res is not None:
+            intensity_lines = (
+                f"\nPower ≈ {res['power_mw']:.3g} mW  |  Beam area ≈ {res['area_um2']:.1f} µm²"
+                f"\nPeak intensity ≈ {res['peak_mw_um2']:.4g} mW/µm²"
+                f"  =  {res['peak_w_cm2']:.3g} W/cm²"
+            )
+
         if mode == "single":
-            return f"Single pulse ON for {w}, Vhigh={p['vhigh']} V"
+            return f"Single pulse ON for {w}, Vhigh={p['vhigh']} V{pwr_str}{intensity_lines}"
         if mode == "train":
             off = format_time_compact(p["off_s"])
             return (
                 f"Train: {p['num_pulses']} pulses, each ON {w} / OFF {off}, "
-                f"Vhigh={p['vhigh']} V"
+                f"Vhigh={p['vhigh']} V{pwr_str}{intensity_lines}"
             )
         n_cd = max(0, int(p["num_pulses"]) - 1)
         return (
             f"Cool-down: write {w} + {n_cd} typed pulse(s), "
-            f"total CD {format_width_s(p.get('cooldown_span_s', 0))}"
+            f"total CD {format_width_s(p.get('cooldown_span_s', 0))}{pwr_str}{intensity_lines}"
         )
 
     def _update_live_pulse_summary(self) -> None:
@@ -3564,6 +4160,10 @@ class PmuLaserSmuReadGUI:
                     "decay": params.get("decay"),
                     "num_pulses": params.get("num_pulses"),
                     "mode_label": ev.get("mode_label"),
+                    "laser_current_pct": params.get("laser_current_pct"),
+                    "laser_power_mw": params.get("laser_power_mw"),
+                    "peak_intensity_mw_um2": params.get("peak_intensity_mw_um2"),
+                    "peak_intensity_W_cm2": params.get("peak_intensity_W_cm2"),
                     "smu_pulse_v": params.get("smu_pulse_v"),
                     "smu_pulse_width_s": params.get("smu_pulse_width_s"),
                     "params": params,
@@ -3591,7 +4191,7 @@ class PmuLaserSmuReadGUI:
         image_path: Optional[Path] = None
         try:
             vis_events = [
-                {"width_s": fe["params"].get("width_s"), "percent": fe["params"].get("laser_power_mw")}
+                {"width_s": fe["params"].get("width_s"), "percent": fe["params"].get("laser_current_pct")}
                 for fe in fire_events
                 if fe.get("params", {}).get("width_s") is not None
             ]
@@ -3631,6 +4231,8 @@ class PmuLaserSmuReadGUI:
                 "table1": "laser_fires (#-commented rows)",
                 "table2": "data columns t_s,I_A,V_V,R_Ohm,laser_fire",
                 "laser_fire": "0=none; N=Nth fire marked on nearest sample",
+                "laser_current_pct": "diode current % at fire",
+                "laser_power_mw": "estimated optical power from power-sweep calibration (extrapolated)",
             },
         }
         meta_path.write_text(json.dumps(meta, indent=2, default=str), encoding="utf-8")
@@ -3946,10 +4548,15 @@ class PmuLaserSmuReadGUI:
         powers_mw = generate_power_levels(start_mw, step_mw, max_mw)
         return widths_s, powers_mw
 
+    def _routine_sweep_order(self) -> str:
+        """Return the current sweep-order setting (safe to call before tab build)."""
+        var = getattr(self, "routine_sweep_order_var", None)
+        return var.get() if var is not None else "power_outer"
+
     def _preview_routine_plan(self) -> None:
         try:
             widths_s, powers_mw = self._routine_widths_and_powers()
-            plan = build_routine_plan(widths_s, powers_mw)
+            plan = build_routine_plan(widths_s, powers_mw, sweep_order=self._routine_sweep_order())
             settle_s = self._f(self.routine_settle_var)
             interval_s = self._f(self.routine_interval_var)
             text = describe_plan(plan, settle_s, interval_s)
@@ -4051,7 +4658,7 @@ class PmuLaserSmuReadGUI:
     def _show_routine_visual(self) -> None:
         try:
             widths_s, powers_mw = self._routine_widths_and_powers()
-            plan = build_routine_plan(widths_s, powers_mw)
+            plan = build_routine_plan(widths_s, powers_mw, sweep_order=self._routine_sweep_order())
         except Exception as exc:
             messagebox.showerror("Invalid routine parameters", str(exc))
             return
@@ -4081,7 +4688,7 @@ class PmuLaserSmuReadGUI:
             return
         try:
             widths_s, powers_mw = self._routine_widths_and_powers()
-            plan = build_routine_plan(widths_s, powers_mw)
+            plan = build_routine_plan(widths_s, powers_mw, sweep_order=self._routine_sweep_order())
             settle_s = self._f(self.routine_settle_var)
             interval_s = self._f(self.routine_interval_var)
             if settle_s <= 0 or interval_s <= 0:
@@ -4202,7 +4809,7 @@ class PmuLaserSmuReadGUI:
                 self.routine_status_var.set(f"Routine stopped — invalid pulse params: {exc}")
                 self._stop_routine()
                 return
-            p["laser_power_mw"] = self._routine_current_power_mw
+            p = self._stamp_laser_power_on_params(p, pct)
             self._print_laser_levels(f"ROUTINE FIRE {i}/{n}")
             self._stream_fire_queue.put(p)
             self.routine_status_var.set(

@@ -1,0 +1,7 @@
+PyQt5>=5.15.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+scipy>=1.10.0
+pylablib>=1.4.0
+pygrabber>=0.2
+# ThorCam must be installed for uc480 cameras (C1284R13C etc.)

@@ -34,6 +34,8 @@ ALL_TEST_FUNCTIONS = [
     'endurance_test',
     'endurance_burst_test',
     'retention_test',
+    'log_retention_test',
+    'volatile_screening_test',
     'pulse_multi_read',
     'multi_read_only',
     'current_range_finder',
@@ -72,6 +74,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'depression_only': True,
         'endurance_test': True,
         'retention_test': True,
+        'log_retention_test': True,
+        'volatile_screening_test': True,
         'pulse_multi_read': True,
         'multi_read_only': True,
         'current_range_finder': True,
@@ -103,6 +107,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'endurance_test': True,
         'endurance_burst_test': True,
         'retention_test': True,
+        'log_retention_test': True,
+        'volatile_screening_test': True,
         'pulse_multi_read': True,
         'multi_read_only': True,
         'current_range_finder': False,
@@ -174,6 +180,8 @@ SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
         'depression_only': True,  # ✅ SCPI-based: Initial Read → Repeated RESET pulses with reads
         'endurance_test': True,  # ✅ SCPI-based: (SET → Read → RESET → Read) × N cycles
         'retention_test': True,  # ✅ SCPI-based: Pulse → Read @ t1 → Read @ t2 → Read @ t3...
+        'log_retention_test': True,  # PC-timed log-spaced retention
+        'volatile_screening_test': True,  # PC-timed (GPIB — not ms-resolution)
         'pulse_multi_read': True,  # ✅ SCPI-based: N pulses then many reads
         'multi_read_only': True,  # ✅ SCPI-based: Just reads, no pulses
         'current_range_finder': True,  # ✅ SCPI-based: Find optimal current measurement range
@@ -197,6 +205,9 @@ SYSTEM_CAPABILITIES['keithley4200_custom'] = {k: False for k in ALL_TEST_FUNCTIO
 
 # Legacy alias: same as keithley4200_pmu (saved configs / address auto-detect migration)
 SYSTEM_CAPABILITIES['keithley4200a'] = dict(SYSTEM_CAPABILITIES['keithley4200_pmu'])
+
+# Simulation uses same capability matrix as hardware 2450
+SYSTEM_CAPABILITIES['keithley2450_sim'] = dict(SYSTEM_CAPABILITIES['keithley2450'])
 
 
 def is_test_supported(system_name: str, test_function: str) -> bool:

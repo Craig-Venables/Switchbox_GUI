@@ -183,6 +183,89 @@ class Keithley2400System(BaseMeasurementSystem):
         from .retention_intervals import normalize_timed_retention_params
         params = normalize_timed_retention_params(params)
         return self.test_scripts.retention_test(**params)
+
+    def log_retention_test(self, **params) -> Dict[str, Any]:
+        """Log-spaced retention (PC-timed on 2400)."""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        from .retention_intervals import (
+            fit_log_retention_decay,
+            normalize_log_retention_params,
+        )
+        params = normalize_log_retention_params(params)
+        result = self.test_scripts.retention_test(**params)
+        ops = result.get("operation") or []
+        post_idx = [i for i, op in enumerate(ops) if op == "post_pulse"]
+        t_pulse = result["timestamps"][post_idx[0]] if post_idx else None
+        fit = fit_log_retention_decay(
+            result["timestamps"], result["resistances"], ops, t_pulse_end=t_pulse
+        )
+        if fit:
+            result["retention_fit"] = fit
+        result["read_intervals_used"] = params.get("read_intervals", [])
+        return result
+
+    def volatile_screening_test(self, **params) -> Dict[str, Any]:
+        """Volatile screening via PC-timed reads (GPIB — not ms-resolution)."""
+        if not self.test_scripts:
+            raise RuntimeError("Not connected to device")
+        from .retention_intervals import (
+            classify_volatile_screening,
+            normalize_volatile_screening_params,
+        )
+        params = normalize_volatile_screening_params(params)
+        burst = params.get("burst_intervals") or []
+        tail = params.get("slow_tail_intervals") or []
+        all_intervals = list(burst)
+        for t in tail:
+            if not all_intervals or t > all_intervals[-1]:
+                all_intervals.append(t)
+        run_params = {
+            k: v
+            for k, v in params.items()
+            if k
+            not in (
+                "burst_intervals",
+                "burst_wait_deltas",
+                "slow_tail_intervals",
+                "schedule_mode",
+                "t_min_s",
+                "burst_t_max_s",
+                "num_reads",
+                "include_slow_tail",
+                "slow_tail_start_s",
+                "slow_tail_num_reads",
+                "include_early_burst",
+            )
+        }
+        run_params["read_intervals"] = all_intervals
+        result = self.test_scripts.retention_test(**run_params)
+        ops = result.get("operation") or []
+        for i, op in enumerate(ops):
+            if op == "retention" and i > 0:
+                post_t = None
+                post_idx = [j for j, o in enumerate(ops) if o == "post_pulse"]
+                if post_idx:
+                    post_t = result["timestamps"][post_idx[0]]
+                if post_t is not None and result["timestamps"][i] > (
+                    burst[-1] if burst else 0
+                ):
+                    ops[i] = "slow_tail"
+        result["operation"] = ops
+        post_idx = [i for i, op in enumerate(ops) if op == "post_pulse"]
+        t_pulse = result["timestamps"][post_idx[0]] if post_idx else None
+        result["volatile_screening"] = classify_volatile_screening(
+            result["timestamps"],
+            result["resistances"],
+            ops,
+            retention_threshold=float(params.get("retention_threshold", 0.85)),
+            min_switch_ratio=float(params.get("min_switch_ratio", 0.05)),
+            t_pulse_end=t_pulse,
+        )
+        result["read_intervals_used"] = burst
+        if tail:
+            result["slow_tail_intervals_used"] = tail
+        return result
     
     def pulse_multi_read(self, **params) -> Dict[str, Any]:
         """Pattern: N pulses then many reads"""

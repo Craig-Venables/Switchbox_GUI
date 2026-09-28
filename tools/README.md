@@ -32,6 +32,8 @@ Optional utilities that live outside the main `main.py` application. Each tool h
 | [`optical_timing_calibration/`](optical_timing_calibration/) | Optical pulse timing from saved data | `python tools/optical_timing_calibration/analyze_optical_result.py <file>` |
 | [`fg_test/`](fg_test/) | SDG1032X FG config smoke test | `python tools/fg_test/test_fg_config.py` |
 | [`pmu_laser_smu_read/`](pmu_laser_smu_read/) | 4200 PMU CH1 TTL laser + SMU continuous R(t) | `python tools/pmu_laser_smu_read/run_gui.py` |
+| [`laser_beam_width/`](laser_beam_width/) | Overhead camera laser spot width (FWHM / 1/e²) | `python tools/laser_beam_width/main.py` |
+| [`laser_power_sweep/`](laser_power_sweep/) | Oxxius digital power sweep + PM100D (+ optional power density) | `python tools/laser_power_sweep/main.py` |
 | [`Lines_of_code/`](Lines_of_code/) | Repo line-count report | `python tools/Lines_of_code/count_lines_of_code.py` |
 
 ## Integrated with Measurement GUI

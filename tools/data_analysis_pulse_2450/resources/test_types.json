@@ -336,5 +336,39 @@
       "reset_duration",
       "num_cycles"
     ]
+  },
+  "Log Retention": {
+    "description": "Log-spaced retention reads for publication decay fitting",
+    "plot_type": "log_retention",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "pulse_voltage",
+      "t_min_s",
+      "t_max_s",
+      "num_reads"
+    ]
+  },
+  "Volatile Screening": {
+    "description": "Volatile vs non-volatile screening with auto verdict",
+    "plot_type": "volatile_screening",
+    "expected_columns": [
+      "Measurement_Number",
+      "Timestamp(s)",
+      "Voltage(V)",
+      "Current(A)",
+      "Resistance(Ohm)"
+    ],
+    "key_parameters": [
+      "pulse_voltage",
+      "burst_t_max_s",
+      "num_reads",
+      "schedule_mode"
+    ]
   }
 }

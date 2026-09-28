@@ -1593,10 +1593,14 @@ class TSPTestingGUI(tk.Toplevel):
         
         self.params_frame.columnconfigure(1, weight=1)
 
-        # Timed Retention: live estimate of wall-clock hours to finish
+        # Timed / Log Retention / Volatile Screening: live wall-clock estimate
         self.timed_retention_eta_var = None
         self.timed_retention_eta_label = None
-        if "read_every_s" in self.param_vars and "retention_duration_s" in self.param_vars:
+        eta_funcs = ("retention_test", "log_retention_test", "volatile_screening_test")
+        test_func = TEST_FUNCTIONS.get(test_name, {}).get("function", "")
+        if test_func in eta_funcs or (
+            "read_every_s" in self.param_vars and "retention_duration_s" in self.param_vars
+        ):
             self.timed_retention_eta_var = tk.StringVar(value="")
             self.timed_retention_eta_label = tk.Label(
                 self.params_frame,
@@ -1620,19 +1624,39 @@ class TSPTestingGUI(tk.Toplevel):
             self.refresh_params_canvas()
 
     def _update_timed_retention_eta(self):
-        """Refresh Estimated time to complete for Timed Retention params."""
+        """Refresh estimated wall-clock time for retention-related tests."""
         if not getattr(self, "timed_retention_eta_var", None):
             return
-        if "read_every_s" not in getattr(self, "param_vars", {}) or "retention_duration_s" not in self.param_vars:
-            self.timed_retention_eta_var.set("")
-            return
+        test_name = self.test_var.get() if hasattr(self, "test_var") else ""
+        func = TEST_FUNCTIONS.get(test_name, {}).get("function", "")
         try:
+            if func == "log_retention_test":
+                from Pulse_Testing.systems.retention_intervals import format_log_retention_eta
+                t_max = float(self.param_vars["t_max_s"]["var"].get())
+                num_reads = int(self.param_vars["num_reads"]["var"].get())
+                self.timed_retention_eta_var.set(format_log_retention_eta(t_max, num_reads))
+                return
+            if func == "volatile_screening_test":
+                from Pulse_Testing.systems.retention_intervals import format_volatile_screening_eta
+                burst = float(self.param_vars["burst_t_max_s"]["var"].get())
+                num_reads = int(self.param_vars["num_reads"]["var"].get())
+                include_tail = bool(self.param_vars.get("include_slow_tail", {}).get("var", tk.BooleanVar(value=False)).get())
+                t_max = float(self.param_vars["t_max_s"]["var"].get()) if "t_max_s" in self.param_vars else burst
+                self.timed_retention_eta_var.set(
+                    format_volatile_screening_eta(
+                        burst, num_reads, include_slow_tail=include_tail, t_max_s=t_max
+                    )
+                )
+                return
+            if "read_every_s" not in getattr(self, "param_vars", {}) or "retention_duration_s" not in self.param_vars:
+                self.timed_retention_eta_var.set("")
+                return
             every = float(self.param_vars["read_every_s"]["var"].get())
             duration = float(self.param_vars["retention_duration_s"]["var"].get())
             from Pulse_Testing.systems.retention_intervals import format_timed_retention_eta
             self.timed_retention_eta_var.set(format_timed_retention_eta(every, duration))
         except Exception:
-            self.timed_retention_eta_var.set("Estimated time: enter valid Read Every / Retention Duration")
+            self.timed_retention_eta_var.set("Estimated time: enter valid schedule parameters")
     
     def get_test_parameters(self):
         """Extract and validate parameters"""
@@ -1881,6 +1905,20 @@ class TSPTestingGUI(tk.Toplevel):
             self._log_pmu_endurance_check(results, params)
         if func_name == "retention_test" and self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS:
             self._log_pmu_retention_check(results, params)
+        if func_name == "volatile_screening_test":
+            vs = results.get("volatile_screening") or {}
+            verdict = vs.get("verdict", "unknown")
+            self.log(f"  Volatile screening verdict: {verdict}")
+            if vs.get("retention_fraction_final") is not None:
+                self.log(f"    f_final={vs['retention_fraction_final']:.3f}")
+            if vs.get("retention_fraction_100ms") is not None:
+                self.log(f"    f@100ms={vs['retention_fraction_100ms']:.3f}")
+        if func_name == "log_retention_test" and results.get("retention_fit"):
+            fit = results["retention_fit"]
+            self.log(
+                f"  Log fit: R²={fit.get('r_squared', 0):.4f}, "
+                f"alpha={fit.get('alpha', 0):.4g}"
+            )
 
         self.last_results = results
         self.last_results["test_name"] = self.test_var.get()
@@ -2140,6 +2178,28 @@ class TSPTestingGUI(tk.Toplevel):
                         sample_name_for_metadata = str(fallback_name).strip()
             
             # Prepare metadata
+            extra_notes = []
+            if self.last_results.get("retention_fit"):
+                fit = self.last_results["retention_fit"]
+                extra_notes.append(
+                    f"Log retention fit: R0={fit.get('r0')}, alpha={fit.get('alpha')}, "
+                    f"R_squared={fit.get('r_squared')}"
+                )
+            if self.last_results.get("volatile_screening"):
+                vs = self.last_results["volatile_screening"]
+                extra_notes.append(f"Verdict: {vs.get('verdict')}")
+                for key in (
+                    "retention_fraction_final",
+                    "retention_fraction_early",
+                    "retention_fraction_100ms",
+                    "relaxation_time_50pct",
+                    "switch_ratio",
+                ):
+                    if vs.get(key) is not None:
+                        extra_notes.append(f"{key}: {vs.get(key)}")
+            if extra_notes:
+                notes = (notes + "\n" if notes else "") + "\n".join(extra_notes)
+
             metadata = {
                 'sample': sample_name_for_metadata,
                 'device': self.device_label,

@@ -154,10 +154,20 @@ class RoutineStep:
     label: str = ""
 
 
-def build_routine_plan(widths_s: List[float], powers_mw: List[float]) -> List[RoutineStep]:
-    """For each current-% level (low -> high): one ``set_power`` step, then one
-    ``fire`` step per width (low -> high). Encodes "low-current pulse at
-    various widths, then increase current %, repeat until something is seen."
+def build_routine_plan(
+    widths_s: List[float],
+    powers_mw: List[float],
+    sweep_order: str = "power_outer",
+) -> List[RoutineStep]:
+    """Build the routine firing plan.
+
+    ``sweep_order="power_outer"`` (default):
+        For each power level (low → high): set power, then fire every width.
+        Encodes "low-current pulse at various widths, then raise current %".
+
+    ``sweep_order="width_outer"``:
+        For each width (short → long): set power for each level, fire.
+        Encodes "narrow pulse at all powers first, then widen".
     """
     if not widths_s:
         raise ValueError("no widths configured")
@@ -165,23 +175,44 @@ def build_routine_plan(widths_s: List[float], powers_mw: List[float]) -> List[Ro
         raise ValueError("no current % levels configured")
 
     plan: List[RoutineStep] = []
-    for current_pct in powers_mw:
-        plan.append(
-            RoutineStep(
-                kind="set_power",
-                power_mw=current_pct,
-                label=f"Set laser current \u2192 {current_pct:.3g} %",
-            )
-        )
+
+    if sweep_order == "width_outer":
         for width_s in widths_s:
+            for current_pct in powers_mw:
+                plan.append(
+                    RoutineStep(
+                        kind="set_power",
+                        power_mw=current_pct,
+                        label=f"Set laser current \u2192 {current_pct:.3g} %",
+                    )
+                )
+                plan.append(
+                    RoutineStep(
+                        kind="fire",
+                        power_mw=current_pct,
+                        width_s=width_s,
+                        label=f"Fire {format_time_compact(width_s)} @ {current_pct:.3g} %",
+                    )
+                )
+    else:
+        # "power_outer" — original behaviour
+        for current_pct in powers_mw:
             plan.append(
                 RoutineStep(
-                    kind="fire",
+                    kind="set_power",
                     power_mw=current_pct,
-                    width_s=width_s,
-                    label=f"Fire {format_time_compact(width_s)} @ {current_pct:.3g} %",
+                    label=f"Set laser current \u2192 {current_pct:.3g} %",
                 )
             )
+            for width_s in widths_s:
+                plan.append(
+                    RoutineStep(
+                        kind="fire",
+                        power_mw=current_pct,
+                        width_s=width_s,
+                        label=f"Fire {format_time_compact(width_s)} @ {current_pct:.3g} %",
+                    )
+                )
     return plan
 
 

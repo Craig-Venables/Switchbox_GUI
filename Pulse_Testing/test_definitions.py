@@ -23,6 +23,8 @@ TEST_DISPLAY_ORDER: List[str] = [
     "endurance_test",
     "endurance_burst_test",
     "retention_test",
+    "log_retention_test",
+    "volatile_screening_test",
     "pulse_read_repeat",
     "multi_pulse_then_read",
     "pulse_multi_read",
@@ -392,6 +394,88 @@ TEST_FUNCTIONS: Dict[str, Dict[str, Any]] = {
             "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
         },
         "plot_type": "time_series",
+    },
+    "Log Retention": {
+        "function": "log_retention_test",
+        "only_for_systems": ["keithley2450", "keithley2450_sim", "keithley2400"],
+        "description": (
+            "Publication-quality log-spaced retention (2450 / 2400).\n"
+            "Pattern: Initial read → program pulse → post-pulse read → "
+            "log-spaced reads from t_min to t_max.\n"
+            "Optional early burst (0.05–1 s) when t_min < 1 s for fast initial relaxation.\n"
+            "Fits R(t) = R₀(1 + α·log(1+t)) after the run.\n"
+            "t_min / t_max / num_reads are absolute seconds (not affected by ns/µs/ms unit)."
+        ),
+        "params": {
+            "pulse_voltage": {"default": 2.0, "label": "Program Pulse Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 0.1, "label": "Program Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "t_min_s": {"default": 0.1, "label": "First Read After Pulse (s)", "type": "float"},
+            "t_max_s": {"default": 86400.0, "label": "Last Read After Pulse (s)", "type": "float"},
+            "num_reads": {"default": 80, "label": "Log-Spaced Read Count", "type": "int"},
+            "include_early_burst": {
+                "default": True,
+                "label": "Early Burst (0.05–1 s before log segment)",
+                "type": "bool",
+            },
+            "read_intervals": {
+                "default": "",
+                "label": "Explicit Intervals (s, comma) — overrides schedule",
+                "type": "str",
+            },
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "log_retention",
+    },
+    "Volatile Screening": {
+        "function": "volatile_screening_test",
+        "only_for_systems": ["keithley2450", "keithley2450_sim", "keithley2400"],
+        "description": (
+            "Volatile vs non-volatile screening (2450 on-instrument burst; 2400 PC-timed).\n"
+            "Phase A: baseline → pulse → post-pulse → dense reads (ms–s, 50+ points).\n"
+            "Phase B (optional): slow PC tail for longer non-volatile confirmation.\n"
+            "Auto verdict: VOLATILE / NON-VOLATILE / MARGINAL / INCONCLUSIVE.\n"
+            "Schedule: log (default), linear, or explicit comma intervals in seconds."
+        ),
+        "params": {
+            "pulse_voltage": {"default": 2.0, "label": "Program Pulse Voltage (V)", "type": "float"},
+            "pulse_width": {"default": 1.0, "label": "Program Pulse Width (ms)", "type": "float"},
+            "read_voltage": {"default": 0.2, "label": "Read Voltage (V)", "type": "float"},
+            "schedule_mode": {
+                "default": "log",
+                "label": "Schedule Mode",
+                "type": "choice",
+                "choices": ["log", "linear", "explicit"],
+            },
+            "t_min_s": {"default": 0.001, "label": "First Read After Pulse (s)", "type": "float"},
+            "burst_t_max_s": {"default": 5.0, "label": "Burst End Time (s)", "type": "float"},
+            "t_max_s": {"default": 5.0, "label": "Overall End Time (s)", "type": "float"},
+            "num_reads": {"default": 50, "label": "Burst Read Count", "type": "int"},
+            "read_intervals": {
+                "default": "",
+                "label": "Explicit Intervals (s) — e.g. 0.001,0.01,0.1,1",
+                "type": "str",
+            },
+            "include_slow_tail": {
+                "default": False,
+                "label": "Enable Slow Tail (Phase B)",
+                "type": "bool",
+            },
+            "slow_tail_start_s": {"default": 10.0, "label": "Slow Tail Start (s)", "type": "float"},
+            "slow_tail_num_reads": {"default": 30, "label": "Slow Tail Read Count", "type": "int"},
+            "retention_threshold": {
+                "default": 0.85,
+                "label": "Non-Volatile Threshold (fraction retained)",
+                "type": "float",
+            },
+            "min_switch_ratio": {
+                "default": 0.05,
+                "label": "Min Switch Ratio |ΔR/R_base|",
+                "type": "float",
+            },
+            "clim": {"default": 100e-6, "label": "Current Limit (A)", "type": "float"},
+        },
+        "plot_type": "volatile_screening",
     },
     "Pulse → Multi-Read": {
         "function": "pulse_multi_read",

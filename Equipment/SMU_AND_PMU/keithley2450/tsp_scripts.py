@@ -1870,25 +1870,30 @@ class Keithley2450_TSP_Scripts:
         return self._format_results(timestamps, voltages, currents, resistances,
                                    cycle_number=cycle_numbers, operation=operations)
     
-    def retention_test(self, pulse_voltage: float = 2.0,
-                      pulse_width: float = 100e-6,
-                      read_voltage: float = 0.2,
-                      read_intervals: List[float] = None,
-                      clim: float = 100e-3) -> Dict:
-        """Retention: baseline read → program pulse → post-pulse read → timed reads."""
-        if read_intervals is None:
-            read_intervals = [1, 10, 100, 1000, 10000]
-        
-        print(
-            f"Starting retention test: baseline → {pulse_voltage}V pulse → "
-            f"{len(read_intervals)} timed reads (last at {read_intervals[-1]}s)"
-        )
-        
-        timestamps: List[float] = []
-        voltages: List[float] = []
-        currents: List[float] = []
-        resistances: List[float] = []
-        operations: List[str] = []
+    def _run_pc_timed_retention_sequence(
+        self,
+        pulse_voltage: float,
+        pulse_width: float,
+        read_voltage: float,
+        read_intervals: List[float],
+        clim: float,
+        *,
+        test_label: str = "retention",
+        append_operations: Optional[List[str]] = None,
+        t_start: Optional[float] = None,
+        skip_baseline_and_pulse: bool = False,
+        existing_results: Optional[Dict[str, List]] = None,
+    ) -> Dict:
+        """Shared PC-timed retention: baseline → pulse → post-pulse → timed reads."""
+        read_intervals = [float(x) for x in read_intervals]
+        if not read_intervals and skip_baseline_and_pulse:
+            return existing_results or self._format_results([], [], [], [])
+
+        timestamps: List[float] = list((existing_results or {}).get("timestamps", []))
+        voltages: List[float] = list((existing_results or {}).get("voltages", []))
+        currents: List[float] = list((existing_results or {}).get("currents", []))
+        resistances: List[float] = list((existing_results or {}).get("resistances", []))
+        operations: List[str] = list((existing_results or {}).get("operation", []))
 
         def _append_point(ts: float, v: float, i: float, op: str) -> None:
             r = v / i if abs(i) > 1e-12 else 1e12
@@ -1900,77 +1905,307 @@ class Keithley2450_TSP_Scripts:
             print(f"  [{op}] t={ts:.3g}s: R = {r:.2e} Ω")
 
         def _run_read_script(script_name: str) -> Tuple[float, float]:
-            self.tsp.device.write(f'{script_name}()')
-            self.tsp.device.write('waitcomplete()')
+            self.tsp.device.write(f"{script_name}()")
+            self.tsp.device.write("waitcomplete()")
             time.sleep(0.02)
             response = self.tsp.device.read().strip()
-            parts = response.split(',')
+            parts = response.split(",")
             return float(parts[0]), float(parts[1])
 
-        # Shared read-only script (baseline + post-pulse + timed reads)
-        self.tsp.device.write('if retentionReadOnly ~= nil then script.delete("retentionReadOnly") end')
+        self.tsp.device.write(
+            'if retentionReadOnly ~= nil then script.delete("retentionReadOnly") end'
+        )
         time.sleep(0.01)
-        self.tsp.device.write('loadscript retentionReadOnly')
-        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
-        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
-        self.tsp.device.write('smu.measure.func = smu.FUNC_DC_CURRENT')
-        self.tsp.device.write('smu.measure.nplc = 0.01')
-        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
-        self.tsp.device.write('smu.source.output = smu.ON')
-        self.tsp.device.write(f'smu.source.level = {read_voltage}')
-        self.tsp.device.write('local i = smu.measure.read()')
-        self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write('smu.source.output = smu.OFF')
-        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
-        self.tsp.device.write(f'print(string.format("%.6e,%.6e", {read_voltage}, i))')
-        self.tsp.device.write('endscript')
+        self.tsp.device.write("loadscript retentionReadOnly")
+        self.tsp.device.write("smu.source.func = smu.FUNC_DC_VOLTAGE")
+        self.tsp.device.write(f"smu.source.ilimit.level = {clim}")
+        self.tsp.device.write("smu.measure.func = smu.FUNC_DC_CURRENT")
+        self.tsp.device.write("smu.measure.nplc = 0.01")
+        self.tsp.device.write("smu.measure.autozero.enable = smu.OFF")
+        self.tsp.device.write("smu.source.output = smu.ON")
+        self.tsp.device.write(f"smu.source.level = {read_voltage}")
+        self.tsp.device.write("local i = smu.measure.read()")
+        self.tsp.device.write("smu.source.level = 0")
+        self.tsp.device.write("smu.source.output = smu.OFF")
+        self.tsp.device.write("smu.measure.autozero.enable = smu.ON")
+        self.tsp.device.write(
+            f'print(string.format("%.6e,%.6e", {read_voltage}, i))'
+        )
+        self.tsp.device.write("endscript")
 
-        # Absolute clock for unique timestamps; wait schedule is relative to pulse end.
-        t_start = time.time()
+        if t_start is None:
+            t_start = time.time()
 
-        # 1) Initial state (before programming)
-        print("  Measuring initial state (pre-pulse)...")
-        v, i = _run_read_script('retentionReadOnly')
-        _append_point(time.time() - t_start, v, i, 'baseline')
+        t0: Optional[float] = None
+        if not skip_baseline_and_pulse:
+            print(f"Starting {test_label}: baseline → {pulse_voltage}V pulse → "
+                  f"{len(read_intervals)} timed reads")
+            print("  Measuring initial state (pre-pulse)...")
+            v, i = _run_read_script("retentionReadOnly")
+            _append_point(time.time() - t_start, v, i, "baseline")
 
-        # 2) Program pulse only
-        self.tsp.device.write('if retentionProgram ~= nil then script.delete("retentionProgram") end')
-        time.sleep(0.01)
-        self.tsp.device.write('loadscript retentionProgram')
-        self.tsp.device.write('smu.source.func = smu.FUNC_DC_VOLTAGE')
-        self.tsp.device.write(f'smu.source.ilimit.level = {clim}')
-        self.tsp.device.write('smu.measure.autozero.enable = smu.OFF')
-        self.tsp.device.write('smu.source.output = smu.ON')
-        self.tsp.device.write(f'smu.source.level = {pulse_voltage}')
-        self.tsp.device.write(f'delay({pulse_width})')
-        self.tsp.device.write('smu.source.level = 0')
-        self.tsp.device.write('smu.source.output = smu.OFF')
-        self.tsp.device.write('smu.measure.autozero.enable = smu.ON')
-        self.tsp.device.write('endscript')
+            self.tsp.device.write(
+                'if retentionProgram ~= nil then script.delete("retentionProgram") end'
+            )
+            time.sleep(0.01)
+            self.tsp.device.write("loadscript retentionProgram")
+            self.tsp.device.write("smu.source.func = smu.FUNC_DC_VOLTAGE")
+            self.tsp.device.write(f"smu.source.ilimit.level = {clim}")
+            self.tsp.device.write("smu.measure.autozero.enable = smu.OFF")
+            self.tsp.device.write("smu.source.output = smu.ON")
+            self.tsp.device.write(f"smu.source.level = {pulse_voltage}")
+            self.tsp.device.write(f"delay({pulse_width})")
+            self.tsp.device.write("smu.source.level = 0")
+            self.tsp.device.write("smu.source.output = smu.OFF")
+            self.tsp.device.write("smu.measure.autozero.enable = smu.ON")
+            self.tsp.device.write("endscript")
 
-        print(f"  Programming: {pulse_voltage}V for {pulse_width}s")
-        self.tsp.device.write('retentionProgram()')
-        self.tsp.device.write('waitcomplete()')
-        time.sleep(0.02)
+            print(f"  Programming: {pulse_voltage}V for {pulse_width}s")
+            self.tsp.device.write("retentionProgram()")
+            self.tsp.device.write("waitcomplete()")
+            time.sleep(0.02)
 
-        # 3) Retention wait clock from end of pulse; timestamps from t_start
-        t0 = time.time()
-        v, i = _run_read_script('retentionReadOnly')
-        _append_point(time.time() - t_start, v, i, 'post_pulse')
+            t0 = time.time()
+            v, i = _run_read_script("retentionReadOnly")
+            _append_point(time.time() - t_start, v, i, "post_pulse")
+        else:
+            post_idx = [i for i, op in enumerate(operations) if op == "post_pulse"]
+            if post_idx:
+                t0 = t_start + timestamps[post_idx[-1]]
+            else:
+                t0 = time.time()
 
+        op_tag = append_operations[0] if append_operations else "retention"
         for interval in read_intervals:
             wait_time = float(interval) - (time.time() - t0)
             if wait_time > 0:
-                print(f"  Waiting {wait_time:.1f}s until t={interval:g}s after pulse...")
+                print(f"  Waiting {wait_time:.3g}s until t={interval:g}s after pulse...")
                 time.sleep(wait_time)
 
-            v, i = _run_read_script('retentionReadOnly')
-            _append_point(time.time() - t_start, v, i, 'retention')
+            v, i = _run_read_script("retentionReadOnly")
+            _append_point(time.time() - t_start, v, i, op_tag)
 
-        print("✓ Retention test complete")
         return self._format_results(
             timestamps, voltages, currents, resistances, operation=operations
         )
+
+    def retention_test(self, pulse_voltage: float = 2.0,
+                      pulse_width: float = 100e-6,
+                      read_voltage: float = 0.2,
+                      read_intervals: List[float] = None,
+                      clim: float = 100e-3) -> Dict:
+        """Retention: baseline read → program pulse → post-pulse read → timed reads."""
+        if read_intervals is None:
+            read_intervals = [1, 10, 100, 1000, 10000]
+
+        result = self._run_pc_timed_retention_sequence(
+            pulse_voltage, pulse_width, read_voltage, read_intervals, clim,
+            test_label="retention test",
+        )
+        print("✓ Retention test complete")
+        return result
+
+    def log_retention_test(self, pulse_voltage: float = 2.0,
+                           pulse_width: float = 100e-6,
+                           read_voltage: float = 0.2,
+                           read_intervals: List[float] = None,
+                           clim: float = 100e-3,
+                           **_) -> Dict:
+        """Log-spaced retention for publication-quality decay fitting."""
+        from Pulse_Testing.systems.retention_intervals import fit_log_retention_decay
+
+        if read_intervals is None:
+            read_intervals = [1, 10, 100, 1000, 10000]
+
+        print(
+            f"Starting log retention: {len(read_intervals)} reads "
+            f"(t={read_intervals[0]:g}s … {read_intervals[-1]:g}s)"
+        )
+        result = self._run_pc_timed_retention_sequence(
+            pulse_voltage, pulse_width, read_voltage, read_intervals, clim,
+            test_label="log retention",
+        )
+
+        ops = result.get("operation") or []
+        post_idx = [i for i, op in enumerate(ops) if op == "post_pulse"]
+        t_pulse = result["timestamps"][post_idx[0]] if post_idx else None
+        fit = fit_log_retention_decay(
+            result["timestamps"], result["resistances"], ops, t_pulse_end=t_pulse
+        )
+        if fit:
+            result["retention_fit"] = fit
+            print(
+                f"  Log fit: R0={fit['r0']:.2e} Ω, alpha={fit['alpha']:.4f}, "
+                f"R²={fit['r_squared']:.4f}"
+            )
+        result["read_intervals_used"] = list(read_intervals)
+        print("✓ Log retention test complete")
+        return result
+
+    def volatile_screening_test(
+        self,
+        pulse_voltage: float = 2.0,
+        pulse_width: float = 100e-6,
+        read_voltage: float = 0.2,
+        clim: float = 100e-3,
+        burst_intervals: Optional[List[float]] = None,
+        burst_wait_deltas: Optional[List[float]] = None,
+        slow_tail_intervals: Optional[List[float]] = None,
+        retention_threshold: float = 0.85,
+        min_switch_ratio: float = 0.05,
+        **_,
+    ) -> Dict:
+        """
+        Volatile screening: on-instrument burst (ms–s) + optional PC slow tail + verdict.
+        """
+        from Pulse_Testing.systems.retention_intervals import classify_volatile_screening
+
+        if burst_wait_deltas is None:
+            if burst_intervals:
+                from Pulse_Testing.systems.retention_intervals import intervals_to_wait_deltas
+                burst_wait_deltas = intervals_to_wait_deltas(burst_intervals)
+            else:
+                burst_wait_deltas = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0]
+
+        n_burst = len(burst_wait_deltas)
+        print(
+            f"Starting volatile screening: burst={n_burst} on-instrument reads, "
+            f"slow_tail={len(slow_tail_intervals or [])} reads"
+        )
+
+        v_range = max(abs(pulse_voltage), abs(read_voltage)) * 1.2
+        v_range = max(v_range, 0.2)
+        i_range = clim * 1.2
+        buffer_capacity = max(n_burst + 2, 10)
+
+        self.tsp.device.write(
+            'if volatileScreenBurst ~= nil then script.delete("volatileScreenBurst") end'
+        )
+        time.sleep(0.01)
+        self.tsp.device.write("loadscript volatileScreenBurst")
+        self.tsp.device.write(f"defbuffer1.clear()")
+        self.tsp.device.write(f"defbuffer1.capacity = {buffer_capacity}")
+        self.tsp.device.write("smu.source.func = smu.FUNC_DC_VOLTAGE")
+        self.tsp.device.write(f"smu.source.range = {v_range}")
+        self.tsp.device.write(f"smu.source.ilimit.level = {clim}")
+        self.tsp.device.write("smu.measure.func = smu.FUNC_DC_CURRENT")
+        self.tsp.device.write(f"smu.measure.range = {i_range}")
+        self.tsp.device.write("smu.measure.nplc = 0.01")
+        self.tsp.device.write("smu.measure.autozero.enable = smu.OFF")
+        self.tsp.device.write("smu.source.output = smu.ON")
+        self.tsp.device.write(f"smu.source.level = {read_voltage}")
+        self.tsp.device.write("smu.measure.read(defbuffer1)")
+        self.tsp.device.write("smu.source.level = 0")
+        self.tsp.device.write(f"smu.source.level = {pulse_voltage}")
+        self.tsp.device.write(f"delay({pulse_width})")
+        self.tsp.device.write("smu.source.level = 0")
+        self.tsp.device.write(f"smu.source.level = {read_voltage}")
+        self.tsp.device.write("smu.measure.read(defbuffer1)")
+        self.tsp.device.write("smu.source.level = 0")
+        for delta in burst_wait_deltas:
+            self.tsp.device.write(f"delay({float(delta)})")
+            self.tsp.device.write(f"smu.source.level = {read_voltage}")
+            self.tsp.device.write("smu.measure.read(defbuffer1)")
+            self.tsp.device.write("smu.source.level = 0")
+        self.tsp.device.write("smu.source.autorange = smu.ON")
+        self.tsp.device.write("smu.measure.autorange = smu.ON")
+        self.tsp.device.write("smu.measure.autozero.enable = smu.ON")
+        self.tsp.device.write("smu.source.output = smu.OFF")
+        self.tsp.device.write(
+            "printbuffer(1, defbuffer1.n, defbuffer1.relativetimestamps, "
+            "defbuffer1.sourcevalues, defbuffer1.readings)"
+        )
+        self.tsp.device.write("endscript")
+
+        read_time = 0.001
+        expected_duration = (
+            0.002 + pulse_width + sum(float(d) for d in burst_wait_deltas)
+            + n_burst * read_time + 0.5
+        )
+        script_timeout = max(30000, int(expected_duration * 1000 * 2.0))
+
+        t_start = time.time()
+        self._flush_output_buffer()
+        original_timeout = self.tsp.device.timeout
+        self.tsp.device.timeout = script_timeout
+
+        self.tsp.device.write("volatileScreenBurst()")
+        self.tsp.device.write("waitcomplete()")
+        time.sleep(expected_duration + 0.2)
+
+        timestamps: List[float] = []
+        voltages: List[float] = []
+        currents: List[float] = []
+        resistances: List[float] = []
+        operations: List[str] = []
+
+        try:
+            self.tsp.device.timeout = max(script_timeout, 30000)
+            response = self.tsp.device.read().strip()
+            parsed = self._parse_timestamped_buffer(response)
+            if parsed and parsed["timestamps"]:
+                n_pts = len(parsed["timestamps"])
+                for idx in range(n_pts):
+                    ts_abs = t_start + parsed["timestamps"][idx]
+                    v = parsed["voltages"][idx]
+                    i = parsed["currents"][idx]
+                    r = parsed["resistances"][idx]
+                    if idx == 0:
+                        op = "baseline"
+                    elif idx == 1:
+                        op = "post_pulse"
+                    else:
+                        op = "retention"
+                    timestamps.append(ts_abs - t_start)
+                    voltages.append(v)
+                    currents.append(i)
+                    resistances.append(r)
+                    operations.append(op)
+                    print(f"  [{op}] t={timestamps[-1]:.4g}s: R = {r:.2e} Ω")
+            else:
+                print("  ⚠ Could not parse burst buffer; falling back to empty burst")
+        except Exception as exc:
+            print(f"  ❌ Error reading volatile burst buffer: {exc}")
+        finally:
+            self.tsp.device.timeout = original_timeout
+
+        result = self._format_results(
+            timestamps, voltages, currents, resistances, operation=operations
+        )
+
+        if slow_tail_intervals:
+            print(f"  Running slow tail: {len(slow_tail_intervals)} PC-timed reads...")
+            result = self._run_pc_timed_retention_sequence(
+                pulse_voltage,
+                pulse_width,
+                read_voltage,
+                slow_tail_intervals,
+                clim,
+                test_label="volatile slow tail",
+                append_operations=["slow_tail"],
+                t_start=t_start,
+                skip_baseline_and_pulse=True,
+                existing_results=result,
+            )
+
+        ops = result.get("operation") or []
+        post_idx = [i for i, op in enumerate(ops) if op == "post_pulse"]
+        t_pulse = result["timestamps"][post_idx[0]] if post_idx else None
+        screening = classify_volatile_screening(
+            result["timestamps"],
+            result["resistances"],
+            ops,
+            retention_threshold=retention_threshold,
+            min_switch_ratio=min_switch_ratio,
+            t_pulse_end=t_pulse,
+        )
+        result["volatile_screening"] = screening
+        result["read_intervals_used"] = list(burst_intervals or [])
+        if slow_tail_intervals:
+            result["slow_tail_intervals_used"] = list(slow_tail_intervals)
+
+        print(f"✓ Volatile screening complete — {screening.get('verdict', 'unknown')}")
+        return result
     
     def multi_pulse_then_read(self, pulse_voltage: float = 1.0,
                              num_pulses_per_read: int = 10,
