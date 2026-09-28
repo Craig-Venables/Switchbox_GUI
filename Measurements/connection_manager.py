@@ -108,13 +108,34 @@ class InstrumentConnectionManager:
             print(error_msg)
             warnings.warn(error_msg, RuntimeWarning, stacklevel=2)
             raise RuntimeError(error_msg) from _IVC_ERROR
+        # Drop any previous SMU session so GPIB/USB is not left half-open
+        if self.keithley is not None:
+            try:
+                self.keithley.close()
+            except Exception:
+                pass
+            self.keithley = None
+            self.flags["keithley"] = False
+
         instrument = IVControllerManager(smu_type, address)
         try:
             connected = bool(instrument.is_connected())
-        except Exception:  # Some drivers lack the helper
-            connected = True
+        except Exception:
+            connected = False
+
+        if not connected:
+            try:
+                instrument.close()
+            except Exception:
+                pass
+            raise RuntimeError(
+                f"Failed to connect to {smu_type} at {address}. "
+                "Instrument did not open a usable VISA session "
+                "(check power, cable, GPIB/USB address, and that NI-VISA lists the resource)."
+            )
+
         self.keithley = instrument
-        self.flags["keithley"] = connected
+        self.flags["keithley"] = True
         self.status_logger(f"Keithley connected: {smu_type} @ {address}")
         return instrument
 

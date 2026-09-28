@@ -332,6 +332,239 @@
         ],
         "main_sweep": 5
     },
+    "St_form(3.0v)": {
+        "sweep_combinations": [
+            {
+                "sweeps": [
+                    1,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    10
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    9
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    8
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    7
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    6
+                ],
+                "title": "Main Sweep"
+            }
+        ],
+        "main_sweep": 6
+    },
+    "St_form(3.5v)": {
+        "sweep_combinations": [
+            {
+                "sweeps": [
+                    1,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    10
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    9
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    6,
+                    8
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7
+                ],
+                "title": "Main Sweep"
+            }
+        ],
+        "main_sweep": 7
+    },
+    "St_form(4.0v)": {
+        "sweep_combinations": [
+            {
+                "sweeps": [
+                    1,
+                    15
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    14
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    6,
+                    10
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7,
+                    9
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    8
+                ],
+                "title": "Main Sweep"
+            }
+        ],
+        "main_sweep": 8
+    },
+    "St_form(5.0v)": {
+        "sweep_combinations": [
+            {
+                "sweeps": [
+                    1,
+                    19
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    2,
+                    18
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    3,
+                    17
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    4,
+                    16
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    5,
+                    15
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    6,
+                    14
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    7,
+                    13
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    8,
+                    12
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    9,
+                    11
+                ],
+                "title": "Same voltage sweep before and after forming"
+            },
+            {
+                "sweeps": [
+                    10
+                ],
+                "title": "Main Sweep"
+            }
+        ],
+        "main_sweep": 10
+    },
     "Chris_Devices": {
         "sweep_combinations": [
             {

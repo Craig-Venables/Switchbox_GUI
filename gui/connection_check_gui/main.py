@@ -325,11 +325,17 @@ class CheckConnection:
     def measurement_loop(self) -> None:
         """Worker thread: bias the device and stream current to the plot."""
         start_time = time.time()
-        helper = getattr(self.keithley, "connection_check_sample", None)
-        if not callable(helper) and hasattr(self.keithley, "instrument"):
+        # IVControllerManager always exposes connection_check_sample, but only
+        # 4200A-style instruments implement it — probe the inner instrument.
+        helper = None
+        if hasattr(self.keithley, "instrument"):
             inner = getattr(self.keithley.instrument, "connection_check_sample", None)
             if callable(inner):
-                helper = inner
+                helper = getattr(self.keithley, "connection_check_sample", None)
+        else:
+            candidate = getattr(self.keithley, "connection_check_sample", None)
+            if callable(candidate):
+                helper = candidate
         use_connection_helper = callable(helper)
         print(
             "[ConnectionCheck] keithley type:",

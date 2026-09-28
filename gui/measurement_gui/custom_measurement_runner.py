@@ -11,10 +11,14 @@ from typing import Any
 import numpy as np
 from tkinter import messagebox
 
+from Measurements.data_saver import (
+    resolve_unique_summary_artifact_label,
+    sanitize_summary_artifact_label,
+)
 from Measurements.measurement_services_smu import VoltageRangeMode
 
 
-def __debug_print(*args: Any, **kwargs: Any) -> None:
+def _debug_print(*args: Any, **kwargs: Any) -> None:
     """No-op debug logger (matches MeasurementGUI debug_print when disabled)."""
     return None
 

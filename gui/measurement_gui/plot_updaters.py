@@ -144,40 +144,44 @@ class PlotUpdaters:
     def _update_iv_plots(self) -> None:
         name = "iv"
         while self._thread_running(name):
-            if getattr(self.gui, "measuring", False):
-                v = list(self.gui.v_arr_disp)
-                i = list(self.gui.c_arr_disp)
-                n = min(len(v), len(i))
-                if n > 0:
-                    voltages = v[:n]
-                    currents = np.array(i[:n], dtype=float)
-                    self._update_line("rt_iv", voltages, currents.tolist())
+            try:
+                if getattr(self.gui, "measuring", False):
+                    v = list(self.gui.v_arr_disp)
+                    i = list(self.gui.c_arr_disp)
+                    n = min(len(v), len(i))
+                    if n > 0:
+                        voltages = v[:n]
+                        currents = np.array(i[:n], dtype=float)
+                        self._update_line("rt_iv", voltages, currents.tolist())
 
-                    abs_currents = np.abs(currents)
-                    abs_currents[abs_currents == 0] = 1e-12
-                    abs_list = abs_currents.tolist()
-                    try:
-                        self.gui.c_arr_disp_abs = abs_list
-                    except Exception:
-                        pass
-                    self._update_line("rt_logiv", voltages, abs_list)
+                        abs_currents = np.abs(currents)
+                        abs_currents[abs_currents == 0] = 1e-12
+                        # Publish a copy: reset_for_new_sweep() clears gui buffers in-place;
+                        # sharing the same list would race with filtering below.
+                        try:
+                            self.gui.c_arr_disp_abs = abs_currents.tolist()
+                        except Exception:
+                            pass
+                        self._update_line("rt_logiv", voltages, abs_currents.tolist())
 
-                    abs_voltages = np.abs(np.array(voltages, dtype=float))
-                    abs_voltages[abs_voltages == 0] = 1e-12
-                    # Filter voltage: only show >= 0.1V (user requirement: don't go below 0.1V or -0.2V)
-                    voltage_mask = abs_voltages >= 0.1
-                    # Safety check: ensure abs_list and voltage_mask have matching lengths
-                    if len(abs_list) == len(voltage_mask):
-                        filtered_voltages = abs_voltages[voltage_mask]
-                        filtered_currents = np.array(abs_list)[voltage_mask]
-                        if len(filtered_voltages) > 0:
-                            self._update_line("rt_logilogv", filtered_voltages.tolist(), filtered_currents.tolist())
-                        else:
-                            # If no data meets threshold, show empty plot
-                            self._update_line("rt_logilogv", [], [])
-                    else:
-                        # Length mismatch - skip this update to avoid IndexError
-                        self._update_line("rt_logilogv", [], [])
+                        abs_voltages = np.abs(np.array(voltages, dtype=float))
+                        abs_voltages[abs_voltages == 0] = 1e-12
+                        # Filter voltage: only show >= 0.1V
+                        voltage_mask = abs_voltages >= 0.1
+                        if voltage_mask.size == abs_currents.size:
+                            filtered_voltages = abs_voltages[voltage_mask]
+                            filtered_currents = abs_currents[voltage_mask]
+                            if filtered_voltages.size > 0:
+                                self._update_line(
+                                    "rt_logilogv",
+                                    filtered_voltages.tolist(),
+                                    filtered_currents.tolist(),
+                                )
+                            else:
+                                self._update_line("rt_logilogv", [], [])
+            except Exception:
+                # Never let a bad/racy update kill the live plotter thread.
+                pass
             time.sleep(self.interval_s)
 
     def _update_current_time_plot(self) -> None:

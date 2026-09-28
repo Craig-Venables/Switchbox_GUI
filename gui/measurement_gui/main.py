@@ -1401,9 +1401,9 @@ class MeasurementGUI:
             # Handle None device_type
             if device_type is None:
                 device_type = 'unknown'
-            confidence = classification.get('confidence', 0.0)
-            memristivity_score = classification.get('memristivity_score', 0.0)
-            switching_strength = classification.get('switching_strength', 0.0)
+            confidence = classification.get('confidence', 0.0) or 0.0
+            memristivity_score = classification.get('memristivity_score', 0.0) or 0.0
+            switching_strength = classification.get('switching_strength', 0.0) or 0.0
             reasoning = classification.get('reasoning', '')
             warnings = classification.get('warnings', [])
             

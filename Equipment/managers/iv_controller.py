@@ -764,25 +764,19 @@ class IVControllerManager:
             # Simulations are always "connected" (no real hardware)
             return True
         
-        # Common attributes for our supported controllers
+        # Common attributes for our supported controllers.
+        # If a known handle exists but is None, init failed — do not fall through to True.
         if hasattr(inst, 'device'):
-            device = getattr(inst, 'device')
-            if device is not None:
-                return True
-        
+            return getattr(inst, 'device') is not None
+
         if hasattr(inst, 'inst'):
-            inst_obj = getattr(inst, 'inst')
-            if inst_obj is not None:
-                return True
-        
+            return getattr(inst, 'inst') is not None
+
         # Check for socket connection (some controllers)
         if hasattr(inst, 'sock'):
             return getattr(inst, 'sock') is not None
-        
-        # Fallback: if instrument exists, assume connected
-        # (Some controllers don't have device/inst attributes)
-        return True
-        # Fallback: assume connected if no known handle is exposed
+
+        # Fallback: if instrument exists and exposes no known handle, assume connected
         return True
     # Optional pass-throughs
     def beep(self, frequency: float = 1000, duration: float = 0.2):

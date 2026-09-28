@@ -214,28 +214,35 @@ class ConnectionController:
         self.connect_keithley()
 
         connected = getattr(gui, "connected", False)
+        idn = ""
         if connected:
-            idn = ""
             try:
                 if hasattr(gui.keithley, "get_idn"):
-                    idn = gui.keithley.get_idn()
+                    idn = gui.keithley.get_idn() or ""
             except Exception as exc:
                 print(f"⚠️  Warning: Unable to query IDN: {exc}")
+                idn = ""
 
+            # Controllers that swallow open failures still report this placeholder
+            if not idn or "no device connected" in idn.lower():
+                connected = False
+                gui.connected = False
+                gui.connections.flags["keithley"] = False
+
+        if connected:
             model_number = smu_type
-            if idn:
-                parts = idn.split(",")
-                for part in parts:
-                    part = part.strip()
-                    if "MODEL" in part.upper():
-                        model_match = part.upper().replace("MODEL", "").strip()
-                        if model_match:
-                            model_number = model_match
-                            break
-                    elif any(char.isdigit() for char in part) and len(part) <= 10:
-                        if any(x in part.upper() for x in ["2400", "2450", "2600", "4200", "2636"]):
-                            model_number = part
-                            break
+            parts = idn.split(",")
+            for part in parts:
+                part = part.strip()
+                if "MODEL" in part.upper():
+                    model_match = part.upper().replace("MODEL", "").strip()
+                    if model_match:
+                        model_number = model_match
+                        break
+                elif any(char.isdigit() for char in part) and len(part) <= 10:
+                    if any(x in part.upper() for x in ["2400", "2450", "2600", "4200", "2636"]):
+                        model_number = part
+                        break
 
             status_text = model_number
             print(f"✓ Connected: {idn or f'{smu_type} @ {keithley_address}'}")

@@ -231,6 +231,84 @@
         "9": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05}
       }
     },
+    "Sdt Forming (3.0V)": {
+      "code_name": "St_form(3.0v)",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05}
+      }
+    },
+    "Sdt Forming (3.5V)": {
+      "code_name": "St_form(3.5v)",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 3.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "12": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "13": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05}
+      }
+    },
+    "Sdt Forming (4.0V)": {
+      "code_name": "St_form(4.0v)",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 3.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 4.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 3.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "12": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "13": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "14": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "15": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05}
+      }
+    },
+    "Sdt Forming (5.0V)": {
+      "code_name": "St_form(5.0v)",
+      "sweeps": {
+        "1": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "2": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "3": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "4": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "5": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "6": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "7": {"start_v": 0, "stop_v": 3.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "8": {"start_v": 0, "stop_v": 4.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "9": {"start_v": 0, "stop_v": 4.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "10": {"start_v": 0, "stop_v": 5.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "11": {"start_v": 0, "stop_v": 4.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "12": {"start_v": 0, "stop_v": 4.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "13": {"start_v": 0, "stop_v": 3.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "14": {"start_v": 0, "stop_v": 3.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "15": {"start_v": 0, "stop_v": 2.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "16": {"start_v": 0, "stop_v": 2.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "17": {"start_v": 0, "stop_v": 1.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "18": {"start_v": 0, "stop_v": 1.0, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05},
+        "19": {"start_v": 0, "stop_v": 0.5, "sweeps": 3, "step_v": 0.05,"step_delay": 0.05}
+      }
+    },
     "Sdt V3_led-(~75 mins)": {
       "code_name": "ST_v3",
       "sweeps": {
