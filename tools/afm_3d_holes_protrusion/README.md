@@ -4,6 +4,8 @@ This tool batch-processes Atomic Force Microscopy (AFM) height maps from Asylum 
 
 This document serves both as a **user manual** and as a **methods appendix** suitable for citation in a thesis or journal article. Parameters referenced below correspond to symbols in `main.py` unless noted.
 
+**Putting data in:** one subfolder under `Data/` is one experiment. See [Data/README.md](Data/README.md). Copy [Data/_template_glass_vs_ito/](Data/_template_glass_vs_ito/) to start a new comparison. Your current scans live in [Data/new_device/](Data/new_device/).
+
 ---
 
 ## 1. Algorithmic Pipeline (overview)

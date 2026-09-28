@@ -20,5 +20,7 @@
   "exclude_workbook_names": ["device_status.xlsx", "device_status.xls"],
   "fabrication_workbook": "C:\\Users\\Craig-Desktop\\OneDrive - The University of Nottingham\\Documents\\Phd\\solutions and devices.xlsx",
   "fabrication_sheet": "Memristor Devices",
-  "notes": "Lower priority number wins on duplicate sample IDs. Source folders and fabrication workbook are never modified."
+  "thesis_facts_dir": "../../../llm model/output/facts",
+  "auto_yield_gates": "4,10,20,50,100",
+  "notes": "Lower priority number wins on duplicate sample IDs. Source folders and fabrication workbook are never modified. thesis_facts_dir enables Auto yield ≥N sweeps overlay from thesis_llm fact packs."
 }

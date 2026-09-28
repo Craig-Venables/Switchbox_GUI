@@ -13,10 +13,12 @@ from PyQt5.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QVBoxLayout,
     QWidget,
 )
 
+from ..auto_yield import load_auto_yield_dataframe, parse_gates
 from ..models import CATEGORY_DISPLAY
 from ..plots import (
     AGE_CMAP,
@@ -26,9 +28,18 @@ from ..plots import (
 )
 
 
-PLOT_YIELD = "Yield vs sample ID"
+PLOT_YIELD = "Yield vs sample ID (Excel)"
+PLOT_AUTO_YIELD = "Auto yield ≥N loops vs sample ID"
 PLOT_COMPOSITION = "Composition vs sample ID"
 PLOT_CONCENTRATION = "Concentration vs yield"
+
+_GATE_COLORS = {
+    4: "#2ca02c",
+    10: "#1f77b4",
+    20: "#ff7f0e",
+    50: "#d62728",
+    100: "#9467bd",
+}
 
 
 class InteractivePlotPanel(QWidget):
@@ -37,6 +48,8 @@ class InteractivePlotPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._df = pd.DataFrame()
+        self._auto_df = pd.DataFrame()
+        self._facts_dir = None
         self._plotted = pd.DataFrame()
         self._axis_columns: Tuple[Optional[str], Optional[str]] = (None, None)
         # dpi=130 keeps small concentration clusters legible when zooming.
@@ -45,8 +58,24 @@ class InteractivePlotPanel(QWidget):
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
 
         self.plot_type = QComboBox()
-        self.plot_type.addItems([PLOT_YIELD, PLOT_COMPOSITION, PLOT_CONCENTRATION])
-        self.plot_type.currentIndexChanged.connect(self.redraw)
+        self.plot_type.addItems(
+            [PLOT_YIELD, PLOT_AUTO_YIELD, PLOT_COMPOSITION, PLOT_CONCENTRATION]
+        )
+        self.plot_type.currentIndexChanged.connect(self._on_plot_type_changed)
+
+        self.gates_edit = QLineEdit("4,10,20,50,100")
+        self.gates_edit.setToolTip(
+            "Comma-separated min memristive_loop_count gates "
+            "(cumulative cycles across IV files; not file count). Example: 4,10,50,100"
+        )
+        self.gates_edit.setMaximumWidth(160)
+        self.gates_edit.editingFinished.connect(self._on_gates_changed)
+
+        self.overlay_excel_check = QCheckBox("Overlay Excel strict yield")
+        self.overlay_excel_check.setToolTip(
+            "On the auto ≥N plot, also draw Excel strict memristive yield for comparison."
+        )
+        self.overlay_excel_check.toggled.connect(self.redraw)
 
         self.log_x_check = QCheckBox("Log x (concentration)")
         self.log_x_check.setToolTip(
@@ -73,6 +102,9 @@ class InteractivePlotPanel(QWidget):
         top = QHBoxLayout()
         top.addWidget(QLabel("Plot:"))
         top.addWidget(self.plot_type)
+        top.addWidget(QLabel("Gates ≥"))
+        top.addWidget(self.gates_edit)
+        top.addWidget(self.overlay_excel_check)
         top.addWidget(self.log_x_check)
         top.addWidget(self.gradient_check)
         top.addWidget(self.labels_check)
@@ -84,10 +116,29 @@ class InteractivePlotPanel(QWidget):
         layout.addWidget(self.toolbar)
         layout.addWidget(self.canvas)
         self.canvas.mpl_connect("motion_notify_event", self._on_motion)
+        self._on_plot_type_changed()
 
     # ---------------------------------------------------------------- public
     def set_dataframe(self, df: pd.DataFrame) -> None:
         self._df = df.copy() if df is not None else pd.DataFrame()
+        self.redraw()
+
+    def set_auto_dataframe(self, df: pd.DataFrame) -> None:
+        self._auto_df = df.copy() if df is not None else pd.DataFrame()
+        self.redraw()
+
+    def set_facts_dir(self, facts_dir) -> None:
+        self._facts_dir = facts_dir
+
+    def set_default_gates(self, gates: str) -> None:
+        if gates:
+            self.gates_edit.setText(str(gates))
+
+    def _on_gates_changed(self) -> None:
+        if self._facts_dir is not None:
+            self._auto_df = load_auto_yield_dataframe(
+                self._facts_dir, gates=self.current_gates()
+            )
         self.redraw()
 
     def plotted_dataframe(self) -> pd.DataFrame:
@@ -101,16 +152,28 @@ class InteractivePlotPanel(QWidget):
         """(x_column, y_column) for the current plot, or (None, None)."""
         return self._axis_columns
 
+    def current_gates(self) -> list:
+        return parse_gates(self.gates_edit.text())
+
     def export_stem(self) -> str:
         kind = self.plot_kind()
         if kind == PLOT_YIELD:
             return "plot_yield_vs_sample"
+        if kind == PLOT_AUTO_YIELD:
+            gates = "-".join(str(g) for g in self.current_gates())
+            return f"plot_auto_loop_yield_vs_sample_g{gates}"
         if kind == PLOT_COMPOSITION:
             return "plot_composition_vs_sample"
         stem = "plot_concentration_vs_yield"
         return f"{stem}_logx" if self.log_x_check.isChecked() else stem
 
     # ---------------------------------------------------------------- drawing
+    def _on_plot_type_changed(self, *_args) -> None:
+        auto = self.plot_kind() == PLOT_AUTO_YIELD
+        self.gates_edit.setEnabled(True)
+        self.overlay_excel_check.setEnabled(auto)
+        self.redraw()
+
     def redraw(self) -> None:
         self.figure.clear()
         self._annot = None
@@ -123,8 +186,13 @@ class InteractivePlotPanel(QWidget):
         df = self._df
         kind = self.plot_kind()
         self.log_x_check.setEnabled(kind == PLOT_CONCENTRATION)
-        self.gradient_check.setEnabled(kind != PLOT_COMPOSITION)
+        self.gradient_check.setEnabled(kind not in (PLOT_COMPOSITION, PLOT_AUTO_YIELD))
         self.labels_check.setEnabled(kind != PLOT_COMPOSITION)
+
+        if kind == PLOT_AUTO_YIELD:
+            self._draw_auto_yield(ax)
+            self.canvas.draw_idle()
+            return
 
         if df is None or df.empty:
             ax.text(0.5, 0.5, "No samples selected", ha="center", va="center")
@@ -188,7 +256,7 @@ class InteractivePlotPanel(QWidget):
         self._annotate_points(ax, x, y, sub["sample_id"].tolist())
         ax.set_xlabel("Sample number (D#)")
         ax.set_ylabel("Strict memristive yield (%)")
-        ax.set_title("Strict memristive yield vs sample ID")
+        ax.set_title("Excel strict memristive yield vs sample ID")
         ax.set_ylim(-2, 105)
         ax.grid(True, alpha=0.3)
         self._hover_xy = np.column_stack([x, y])
@@ -196,6 +264,124 @@ class InteractivePlotPanel(QWidget):
         self._plotted = sub.reset_index(drop=True)
         self._axis_columns = ("sample_number", "strict_yield_pct")
         self._setup_annot(ax)
+
+    def _draw_auto_yield(self, ax) -> None:
+        gates = self.current_gates()
+        auto = self._auto_df
+        if auto is None or auto.empty:
+            ax.text(
+                0.5,
+                0.5,
+                "No thesis_llm fact packs found.\n"
+                "Set thesis_facts_dir in config.json\n"
+                "(e.g. …/llm model/output/facts) and rebuild facts.",
+                ha="center",
+                va="center",
+            )
+            ax.set_axis_off()
+            return
+
+        excel = self._df
+        if excel is not None and not excel.empty and "sample_id" in excel.columns:
+            keep = set(excel["sample_id"].astype(str).str.upper())
+            auto = auto[auto["sample_id"].astype(str).str.upper().isin(keep)].copy()
+
+        sub = auto.dropna(subset=["sample_number"]).sort_values("sample_number")
+        if sub.empty:
+            ax.text(
+                0.5,
+                0.5,
+                "No overlapping samples with fact packs",
+                ha="center",
+                va="center",
+            )
+            ax.set_axis_off()
+            return
+
+        x = sub["sample_number"].to_numpy(dtype=float)
+        plotted_cols = ["sample_id", "sample_number"]
+        palette = ["#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+        any_line = False
+        hover_col = None
+        for i, g in enumerate(gates):
+            col = f"worked_pct_at_{g}"
+            if col not in sub.columns:
+                continue
+            y = pd.to_numeric(sub[col], errors="coerce").to_numpy(dtype=float)
+            if np.all(np.isnan(y)):
+                continue
+            color = _GATE_COLORS.get(int(g), palette[i % len(palette)])
+            ax.plot(
+                x,
+                y,
+                marker="o",
+                markersize=4.5,
+                linewidth=1.6,
+                color=color,
+                label=f"≥{g} memristive loops",
+                zorder=3,
+            )
+            plotted_cols.append(col)
+            if hover_col is None:
+                hover_col = col
+            any_line = True
+
+        if self.overlay_excel_check.isChecked() and excel is not None and not excel.empty:
+            ex = excel.dropna(subset=["sample_number", "strict_yield_pct"]).sort_values(
+                "sample_number"
+            )
+            if not ex.empty:
+                ax.plot(
+                    ex["sample_number"].to_numpy(dtype=float),
+                    ex["strict_yield_pct"].to_numpy(dtype=float),
+                    linestyle="--",
+                    color="#9e9e9e",
+                    linewidth=1.4,
+                    marker="x",
+                    markersize=4,
+                    label="Excel strict yield",
+                    zorder=2,
+                )
+
+        if not any_line:
+            ax.text(
+                0.5,
+                0.5,
+                "Fact packs lack worked_by_loop_threshold for these gates.\n"
+                "Run scan-loops + build-facts in thesis_llm.",
+                ha="center",
+                va="center",
+            )
+            ax.set_axis_off()
+            return
+
+        if hover_col:
+            self._annotate_points(
+                ax,
+                x,
+                pd.to_numeric(sub[hover_col], errors="coerce").to_numpy(dtype=float),
+                sub["sample_id"].tolist(),
+            )
+
+        ax.set_xlabel("Sample number (D#)")
+        ax.set_ylabel("Worked memristive-loop yield (%)")
+        ax.set_title(
+            "Auto worked_memristive_loops yield vs sample ID "
+            f"(gates ≥{', ≥'.join(str(g) for g in gates)} loops)"
+        )
+        ax.set_ylim(-2, 105)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc="best", fontsize=7, framealpha=0.92)
+
+        if hover_col:
+            hy = pd.to_numeric(sub[hover_col], errors="coerce").to_numpy(dtype=float)
+            self._hover_xy = np.column_stack([x, hy])
+            self._hover_ids = sub["sample_id"].astype(str).tolist()
+            self._setup_annot(ax)
+        self._plotted = sub[[c for c in plotted_cols if c in sub.columns]].reset_index(
+            drop=True
+        )
+        self._axis_columns = ("sample_number", hover_col)
 
     def _draw_composition(self, ax, df: pd.DataFrame) -> None:
         sub = df.sort_values("sample_number")

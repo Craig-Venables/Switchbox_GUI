@@ -34,6 +34,7 @@ from PyQt5.QtWidgets import (
 )
 
 from ..analysis import quality_report, sample_dataframe
+from ..auto_yield import load_auto_yield_dataframe, parse_gates
 from ..cache import YieldCache
 from ..config import AppConfig, load_config
 from ..fabrication import get_fabrication_index
@@ -50,6 +51,7 @@ class MainWindow(QMainWindow):
         self.scan_worker: Optional[ScanWorker] = None
         self.report_worker: Optional[ReportWorker] = None
         self._samples = pd.DataFrame()
+        self._auto_yield = pd.DataFrame()
         self._updating_filters = False
         self.setWindowTitle("Historical Device Yield Analysis")
         self.resize(1400, 900)
@@ -173,6 +175,7 @@ class MainWindow(QMainWindow):
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(0, 0, 0, 0)
         self.plot_panel = InteractivePlotPanel()
+        self.plot_panel.set_default_gates(self.config.auto_yield_gates)
         right_lay.addWidget(self.plot_panel, stretch=1)
         plot_btn_row = QHBoxLayout()
         self.btn_export_plot = QPushButton("Export plotted data (TXT)")
@@ -262,12 +265,28 @@ class MainWindow(QMainWindow):
 
     def refresh_all(self) -> None:
         self.refresh_status()
+        self.reload_auto_yield()
         self.reload_sample_data()
         # The missing-Excel scan is user-triggered. It walks external OneDrive
         # roots and must not delay or prevent the main window from opening.
         self.missing_label.setText(
             "Click “Refresh missing list” to scan Dxx sample folders."
         )
+
+    def reload_auto_yield(self) -> None:
+        gates = parse_gates(self.config.auto_yield_gates)
+        self._auto_yield = load_auto_yield_dataframe(
+            self.config.thesis_facts_dir, gates=gates
+        )
+        self.plot_panel.set_facts_dir(self.config.thesis_facts_dir)
+        self.plot_panel.set_default_gates(self.config.auto_yield_gates)
+        self.plot_panel.set_auto_dataframe(self._auto_yield)
+        n = 0 if self._auto_yield is None else len(self._auto_yield)
+        facts = self.config.thesis_facts_dir
+        if facts:
+            self.stats_label.setToolTip(
+                f"Auto yield facts: {n} samples from {facts}"
+            )
 
     def refresh_status(self) -> None:
         roots = []
@@ -525,6 +544,13 @@ class MainWindow(QMainWindow):
     def _apply_selection_to_plot(self) -> None:
         df = self.current_selection_df()
         self.selection_label.setText(f"Selected: {len(df)}")
+        # Refresh auto columns for current gates typed in the plot panel
+        gates = self.plot_panel.current_gates()
+        if self.config.thesis_facts_dir:
+            self._auto_yield = load_auto_yield_dataframe(
+                self.config.thesis_facts_dir, gates=gates
+            )
+        self.plot_panel.set_auto_dataframe(self._auto_yield)
         self.plot_panel.set_dataframe(df)
         self._fill_table(
             self.sample_table,

@@ -75,7 +75,8 @@ The **Filters & plot** tab lets you:
 - Select / deselect samples individually (All / None / Invert + search box)
 - Filter by **polymer**, **B-electrode**, **T-electrode**, **polymer %**, and **Np type** (from fabrication workbook)
 - Zoom / pan the embedded Matplotlib plot (toolbar) — useful for dense Stock=0 / edge concentration points
-- Switch plot type: yield timeline, composition stack, concentration vs yield (hover shows sample ID)
+- Switch plot type: yield timeline (Excel), **auto ≥N loops** (thesis facts `worked_by_loop_threshold`), composition stack, concentration vs yield (hover shows sample ID)
+- For auto yield: type arbitrary **loop** gates in **Gates ≥** (e.g. `4,10,50,100`) and optionally overlay Excel strict yield
 
 Plot toggles:
 

@@ -34,6 +34,9 @@ class AppConfig:
     )
     fabrication_workbook: Optional[Path] = None
     fabrication_sheet: str = "Memristor Devices"
+    # Optional path to thesis_llm output/facts for auto ≥N-sweep yield overlays
+    thesis_facts_dir: Optional[Path] = None
+    auto_yield_gates: str = "4,10,20,50,100"
     config_path: Optional[Path] = None
 
     @property
@@ -66,6 +69,10 @@ class AppConfig:
                 str(self.fabrication_workbook) if self.fabrication_workbook else None
             ),
             "fabrication_sheet": self.fabrication_sheet,
+            "thesis_facts_dir": (
+                str(self.thesis_facts_dir) if self.thesis_facts_dir else None
+            ),
+            "auto_yield_gates": self.auto_yield_gates,
         }
 
 
@@ -120,6 +127,9 @@ def load_config(config_path: Optional[Path | str] = None) -> AppConfig:
     fab_raw = raw.get("fabrication_workbook")
     fab_path = _resolve_path(fab_raw) if fab_raw else None
 
+    facts_raw = raw.get("thesis_facts_dir")
+    facts_path = _resolve_path(facts_raw) if facts_raw else None
+
     return AppConfig(
         data_roots=roots,
         cache_dir=cache_dir,
@@ -133,6 +143,8 @@ def load_config(config_path: Optional[Path | str] = None) -> AppConfig:
         ],
         fabrication_workbook=fab_path,
         fabrication_sheet=str(raw.get("fabrication_sheet", "Memristor Devices")),
+        thesis_facts_dir=facts_path,
+        auto_yield_gates=str(raw.get("auto_yield_gates", "4,10,20,50,100")),
         config_path=path,
     )
 

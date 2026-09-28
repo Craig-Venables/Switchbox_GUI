@@ -1421,6 +1421,37 @@ def run_experiment(ibw_files, output_dir: str, replicate_regex: re.Pattern, expe
 # MAIN
 # ===========================================================================
 
+def _is_experiment_folder(name: str) -> bool:
+    """Skip notes/templates: folders starting with '_' or '.' are not experiments."""
+    return bool(name) and not name.startswith(('.', '_'))
+
+
+def _print_experiment_plan(data_dir: str, experiment_specs, replicate_regex: re.Pattern) -> None:
+    """Print a readable map of folder → sample groups before processing."""
+    print()
+    print('DATA LAYOUT')
+    print(f'  Folder    : {data_dir}')
+    print('  Rule      : one subfolder = one experiment (files compared together)')
+    print('  Filenames : Substrate_Layer_0001.ibw   (see Data/README.md)')
+    print()
+    if not experiment_specs:
+        print('  No experiments found (no .ibw files in any Data/<experiment>/ folder).')
+        print('  Copy Data/_template_glass_vs_ito/, rename it (drop the leading _),')
+        print('  and put pre-levelled .ibw files inside.')
+        return
+    print(f'  {len(experiment_specs)} experiment(s):')
+    for exp_name, exp_files in experiment_specs:
+        print(f'    {exp_name}/   ({len(exp_files)} scan(s))')
+        groups: dict = {}
+        for fp in exp_files:
+            fname = os.path.splitext(os.path.basename(fp))[0]
+            base = replicate_regex.sub('', fname).strip() or fname
+            groups.setdefault(base, []).append(os.path.basename(fp))
+        for base, files in groups.items():
+            print(f'      group {base!r}: {", ".join(files)}')
+    print()
+
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     data_dir = os.path.join(script_dir, 'Data')
@@ -1433,6 +1464,8 @@ def main():
 
     if not os.path.isdir(data_dir):
         print(f"Data directory not found: {data_dir}")
+        print('Create Data/<experiment_name>/ and put pre-levelled .ibw files there.')
+        print('See Data/README.md')
         return
 
     legacy_dir = os.path.join(output_base_dir, LEGACY_RUN_TO_RESTRUCTURE)
@@ -1440,6 +1473,8 @@ def main():
 
     experiment_specs = []
     for entry in sorted(os.listdir(data_dir)):
+        if not _is_experiment_folder(entry):
+            continue
         exp_path = os.path.join(data_dir, entry)
         if not os.path.isdir(exp_path):
             continue
@@ -1451,8 +1486,9 @@ def main():
     if root_files:
         experiment_specs.append(('unnamed', root_files))
 
+    _print_experiment_plan(data_dir, experiment_specs, replicate_regex)
+
     if not experiment_specs:
-        print(f"No .ibw files found in {data_dir} or its top-level experiment folders")
         return
 
     for exp_name, exp_files in experiment_specs:
