@@ -1,0 +1,7 @@
+Session	Pad_um	N_jumps_all	Median_all_AbsV	N_first	Median_first_AbsV	N_later	Median_later_AbsV
+D65_new	100	1	2.5	1	2.5	0	
+D65_new	200	22	2.075	9	2.425	13	2.025
+D65_new	400	1	2.425	1	2.425	0	
+D110-80+94	100	15	2.375	7	2.235	8	2.425
+D110-80+94	200	31	2.425	13	2.275	18	2.5625
+D110-80+94	400	0		0		0	

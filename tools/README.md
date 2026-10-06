@@ -22,6 +22,9 @@ Each tool has its own folder under `tools/` with a **snake_case** name (no space
 | [`classification_validation/`](classification_validation/) | Classifier weight tuning & validation | `python tools/classification_validation/launch_gui.py` |
 | [`device_visualizer/`](device_visualizer/) | Qt device yield / IV gallery viewer | `python tools/device_visualizer/device_visualizer_app.py` |
 | [`filament_jump_finder/`](filament_jump_finder/) | Detect large current jumps in IV data | `python -m tools.filament_jump_finder` |
+| [`device_variation/`](device_variation/) | Pre/post forming IV shapes and device-to-device spread | `python -m tools.device_variation` |
+| [`loop_trend/`](loop_trend/) | Multi-loop IV files: positive and negative drift, Origin export | `python -m tools.loop_trend` |
+| [`first_sweep/`](first_sweep/) | First-sweep overlays and forming metrics across samples | `python -m tools.first_sweep` |
 | [`historical_yield_analysis/`](historical_yield_analysis/) | Thesis yield / composition timeline from manual Excel labels (cached) | `python tools/historical_yield_analysis/launch_gui.py` |
 | [`sample_yield_plots/`](sample_yield_plots/) | Yield vs polymer fraction and phase separation | `python tools/sample_yield_plots/main.py` |
 | [`impedance_analyzer/`](impedance_analyzer/) | SMaRT impedance CSV / `.dat` plots | `python tools/impedance_analyzer/visualise_csv.py` |
@@ -66,6 +69,9 @@ To add a new hardware tool, see [Documents/guides/GUI_EXTENSION_GUIDE.md](../Doc
 | **classification_validation** | Tune classifier weights against labelled test files | [README](classification_validation/README.md), [QUICK_START](classification_validation/QUICK_START.md) |
 | **device_visualizer** | Browse device folders, yield heatmaps, plot gallery | [README](device_visualizer/README.md) |
 | **filament_jump_finder** | Find filament-forming jumps in IV sweeps | Run with `python -m tools.filament_jump_finder --sample <path>` |
+| **device_variation** | Compare pre/post forming curves and how devices in a sample differ | [README](device_variation/README.md) |
+| **loop_trend** | Find files with many loops and plot positive and negative drift | [README](loop_trend/README.md) |
+| **first_sweep** | Overlay first sweeps and compare forming, ON/OFF, and sweep evolution | [README](first_sweep/README.md) |
 | **historical_yield_analysis** | Index split data roots, cache classifications, plot yield evolution | [README](historical_yield_analysis/README.md) |
 | **sample_yield_plots** | Box and scatter plots of device yield against polymer fraction and phase separation | [README](sample_yield_plots/README.md) |
 | **impedance_analyzer** | Open/short corrected impedance plots | [README](impedance_analyzer/README.md) |

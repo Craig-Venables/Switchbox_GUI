@@ -6,7 +6,7 @@ Compare yield (all + memristive) → Save Session / Save for Origin.
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Sequence
 
 import numpy as np
 from PyQt5.QtWidgets import (
@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (
     QSplitter, QTabWidget, QListWidget, QListWidgetItem, QListView, QTreeView,
     QShortcut, QApplication, QScrollArea, QComboBox, QInputDialog,
 )
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer
+from PyQt5.QtCore import pyqtSignal, Qt, QThread, QTimer
 from PyQt5.QtGui import QKeySequence, QBrush, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -35,8 +35,21 @@ from .core import (
     filter_jumps,
     find_jumps_in_curve,
     jump_decision_key,
-    histogram_bins,
+    loop_spans,
+    span_index_for_sample,
+    histogram_by_pad,
+    histogram_from_floor,
+    fit_voltage_mixture,
+    mixture_density,
+    get_first_and_all,
+    pad_label,
+    pad_um_for_section,
+    PAD_UM_ORDER,
+    compute_pad_comparison,
     compute_yield_summary,
+    align_pad_rows,
+    describe_filter_state,
+    filter_kwargs_from_state,
     resolve_device_iv_curve,
     memristive_devices_by_jump,
     origin_export_root,
@@ -55,6 +68,272 @@ from .origin_export import (
     sanitize_export_name,
     ORIGIN_DIR_NAME,
 )
+from .session_graphs import SessionGraphsDialog, write_origin_files
+
+PAD_BAR_COLORS = {
+    "100 µm": "#4c78a8",
+    "200 µm": "#f58518",
+    "400 µm": "#54a24b",
+    "Unknown": "#9e9e9e",
+}
+
+
+def jump_direction_phrase(v_before, v_after, i_before, i_after) -> str:
+    """Sweep leg and signed-current sense of one step, e.g. 'V decreasing, current up'."""
+    dv = float(v_after) - float(v_before)
+    di = float(i_after) - float(i_before)
+    if dv > 1e-6:
+        v_txt = "V increasing"
+    elif dv < -1e-6:
+        v_txt = "V decreasing"
+    else:
+        v_txt = "V held"
+    if di > 0:
+        i_txt = "current up"
+    elif di < 0:
+        i_txt = "current down"
+    else:
+        i_txt = "current unchanged"
+    return f"{v_txt}, {i_txt}"
+
+
+def _draw_mixture(ax, grid, fit: Dict[str, Any], n: int, bin_width: float):
+    """Overlay a fitted normal mixture, scaled to histogram counts."""
+    weights = fit.get("weights") or []
+    means = fit.get("means") or []
+    stds = fit.get("stds") or []
+    if not weights or n <= 0 or len(grid) == 0:
+        return
+    scale = n * float(bin_width)
+    mix = mixture_density(grid, weights, means, stds)
+    ax.plot(grid, mix * scale, color="#1f4e79", lw=1.8, label="Mixture", zorder=4)
+    if len(weights) > 1:
+        colors = ("#e07a3d", "#2a9d8f", "#7b4ea3", "#c73e6a")
+        for i, (w, mean, std) in enumerate(zip(weights, means, stds)):
+            comp = mixture_density(grid, [w], [mean], [std])
+            ax.plot(
+                grid, comp * scale, color=colors[i % len(colors)], lw=1.2, ls="--",
+                label=f"Peak {i + 1}", zorder=4,
+            )
+
+
+def draw_jump_voltage_figure(
+    fig: Figure,
+    signed: List[float],
+    fit: Dict[str, Any],
+    floor: float,
+    bin_width: float,
+    included: Optional[List[bool]] = None,
+    signed_fit: Optional[Dict[str, Any]] = None,
+):
+    """Histogram of |V| and signed voltage, each with its own Gaussian mixture."""
+    fig.clear()
+    if not signed:
+        ax = fig.add_subplot(111)
+        ax.text(0.5, 0.5, "No jumps in this range", ha="center", va="center")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        fig.tight_layout()
+        return
+
+    if included is None or len(included) != len(signed):
+        included = [True] * len(signed)
+    accepted = [v for v, keep in zip(signed, included) if keep]
+    rejected = [v for v, keep in zip(signed, included) if not keep]
+    absolute = [abs(v) for v in signed]
+    centers, _counts, edges = histogram_from_floor(absolute, floor, bin_width)
+    acc_abs = np.histogram([abs(v) for v in accepted], bins=edges)[0] if accepted else np.zeros(len(centers))
+    rej_abs = np.histogram([abs(v) for v in rejected], bins=edges)[0] if rejected else np.zeros(len(centers))
+    ax1 = fig.add_subplot(121)
+    bar_width = bin_width * 0.92
+    ax1.bar(
+        centers, acc_abs, width=bar_width,
+        color="#4c78a8", edgecolor="black", linewidth=0.4,
+        label="Jump", zorder=2,
+    )
+    if rejected:
+        ax1.bar(
+            centers, rej_abs, width=bar_width, bottom=acc_abs,
+            color="#e09f3e", edgecolor="black", linewidth=0.4,
+            label="Not a jump", zorder=2,
+        )
+    if len(centers):
+        right = max(float(centers[-1]) + bin_width, max(absolute))
+        grid = np.linspace(float(floor), right, 400)
+        _draw_mixture(ax1, grid, fit, len(absolute), bin_width)
+    if fit.get("median") is not None:
+        ax1.axvline(fit["median"], color="black", lw=1.0, ls=":", label=f"Median {fit['median']:.2f} V")
+    ax1.set_xlabel("|Jump voltage| (V)")
+    ax1.set_ylabel("Count")
+    ax1.set_title("|V| and Gaussian mixture")
+    ax1.set_xlim(left=max(0.0, float(floor) - 0.15))
+    ax1.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax1.grid(True, axis="y", alpha=0.3)
+    ax1.legend(fontsize=8, frameon=False)
+
+    ax2 = fig.add_subplot(122)
+    signed_arr = np.asarray(signed, dtype=float)
+    lo = min(float(np.min(signed_arr)), -float(floor))
+    hi = max(float(np.max(signed_arr)), float(floor))
+    start = np.floor(lo / bin_width) * bin_width
+    stop = np.ceil(hi / bin_width) * bin_width + bin_width
+    edges = np.arange(start, stop + bin_width * 0.5, bin_width)
+    if len(edges) < 2:
+        edges = np.array([start, start + bin_width])
+    s_centers = 0.5 * (edges[:-1] + edges[1:])
+    acc_signed = np.histogram(np.asarray(accepted, dtype=float), bins=edges)[0] if accepted else np.zeros(len(s_centers))
+    rej_signed = np.histogram(np.asarray(rejected, dtype=float), bins=edges)[0] if rejected else np.zeros(len(s_centers))
+    ax2.axvspan(-float(floor), float(floor), color="#e6e6e6", zorder=0, label=f"|V| < {floor:.2f} excluded")
+    ax2.bar(
+        s_centers, acc_signed, width=bin_width * 0.92,
+        color="#4c78a8", edgecolor="black", linewidth=0.4, zorder=2,
+        label="Jump",
+    )
+    if rejected:
+        ax2.bar(
+            s_centers, rej_signed, width=bin_width * 0.92, bottom=acc_signed,
+            color="#e09f3e", edgecolor="black", linewidth=0.4, zorder=2,
+            label="Not a jump",
+        )
+    ax2.axvline(0.0, color="black", lw=0.7, zorder=3)
+    if signed_fit and len(s_centers):
+        grid = np.linspace(float(edges[0]), float(edges[-1]), 500)
+        _draw_mixture(ax2, grid, signed_fit, len(signed), bin_width)
+    ax2.set_xlabel("Jump voltage (V)")
+    ax2.set_ylabel("Count")
+    n_pos = int(np.sum(signed_arr >= 0))
+    ax2.set_title(f"Signed voltage ({n_pos} positive, {len(signed) - n_pos} negative)")
+    ax2.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax2.grid(True, axis="y", alpha=0.3)
+    ax2.legend(fontsize=8, frameon=False, loc="upper right")
+    fig.tight_layout()
+
+
+_SESSION_PAD_WIDTHS = (100, 200, 400)
+_SESSION_PAD_FIELDS = (
+    ("n_with_jump", "formed", "count"),
+    ("pct_with_jump", "yield", "pct"),
+    ("n_jumps", "all jumps", "count"),
+    ("median_abs_v", "all |V|", "volt"),
+    ("n_first", "first", "count"),
+    ("median_first_v", "first |V|", "volt"),
+    ("n_later", "later", "count"),
+    ("median_later_v", "later |V|", "volt"),
+)
+
+
+class SessionCompareWorker(QThread):
+    """Reload each saved session and summarise accepted jumps by pad width."""
+
+    progress = pyqtSignal(str)
+    ready = pyqtSignal(list)
+
+    def __init__(self, paths: List[str], parent=None):
+        super().__init__(parent)
+        self._paths = list(paths)
+
+    def run(self):
+        results = []
+        total = len(self._paths)
+        for index, raw in enumerate(self._paths, start=1):
+            path = Path(raw)
+            self.progress.emit(f"Reading {path.name} ({index}/{total})…")
+            session = load_session(path)
+            name = (session or {}).get("session_name") or path.stem
+            if not session:
+                results.append({
+                    "name": name,
+                    "error": "Could not read this session file.",
+                    "pads": [],
+                    "filters": "",
+                })
+                continue
+            folders = session_folder_paths(session)
+            missing = [str(folder) for folder in folders if not Path(folder).exists()]
+            try:
+                loaded = load_folders(folders)
+                state = session.get("filter_state") or {}
+                kwargs = filter_kwargs_from_state(state)
+                kwargs["decisions"] = apply_review_to_decisions(session)
+                filtered = filter_jumps(loaded["jumps"], **kwargs)
+                pads = align_pad_rows(compute_pad_comparison(
+                    loaded["device_registry"], filtered,
+                ))
+                _attach_first_later(filtered, pads)
+                if missing:
+                    error = "Missing folder: " + "; ".join(missing)
+                elif not loaded["device_registry"]:
+                    error = "No devices found in the saved folder."
+                else:
+                    error = ""
+                results.append({
+                    "name": name,
+                    "error": error,
+                    "pads": pads,
+                    "filters": describe_filter_state(state),
+                })
+            except Exception as exc:
+                results.append({
+                    "name": name,
+                    "error": str(exc),
+                    "pads": [],
+                    "filters": "",
+                })
+        self.ready.emit(results)
+
+
+def _jump_abs_v(jump: Dict[str, Any]) -> Optional[float]:
+    value = jump.get("voltage", jump.get("voltage_mid"))
+    if value is None:
+        return None
+    try:
+        return abs(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _attach_first_later(filtered: List[Dict], pads: List[Dict]) -> None:
+    """Add first-jump and later-jump counts and voltages onto each pad row."""
+    first, all_jumps = get_first_and_all(filtered)
+    first_keys = {jump_decision_key(j) for j in first}
+    later = [j for j in all_jumps if jump_decision_key(j) not in first_keys]
+    n_first_all = max(len(first), 1)
+    for pad in pads:
+        um = pad.get("pad_um")
+        first_v = [v for v in (_jump_abs_v(j) for j in first if j.get("pad_um") == um) if v is not None]
+        later_v = [v for v in (_jump_abs_v(j) for j in later if j.get("pad_um") == um) if v is not None]
+        pad["n_first"] = len(first_v)
+        pad["n_later"] = len(later_v)
+        pad["first_abs_v"] = first_v
+        pad["later_abs_v"] = later_v
+        pad["pct_first_jumps"] = 100.0 * len(first_v) / n_first_all if first else 0.0
+        pad["median_first_v"] = float(np.median(first_v)) if first_v else None
+        pad["median_later_v"] = float(np.median(later_v)) if later_v else None
+
+
+def _write_origin_tsv(path: Path, headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    lines = ["\t".join(headers)]
+    for row in rows:
+        lines.append("\t".join("" if value is None else str(value) for value in row))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _draw_step_arrow(ax, x0, y0, x1, y1, mutation_scale: float = 16):
+    """Arrow from the sample before the step to the sample after it."""
+    ax.annotate(
+        "",
+        xy=(x1, y1),
+        xytext=(x0, y0),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color="#e65100",
+            lw=2.2,
+            mutation_scale=mutation_scale,
+            shrinkA=0,
+            shrinkB=2,
+        ),
+        zorder=6,
+    )
 
 
 class InspectJumpsDialog(QDialog):
@@ -219,6 +498,7 @@ class InspectJumpsDialog(QDialog):
                 j['filename'] = self.file_path.name
                 j['file_path'] = self.file_path
                 j['voltage'] = j['voltage_mid']
+                j['pad_um'] = pad_um_for_section(self.section)
                 self.jumps_for_file.append(j)
                 added.append(j)
                 existing.add(key)
@@ -281,6 +561,10 @@ class MainWindow(QMainWindow):
         self._hist_refresh_timer.setSingleShot(True)
         self._hist_refresh_timer.setInterval(200)
         self._hist_refresh_timer.timeout.connect(self._flush_hist_refresh)
+        self._session_paths: List[Path] = []
+        self._session_results: list = []
+        self._session_graphs: Optional[SessionGraphsDialog] = None
+        self._session_worker: Optional[SessionCompareWorker] = None
 
         self._init_ui()
 
@@ -389,16 +673,32 @@ class MainWindow(QMainWindow):
         self.upward_only_cb.toggled.connect(self._on_filters_changed)
         opts.addWidget(self.upward_only_cb)
 
+        opts.addWidget(QLabel("Pad"))
+        self.pad_combo = QComboBox()
+        self.pad_combo.addItem("All", None)
+        for um in PAD_UM_ORDER:
+            self.pad_combo.addItem(f"{um} µm", um)
+        self.pad_combo.setToolTip(
+            "Electrode pad size from the section folder letter.\n"
+            "100 µm: B, E, F, I, L\n"
+            "200 µm: A, D, G, H, K\n"
+            "400 µm: C, J"
+        )
+        self.pad_combo.currentIndexChanged.connect(self._on_filters_changed)
+        opts.addWidget(self.pad_combo)
+
         opts.addStretch()
         self.count_label = QLabel("Add device folders to begin.")
         self.count_label.setStyleSheet("font-weight: bold;")
         opts.addWidget(self.count_label)
         root.addLayout(opts)
 
-        # --- Tabs: Review | Compare ---
+        # --- Tabs: Review | Compare | Jump voltages ---
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_review_tab(), "Review")
         self.tabs.addTab(self._build_compare_tab(), "Compare")
+        self.tabs.addTab(self._build_jump_voltage_tab(), "Jump voltages")
+        self.tabs.addTab(self._build_session_compare_tab(), "Sessions")
         root.addWidget(self.tabs, stretch=1)
 
         self.status = QLabel("Add one or more device folders (e.g. D110, D112), then review jumps.")
@@ -418,9 +718,9 @@ class MainWindow(QMainWindow):
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addWidget(QLabel("Jumps (current filters)"))
         self.jump_table = QTableWidget()
-        self.jump_table.setColumnCount(7)
+        self.jump_table.setColumnCount(8)
         self.jump_table.setHorizontalHeaderLabels([
-            "Status", "Folder", "Section", "Device", "Filename", "Voltage (V)", "Ratio",
+            "Status", "Folder", "Section", "Pad", "Device", "Filename", "Voltage (V)", "Ratio",
         ])
         self.jump_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.jump_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -500,11 +800,21 @@ class MainWindow(QMainWindow):
     def _build_compare_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        head = QHBoxLayout()
         self.compare_status = QLabel(
             "Load folders to see yield, NDR, and memristive IV overlays."
         )
         self.compare_status.setWordWrap(True)
-        layout.addWidget(self.compare_status)
+        head.addWidget(self.compare_status, stretch=1)
+        self.compare_first_only = QPushButton("First jumps only")
+        self.compare_first_only.setCheckable(True)
+        self.compare_first_only.setToolTip(
+            "Count only the first accepted jump on each device. "
+            "Leave this off to include later jumps in the jump totals and the median voltage."
+        )
+        self.compare_first_only.toggled.connect(self._on_compare_first_only)
+        head.addWidget(self.compare_first_only)
+        layout.addLayout(head)
 
         self.compare_tabs = QTabWidget()
         self.compare_tabs.currentChanged.connect(self._on_compare_tab_changed)
@@ -559,13 +869,304 @@ class MainWindow(QMainWindow):
         best_l.addWidget(self.best_pair_canvas, stretch=1)
         self.compare_tabs.addTab(best_w, "Best pair")
 
+        # --- Pad width comparison ---
+        pad_w = QWidget()
+        pad_l = QVBoxLayout(pad_w)
+        self.pad_compare_note = QLabel(
+            "Compares 100, 200, and 400 µm pads across the loaded folders. "
+            "The Pad dropdown does not hide a width here."
+        )
+        self.pad_compare_note.setWordWrap(True)
+        pad_l.addWidget(self.pad_compare_note)
+        self.pad_table = QTableWidget()
+        self.pad_table.setColumnCount(9)
+        self.pad_table.setHorizontalHeaderLabels([
+            "Pad", "Devices", "% of devices", "With jump", "Jump yield",
+            "Jumps", "% of jumps", "Median |V|", "Sections",
+        ])
+        self.pad_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.pad_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.pad_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.pad_table.setMaximumHeight(160)
+        pad_l.addWidget(self.pad_table)
+        self.pad_fig = Figure(figsize=(10, 5), dpi=100)
+        self.pad_canvas = FigureCanvasQTAgg(self.pad_fig)
+        pad_l.addWidget(NavigationToolbar2QT(self.pad_canvas, self))
+        pad_l.addWidget(self.pad_canvas, stretch=1)
+        self.compare_tabs.addTab(pad_w, "Pad size")
+
         layout.addWidget(self.compare_tabs, stretch=1)
         # Back-compat aliases so empty plot helpers still work during transition
         self.compare_fig = self.yield_fig
         self.compare_canvas = self.yield_canvas
         return tab
 
-    # ------------------------------------------------------------------ folders
+    def _build_jump_voltage_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        note = QLabel(
+            "Where jumps sit across the whole loaded sample, from the floor upward. "
+            "The Review voltage window and the Pad dropdown are ignored. "
+            "Jumps you have not reviewed are included when they pass the ratio filter and |V| is at least the floor. "
+            "Include Not a jump adds steps you already marked Not a jump. "
+            "Min |I| at start keeps a jump only when the current before the step is at least that value. "
+            "The Review minimum current still applies to the smaller of the two points. "
+            "Each panel has its own Gaussian mixture. The number of peaks is the fit with the lowest BIC."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Floor |V|"))
+        self.dist_floor_spin = QDoubleSpinBox()
+        self.dist_floor_spin.setRange(0.0, 20.0)
+        self.dist_floor_spin.setDecimals(2)
+        self.dist_floor_spin.setSingleStep(0.1)
+        self.dist_floor_spin.setValue(0.5)
+        self.dist_floor_spin.setSuffix(" V")
+        row.addWidget(self.dist_floor_spin)
+        row.addWidget(QLabel("Bin"))
+        self.dist_bin_spin = QDoubleSpinBox()
+        self.dist_bin_spin.setRange(0.05, 1.0)
+        self.dist_bin_spin.setDecimals(2)
+        self.dist_bin_spin.setSingleStep(0.05)
+        self.dist_bin_spin.setValue(0.20)
+        self.dist_bin_spin.setSuffix(" V")
+        row.addWidget(self.dist_bin_spin)
+        self.dist_first_only = QPushButton("First jumps only")
+        self.dist_first_only.setCheckable(True)
+        self.dist_first_only.setToolTip(
+            "Use only the first jump on each device. "
+            "Leave this off to include later jumps on devices that already formed."
+        )
+        row.addWidget(self.dist_first_only)
+        self.dist_include_rejected = QCheckBox("Include Not a jump")
+        self.dist_include_rejected.setToolTip(
+            "Add steps you marked Not a jump. They are drawn in orange on top of the jumps you kept."
+        )
+        row.addWidget(self.dist_include_rejected)
+        row.addWidget(QLabel("Min |I| at start"))
+        self.dist_start_i_edit = QLineEdit()
+        self.dist_start_i_edit.setPlaceholderText("optional, A")
+        self.dist_start_i_edit.setMaximumWidth(110)
+        self.dist_start_i_edit.setToolTip(
+            "Minimum |current| on the point before the jump, for example 1e-9. "
+            "Leave blank to apply no extra cut."
+        )
+        row.addWidget(self.dist_start_i_edit)
+        row.addStretch()
+        layout.addLayout(row)
+
+        self.dist_summary = QLabel("Load a sample to see where the jumps sit.")
+        self.dist_summary.setWordWrap(True)
+        layout.addWidget(self.dist_summary)
+
+        self.dist_table = QTableWidget()
+        self.dist_table.setColumnCount(5)
+        self.dist_table.setHorizontalHeaderLabels(["Axis", "Peak", "Share", "Mean (V)", "Std"])
+        self.dist_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.dist_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dist_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.dist_table.setMaximumHeight(168)
+        layout.addWidget(self.dist_table)
+
+        self.dist_fig = Figure(figsize=(10, 4.6), dpi=100)
+        self.dist_canvas = FigureCanvasQTAgg(self.dist_fig)
+        layout.addWidget(NavigationToolbar2QT(self.dist_canvas, self))
+        layout.addWidget(self.dist_canvas, stretch=1)
+
+        self.dist_floor_spin.valueChanged.connect(self._on_dist_controls)
+        self.dist_bin_spin.valueChanged.connect(self._on_dist_controls)
+        self.dist_first_only.toggled.connect(self._on_dist_controls)
+        self.dist_include_rejected.stateChanged.connect(self._on_dist_controls)
+        self.dist_start_i_edit.textChanged.connect(self._on_dist_controls)
+        return tab
+
+    def _build_session_compare_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        note = QLabel(
+            "Add saved session files and press Compare. "
+            "Each session keeps its own ratio, voltage window, and Jump / Not a jump marks. "
+            "The table lists every jump and the first jump on each device. "
+            "Open graphs for the thesis figures. First jumps only is on that page and applies to every figure."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        self.session_list = QListWidget()
+        self.session_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.session_list.setMaximumHeight(110)
+        row.addWidget(self.session_list, stretch=1)
+        buttons = QVBoxLayout()
+        add_btn = QPushButton("Add sessions…")
+        add_btn.clicked.connect(self._add_session_files)
+        buttons.addWidget(add_btn)
+        remove_btn = QPushButton("Remove")
+        remove_btn.clicked.connect(self._remove_session_files)
+        buttons.addWidget(remove_btn)
+        self.session_compare_btn = QPushButton("Compare")
+        self.session_compare_btn.clicked.connect(self._compare_sessions)
+        buttons.addWidget(self.session_compare_btn)
+        open_btn = QPushButton("Open graphs…")
+        open_btn.clicked.connect(self._open_session_graphs)
+        buttons.addWidget(open_btn)
+        self.session_save_btn = QPushButton("Save Origin data…")
+        self.session_save_btn.clicked.connect(self._save_session_origin)
+        buttons.addWidget(self.session_save_btn)
+        buttons.addStretch()
+        row.addLayout(buttons)
+        layout.addLayout(row)
+
+        self.session_status = QLabel("No sessions added.")
+        self.session_status.setWordWrap(True)
+        layout.addWidget(self.session_status)
+
+        headers = ["Session"]
+        for um in _SESSION_PAD_WIDTHS:
+            for _key, label, _kind in _SESSION_PAD_FIELDS:
+                headers.append(f"{um} µm\n{label}")
+        headers.append("Saved filters")
+        self.session_table = QTableWidget()
+        self.session_table.setColumnCount(len(headers))
+        self.session_table.setHorizontalHeaderLabels(headers)
+        self.session_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.session_table.horizontalHeader().setStretchLastSection(True)
+        self.session_table.horizontalHeader().setMinimumHeight(44)
+        self.session_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.session_table.setAlternatingRowColors(True)
+        self.session_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        layout.addWidget(self.session_table, stretch=1)
+        return tab
+
+    def _add_session_files(self):
+        start = str(Path(__file__).resolve().parents[1])
+        paths, _selected = QFileDialog.getOpenFileNames(
+            self, "Add session files", start, "Session JSON (*.json)",
+        )
+        known = {str(path) for path in self._session_paths}
+        for raw in paths:
+            path = Path(raw)
+            if str(path) in known:
+                continue
+            self._session_paths.append(path)
+            known.add(str(path))
+            self.session_list.addItem(f"{path.stem}  —  {path}")
+        if self._session_paths:
+            self.session_status.setText(
+                f"{len(self._session_paths)} session(s) ready. Press Compare."
+            )
+
+    def _remove_session_files(self):
+        rows = sorted({idx.row() for idx in self.session_list.selectedIndexes()}, reverse=True)
+        if not rows:
+            return
+        for row in rows:
+            if 0 <= row < len(self._session_paths):
+                del self._session_paths[row]
+            self.session_list.takeItem(row)
+        if not self._session_paths:
+            self.session_status.setText("No sessions added.")
+
+    def _compare_sessions(self):
+        if not self._session_paths:
+            self.session_status.setText("Add one or more session JSON files first.")
+            return
+        if self._session_worker is not None and self._session_worker.isRunning():
+            return
+        self.session_compare_btn.setEnabled(False)
+        self.session_status.setText("Comparing sessions…")
+        worker = SessionCompareWorker([str(path) for path in self._session_paths], self)
+        worker.progress.connect(self.session_status.setText)
+        worker.ready.connect(self._show_session_comparison)
+        worker.finished.connect(lambda: self.session_compare_btn.setEnabled(True))
+        self._session_worker = worker
+        worker.start()
+
+    def _show_session_comparison(self, results: list):
+        widths = list(_SESSION_PAD_WIDTHS)
+        self.session_table.setRowCount(len(results))
+        problems = []
+        for row_i, result in enumerate(results):
+            pads = {pad.get("pad_um"): pad for pad in result.get("pads") or []}
+            failed = bool(result.get("error")) and not result.get("pads")
+            values = [result.get("name") or ""]
+            for um in widths:
+                pad = pads.get(um) or {}
+                for key, _label, kind in _SESSION_PAD_FIELDS:
+                    if failed:
+                        values.append("—")
+                        continue
+                    raw = pad.get(key)
+                    if kind == "count":
+                        text = str(int(raw or 0))
+                    elif kind == "pct":
+                        text = f"{float(raw or 0):.1f}%"
+                    elif raw is None:
+                        text = "—"
+                    else:
+                        text = f"{float(raw):.3f}"
+                    values.append(text)
+            filters = result.get("filters") or ""
+            error = result.get("error") or ""
+            if error:
+                problems.append(f"{result.get('name')}: {error}")
+                if filters:
+                    filters = f"{filters}  ({error})"
+                else:
+                    filters = error
+            values.append(filters)
+            for col, text in enumerate(values):
+                item = QTableWidgetItem(text)
+                item.setTextAlignment(Qt.AlignCenter if col else Qt.AlignLeft | Qt.AlignVCenter)
+                self.session_table.setItem(row_i, col, item)
+        self.session_table.resizeColumnsToContents()
+        if problems:
+            self.session_status.setText(
+                f"Compared {len(results)} session(s). " + " ".join(problems)
+            )
+        else:
+            self.session_status.setText(
+                f"Compared {len(results)} session(s). "
+                "The table lists every jump and the first jump separately. "
+                "The graph page is open."
+            )
+        self._session_results = list(results)
+        if any(row.get("pads") for row in results):
+            self._open_session_graphs()
+
+    def _open_session_graphs(self):
+        usable = [row for row in self._session_results if row.get("pads")]
+        if not usable:
+            self.session_status.setText("Compare sessions before opening the graphs.")
+            return
+        if self._session_graphs is None:
+            self._session_graphs = SessionGraphsDialog(usable, self)
+        else:
+            self._session_graphs.set_results(usable)
+        self._session_graphs.show()
+        self._session_graphs.raise_()
+        self._session_graphs.activateWindow()
+
+    def _save_session_origin(self):
+        usable = [row for row in self._session_results if row.get("pads")]
+        if not usable:
+            self.session_status.setText("Compare sessions before saving Origin data.")
+            return
+        start = str(Path(__file__).resolve().parents[1])
+        folder = QFileDialog.getExistingDirectory(self, "Folder for Origin text files", start)
+        if not folder:
+            return
+        written = write_origin_files(Path(folder), usable)
+        if self._session_graphs is None:
+            self._session_graphs = SessionGraphsDialog(usable, self)
+        else:
+            self._session_graphs.set_results(usable)
+        pngs = self._session_graphs._save_pngs(Path(folder), None)
+        names = ", ".join(path.name for path in written + pngs)
+        self.session_status.setText(f"Wrote {names}.")
+
     def _refresh_folder_list(self):
         self.folder_list.clear()
         for p in self._folder_paths:
@@ -705,6 +1306,7 @@ class MainWindow(QMainWindow):
             min_current=self._parse_min_current(),
             upward_only=self.upward_only_cb.isChecked(),
             decisions=self._decisions,
+            pad_um=self.pad_combo.currentData(),
         )
 
     def _on_filters_changed(self, *_args):
@@ -748,6 +1350,10 @@ class MainWindow(QMainWindow):
                 self.min_current_edit.setText(str(state['min_current']))
             else:
                 self.min_current_edit.clear()
+            pad = state.get('pad_um')
+            idx = self.pad_combo.findData(pad if pad else None)
+            if idx >= 0:
+                self.pad_combo.setCurrentIndex(idx)
         finally:
             self._updating_controls = False
 
@@ -760,6 +1366,7 @@ class MainWindow(QMainWindow):
             'use_abs_v': self.abs_v_cb.isChecked(),
             'min_current': self._parse_min_current(),
             'upward_only': self.upward_only_cb.isChecked(),
+            'pad_um': self.pad_combo.currentData(),
         }
 
     # ------------------------------------------------------------------ session / origin
@@ -850,6 +1457,7 @@ class MainWindow(QMainWindow):
         paths = export_origin_files(
             out_root,
             self._filtered,
+            pad_jumps=self._jumps_ignoring_pad_filter(),
             decisions=self._decisions,
             filter_state=self._current_filter_state(),
             excluded_files_from_first=self._excluded_files_from_first,
@@ -878,6 +1486,7 @@ class MainWindow(QMainWindow):
                 status,
                 str(j.get('source_folder', '')),
                 str(j.get('section', '')),
+                pad_label(str(j.get('section', ''))),
                 str(j.get('device_num', '')),
                 str(j.get('filename', '')),
                 f"{j.get('voltage', j.get('voltage_mid')):.6g}"
@@ -1068,6 +1677,17 @@ class MainWindow(QMainWindow):
             self._select_index(next_idx)
 
     # ------------------------------------------------------------------ IV plot
+    def _strip_sweep_caption(self):
+        text = self.selection_label.text()
+        marker = " | sweep "
+        if marker in text:
+            self.selection_label.setText(text.split(marker, 1)[0])
+
+    def _add_sweep_caption(self, caption: str):
+        self._strip_sweep_caption()
+        if caption:
+            self.selection_label.setText(self.selection_label.text() + " | sweep " + caption)
+
     def _draw_empty_iv(self):
         self.iv_fig.clear()
         ax = self.iv_fig.add_subplot(111)
@@ -1077,6 +1697,29 @@ class MainWindow(QMainWindow):
         self.iv_fig.tight_layout()
         self.iv_canvas.draw_idle()
         self._marker_artists = []
+        self._iv_click_axes = ()
+        if hasattr(self, "selection_label"):
+            self._strip_sweep_caption()
+
+    def _inset_corner(self, ax, x_frac: float, y_frac: float):
+        """Axes-fraction box in the corner farthest from the highlighted jump."""
+        width, height = 0.32, 0.30
+        corners = (
+            (0.03, 0.66),
+            (0.65, 0.66),
+            (0.03, 0.05),
+            (0.65, 0.05),
+        )
+        best = corners[1]
+        best_d = -1.0
+        for left, bottom in corners:
+            cx = left + width / 2.0
+            cy = bottom + height / 2.0
+            dist = (cx - x_frac) ** 2 + (cy - y_frac) ** 2
+            if dist > best_d:
+                best_d = dist
+                best = (left, bottom)
+        return ax.inset_axes([best[0], best[1], width, height])
 
     def _draw_iv_for_jump(self, selected: Dict[str, Any]):
         file_path = selected.get('file_path')
@@ -1097,19 +1740,39 @@ class MainWindow(QMainWindow):
             voltage = np.asarray(cached['voltage'], dtype=float)
             current = np.asarray(cached['current'], dtype=float)
 
+        n = min(len(voltage), len(current))
+        voltage = voltage[:n]
+        current = current[:n]
+        spans = loop_spans(voltage)
+        if not spans:
+            self._draw_empty_iv()
+            return
+        jump_index = int(selected.get('index', 0))
+        sweep_i = span_index_for_sample(spans, jump_index)
+        start, stop = spans[sweep_i]
+        # Keep the second point of a step that lands on the span boundary.
+        draw_stop = stop
+        if jump_index + 1 >= stop and jump_index + 1 < n:
+            draw_stop = jump_index + 2
+        sweep_v = voltage[start:draw_stop]
+        sweep_i_arr = current[start:draw_stop]
+        n_sweeps = len(spans)
+        sweep_caption = f"{sweep_i + 1}/{n_sweeps}"
+
         self.iv_fig.clear()
         ax_lin = self.iv_fig.add_subplot(121)
         ax_log = self.iv_fig.add_subplot(122)
-        ax_lin.plot(voltage, current, "o-", markersize=2, color='#1f77b4', alpha=0.8)
+        self._iv_click_axes = (ax_lin, ax_log)
+        ax_lin.plot(sweep_v, sweep_i_arr, "o-", markersize=3, color='#1f77b4', alpha=0.9, linewidth=1.2)
         ax_lin.set_xlabel("Voltage (V)")
         ax_lin.set_ylabel("Current (A)")
-        ax_lin.set_title(file_path.name)
         ax_lin.grid(True, alpha=0.3)
 
-        ax_log.plot(voltage, np.abs(current), "o-", markersize=2, color='#1f77b4', alpha=0.8)
+        ax_log.plot(sweep_v, np.abs(sweep_i_arr), "o-", markersize=3, color='#1f77b4', alpha=0.9, linewidth=1.2)
         ax_log.set_yscale("log")
         ax_log.set_xlabel("Voltage (V)")
         ax_log.set_ylabel("|Current| (A)")
+        ax_log.set_title(file_path.name, fontsize=9)
         ax_log.grid(True, which="both", alpha=0.3)
 
         self._marker_artists = []
@@ -1117,26 +1780,106 @@ class MainWindow(QMainWindow):
         for idx, j in enumerate(self._filtered):
             if Path(j.get('file_path', '')) != file_path:
                 continue
+            sample = j.get('index')
+            if sample is None or not (start <= int(sample) < stop):
+                continue
             v = j.get('voltage_mid', j.get('voltage'))
             if v is None:
                 continue
             is_sel = jump_decision_key(j) == selected_key
             included = j.get('included', True)
             if is_sel:
-                color, lw = '#ff9800', 2.5
+                color, lw, alpha = '#ff9800', 2.2, 0.95
             elif included:
-                color, lw = '#4caf50', 1.5
+                color, lw, alpha = '#4caf50', 1.0, 0.35
             else:
-                color, lw = '#9e9e9e', 1.0
+                color, lw, alpha = '#9e9e9e', 1.0, 0.35
             for ax in (ax_lin, ax_log):
-                line = ax.axvline(v, color=color, alpha=0.85, linestyle='--', linewidth=lw)
+                line = ax.axvline(v, color=color, alpha=alpha, linestyle='--', linewidth=lw, zorder=3)
                 self._marker_artists.append((line, idx, float(v)))
 
-        self.iv_fig.tight_layout()
+        vb = selected.get('v_before', selected.get('voltage'))
+        va = selected.get('v_after', selected.get('voltage'))
+        ib = selected.get('i_before')
+        ia = selected.get('i_after')
+        phrase = ""
+        if vb is not None and va is not None and ib is not None and ia is not None:
+            vb_f, va_f = float(vb), float(va)
+            ib_f, ia_f = float(ib), float(ia)
+            phrase = jump_direction_phrase(vb_f, va_f, ib_f, ia_f)
+            _draw_step_arrow(ax_lin, vb_f, ib_f, va_f, ia_f)
+            ax_lin.scatter(
+                [vb_f], [ib_f],
+                s=42, facecolors='white', edgecolors='#e65100', linewidths=1.4, zorder=7,
+            )
+            ax_lin.scatter(
+                [va_f], [ia_f],
+                s=36, color='#e65100', edgecolors='black', linewidths=0.4, zorder=7,
+            )
+            abs_before, abs_after = abs(ib_f), abs(ia_f)
+            if abs_before > 0 and abs_after > 0:
+                _draw_step_arrow(ax_log, vb_f, abs_before, va_f, abs_after)
+                ax_log.scatter(
+                    [vb_f], [abs_before],
+                    s=42, facecolors='white', edgecolors='#e65100', linewidths=1.4, zorder=7,
+                )
+                ax_log.scatter(
+                    [va_f], [abs_after],
+                    s=36, color='#e65100', edgecolors='black', linewidths=0.4, zorder=7,
+                )
+                if abs_after > abs_before:
+                    mag_txt = "|I| up"
+                elif abs_after < abs_before:
+                    mag_txt = "|I| down"
+                else:
+                    mag_txt = "|I| unchanged"
+                ax_log.text(
+                    0.98, 0.04, mag_txt,
+                    transform=ax_log.transAxes,
+                    va="bottom", ha="right",
+                    color="#e65100", fontsize=8, fontweight="bold",
+                    bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.85),
+                )
+        ax_lin.set_title(
+            f"Sweep {sweep_caption} — {phrase}" if phrase else f"Sweep {sweep_caption}"
+        )
+
+        xmin, xmax = ax_lin.get_xlim()
+        ymin, ymax = ax_lin.get_ylim()
+        v_mark = float(selected.get('voltage', vb if vb is not None else 0.0))
+        i_mark = float(ib) if ib is not None else float(np.nanmedian(sweep_i_arr)) if len(sweep_i_arr) else 0.0
+        x_frac = (v_mark - xmin) / (xmax - xmin) if xmax > xmin else 0.5
+        y_frac = (i_mark - ymin) / (ymax - ymin) if ymax > ymin else 0.5
+        x_frac = min(1.0, max(0.0, x_frac))
+        y_frac = min(1.0, max(0.0, y_frac))
+        inset = self._inset_corner(ax_lin, x_frac, y_frac)
+        for i, (a, b) in enumerate(spans):
+            if i == sweep_i:
+                continue
+            inset.plot(voltage[a:b], current[a:b], color='#bdbdbd', linewidth=0.6, alpha=0.9)
+        inset.plot(sweep_v, sweep_i_arr, color='#1f77b4', linewidth=1.1, zorder=3)
+        if vb is not None and va is not None and ib is not None and ia is not None:
+            _draw_step_arrow(inset, float(vb), float(ib), float(va), float(ia), mutation_scale=8)
+        inset.set_xticks([])
+        inset.set_yticks([])
+        inset.set_title("full file", fontsize=7, pad=1)
+        inset.patch.set_alpha(0.94)
+        inset.set_facecolor("white")
+        for spine in inset.spines.values():
+            spine.set_color("#616161")
+            spine.set_linewidth(0.6)
+
+        self.iv_fig.subplots_adjust(left=0.12, right=0.98, bottom=0.12, top=0.90, wspace=0.35)
         self.iv_canvas.draw_idle()
+        self._add_sweep_caption(
+            f"{sweep_caption} — {phrase}" if phrase else sweep_caption
+        )
 
     def _on_iv_click(self, event):
-        if event.inaxes is None or event.xdata is None or not self._marker_artists:
+        click_axes = getattr(self, '_iv_click_axes', ())
+        if event.inaxes is None or event.inaxes not in click_axes:
+            return
+        if event.xdata is None or not self._marker_artists:
             return
         best_idx = None
         best_dist = None
@@ -1160,40 +1903,62 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ histogram
     def _plot_histogram(self, accepted: List[Dict]):
         self.hist_fig.clear()
-        voltages = []
-        for j in accepted:
-            v = j.get('voltage', j.get('voltage_mid'))
-            if v is not None:
-                voltages.append(float(v))
-        if not voltages:
+        bin_width = 0.2
+        colors = PAD_BAR_COLORS
+        order = ("100 µm", "200 µm", "400 µm", "Unknown")
+        centers_s, by_s = histogram_by_pad(accepted, bin_width=bin_width, absolute=False)
+        centers_a, by_a = histogram_by_pad(accepted, bin_width=bin_width, absolute=True)
+        if not len(centers_s) and not len(centers_a):
             ax = self.hist_fig.add_subplot(111)
             ax.text(0.5, 0.5, "No accepted jumps", ha='center', va='center')
             self.hist_fig.tight_layout()
             self.hist_canvas.draw_idle()
             return
 
-        centers_s, counts_s = histogram_bins(voltages, absolute=False)
-        centers_a, counts_a = histogram_bins(voltages, absolute=True)
-        bin_width = 0.2
+        present = [lab for lab in order if lab in by_s or lab in by_a]
+        n = max(len(present), 1)
+        width = bin_width * 0.85 / n
+
+        def _draw(ax, centers, grouped, xlabel, title):
+            for i, lab in enumerate(present):
+                counts = grouped.get(lab)
+                if counts is None or not len(centers):
+                    continue
+                offset = (i - (n - 1) / 2.0) * width
+                ax.bar(
+                    centers + offset, counts, width=width * 0.95,
+                    color=colors.get(lab, "#4c78a8"),
+                    edgecolor='black', linewidth=0.4, label=lab,
+                )
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel("Count")
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.1f}"))
+            if len(present) > 1:
+                ax.legend(fontsize=8)
 
         ax1 = self.hist_fig.add_subplot(211)
-        if len(centers_s):
-            ax1.bar(centers_s, counts_s, width=bin_width * 0.9, edgecolor='black', alpha=0.7)
-        ax1.set_xlabel("Jump voltage (V)")
-        ax1.set_ylabel("Count")
-        ax1.set_title("Signed")
-        ax1.grid(True, alpha=0.3)
-        ax1.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.1f}"))
-
+        _draw(ax1, centers_s, by_s, "Jump voltage (V)", "Signed")
         ax2 = self.hist_fig.add_subplot(212)
-        if len(centers_a):
-            ax2.bar(centers_a, counts_a, width=bin_width * 0.9, edgecolor='black', alpha=0.7)
-        ax2.set_xlabel("|Jump voltage| (V)")
-        ax2.set_ylabel("Count")
-        ax2.set_title("Absolute")
-        ax2.grid(True, alpha=0.3)
-        ax2.xaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.1f}"))
-        self.hist_fig.tight_layout()
+        _draw(ax2, centers_a, by_a, "|Jump voltage| (V)", "Absolute")
+
+        bits = []
+        for lab in present:
+            volts = []
+            for j in accepted:
+                if pad_label(str(j.get('section', ''))) != lab:
+                    continue
+                v = j.get('voltage', j.get('voltage_mid'))
+                if v is not None:
+                    volts.append(abs(float(v)))
+            if volts:
+                bits.append(f"{lab}: n={len(volts)}, median {float(np.median(volts)):.2f} V")
+        if bits:
+            self.hist_fig.suptitle("   ·   ".join(bits), fontsize=8)
+            self.hist_fig.tight_layout(rect=(0, 0, 1, 0.93))
+        else:
+            self.hist_fig.tight_layout()
         self.hist_canvas.draw_idle()
 
     # ------------------------------------------------------------------ compare
@@ -1209,6 +1974,8 @@ class MainWindow(QMainWindow):
             (self.ndr_fig, self.ndr_canvas),
             (self.mem_iv_fig, self.mem_iv_canvas),
             (self.best_pair_fig, self.best_pair_canvas),
+            (self.pad_fig, self.pad_canvas),
+            (self.dist_fig, self.dist_canvas),
         ):
             fig.clear()
             ax = fig.add_subplot(111)
@@ -1221,6 +1988,9 @@ class MainWindow(QMainWindow):
             "Load folders to see yield, NDR, and memristive IV overlays."
         )
         self.mem_iv_count_label.setText("")
+        self.pad_table.setRowCount(0)
+        self.dist_table.setRowCount(0)
+        self.dist_summary.setText("Load a sample to see where the jumps sit.")
         self._sync_compare_folder_combos([])
 
     def _sync_compare_folder_combos(self, folders: List[str]):
@@ -1252,11 +2022,28 @@ class MainWindow(QMainWindow):
         if self._yield_summary:
             self._update_best_pair_tab(self._yield_summary)
 
+    def _on_compare_first_only(self, *_args):
+        if self._device_registry:
+            self._update_compare()
+
+    def _compare_jump_list(self, jumps: List[Dict]) -> List[Dict]:
+        """Accepted jumps for Compare. First jumps only keeps one jump per device."""
+        if not getattr(self, "compare_first_only", None) or not self.compare_first_only.isChecked():
+            return jumps
+        first, _all = get_first_and_all(
+            jumps,
+            excluded_files_from_first=self._excluded_files_from_first,
+            accepted_only=True,
+        )
+        return first
+
     def _update_compare(self):
         if not self._device_registry:
             self._plot_compare_empty()
             return
-        summary = compute_yield_summary(self._device_registry, self._filtered)
+        summary = compute_yield_summary(
+            self._device_registry, self._compare_jump_list(self._filtered),
+        )
         self._yield_summary = summary
         combined = summary['combined']
         ndr = summary.get('ndr_stats') or {}
@@ -1270,7 +2057,9 @@ class MainWindow(QMainWindow):
             m = g.get('mean_ndr')
             return f"{m:.3f}" if m is not None else "—"
 
+        scope = "First jumps only. " if self.compare_first_only.isChecked() else ""
         self.compare_status.setText(
+            f"{scope}"
             f"All: {combined['WithJump']} with jump, {combined['NoJump']} without.  "
             f"Memristive (worked): {combined['MemWithJump']} with jump, "
             f"{combined['MemNoJump']} without.  "
@@ -1285,6 +2074,148 @@ class MainWindow(QMainWindow):
         self._update_ndr_tab(summary)
         self._update_memristive_iv_tab(summary)
         self._update_best_pair_tab(summary)
+        self._update_pad_tab()
+        self._update_jump_voltage_tab()
+
+    def _on_dist_controls(self, *_args):
+        if not self._all_jumps:
+            return
+        text = self.dist_start_i_edit.text().strip()
+        if text:
+            try:
+                float(text)
+            except ValueError:
+                return
+        self._update_jump_voltage_tab()
+
+    def _dist_start_current(self) -> Optional[float]:
+        text = self.dist_start_i_edit.text().strip()
+        if not text:
+            return None
+        return float(text)
+
+    def _distribution_jumps(self) -> List[Dict]:
+        """Jumps at or above the floor, ignoring the review voltage window and pad filter."""
+        if not self._all_jumps:
+            return []
+        kwargs = self._filter_kwargs()
+        kwargs["pad_um"] = None
+        kwargs["v_min"] = float(self.dist_floor_spin.value())
+        kwargs["v_max"] = None
+        kwargs["use_abs_v"] = True
+        rows = list(filter_jumps(self._all_jumps, **kwargs))
+        if not self.dist_include_rejected.isChecked():
+            rows = [j for j in rows if j.get("included", True)]
+        start_i = self._dist_start_current()
+        if start_i is not None:
+            kept = []
+            for jump in rows:
+                try:
+                    before = abs(float(jump.get("i_before", 0)))
+                except (TypeError, ValueError):
+                    continue
+                if before >= start_i:
+                    kept.append(jump)
+            rows = kept
+        if self.dist_first_only.isChecked():
+            first, _all = get_first_and_all(
+                rows,
+                excluded_files_from_first=self._excluded_files_from_first,
+                accepted_only=not self.dist_include_rejected.isChecked(),
+            )
+            return first
+        return rows
+
+    def _update_jump_voltage_tab(self):
+        jumps = self._distribution_jumps()
+        signed: List[float] = []
+        included: List[bool] = []
+        for jump in jumps:
+            voltage = jump.get("voltage", jump.get("voltage_mid"))
+            if voltage is None:
+                continue
+            try:
+                signed.append(float(voltage))
+            except (TypeError, ValueError):
+                continue
+            included.append(bool(jump.get("included", True)))
+        absolute = [abs(v) for v in signed]
+        floor = float(self.dist_floor_spin.value())
+        bin_width = float(self.dist_bin_spin.value())
+        fit = fit_voltage_mixture(absolute)
+        signed_fit = fit_voltage_mixture(signed, max_components=4)
+        self._fill_dist_summary(fit, signed, floor, included, signed_fit)
+        draw_jump_voltage_figure(
+            self.dist_fig, signed, fit, floor, bin_width, included, signed_fit,
+        )
+        self.dist_canvas.draw_idle()
+
+    def _peak_clause(self, fit: Dict[str, Any], axis_name: str) -> str:
+        means = fit.get("means") or []
+        stds = fit.get("stds") or []
+        weights = fit.get("weights") or []
+        k = int(fit.get("components") or 0)
+        if k <= 1 and means:
+            return (
+                f"On {axis_name}, a single normal is preferred "
+                f"(mean {means[0]:.2f} V, std {stds[0]:.2f} V)."
+            )
+        if k > 1:
+            bits = [
+                f"{100.0 * w:.0f}% at {m:.2f} ± {s:.2f} V"
+                for w, m, s in zip(weights, means, stds)
+            ]
+            return f"On {axis_name}, a {k}-peak mixture is preferred: " + "; ".join(bits) + "."
+        return f"On {axis_name}, there is not enough spread to fit a curve."
+
+    def _append_peak_rows(self, fit: Dict[str, Any], axis_name: str):
+        weights = fit.get("weights") or []
+        means = fit.get("means") or []
+        stds = fit.get("stds") or []
+        start = self.dist_table.rowCount()
+        self.dist_table.setRowCount(start + len(weights))
+        for i, (w, m, s) in enumerate(zip(weights, means, stds)):
+            vals = [axis_name, str(i + 1), f"{100.0 * w:.1f}%", f"{m:.3f}", f"{s:.3f}"]
+            for c, value in enumerate(vals):
+                self.dist_table.setItem(start + i, c, QTableWidgetItem(value))
+
+    def _fill_dist_summary(
+        self,
+        fit: Dict[str, Any],
+        signed: List[float],
+        floor: float,
+        included: List[bool],
+        signed_fit: Dict[str, Any],
+    ):
+        n = int(fit.get("n") or 0)
+        self.dist_table.setRowCount(0)
+        start_i = None
+        try:
+            start_i = self._dist_start_current()
+        except ValueError:
+            start_i = None
+        start_bit = "" if start_i is None else f" |I| before the jump ≥ {start_i:.3g} A."
+        if n == 0:
+            self.dist_summary.setText(f"No jumps with |V| ≥ {floor:.2f} V.{start_bit}")
+            return
+        n_pos = sum(1 for v in signed if v >= 0)
+        n_rejected = sum(1 for keep in included if not keep)
+        n_kept = n - n_rejected
+        if self.dist_first_only.isChecked():
+            scope = "first jumps"
+        elif n_rejected:
+            scope = f"jumps ({n_kept} marked Jump, {n_rejected} Not a jump)"
+        else:
+            scope = "jumps marked Jump"
+        text = (
+            f"{n} {scope} with |V| ≥ {floor:.2f} V.{start_bit} "
+            f"Median |V| {fit['median']:.2f} V (IQR {fit['q25']:.2f}–{fit['q75']:.2f}). "
+            f"{n_pos} positive, {n - n_pos} negative. "
+            f"{self._peak_clause(fit, '|V|')} {self._peak_clause(signed_fit, 'signed V')}"
+        )
+        self.dist_summary.setText(text)
+        self._append_peak_rows(fit, "|V|")
+        self._append_peak_rows(signed_fit, "Signed")
 
     def _update_yield_tab(self, summary: Dict[str, Any]):
         folders = sorted(summary['counts_by_folder'].keys())
@@ -1323,6 +2254,92 @@ class MainWindow(QMainWindow):
         ax2.grid(True, axis='y', alpha=0.3)
         self.yield_fig.tight_layout()
         self.yield_canvas.draw_idle()
+
+    def _jumps_ignoring_pad_filter(self) -> List[Dict]:
+        """Current ratio/voltage filters, with every pad width included."""
+        if not self._all_jumps:
+            return []
+        kwargs = self._filter_kwargs()
+        kwargs['pad_um'] = None
+        return filter_jumps(self._all_jumps, **kwargs)
+
+    def _update_pad_tab(self):
+        first_only = self.compare_first_only.isChecked()
+        rows = compute_pad_comparison(
+            self._device_registry,
+            self._compare_jump_list(self._jumps_ignoring_pad_filter()),
+        )
+        self.pad_table.setHorizontalHeaderLabels([
+            "Pad", "Devices", "% of devices", "With jump", "Jump yield",
+            "First jumps" if first_only else "Jumps",
+            "% of jumps",
+            "First |V|" if first_only else "Median |V|",
+            "Sections",
+        ])
+        self.pad_table.setRowCount(len(rows))
+        for r, row in enumerate(rows):
+            med = row.get('median_abs_v')
+            vals = [
+                row['label'],
+                str(row['n_devices']),
+                f"{row['pct_devices']:.1f}%",
+                str(row['n_with_jump']),
+                f"{row['pct_with_jump']:.1f}%",
+                str(row['n_jumps']),
+                f"{row['pct_jumps']:.1f}%",
+                f"{med:.3f}" if med is not None else "—",
+                row.get('sections') or "—",
+            ]
+            for c, text in enumerate(vals):
+                self.pad_table.setItem(r, c, QTableWidgetItem(text))
+
+        self.pad_fig.clear()
+        if not rows:
+            ax = self.pad_fig.add_subplot(111)
+            ax.text(0.5, 0.5, "No devices loaded", ha='center', va='center')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            self.pad_fig.tight_layout()
+            self.pad_canvas.draw_idle()
+            return
+
+        labels = [row['label'] for row in rows]
+        colors = [PAD_BAR_COLORS.get(lab, "#4c78a8") for lab in labels]
+        x = np.arange(len(labels))
+
+        ax1 = self.pad_fig.add_subplot(121)
+        yield_pct = [row['pct_with_jump'] for row in rows]
+        bars = ax1.bar(x, yield_pct, color=colors, edgecolor='black')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(labels)
+        ax1.set_ylim(0, 100)
+        ax1.set_ylabel("Devices with a jump (%)")
+        ax1.set_title("Forming yield by pad width" if first_only else "Jump yield by pad width")
+        ax1.grid(True, axis='y', alpha=0.3)
+        for bar, row in zip(bars, rows):
+            ax1.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 1.5,
+                f"{row['n_with_jump']}/{row['n_devices']}",
+                ha='center', va='bottom', fontsize=8,
+            )
+
+        ax2 = self.pad_fig.add_subplot(122)
+        medians = [row['median_abs_v'] or 0 for row in rows]
+        ax2.bar(x, medians, color=colors, edgecolor='black')
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(labels)
+        ax2.set_ylabel("Median |jump voltage| (V)")
+        ax2.set_title("First-jump voltage by pad width" if first_only else "Jump voltage by pad width")
+        ax2.grid(True, axis='y', alpha=0.3)
+        for i, row in enumerate(rows):
+            med = row.get('median_abs_v')
+            if med is None:
+                continue
+            ax2.text(i, med, f"{med:.2f} V", ha='center', va='bottom', fontsize=8)
+
+        self.pad_fig.tight_layout()
+        self.pad_canvas.draw_idle()
 
     def _update_ndr_tab(self, summary: Dict[str, Any]):
         ndr = summary.get('ndr_stats') or {}
@@ -1587,6 +2604,8 @@ class MainWindow(QMainWindow):
         for j in new_jumps:
             if 'source_folder' not in j and self._folder_paths:
                 j['source_folder'] = self._folder_paths[0].name
+            if j.get('pad_um') is None:
+                j['pad_um'] = pad_um_for_section(j.get('section', ''))
             self._all_jumps.append(j)
             key = jump_decision_key(j)
             self._decisions[key] = True

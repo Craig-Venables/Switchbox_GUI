@@ -12,6 +12,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .core import (
     get_first_and_all,
     histogram_bins,
+    histogram_by_pad,
+    pad_um_for_section,
+    compute_pad_comparison,
     compute_yield_summary,
     origin_export_root,
 )
@@ -23,6 +26,7 @@ SESSION_VERSION = 2
 JUMP_COLUMNS = (
     "SourceFolder",
     "Section",
+    "Pad_um",
     "Device",
     "Filename",
     "Voltage_V",
@@ -32,11 +36,27 @@ JUMP_COLUMNS = (
     "I_after_A",
 )
 
+HIST_BY_PAD_COLUMNS = ("Pad_um", "BinCenter_V", "Count")
+
+PAD_COMPARE_COLUMNS = (
+    "Pad_um",
+    "Sections",
+    "N_devices",
+    "Pct_devices",
+    "N_with_jump",
+    "Pct_with_jump",
+    "N_jumps",
+    "Pct_jumps",
+    "Median_AbsV",
+    "Mean_AbsV",
+)
+
 HIST_COLUMNS = ("BinCenter_V", "Count")
 
 DEVICE_YIELD_COLUMNS = (
     "SourceFolder",
     "Section",
+    "Pad_um",
     "Device",
     "HasJump",
     "Classification",
@@ -114,6 +134,7 @@ def _jump_row(j: Dict[str, Any]) -> Tuple[Any, ...]:
     return (
         j.get("source_folder", ""),
         j.get("section", ""),
+        j.get("pad_um") if j.get("pad_um") is not None else (pad_um_for_section(j.get("section", "")) or ""),
         j.get("device_num", ""),
         j.get("filename", ""),
         f"{v_f:.6g}" if v_f is not None else "",
@@ -134,6 +155,7 @@ def export_origin_files(
     folder_paths: Optional[Sequence[Path]] = None,
     device_registry: Optional[List[Dict[str, Any]]] = None,
     export_name: Optional[str] = None,
+    pad_jumps: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Path]:
     """
     Write Origin TXT files and a review JSON into ``<out_root>/origin data[/name]/``.
@@ -178,9 +200,46 @@ def export_origin_files(
         [(f"{c:.6g}", int(n)) for c, n in zip(centers_a, counts_a)],
     )
 
+    centers_pad, by_pad = histogram_by_pad(all_list, bin_width=bin_width, absolute=True)
+    pad_rows = []
+    for label, counts in by_pad.items():
+        pad_um = label.replace(" µm", "") if label.endswith(" µm") else ""
+        for c, n in zip(centers_pad, counts):
+            if int(n) == 0:
+                continue
+            pad_rows.append((pad_um, f"{c:.6g}", int(n)))
+    paths["hist_by_pad"] = _write_tsv(
+        out_dir / "filament_jump_histogram_by_pad.txt",
+        HIST_BY_PAD_COLUMNS,
+        pad_rows,
+    )
+
     if device_registry is not None:
         yield_paths = export_yield_files(out_dir, device_registry, filtered_jumps)
         paths.update(yield_paths)
+        pad_rows = compute_pad_comparison(
+            device_registry,
+            pad_jumps if pad_jumps is not None else filtered_jumps,
+        )
+        paths["pad_compare"] = _write_tsv(
+            out_dir / "filament_pad_comparison.txt",
+            PAD_COMPARE_COLUMNS,
+            [
+                (
+                    row.get("pad_um") if row.get("pad_um") is not None else "",
+                    row.get("sections", ""),
+                    row["n_devices"],
+                    f"{row['pct_devices']:.2f}",
+                    row["n_with_jump"],
+                    f"{row['pct_with_jump']:.2f}",
+                    row["n_jumps"],
+                    f"{row['pct_jumps']:.2f}",
+                    f"{row['median_abs_v']:.6g}" if row.get("median_abs_v") is not None else "",
+                    f"{row['mean_abs_v']:.6g}" if row.get("mean_abs_v") is not None else "",
+                )
+                for row in pad_rows
+            ],
+        )
 
     review = {
         "version": SESSION_VERSION,
@@ -214,6 +273,7 @@ def export_yield_files(
         device_rows.append((
             r["source_folder"],
             r["section"],
+            r.get("pad_um") if r.get("pad_um") is not None else (pad_um_for_section(r.get("section", "")) or ""),
             r["device_num"],
             1 if r["has_jump"] else 0,
             r["classification"],

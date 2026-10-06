@@ -25,6 +25,29 @@ except ImportError:
 # Floor ratio used when scanning on load; live UI filters upward from this.
 DETECTION_FLOOR_RATIO = 1.5
 
+# Cross-bar electrode pad size (µm) by section folder letter.
+# Letters are the device folders (A, B, C, …) in
+# resources/sample_information/mapping_backup.json.
+# Widths match DEVICE_SIZE_MAPPING in analysis/aggregators/sample_analyzer.py
+# and plotting/sample/sample_plots.py.
+PAD_UM_BY_SECTION = {
+    'A': 200, 'D': 200, 'G': 200, 'H': 200, 'K': 200,
+    'B': 100, 'E': 100, 'F': 100, 'I': 100, 'L': 100,
+    'C': 400, 'J': 400,
+}
+PAD_UM_ORDER = (100, 200, 400)
+
+
+def pad_um_for_section(section: str) -> Optional[int]:
+    """Return 100, 200, or 400 for a Cross_bar section letter, else None."""
+    return PAD_UM_BY_SECTION.get(str(section or '').strip().upper())
+
+
+def pad_label(section: str) -> str:
+    """Short label for plots and tables, e.g. '200 µm' or 'Unknown'."""
+    um = pad_um_for_section(section)
+    return f"{um} µm" if um else "Unknown"
+
 # Thesis LLM classification exports (written by thesis_llm.classification_export)
 THESIS_LLM_EXPORT_SUBDIR = Path("sample_analysis") / "thesis_llm_exports"
 
@@ -303,6 +326,73 @@ def find_jumps_in_curve(
     return results
 
 
+def loop_spans(voltage: np.ndarray) -> List[Tuple[int, int]]:
+    """Half-open ``[start, stop)`` ranges of repeated IV loops in one file.
+
+    A loop is one trip out to the positive peak and back (the same split used
+    for repeated ``Py-N`` triangles). A single sweep is one span over the
+    whole curve. Jump ``index`` values fall inside the span that contains
+    that sample, so a step can be drawn on its own sweep.
+    """
+    voltage = np.asarray(voltage, dtype=float)
+    n = int(voltage.size)
+    if n < 4:
+        return [(0, n)] if n else []
+    finite = np.isfinite(voltage)
+    if not np.any(finite):
+        return [(0, n)]
+    vmax = float(np.nanmax(voltage[finite]))
+    if not np.isfinite(vmax) or vmax <= 0:
+        return [(0, n)]
+    threshold = 0.7 * vmax
+    peaks: List[int] = []
+    k = 1
+    while k < n - 1:
+        if voltage[k] >= threshold and voltage[k] >= voltage[k - 1]:
+            j = k
+            while (
+                j + 1 < n
+                and voltage[j + 1] >= threshold
+                and voltage[j + 1] >= voltage[j] - 1e-12
+            ):
+                j += 1
+            if j + 1 >= n or voltage[j + 1] < voltage[j]:
+                peaks.append(k)
+            k = j + 1
+        else:
+            k += 1
+    if len(peaks) <= 1:
+        return [(0, n)]
+    period = int(round(float(np.median(np.diff(peaks)))))
+    if period < 4:
+        return [(0, n)]
+    first = int(peaks[0] - (peaks[0] % period))
+    if first < 0:
+        first = 0
+    spans: List[Tuple[int, int]] = []
+    for start in range(first, n, period):
+        stop = min(start + period, n)
+        if stop > start:
+            spans.append((start, stop))
+    if not spans:
+        return [(0, n)]
+    # Keep any samples before the first aligned peak inside sweep 1.
+    if spans[0][0] > 0:
+        spans[0] = (0, spans[0][1])
+    return spans
+
+
+def span_index_for_sample(spans: Sequence[Tuple[int, int]], sample_index: int) -> int:
+    """Which span contains ``sample_index``. The last span wins if it is past the end."""
+    if not spans:
+        return 0
+    idx = int(sample_index)
+    for i, (start, stop) in enumerate(spans):
+        if start <= idx < stop:
+            return i
+    return len(spans) - 1
+
+
 def _parse_device_id(device_id: str) -> Tuple[str, int]:
     """Return (section, device_num) from device_id e.g. 'G_1' -> ('G', 1)."""
     parts = device_id.split('_')
@@ -352,6 +442,7 @@ def _scan_device(
         'has_classification': class_info['has_classification'],
         'device_key': class_info.get('device_key', ''),
         'classification_csv': class_info.get('source_csv', ''),
+        'pad_um': pad_um_for_section(section),
         'best_sweep': None,  # filled by load_folder
     }
     jumps: List[Dict[str, Any]] = []
@@ -391,6 +482,7 @@ def _scan_device(
             j['voltage'] = j['voltage_mid']
             j['source_folder'] = source_folder
             j['source_path'] = Path(source_path)
+            j['pad_um'] = pad_um_for_section(section)
             jumps.append(j)
     return device_rec, jumps, curve_cache
 
@@ -548,11 +640,18 @@ def filter_jumps(
     min_current: Optional[float] = None,
     upward_only: bool = False,
     decisions: Optional[Dict[str, bool]] = None,
+    pad_um: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Filter the cached jump list by live controls."""
     decisions = decisions or {}
     out: List[Dict[str, Any]] = []
     for j in jumps:
+        if pad_um is not None:
+            jumped = j.get('pad_um')
+            if jumped is None:
+                jumped = pad_um_for_section(j.get('section', ''))
+            if jumped != pad_um:
+                continue
         if j.get('ratio', 0) < min_ratio:
             continue
         v = j.get('voltage_mid', j.get('voltage'))
@@ -649,6 +748,7 @@ def compute_yield_summary(
         row = {
             'source_folder': sf,
             'section': rec.get('section', ''),
+            'pad_um': rec.get('pad_um') if rec.get('pad_um') is not None else pad_um_for_section(rec.get('section', '')),
             'device_num': rec.get('device_num', ''),
             'device_id': rec.get('device_id', ''),
             'has_jump': has_jump,
@@ -694,6 +794,158 @@ def compute_yield_summary(
         'best_memristive_pairs': pick_best_memristive_pairs(device_rows),
         'with_jump_keys': with_jump,
     }
+
+
+def compute_pad_comparison(
+    device_registry: Sequence[Dict[str, Any]],
+    filtered_jumps: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    Compare 100 / 200 / 400 µm pads.
+
+    Counts devices and accepted jumps per pad width, plus the share of
+    devices, the share of devices that have a jump, and the share of jumps.
+    """
+    with_jump = devices_with_accepted_jumps(list(filtered_jumps))
+    buckets: Dict[Optional[int], Dict[str, Any]] = {}
+
+    def bucket(um: Optional[int]) -> Dict[str, Any]:
+        if um not in buckets:
+            buckets[um] = {
+                'pad_um': um,
+                'label': f"{um} µm" if um else "Unknown",
+                'n_devices': 0,
+                'n_with_jump': 0,
+                'n_jumps': 0,
+                'abs_v': [],
+                'sections': set(),
+            }
+        return buckets[um]
+
+    for rec in device_registry:
+        um = rec.get('pad_um')
+        if um is None:
+            um = pad_um_for_section(rec.get('section', ''))
+        b = bucket(um)
+        b['n_devices'] += 1
+        section = str(rec.get('section') or '').strip().upper()
+        if section:
+            b['sections'].add(section)
+        if device_key(rec) in with_jump:
+            b['n_with_jump'] += 1
+
+    for j in filtered_jumps:
+        if not j.get('included', True):
+            continue
+        um = j.get('pad_um')
+        if um is None:
+            um = pad_um_for_section(j.get('section', ''))
+        b = bucket(um)
+        b['n_jumps'] += 1
+        v = j.get('voltage', j.get('voltage_mid'))
+        if v is None:
+            continue
+        try:
+            b['abs_v'].append(abs(float(v)))
+        except (TypeError, ValueError):
+            continue
+
+    n_dev_all = sum(b['n_devices'] for b in buckets.values())
+    n_jump_all = sum(b['n_jumps'] for b in buckets.values())
+    keys = [um for um in list(PAD_UM_ORDER) + [None] if um in buckets]
+    for extra in buckets:
+        if extra not in keys:
+            keys.append(extra)
+
+    rows: List[Dict[str, Any]] = []
+    for um in keys:
+        b = buckets[um]
+        n = b['n_devices']
+        nj = b['n_jumps']
+        volts = b['abs_v']
+        rows.append({
+            'pad_um': um,
+            'label': b['label'],
+            'n_devices': n,
+            'pct_devices': (100.0 * n / n_dev_all) if n_dev_all else 0.0,
+            'n_with_jump': b['n_with_jump'],
+            'pct_with_jump': (100.0 * b['n_with_jump'] / n) if n else 0.0,
+            'n_jumps': nj,
+            'pct_jumps': (100.0 * nj / n_jump_all) if n_jump_all else 0.0,
+            'median_abs_v': float(np.median(volts)) if volts else None,
+            'mean_abs_v': float(np.mean(volts)) if volts else None,
+            'sections': ''.join(sorted(b['sections'])),
+        })
+    return rows
+
+
+def empty_pad_row(um: Optional[int]) -> Dict[str, Any]:
+    """Zero row so every session shows 100, 200, and 400 µm even if one is absent."""
+    return {
+        'pad_um': um,
+        'label': f"{um} µm" if um else "Unknown",
+        'n_devices': 0,
+        'pct_devices': 0.0,
+        'n_with_jump': 0,
+        'pct_with_jump': 0.0,
+        'n_jumps': 0,
+        'pct_jumps': 0.0,
+        'median_abs_v': None,
+        'mean_abs_v': None,
+        'sections': '',
+    }
+
+
+def align_pad_rows(rows: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """100 / 200 / 400 µm in that order, then any other width that appeared."""
+    by_um = {row.get('pad_um'): row for row in rows}
+    aligned = [by_um[um] if um in by_um else empty_pad_row(um) for um in PAD_UM_ORDER]
+    for row in rows:
+        if row.get('pad_um') not in PAD_UM_ORDER:
+            aligned.append(row)
+    return aligned
+
+
+def filter_kwargs_from_state(state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Live-filter arguments stored in a session JSON. Pad width is left open."""
+    state = state or {}
+    window = bool(state.get('voltage_window'))
+
+    def _float(value, default=None):
+        if value is None or value == '':
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    return dict(
+        min_ratio=_float(state.get('min_ratio'), 10.0),
+        v_min=_float(state.get('v_min')) if window else None,
+        v_max=_float(state.get('v_max')) if window else None,
+        use_abs_v=bool(state.get('use_abs_v')),
+        min_current=_float(state.get('min_current')),
+        upward_only=bool(state.get('upward_only')),
+        pad_um=None,
+    )
+
+
+def describe_filter_state(state: Optional[Dict[str, Any]]) -> str:
+    """Short label of the filters a session was reviewed under."""
+    state = state or {}
+    try:
+        ratio = float(state.get('min_ratio', 10.0))
+    except (TypeError, ValueError):
+        ratio = 10.0
+    parts = [f"ratio ≥ {ratio:.1f}"]
+    if state.get('voltage_window'):
+        axis = "|V|" if state.get('use_abs_v') else "V"
+        parts.append(f"{axis} {state.get('v_min')}–{state.get('v_max')}")
+    if state.get('min_current') not in (None, ''):
+        parts.append(f"I ≥ {state.get('min_current')}")
+    if state.get('upward_only'):
+        parts.append("upward only")
+    return ", ".join(parts)
 
 
 def _mean(vals: List[float]) -> Optional[float]:
@@ -942,15 +1194,10 @@ def get_first_and_all(
     return first_list, all_list
 
 
-def histogram_bins(
-    voltages: List[float],
-    bin_width: float = 0.2,
-    absolute: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
-    """Return (bin_centers, counts) for Origin histogram export."""
+def _bin_edges(voltages: Sequence[float], bin_width: float, absolute: bool) -> np.ndarray:
     if not voltages:
-        return np.array([]), np.array([])
-    vals = [abs(v) for v in voltages] if absolute else list(voltages)
+        return np.array([])
+    vals = [abs(float(v)) for v in voltages] if absolute else [float(v) for v in voltages]
     v_min, v_max = min(vals), max(vals)
     if absolute:
         start = 0.0
@@ -961,6 +1208,225 @@ def histogram_bins(
     edges = np.arange(start, stop, bin_width)
     if len(edges) < 2:
         edges = np.array([start, start + bin_width])
+    return edges
+
+
+def histogram_bins(
+    voltages: List[float],
+    bin_width: float = 0.2,
+    absolute: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return (bin_centers, counts) for Origin histogram export."""
+    edges = _bin_edges(voltages, bin_width, absolute)
+    if len(edges) < 2:
+        return np.array([]), np.array([])
+    vals = [abs(float(v)) for v in voltages] if absolute else [float(v) for v in voltages]
     counts, edges = np.histogram(vals, bins=edges)
     centers = 0.5 * (edges[:-1] + edges[1:])
     return centers, counts.astype(int)
+
+
+def histogram_by_pad(
+    jumps: Sequence[Dict[str, Any]],
+    bin_width: float = 0.2,
+    absolute: bool = False,
+) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
+    """
+    Shared-bin histogram of jump voltages, split by pad size.
+
+    Returns (bin_centers, {label: counts}). Labels are '100 µm', '200 µm',
+    '400 µm', or 'Unknown'.
+    """
+    grouped: Dict[str, List[float]] = {}
+    all_v: List[float] = []
+    for j in jumps:
+        v = j.get('voltage', j.get('voltage_mid'))
+        if v is None:
+            continue
+        try:
+            vf = float(v)
+        except (TypeError, ValueError):
+            continue
+        label = pad_label(str(j.get('section', '')))
+        grouped.setdefault(label, []).append(vf)
+        all_v.append(vf)
+    edges = _bin_edges(all_v, bin_width, absolute)
+    if len(edges) < 2:
+        return np.array([]), {}
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    counts: Dict[str, np.ndarray] = {}
+    for label, volts in grouped.items():
+        vals = [abs(v) for v in volts] if absolute else volts
+        c, _ = np.histogram(vals, bins=edges)
+        counts[label] = c.astype(int)
+    return centers, counts
+
+
+def histogram_from_floor(
+    values: Sequence[float],
+    floor: float,
+    bin_width: float,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Bins that start at ``floor`` so the empty region below the first jump stays visible."""
+    vals = [float(v) for v in values]
+    if not vals or bin_width <= 0:
+        return np.array([]), np.array([]), np.array([])
+    vmax = max(vals)
+    span = max(vmax - float(floor), 0.0)
+    n_bins = max(int(np.ceil(span / bin_width)), 1)
+    edges = float(floor) + np.arange(n_bins + 1, dtype=float) * float(bin_width)
+    if edges[-1] <= vmax:
+        edges = np.append(edges, edges[-1] + float(bin_width))
+    counts, edges = np.histogram(vals, bins=edges)
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    return centers, counts.astype(int), edges
+
+
+def _normal_logpdf(x: np.ndarray, mean: float, variance: float) -> np.ndarray:
+    variance = max(float(variance), 1e-8)
+    return -0.5 * np.log(2.0 * np.pi * variance) - 0.5 * (x - mean) ** 2 / variance
+
+
+def _gmm_log_likelihood(x: np.ndarray, weights: np.ndarray, means: np.ndarray, variances: np.ndarray) -> float:
+    log_comp = np.vstack([
+        np.log(max(float(w), 1e-12)) + _normal_logpdf(x, float(m), float(v))
+        for w, m, v in zip(weights, means, variances)
+    ])
+    peak = np.max(log_comp, axis=0)
+    return float(np.sum(peak + np.log(np.exp(log_comp - peak).sum(axis=0))))
+
+
+def _em_gmm_1d(
+    x: np.ndarray,
+    k: int,
+    rng: np.random.Generator,
+    n_iter: int = 100,
+) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, float]]:
+    """One EM run. Returns weights, means, variances, log-likelihood, or None if it collapses."""
+    n = len(x)
+    if k == 1:
+        mean = float(np.mean(x))
+        var = float(np.var(x))
+        if var < 1e-8:
+            var = 1e-4
+        weights = np.array([1.0])
+        means = np.array([mean])
+        variances = np.array([var])
+        return weights, means, variances, _gmm_log_likelihood(x, weights, means, variances)
+
+    spread = float(np.std(x))
+    if spread < 1e-6:
+        return None
+    quantiles = np.linspace(0.0, 1.0, k + 2)[1:-1]
+    means = np.quantile(x, quantiles).astype(float)
+    means = means + rng.normal(0.0, 0.05 * spread, size=k)
+    variances = np.full(k, max((spread ** 2) / k, 1e-4))
+    weights = np.full(k, 1.0 / k)
+    prev_ll = -np.inf
+    for _ in range(n_iter):
+        log_comp = np.vstack([
+            np.log(max(float(w), 1e-12)) + _normal_logpdf(x, float(m), float(v))
+            for w, m, v in zip(weights, means, variances)
+        ])
+        peak = np.max(log_comp, axis=0)
+        resp = np.exp(log_comp - peak)
+        resp /= np.maximum(resp.sum(axis=0, keepdims=True), 1e-15)
+        counts = resp.sum(axis=1)
+        if np.any(counts < 1e-3):
+            return None
+        weights = counts / n
+        means = (resp * x).sum(axis=1) / counts
+        variances = (resp * (x - means[:, None]) ** 2).sum(axis=1) / counts
+        variances = np.maximum(variances, 1e-6)
+        ll = _gmm_log_likelihood(x, weights, means, variances)
+        if abs(ll - prev_ll) < 1e-6:
+            break
+        prev_ll = ll
+    order = np.argsort(means)
+    return weights[order], means[order], variances[order], ll
+
+
+def _components_separated(means: np.ndarray, min_gap: float) -> bool:
+    if len(means) < 2:
+        return True
+    ordered = np.sort(np.asarray(means, dtype=float))
+    return bool(np.all(np.diff(ordered) >= float(min_gap)))
+
+
+def fit_voltage_mixture(
+    values: Sequence[float],
+    max_components: int = 3,
+    min_per_component: int = 6,
+    min_separation: float = 0.25,
+) -> Dict[str, Any]:
+    """
+    Fit 1–3 normal components to absolute jump voltages and keep the lowest BIC.
+
+    A fit is kept only when neighbouring peaks are at least ``min_separation``
+    volts apart, so two normals on the same cluster are not reported as two peaks.
+    BIC parameter count is 3k − 1 (means, variances, and weights that sum to 1).
+    """
+    x = np.asarray([float(v) for v in values], dtype=float)
+    n = int(x.size)
+    empty = {
+        "n": n,
+        "median": None,
+        "mean": None,
+        "std": None,
+        "q25": None,
+        "q75": None,
+        "components": 0,
+        "bic": None,
+        "weights": [],
+        "means": [],
+        "stds": [],
+        "log_likelihood": None,
+    }
+    if n == 0:
+        return empty
+    empty.update({
+        "median": float(np.median(x)),
+        "mean": float(np.mean(x)),
+        "std": float(np.std(x, ddof=1)) if n > 1 else 0.0,
+        "q25": float(np.percentile(x, 25)),
+        "q75": float(np.percentile(x, 75)),
+    })
+    best = None
+    best_bic = None
+    rng = np.random.default_rng(7)
+    k_limit = max(1, min(int(max_components), n // int(min_per_component) or 1))
+    for k in range(1, k_limit + 1):
+        starts = 1 if k == 1 else 8
+        for _start in range(starts):
+            fitted = _em_gmm_1d(x, k, rng)
+            if fitted is None:
+                continue
+            weights, means, variances, ll = fitted
+            if not _components_separated(means, min_separation):
+                continue
+            n_params = 3 * k - 1
+            bic = -2.0 * ll + n_params * np.log(n)
+            if best_bic is None or bic < best_bic - 1e-6:
+                best_bic = bic
+                best = (weights, means, variances, ll, k, bic)
+    if best is None:
+        return empty
+    weights, means, variances, ll, k, bic = best
+    empty.update({
+        "components": int(k),
+        "bic": float(bic),
+        "weights": [float(w) for w in weights],
+        "means": [float(m) for m in means],
+        "stds": [float(np.sqrt(v)) for v in variances],
+        "log_likelihood": float(ll),
+    })
+    return empty
+
+
+def mixture_density(grid: np.ndarray, weights: Sequence[float], means: Sequence[float], stds: Sequence[float]) -> np.ndarray:
+    """Normal-mixture pdf on ``grid``."""
+    y = np.zeros(len(grid), dtype=float)
+    for w, mean, std in zip(weights, means, stds):
+        s = max(float(std), 1e-4)
+        y += float(w) * np.exp(-0.5 * ((grid - float(mean)) / s) ** 2) / (s * np.sqrt(2.0 * np.pi))
+    return y

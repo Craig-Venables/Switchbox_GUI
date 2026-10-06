@@ -1,0 +1,4 @@
+Pad_um	D65_N_devices	D65_N_formed	D65_yield_pct	D80_N_devices	D80_N_formed	D80_yield_pct
+100	30	1	3.333333	2	1	50.000000
+200	40	9	22.500000	26	16	61.538462
+400	5	1	20.000000	0	0	

@@ -1,0 +1,7 @@
+Session	Pad_um	N_devices	N_formed	N_jumps_all	N_first	N_later
+D65_new	100	30	1	1	1	0
+D65_new	200	40	9	22	9	13
+D65_new	400	5	1	1	1	0
+D110-80+94	100	11	7	15	7	8
+D110-80+94	200	40	13	31	13	18
+D110-80+94	400	0	0	0	0	0

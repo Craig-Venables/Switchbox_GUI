@@ -1,0 +1,167 @@
+{
+  "version": 1,
+  "excluded_files": [],
+  "split_before": [],
+  "sample_labels": {
+    "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2"
+  },
+  "jump_session_path": null,
+  "folder_paths": [
+    "C:\\Users\\craig\\OneDrive - The University of Nottingham\\Documents\\Phd\\2) Data\\1) Devices\\1) Memristors\\Quantum Dots\\Zn-Cu-In-S(Zns)\\D80-0.1mgml-ITO-PMMA(2%)-Gold-s2"
+  ],
+  "compare_devices": [
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 1
+    }
+  ],
+  "normalization": "max_abs",
+  "read_voltage": 0.5,
+  "memristive_only": false,
+  "log_y": false,
+  "device_view": "lifetime",
+  "sample_pre_rule": "last",
+  "sample_post_rule": "forming",
+  "sample_show_raw": false,
+  "compare_figure": "read_current",
+  "sample_plot": "positive",
+  "min_sweeps": 99,
+  "hidden_devices": [
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 1
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 2
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 3
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 4
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 5
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 6
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 7
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 8
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 9
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "A",
+      "device_num": 10
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "G",
+      "device_num": 1
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "G",
+      "device_num": 2
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "G",
+      "device_num": 3
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "G",
+      "device_num": 4
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "G",
+      "device_num": 5
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 1
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 2
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 3
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 4
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 5
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 6
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 7
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 8
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 9
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "H",
+      "device_num": 10
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "L",
+      "device_num": 1
+    },
+    {
+      "source_folder": "D80-0.1mgml-ITO-PMMA(2%)-Gold-s2",
+      "section": "L",
+      "device_num": 2
+    }
+  ]
+}
