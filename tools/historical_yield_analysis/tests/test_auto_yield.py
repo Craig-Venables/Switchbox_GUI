@@ -42,3 +42,37 @@ def test_load_auto_yield_dataframe_uses_loops(tmp_path: Path):
     assert abs(float(df.iloc[0]["worked_pct_at_4"]) - 86.0) < 1e-6
     assert abs(float(df.iloc[0]["worked_pct_at_10"]) - 55.0) < 1e-6
     assert int(df.iloc[0]["n_worked_at_4"]) == 19
+
+
+def test_load_auto_yield_from_device_summary_reports(tmp_path: Path):
+    reports = tmp_path / "00) device summarys" / "reports"
+    reports.mkdir(parents=True)
+    (reports / "D114_sample_report.json").write_text(
+        json.dumps(
+            {
+                "facts": {
+                    "sample_id": "D114",
+                    "n_devices_with_facts": 22,
+                    "worked_by_loop_threshold": {
+                        "10": {
+                            "min_loops": 10,
+                            "n_worked_memristive_loops": 12,
+                            "worked_fraction": 0.5454545454545454,
+                        }
+                    },
+                    "worked_by_threshold": {
+                        "10": {"worked_fraction": 0.45, "n_worked_memristive": 10}
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports / "D104_A_7_device_report.json").write_text("{}", encoding="utf-8")
+
+    df = load_auto_yield_dataframe(reports.parent, gates=[10])
+
+    assert len(df) == 1
+    assert df.iloc[0]["sample_id"] == "D114"
+    assert abs(float(df.iloc[0]["worked_pct_at_10"]) - 54.54545454545454) < 1e-6
+    assert int(df.iloc[0]["n_worked_at_10"]) == 12

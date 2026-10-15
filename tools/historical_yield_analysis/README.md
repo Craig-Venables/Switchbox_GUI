@@ -28,8 +28,10 @@ Designed to live under `tools/` now and become its own repository later.
 
 Configure in `config.json` (created automatically from `config.example.json` on first run):
 
-1. Newer: `...\Documents\Data_folder` (priority **1**, wins duplicates)
-2. Older: `...\Phd\2) Data\1) Devices\1) Memristors` (priority **2**)
+1. Newer: `{onedrive_documents}/Data_folder` (priority **1**, wins duplicates)
+2. Older: `{onedrive_documents}/Phd/2) Data/1) Devices/1) Memristors` (priority **2**)
+
+`{onedrive_documents}` is the Documents folder inside this PC's OneDrive (`OneDriveCommercial`, then `OneDrive`). The same config works on the desktop and laptop: only the Windows user name changes. An absolute path copied from the other PC is used as-is when it exists, and otherwise remapped onto this PC's OneDrive when it sits under an `OneDrive…` folder.
 
 When the same sample ID exists in both trees, the newer root is kept and the older
 copy is logged as `duplicate_rejected` in the quality report.
@@ -76,7 +78,7 @@ The **Filters & plot** tab lets you:
 - Filter by **polymer**, **B-electrode**, **T-electrode**, **polymer %**, and **Np type** (from fabrication workbook)
 - Zoom / pan the embedded Matplotlib plot (toolbar) — useful for dense Stock=0 / edge concentration points
 - Switch plot type: yield timeline (Excel), **auto ≥N loops** (thesis facts `worked_by_loop_threshold`), composition stack, concentration vs yield (hover shows sample ID)
-- For auto yield: type arbitrary **loop** gates in **Gates ≥** (e.g. `4,10,50,100`) and optionally overlay Excel strict yield
+- For auto yield: type arbitrary **loop** gates in **Gates ≥** (e.g. `4,10,50,100`) and optionally overlay Excel strict yield. The numbers come from `thesis_facts_dir`, either thesis_llm `output/facts` or the device-summaries folder `Phd/00) device summarys` (`reports/*_sample_report.json`)
 
 Plot toggles:
 

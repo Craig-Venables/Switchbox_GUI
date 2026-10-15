@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +14,9 @@ from typing import Any, List, Optional
 TOOL_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG_NAME = "config.json"
 EXAMPLE_CONFIG_NAME = "config.example.json"
+# Config paths may use this token instead of a machine-specific user profile.
+ONEDRIVE_DOCUMENTS_TOKEN = "{onedrive_documents}"
+_TOKEN_RE = re.compile(re.escape(ONEDRIVE_DOCUMENTS_TOKEN), re.IGNORECASE)
 
 
 @dataclass
@@ -83,11 +88,72 @@ def _rel_or_abs(path: Path) -> str:
         return str(path)
 
 
+def local_onedrive_root() -> Optional[Path]:
+    """This PC's OneDrive folder, independent of which Windows user name is logged in."""
+    for key in ("OneDriveCommercial", "OneDrive"):
+        raw = os.environ.get(key, "").strip()
+        if not raw:
+            continue
+        candidate = Path(raw)
+        if candidate.is_dir():
+            return candidate
+
+    home = Path.home()
+    preferred = home / "OneDrive - The University of Nottingham"
+    if preferred.is_dir():
+        return preferred
+    try:
+        matches = sorted(
+            p for p in home.iterdir() if p.is_dir() and p.name.lower().startswith("onedrive")
+        )
+    except OSError:
+        return None
+    return matches[0] if matches else None
+
+
+def local_onedrive_documents() -> Path:
+    root = local_onedrive_root()
+    if root is not None:
+        return root / "Documents"
+    return Path.home() / "OneDrive - The University of Nottingham" / "Documents"
+
+
+def _expand_onedrive_token(text: str) -> str:
+    if not _TOKEN_RE.search(text):
+        return text
+    # Lambda avoids re.sub treating Windows backslashes in the path as escapes.
+    replacement = str(local_onedrive_documents())
+    return _TOKEN_RE.sub(lambda _match: replacement, text)
+
+
+def _tail_after_onedrive(path: Path) -> Optional[tuple]:
+    """Parts that follow the OneDrive folder, so another PC's user prefix can be dropped."""
+    for index, part in enumerate(path.parts):
+        if part.lower().startswith("onedrive"):
+            return path.parts[index + 1 :]
+    return None
+
+
+def _remap_onedrive_path(path: Path) -> Optional[Path]:
+    """Point a path from another PC at the same place under this PC's OneDrive."""
+    root = local_onedrive_root()
+    tail = _tail_after_onedrive(path)
+    if root is None or tail is None:
+        return None
+    return root.joinpath(*tail)
+
+
 def _resolve_path(value: str | Path, base: Path = TOOL_ROOT) -> Path:
-    p = Path(value)
+    p = Path(_expand_onedrive_token(str(value).strip()))
     if not p.is_absolute():
         p = base / p
-    return p.resolve()
+    resolved = p.resolve()
+    if resolved.exists():
+        return resolved
+    remapped = _remap_onedrive_path(resolved)
+    if remapped is not None:
+        return remapped
+    return resolved
 
 
 def ensure_config_file(config_path: Optional[Path] = None) -> Path:
