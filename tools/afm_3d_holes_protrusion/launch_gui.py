@@ -31,6 +31,12 @@ from typing import Optional
 _HERE        = Path(__file__).resolve().parent   # tools/afm_3d_holes_protrusion/
 _DEFAULT_DATA   = _HERE / "Data"
 _DEFAULT_OUTPUT = _HERE / "Output"
+# Used only when Data/ has no .ibw files, so a fresh checkout still opens on a real scan.
+_FALLBACK_DATA = Path(
+    r"C:\Users\craig\OneDrive - The University of Nottingham\Documents\Phd"
+    r"\2) Data\3) Afm\MFP\Annelaing times_finished files\1) Final images"
+)
+_PREFERRED_PREVIEW = "No_Annelaing0001.ibw"
 
 # ---------------------------------------------------------------------------
 # Tkinter
@@ -68,9 +74,22 @@ def _get_afm_main():
         try:
             import main as _m
             _afm_main = _m
-        except Exception:
-            pass
+            _get_afm_main.last_error = None
+        except Exception as exc:
+            _get_afm_main.last_error = exc
     return _afm_main
+
+
+_get_afm_main.last_error = None
+
+
+def _initial_data_dir() -> Path:
+    """Prefer a local Data/ folder that already contains scans."""
+    if _DEFAULT_DATA.exists() and any(_DEFAULT_DATA.rglob("*.ibw")):
+        return _DEFAULT_DATA
+    if _FALLBACK_DATA.exists() and any(_FALLBACK_DATA.rglob("*.ibw")):
+        return _FALLBACK_DATA
+    return _DEFAULT_DATA
 
 
 # ===========================================================================
@@ -144,6 +163,7 @@ class SinglePreviewTab(ttk.Frame):
         self._thresh    = thresh
         self._set_status = status_cb
         self._ibw_files: list[Path] = []
+        self._data_root: Optional[Path] = None
         self._z_nm: Optional[np.ndarray] = None
         self._pixel_nm  = 1.0
         self._debounce_id: Optional[str] = None
@@ -177,11 +197,23 @@ class SinglePreviewTab(ttk.Frame):
 
     def set_files(self, ibw_files: list[Path], data_root: Path):
         self._ibw_files = ibw_files
+        self._data_root = data_root
         display = [str(p.relative_to(data_root)) for p in ibw_files]
         self._combo["values"] = display
-        if display:
-            self._file_var.set(display[0])
-            self._load_file()
+        if not display:
+            self._file_var.set("")
+            self._z_nm = None
+            self._redraw()
+            return
+        # Setting the text alone leaves Combobox.current() at -1, so the
+        # first file never loaded and the preview stayed blank.
+        pick = 0
+        for i, path in enumerate(ibw_files):
+            if path.name.lower() == _PREFERRED_PREVIEW.lower():
+                pick = i
+                break
+        self._combo.current(pick)
+        self._load_file()
 
     def schedule_refresh(self):
         if self._debounce_id:
@@ -190,34 +222,63 @@ class SinglePreviewTab(ttk.Frame):
 
     # ── internals ────────────────────────────────────────────────────────
 
+    def _selected_file(self) -> Optional[Path]:
+        idx = self._combo.current()
+        if 0 <= idx < len(self._ibw_files):
+            return self._ibw_files[idx]
+        label = self._file_var.get()
+        if not label or self._data_root is None:
+            return None
+        for path in self._ibw_files:
+            try:
+                shown = str(path.relative_to(self._data_root))
+            except ValueError:
+                shown = path.name
+            if shown == label:
+                return path
+        return None
+
     def _load_file(self):
         if not _MPL_OK:
             return
-        idx = self._combo.current()
-        if idx < 0 or idx >= len(self._ibw_files):
+        fp = self._selected_file()
+        if fp is None:
             return
-        fp = self._ibw_files[idx]
         mod = _get_afm_main()
         if mod is None:
-            self._set_status("Could not import main.py for preview.")
+            err = _get_afm_main.last_error
+            self._set_status(
+                f"Could not import main.py: {err}" if err
+                else "Could not import main.py for preview."
+            )
             return
+        # A 512² IBW loads in well under a second. Doing it on the UI thread
+        # avoids Tk missing the callback posted from a worker.
         self._set_status(f"Loading {fp.name}…")
-
-        def _load():
-            try:
-                z, px, sx, sy = mod.load_ibw(str(fp))
-                self._z_nm    = z
-                self._pixel_nm = px
-                self.after(0, self._redraw)
-                self.after(0, self._set_status,
-                           f"Preview: {fp.name}  |  {sx:.2f} × {sy:.2f} µm")
-            except Exception as exc:
-                self.after(0, self._set_status, f"Load error: {exc}")
-
-        threading.Thread(target=_load, daemon=True).start()
+        self.update_idletasks()
+        try:
+            z, px, sx, sy = mod.load_ibw(str(fp))
+        except Exception as exc:
+            self._z_nm = None
+            self._set_status(f"Load error: {exc}")
+            self._redraw()
+            return
+        self._z_nm = z
+        self._pixel_nm = px
+        self._redraw()
+        self._set_status(f"Preview: {fp.name}  |  {sx:.2f} × {sy:.2f} µm")
 
     def _redraw(self):
-        if not _MPL_OK or self._z_nm is None or self._fig is None:
+        if not _MPL_OK or self._fig is None:
+            return
+        if self._z_nm is None:
+            self._fig.clf()
+            ax = self._fig.add_subplot(111)
+            ax.set_axis_off()
+            ax.text(0.5, 0.5, "No scan loaded.\nChoose a data folder with .ibw files.",
+                    ha="center", va="center", fontsize=11, color="#555555",
+                    transform=ax.transAxes)
+            self._canvas.draw()
             return
 
         z        = self._z_nm
@@ -238,11 +299,17 @@ class SinglePreviewTab(ttk.Frame):
 
         ny, nx = z.shape
         extent = [0, nx * pixel_nm / 1000, 0, ny * pixel_nm / 1000]  # µm
+        # Full-range autoscaling is dominated by the deepest pit, so the
+        # rest of the surface looks blank. Match a typical AFM display.
+        lo, hi = np.nanpercentile(z, [2, 98])
+        if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+            lo, hi = float(np.nanmin(z)), float(np.nanmax(z))
 
         # Left: raw height map
         im1 = ax1.imshow(z, origin="lower", cmap="afmhot", aspect="equal",
-                         extent=extent, interpolation="nearest")
-        ax1.set_title("Height map", fontsize=9)
+                         extent=extent, interpolation="nearest",
+                         vmin=lo, vmax=hi)
+        ax1.set_title(f"Height map  ({lo:.1f} to {hi:.1f} nm)", fontsize=9)
         ax1.set_xlabel("µm", fontsize=8)
         ax1.set_ylabel("µm", fontsize=8)
         cb = self._fig.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
@@ -270,7 +337,7 @@ class SinglePreviewTab(ttk.Frame):
         )
         ax2.set_xlabel("µm", fontsize=8)
 
-        self._canvas.draw_idle()
+        self._canvas.draw()
 
 
 # ===========================================================================
@@ -501,8 +568,7 @@ class AFMGui(tk.Tk):
 
         # Shared state
         self._thresh     = _ThresholdState()
-        self._data_dir   = tk.StringVar(
-            value=str(_DEFAULT_DATA) if _DEFAULT_DATA.exists() else "")
+        self._data_dir   = tk.StringVar(value=str(_initial_data_dir()))
         self._output_dir = tk.StringVar(
             value=str(_DEFAULT_OUTPUT) if _DEFAULT_OUTPUT.exists() else "")
         self._ibw_files: list[Path] = []

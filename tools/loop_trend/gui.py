@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import colormaps
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 from matplotlib.figure import Figure
+from matplotlib.ticker import FuncFormatter
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QAbstractItemView,
@@ -19,6 +20,7 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -28,11 +30,20 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from plotting.core.formatters import plain_log_formatter
+
 from tools.device_variation.core import negative_side, positive_side, split_loops
 from tools.filament_jump_finder.core import origin_export_root
 from tools.filament_jump_finder.origin_export import origin_data_dir, sanitize_export_name
 
-from .core import load_iv, save_all_loops, scan_folders
+from .core import load_iv, mechanism_xy, outward_fit_xy, polarity_segments, save_all_loops, scan_folders
+
+# Rows under the IV trend. Axes match plotting.device.conduction.
+_MECHANISMS = (
+    ("sclc", "SCLC", "|E| (V/m)", "|J| (A/m^2)", True),
+    ("schottky", "Schottky", "sqrt(|E|) ((V/m)^0.5)", "|J| (A/m^2)", False),
+    ("pf", "Poole-Frenkel", "sqrt(|E|) ((V/m)^0.5)", "|J|/|E| (A/(V*m))", False),
+)
 
 
 class _ScanThread(QThread):
@@ -62,7 +73,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Loop trend")
-        self.resize(1200, 780)
+        self.resize(1280, 900)
         self.folders: List[Path] = []
         self.hits: List[Dict] = []
         self._thread: Optional[_ScanThread] = None
@@ -89,7 +100,10 @@ class MainWindow(QMainWindow):
         bar.addStretch(1)
         layout.addLayout(bar)
 
-        self.status = QLabel("Add the sample folders, then scan. Files are sorted by how much the last loop differs from the first.")
+        self.status = QLabel(
+            "Add the sample folders, then scan. Files are sorted by how much the last loop differs from the first. "
+            "Under the IV plots: SCLC, Schottky, and Poole-Frenkel, with a dashed fit on every loop."
+        )
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
@@ -100,12 +114,17 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
 
-        self.fig = Figure(figsize=(10, 6))
+        self.fig = Figure(figsize=(10, 14))
         self.canvas = FigureCanvasQTAgg(self.fig)
+        dpi = self.fig.get_dpi()
+        self.canvas.setMinimumSize(int(10 * dpi), int(14 * dpi))
         self.toolbar = NavigationToolbar2QT(self.canvas, root)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(False)
+        scroll.setWidget(self.canvas)
         plot_col = QVBoxLayout()
         plot_col.addWidget(self.toolbar)
-        plot_col.addWidget(self.canvas, 1)
+        plot_col.addWidget(scroll, 1)
         plot_wrap = QWidget()
         plot_wrap.setLayout(plot_col)
 
@@ -170,7 +189,8 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, col, item)
         self.status.setText(
             f"{len(self.hits)} measurement(s) with at least {int(self.min_loops.value())} loops. "
-            "The largest first-to-last change is at the top. Early loops are blue, later loops are red."
+            "The largest first-to-last change is at the top. Early loops are blue, later loops are red. "
+            "Dashed lines are the high-field fit on the way out, for every loop."
         )
         if self.hits:
             self.table.selectRow(0)
@@ -203,15 +223,26 @@ class MainWindow(QMainWindow):
             return
         voltage, current = loaded
         loops = split_loops(voltage, current)
-        for col, (negative, title, ylabel) in enumerate((
-            (False, "Positive", "I / max|I| on V≥0"),
-            (True, "Negative", "I / max|I| on V≤0"),
-        )):
-            ax = self.fig.add_subplot(1, 2, col + 1)
+        sides = (
+            (False, "Positive", "I / max|I| on V≥0", "V>0"),
+            (True, "Negative", "I / max|I| on V≤0", "V<0"),
+        )
+        for col, (negative, title, ylabel, _sign) in enumerate(sides):
+            ax = self.fig.add_subplot(4, 2, col + 1)
             _plot_side(ax, loops, negative=negative)
             ax.set_title(f"{title} — {hit['path'].name} ({len(loops)} loops)", fontsize=10)
             ax.set_ylabel(ylabel)
-        self.fig.tight_layout()
+        for row, (kind, name, xlabel, ylabel, log_x) in enumerate(_MECHANISMS, start=1):
+            for col, (negative, _title, _iv_ylabel, sign) in enumerate(sides):
+                ax = self.fig.add_subplot(4, 2, row * 2 + col + 1)
+                _plot_mechanism(ax, loops, negative=negative, kind=kind, log_x=log_x)
+                ax.set_title(f"{name} {sign}", fontsize=10)
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
+        try:
+            self.fig.tight_layout()
+        except Exception:
+            pass
         self.canvas.draw_idle()
 
     def _save_all(self):
@@ -237,13 +268,18 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Saved {written} measurement(s), 12 Origin files each, in {out_dir}")
 
 
+def _loop_style(index: int, n: int):
+    color = colormaps["turbo"](0.0 if n <= 1 else index / (n - 1))
+    alpha = 0.45 if n <= 1 else 0.25 + 0.7 * (index / (n - 1))
+    return color, alpha
+
+
 def _plot_side(ax, loops, negative: bool):
     n = len(loops)
     drawn = 0
     for i, (voltage, current) in enumerate(loops):
         segments = negative_side(voltage, current) if negative else positive_side(voltage, current)
-        color = colormaps["turbo"](0.0 if n <= 1 else i / (n - 1))
-        alpha = 0.45 if n <= 1 else 0.25 + 0.7 * (i / (n - 1))
+        color, alpha = _loop_style(i, n)
         for loop_v, loop_i in segments:
             ax.plot(loop_v, loop_i, color=color, linewidth=1.0, alpha=alpha)
             drawn += 1
@@ -252,3 +288,38 @@ def _plot_side(ax, loops, negative: bool):
         ax.text(0.5, 0.5, f"No {which} voltage", ha="center", va="center", transform=ax.transAxes)
     ax.set_xlabel("Voltage (V)")
     ax.grid(True, alpha=0.3)
+
+
+def _plot_mechanism(ax, loops, *, negative: bool, kind: str, log_x: bool):
+    """One conduction panel. Every loop is drawn, with a dashed outward fit."""
+    n = len(loops)
+    drawn = 0
+    for i, (voltage, current) in enumerate(loops):
+        color, alpha = _loop_style(i, n)
+        for seg_v, seg_i in polarity_segments(voltage, current, negative=negative):
+            x, y = mechanism_xy(seg_v, seg_i, kind)
+            if not np.any(np.isfinite(x) & np.isfinite(y)):
+                continue
+            plot = ax.loglog if log_x else ax.semilogy
+            plot(x, y, color=color, linewidth=0.9, alpha=alpha)
+            drawn += 1
+            fit = outward_fit_xy(seg_v, seg_i, kind)
+            if fit is None:
+                continue
+            x_line, y_line = fit
+            plot(
+                x_line,
+                y_line,
+                color=color,
+                linewidth=1.2,
+                alpha=min(1.0, alpha + 0.2),
+                linestyle="--",
+            )
+    if drawn == 0:
+        which = "negative" if negative else "positive"
+        ax.text(0.5, 0.5, f"No {which} voltage", ha="center", va="center", transform=ax.transAxes)
+        return
+    if log_x:
+        ax.xaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(plain_log_formatter))
+    ax.grid(True, which="both", alpha=0.3)

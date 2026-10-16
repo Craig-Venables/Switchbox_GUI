@@ -207,7 +207,10 @@ def load_ibw(filepath: str):
     wh    = wave['wave_header']
     sfA   = wh['sfA']
 
-    pixel_nm = float(sfA[0]) * 1e9   # metres → nm
+    # sfA is metres per pixel. Dim 0 is the fast / horizontal axis in Igor
+    # and Gwyddion exports (wave name often starts with "gwy").
+    px_x_nm = float(sfA[0]) * 1e9
+    px_y_nm = float(sfA[1]) * 1e9 if len(sfA) > 1 else px_x_nm
 
     if data.ndim == 3:
         z_m = data[:, :, CHANNEL]
@@ -216,10 +219,15 @@ def load_ibw(filepath: str):
     else:
         raise ValueError(f"Unexpected data dimensions: {data.shape}")
 
-    z_nm      = z_m * 1e9
-    ny, nx    = z_nm.shape
-    scan_x_um = nx * pixel_nm / 1000.0
-    scan_y_um = ny * pixel_nm / 1000.0
+    # NumPy row 0 is the top of an image array, but these waves store X along
+    # axis 0. Transpose so columns are X and rows are Y. Callers that draw with
+    # origin="lower" (matplotlib) or y increasing upward (Plotly) then match
+    # the Gwyddion / Asylum image.
+    z_nm = (np.asarray(z_m, dtype=np.float64) * 1e9).T
+    ny, nx = z_nm.shape
+    pixel_nm = px_x_nm
+    scan_x_um = nx * px_x_nm / 1000.0
+    scan_y_um = ny * px_y_nm / 1000.0
 
     return z_nm, pixel_nm, scan_x_um, scan_y_um
 
