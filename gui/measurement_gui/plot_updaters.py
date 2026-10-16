@@ -183,6 +183,9 @@ class PlotUpdaters:
                         else:
                             # Length mismatch - skip this update to avoid IndexError
                             self._update_line("rt_logilogv", [], [])
+            except Exception:
+                # Data or drawing errors should not kill the updater thread.
+                pass
 
             time.sleep(self.interval_s)
 

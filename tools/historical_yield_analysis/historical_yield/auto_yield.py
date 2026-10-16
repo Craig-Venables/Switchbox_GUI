@@ -1,8 +1,13 @@
 """Load thesis_llm sample fact packs for auto ≥N-loop yield overlays.
 
 historical_yield's default timeline is Excel strict memristive yield.
-Auto loop yield (memristive_loop_count ≥ N) lives in thesis_llm
-``output/facts/{sample}/sample.json`` under ``worked_by_loop_threshold``.
+Auto loop yield (memristive_loop_count ≥ N) is read from either:
+
+- thesis_llm ``output/facts/{sample}/sample.json``
+- the OneDrive device-summaries mirror ``reports/{sample}_sample_report.json``
+  (same numbers nested under ``facts``)
+
+Both expose ``worked_by_loop_threshold``.
 
 memristive_loop_count = cumulative memristive triangular cycles across IV files
 (not memristive_sweep_count = number of memristive IV files).
@@ -18,6 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import pandas as pd
 
 _SAMPLE_NUM = re.compile(r"D(\d+)", re.IGNORECASE)
+_SAMPLE_REPORT = re.compile(r"^(D\d+)_sample_report\.json$", re.IGNORECASE)
 
 
 def parse_gates(raw: str, *, default: Sequence[int] = (4, 10, 20, 50, 100)) -> List[int]:
@@ -57,6 +63,51 @@ def _fraction_at_loop_gate(pack: Dict[str, Any], gate: int) -> Optional[float]:
     return None
 
 
+def _unwrap_fact_pack(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Sample reports nest the fact pack under ``facts``; raw fact files do not."""
+    facts = payload.get("facts")
+    if isinstance(facts, dict) and (
+        "worked_by_loop_threshold" in facts or "sample_id" in facts
+    ):
+        return facts
+    return payload
+
+
+def _fact_sources(facts_dir: Path) -> List[tuple]:
+    """(sample_id, path) from a facts tree or a device-summaries folder."""
+    search_dirs = [facts_dir]
+    reports = facts_dir / "reports"
+    if reports.is_dir():
+        search_dirs.append(reports)
+
+    found: List[tuple] = []
+    seen = set()
+    for directory in search_dirs:
+        try:
+            children = sorted(directory.iterdir(), key=lambda p: p.name.lower())
+        except OSError:
+            continue
+        for path in children:
+            if path.is_dir():
+                sample_path = path / "sample.json"
+                if not sample_path.is_file():
+                    continue
+                sid = path.name.upper() if path.name.upper().startswith("D") else path.name
+                source = sample_path
+            else:
+                match = _SAMPLE_REPORT.match(path.name)
+                if not match:
+                    continue
+                sid = match.group(1).upper()
+                source = path
+            key = sid.upper()
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append((sid, source))
+    return found
+
+
 def load_auto_yield_dataframe(
     facts_dir: Optional[Path],
     *,
@@ -73,15 +124,15 @@ def load_auto_yield_dataframe(
         return pd.DataFrame(columns=cols)
 
     rows: List[Dict[str, Any]] = []
-    for p in sorted(facts_dir.iterdir()):
-        sample_path = p / "sample.json"
-        if not p.is_dir() or not sample_path.is_file():
-            continue
-        sid = p.name.upper() if p.name.upper().startswith("D") else p.name
+    for sid, sample_path in _fact_sources(facts_dir):
         try:
-            pack = json.loads(sample_path.read_text(encoding="utf-8-sig"))
+            payload = json.loads(sample_path.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError):
             continue
+        if not isinstance(payload, dict):
+            continue
+        pack = _unwrap_fact_pack(payload)
+        sid = str(pack.get("sample_id") or sid)
         row: Dict[str, Any] = {
             "sample_id": sid,
             "sample_number": sample_number(sid),

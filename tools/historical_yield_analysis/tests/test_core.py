@@ -350,3 +350,77 @@ def test_load_config_accepts_utf8_bom(tmp_path: Path):
 
     assert cfg.classifier == "manual_excel"
     assert cfg.cache_dir.exists()
+
+
+def _minimal_config(tmp_path: Path, **overrides) -> Path:
+    raw = {
+        "data_roots": [],
+        "cache_dir": str(tmp_path / "cache"),
+        "output_dir": str(tmp_path / "output"),
+        "classifier": "manual_excel",
+    }
+    raw.update(overrides)
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps(raw), encoding="utf-8")
+    return cfg_path
+
+
+def test_onedrive_token_resolves_on_this_pc(tmp_path: Path, monkeypatch):
+    docs = tmp_path / "OneDrive - The University of Nottingham" / "Documents"
+    data = docs / "Data_folder"
+    data.mkdir(parents=True)
+    monkeypatch.setenv("OneDriveCommercial", str(docs.parent))
+    monkeypatch.setenv("OneDrive", str(docs.parent))
+
+    cfg_path = _minimal_config(
+        tmp_path,
+        data_roots=[
+            {
+                "name": "Data_folder",
+                "path": "{onedrive_documents}/Data_folder",
+                "priority": 1,
+            }
+        ],
+        fabrication_workbook="{onedrive_documents}/Phd/solutions and devices.xlsx",
+    )
+    cfg = load_config(cfg_path)
+
+    assert cfg.data_roots[0].path == data.resolve()
+    assert cfg.fabrication_workbook == (docs / "Phd" / "solutions and devices.xlsx").resolve()
+
+
+def test_other_pc_onedrive_path_is_remapped_when_missing(tmp_path: Path, monkeypatch):
+    docs = tmp_path / "OneDrive - The University of Nottingham" / "Documents"
+    data = docs / "Data_folder"
+    data.mkdir(parents=True)
+    monkeypatch.setenv("OneDriveCommercial", str(docs.parent))
+    monkeypatch.setenv("OneDrive", str(docs.parent))
+
+    foreign = (
+        r"C:\Users\Craig-Desktop\OneDrive - The University of Nottingham"
+        r"\Documents\Data_folder"
+    )
+    cfg_path = _minimal_config(
+        tmp_path,
+        data_roots=[{"name": "Data_folder", "path": foreign, "priority": 1}],
+    )
+    cfg = load_config(cfg_path)
+
+    assert cfg.data_roots[0].path == data.resolve()
+
+
+def test_existing_absolute_path_is_not_rewritten(tmp_path: Path, monkeypatch):
+    other = tmp_path / "other_onedrive"
+    other.mkdir()
+    monkeypatch.setenv("OneDriveCommercial", str(other))
+    monkeypatch.setenv("OneDrive", str(other))
+    real = tmp_path / "actual" / "Data_folder"
+    real.mkdir(parents=True)
+
+    cfg_path = _minimal_config(
+        tmp_path,
+        data_roots=[{"name": "Data_folder", "path": str(real), "priority": 1}],
+    )
+    cfg = load_config(cfg_path)
+
+    assert cfg.data_roots[0].path == real.resolve()

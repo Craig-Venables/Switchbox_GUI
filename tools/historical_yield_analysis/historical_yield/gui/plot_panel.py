@@ -272,9 +272,9 @@ class InteractivePlotPanel(QWidget):
             ax.text(
                 0.5,
                 0.5,
-                "No thesis_llm fact packs found.\n"
-                "Set thesis_facts_dir in config.json\n"
-                "(e.g. …/llm model/output/facts) and rebuild facts.",
+                "No loop-yield reports found.\n"
+                "Set thesis_facts_dir in config.json to\n"
+                "Phd/00) device summarys or thesis_llm output/facts.",
                 ha="center",
                 va="center",
             )
