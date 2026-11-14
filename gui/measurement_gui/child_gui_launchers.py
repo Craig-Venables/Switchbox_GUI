@@ -137,6 +137,32 @@ def open_oscilloscope_pulse(gui: Any) -> None:
         messagebox.showerror("Error", f"Failed to open Oscilloscope Pulse GUI:\n{exc}")
 
 
+def open_solartron_gui(gui: Any) -> None:
+    """Launch the Solartron SI 1260 GUI in its own process."""
+    existing = getattr(gui, "_solartron_proc", None)
+    if existing is not None and existing.poll() is None:
+        messagebox.showinfo(
+            "Solartron",
+            "The Solartron GUI is already open.",
+            parent=getattr(gui, "master", None),
+        )
+        return
+    try:
+        from gui.frozen_launch import launch_python_script
+
+        gui._solartron_proc = launch_python_script(
+            "tools/solartron_1260/main.py",
+            cwd=None,
+            hide_console=True,
+        )
+    except Exception as exc:
+        messagebox.showerror(
+            "Solartron",
+            f"Could not open the Solartron GUI:\n{exc}",
+            parent=getattr(gui, "master", None),
+        )
+
+
 def open_motor_control(gui: Any) -> None:
     try:
         existing = getattr(gui, "motor_control_window", None)

@@ -107,6 +107,7 @@ def build_connection_section(parent, gui):
             "keithley2450_sim",
             "keithley4200_pmu",
             "keithley4200_smu",
+            "keithley4200_smu_sim",
             "keithley4200_custom",
             "keithley4200a",
             "keithley2400",

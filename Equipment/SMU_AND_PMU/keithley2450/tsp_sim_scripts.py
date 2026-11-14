@@ -213,13 +213,18 @@ class Keithley2450_TSP_Sim_Scripts:
         steps: int = 20,
         num_cycles: int = 1,
         delay_between: float = 10e-3,
+        delay_between_pulses: Optional[float] = None,
+        delay_before_read: float = 10e-6,
         clim: float = 100e-3,
     ) -> Dict[str, List[float]]:
         sv = self._validate_voltage(set_voltage)
         rv = self._validate_voltage(reset_voltage)
         pw = self._validate_pulse_width(pulse_width)
         vread = self._validate_voltage(read_voltage)
-        delay = self._validate_delay(delay_between)
+        # The simulator has a single relax time between pulses.
+        delay = self._validate_delay(
+            delay_between_pulses if delay_between_pulses is not None else delay_between
+        )
         icc = self._validate_current_limit(clim)
 
         phases, currents, times, voltages = self.measurement_service.run_pot_dep(
@@ -244,6 +249,10 @@ class Keithley2450_TSP_Sim_Scripts:
         read_voltage: float = 0.2,
         num_pulses: int = 20,
         delay_between: float = 10e-3,
+        delay_between_pulses: Optional[float] = None,
+        delay_before_read: float = 10e-6,
+        num_post_reads: int = 0,
+        post_read_interval: float = 1e-3,
         clim: float = 100e-3,
     ) -> Dict[str, List[float]]:
         data = self.potentiation_depression_cycle(
@@ -254,11 +263,13 @@ class Keithley2450_TSP_Sim_Scripts:
             steps=num_pulses,
             num_cycles=1,
             delay_between=delay_between,
+            delay_between_pulses=delay_between_pulses,
             clim=clim,
         )
         phases = data.pop("phase", [1] * len(data["timestamps"]))
         mask = [ph >= 0 for ph in phases]
-        return self._filter_results(data, mask)
+        data = self._filter_results(data, mask)
+        return self._append_post_reads(data, read_voltage, num_post_reads, post_read_interval, clim)
 
     def depression_only(
         self,
@@ -267,6 +278,10 @@ class Keithley2450_TSP_Sim_Scripts:
         read_voltage: float = 0.2,
         num_pulses: int = 20,
         delay_between: float = 10e-3,
+        delay_between_pulses: Optional[float] = None,
+        delay_before_read: float = 10e-6,
+        num_post_reads: int = 0,
+        post_read_interval: float = 1e-3,
         clim: float = 100e-3,
     ) -> Dict[str, List[float]]:
         data = self.potentiation_depression_cycle(
@@ -277,11 +292,13 @@ class Keithley2450_TSP_Sim_Scripts:
             steps=num_pulses,
             num_cycles=1,
             delay_between=delay_between,
+            delay_between_pulses=delay_between_pulses,
             clim=clim,
         )
         phases = data.pop("phase", [-1] * len(data["timestamps"]))
         mask = [ph <= 0 for ph in phases]
-        return self._filter_results(data, mask)
+        data = self._filter_results(data, mask)
+        return self._append_post_reads(data, read_voltage, num_post_reads, post_read_interval, clim)
 
     def endurance_test(
         self,
@@ -764,6 +781,41 @@ class Keithley2450_TSP_Sim_Scripts:
     # ------------------------------------------------------------------ #
     # Utility
     # ------------------------------------------------------------------ #
+    def _append_post_reads(
+        self,
+        data: Dict[str, List[float]],
+        read_voltage: float,
+        num_reads: int,
+        interval: float,
+        clim: float,
+    ) -> Dict[str, List[float]]:
+        """Relaxation reads after the last pulse, same columns as ``_format_results``."""
+        if num_reads <= 0:
+            return data
+        rv = self._validate_voltage(read_voltage)
+        icc = self._validate_current_limit(clim)
+        step = self._validate_delay(interval)
+        t = data["timestamps"][-1] if data["timestamps"] else 0.0
+        extra = {key: list(values) for key, values in data.items()}
+        self.tsp.enable_output(True)
+        self.tsp.set_voltage(rv, icc)
+        for _ in range(int(num_reads)):
+            self.tsp.advance_time(step)
+            t += step
+            voltage = self.tsp.measure_voltage()
+            current = self.tsp.measure_current()
+            extra["timestamps"].append(float(t))
+            extra["voltages"].append(float(voltage))
+            extra["currents"].append(float(current))
+            extra["resistances"].append(voltage / current if abs(current) > 1e-12 else float("inf"))
+        self.tsp.set_voltage(0.0, icc)
+        self.tsp.enable_output(False)
+        n = len(extra["timestamps"])
+        for key, values in extra.items():
+            if len(values) < n:
+                values.extend([values[-1] if values else 0.0] * (n - len(values)))
+        return extra
+
     def _filter_results(self, data: Dict[str, List[float]], mask: List[bool]) -> Dict[str, List[float]]:
         filtered: Dict[str, List[float]] = {}
         for key, values in data.items():

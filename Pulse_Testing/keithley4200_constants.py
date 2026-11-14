@@ -14,9 +14,17 @@ KEITHLEY4200_PMU_TIMING_SYSTEMS: FrozenSet[str] = frozenset(
 
 # Optical + read on 4200 uses SMU bias-timed read (Python + laser sync).
 # Use keithley4200_smu in the GUI; legacy keithley4200a matches PMU capabilities only.
-KEITHLEY4200_SMU_OPTICAL_SYSTEMS: FrozenSet[str] = frozenset({"keithley4200_smu"})
+KEITHLEY4200_SMU_OPTICAL_SYSTEMS: FrozenSet[str] = frozenset(
+    {"keithley4200_smu", "keithley4200_smu_sim"}
+)
 
 # Any registered 4200 adapter (including legacy alias and custom connect-only profile).
 KEITHLEY4200_SYSTEM_IDS: FrozenSet[str] = frozenset(
-    {"keithley4200_pmu", "keithley4200_smu", "keithley4200_custom", "keithley4200a"}
+    {
+        "keithley4200_pmu",
+        "keithley4200_smu",
+        "keithley4200_smu_sim",
+        "keithley4200_custom",
+        "keithley4200a",
+    }
 )

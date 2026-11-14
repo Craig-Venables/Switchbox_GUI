@@ -332,7 +332,7 @@ class TSPDataFormatter:
         
         # Add any extra columns (e.g., phase, cycle_number, operation, pulse_widths)
         # Exclude metadata fields that are not data columns
-        metadata_fields = ['test_name', 'params', 'plot_type']
+        metadata_fields = ['test_name', 'params', 'plot_type', 'laser_on_intervals']
         extra_cols = [k for k in data_dict.keys() if k not in base_cols and k not in metadata_fields]
         
         # Get expected length from timestamps
@@ -432,7 +432,13 @@ class TSPDataFormatter:
         }
         if metadata:
             full_metadata.update(metadata)
-        
+        # Pair list is not a per-sample column, so it is kept for the file header.
+        intervals = data_dict.get("laser_on_intervals")
+        if intervals:
+            full_metadata["laser_on_intervals"] = [
+                (float(start), float(end)) for start, end in intervals
+            ]
+
         return data, header, fmt, full_metadata
 
 
@@ -715,6 +721,13 @@ def save_tsp_measurement(
             for key, value in params.items():
                 f.write(f"#   {key}: {value}\n")
             f.write("#\n")
+
+            intervals = metadata.get("laser_on_intervals") or []
+            if intervals:
+                f.write("# Laser On Intervals (s):\n")
+                for start, end in intervals:
+                    f.write(f"#   {float(start):.6f}\t{float(end):.6f}\n")
+                f.write("#\n")
             
             # Write hardware limits if present
             if 'hardware_limits' in metadata:

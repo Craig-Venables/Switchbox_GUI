@@ -16,10 +16,10 @@ Routes test calls to the correct system adapter. Adapters and script locations:
 
 from typing import Dict, Any, Optional, Type
 from .systems.base_system import BaseMeasurementSystem
-from .systems.keithley2450 import Keithley2450System
+from .systems.keithley2450 import Keithley2450SimSystem, Keithley2450System
 from .systems.keithley4200a import Keithley4200ASystem
 from .systems.keithley4200_pmu import Keithley4200PMUSystem
-from .systems.keithley4200_smu import Keithley4200SMUSystem
+from .systems.keithley4200_smu import Keithley4200SMUSimSystem, Keithley4200SMUSystem
 from .systems.keithley4200_custom import Keithley4200CustomSystem
 from .systems.keithley2400 import Keithley2400System
 from .test_capabilities import is_test_supported
@@ -29,8 +29,10 @@ from .utils.data_formatter import normalize_data, ensure_list_format
 # Map of system names to their implementation classes
 SYSTEM_CLASSES: Dict[str, Type[BaseMeasurementSystem]] = {
     'keithley2450': Keithley2450System,
+    'keithley2450_sim': Keithley2450SimSystem,
     'keithley4200_pmu': Keithley4200PMUSystem,
     'keithley4200_smu': Keithley4200SMUSystem,
+    'keithley4200_smu_sim': Keithley4200SMUSimSystem,
     'keithley4200_custom': Keithley4200CustomSystem,
     'keithley4200a': Keithley4200ASystem,
     'keithley2400': Keithley2400System,
@@ -66,6 +68,7 @@ def detect_system_from_address(address: str) -> Optional[str]:
         System identifier ('keithley2450', 'keithley4200_pmu', etc.) or None if unknown
     
     Detection logic:
+    - SIM addresses containing "2450" → keithley2450_sim (before any pyvisa use)
     - USB/GPIB addresses containing "2450" → keithley2450
     - GPIB addresses containing "2400" or "2401" → keithley2400
     - IP:port format (e.g., "192.168.0.10:8888") → keithley4200_pmu
@@ -73,6 +76,13 @@ def detect_system_from_address(address: str) -> Optional[str]:
     - Other GPIB addresses → try to query instrument ID, fallback to keithley2450
     - USB addresses → keithley2450 (default)
     """
+    address_key = address.strip().upper()
+    # Simulators — before any pyvisa import (and before the "2400"/"2450" substring checks).
+    if address_key.startswith("SIM::4200") or address_key == "SIMULATION_4200":
+        return "keithley4200_smu_sim"
+    if address_key.startswith("SIM") and "2450" in address_key:
+        return "keithley2450_sim"
+
     address_lower = address.lower().strip()
     address_normalized = address.strip()
     
@@ -196,7 +206,7 @@ class SystemWrapper:
         system_instance = system_class()
         
         # Handle system-specific connection parameters
-        if system_name == 'keithley2450':
+        if system_name in ('keithley2450', 'keithley2450_sim'):
             # Extract terminals parameter if present
             terminals = kwargs.pop('terminals', 'front')
             system_instance.connect(address, terminals=terminals, **kwargs)

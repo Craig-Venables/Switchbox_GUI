@@ -65,7 +65,7 @@ def show_measurement_help(gui: Any) -> None:
          "• Data Saving: Automatic file naming and organization"),
         ("4. Utility Buttons",
          "• Motor Control / Check Connection / Pulse Testing / Device Visualizer\n"
-         "• Oscilloscope Pulse / Laser FG Scope\n"
+         "• Oscilloscope Pulse / Laser FG Scope / Solartron\n"
          "• Hardware Tools: Display control and LED testing (Arduino tools)"),
         ("5. Conditional Memristive Testing",
          "Smart workflow that screens devices and runs tests only on memristive devices.\n"

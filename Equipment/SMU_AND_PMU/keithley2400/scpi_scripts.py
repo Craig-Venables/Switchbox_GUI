@@ -268,10 +268,12 @@ class Keithley2400_SCPI_Scripts:
                              pulse_width: float = 0.01,
                              delay_between_pulses: float = 0.01,
                              read_voltage: float = 0.2,
+                             num_reads: int = 1,
+                             delay_between_reads: float = 0.01,
                              num_cycles: int = 10,
                              delay_between_cycles: float = 0.01,
                              clim: float = 100e-3) -> Dict[str, Any]:
-        """Pattern: (Pulse×N → Read) × Cycles
+        """Pattern: (Pulse×N → Read×M) × Cycles
         
         Args:
             pulse_voltage: Pulse voltage (V)
@@ -279,6 +281,8 @@ class Keithley2400_SCPI_Scripts:
             pulse_width: Pulse width (seconds)
             delay_between_pulses: Delay between pulses (seconds)
             read_voltage: Read voltage (V)
+            num_reads: Reads after each pulse group
+            delay_between_reads: Delay between those reads (seconds)
             num_cycles: Number of cycles
             delay_between_cycles: Delay between cycles (seconds)
             clim: Current limit (A)
@@ -306,13 +310,15 @@ class Keithley2400_SCPI_Scripts:
                 if delay_between_pulses > 0:
                     time.sleep(delay_between_pulses)
             
-            # Read
-            v, i, r = self._read(read_voltage, icc=clim)
-            t = time.time() - start_time
-            timestamps.append(t)
-            voltages.append(v)
-            currents.append(i)
-            resistances.append(r)
+            for read_idx in range(max(1, int(num_reads))):
+                v, i, r = self._read(read_voltage, icc=clim)
+                t = time.time() - start_time
+                timestamps.append(t)
+                voltages.append(v)
+                currents.append(i)
+                resistances.append(r)
+                if read_idx < num_reads - 1 and delay_between_reads > 0:
+                    time.sleep(delay_between_reads)
             
             # Delay between cycles
             if cycle < num_cycles - 1:
@@ -393,7 +399,8 @@ class Keithley2400_SCPI_Scripts:
                               reset_voltage: Optional[float] = None,
                               read_voltage: float = 0.2,
                               clim: float = 100e-3,
-                              **kwargs) -> Dict[str, Any]:
+                              reset_width: float = 0.01,
+                              delay_between_widths: float = 0.0) -> Dict[str, Any]:
         """Width sweep: For each width: (Read→Pulse→Read)×N, Reset
         
         Args:
@@ -403,6 +410,8 @@ class Keithley2400_SCPI_Scripts:
             reset_voltage: Reset voltage (V), if None, uses -pulse_voltage
             read_voltage: Read voltage (V)
             clim: Current limit (A)
+            reset_width: Reset pulse width (seconds)
+            delay_between_widths: Relaxation delay between width blocks (seconds)
         
         Returns:
             Standardized data dictionary with pulse_widths field
@@ -451,8 +460,10 @@ class Keithley2400_SCPI_Scripts:
             
             # Reset after all pulses at this width
             if reset_voltage != 0:
-                self._pulse(reset_voltage, 0.01, icc=clim)
+                self._pulse(reset_voltage, reset_width, icc=clim)
                 time.sleep(0.01)
+            if width != pulse_widths[-1] and delay_between_widths > 0:
+                time.sleep(delay_between_widths)
         
         self.controller.set_voltage(0.0, Icc=clim)
         return self._format_results(timestamps, voltages, currents, resistances,
@@ -465,7 +476,7 @@ class Keithley2400_SCPI_Scripts:
                                          read_voltage: float = 0.2,
                                          clim: float = 100e-3,
                                          delay_between_widths: float = 0.01,
-                                         **kwargs) -> Dict[str, Any]:
+                                         reset_width: float = 0.01) -> Dict[str, Any]:
         """Width sweep with pulse peak measurements
         
         Similar to width_sweep_with_reads but also measures during pulses.
@@ -479,7 +490,7 @@ class Keithley2400_SCPI_Scripts:
             read_voltage: Read voltage (V)
             clim: Current limit (A)
             delay_between_widths: Delay between different width tests (seconds)
-            **kwargs: Additional parameters (ignored for compatibility)
+            reset_width: Reset pulse width (seconds)
         
         Returns:
             Standardized data dictionary with pulse_widths field
@@ -553,7 +564,7 @@ class Keithley2400_SCPI_Scripts:
             
             # Reset
             if reset_voltage != 0:
-                self._pulse(reset_voltage, 0.01, icc=clim)
+                self._pulse(reset_voltage, reset_width, icc=clim)
                 time.sleep(0.01)
             
             # Delay between widths (except after last)
@@ -567,27 +578,35 @@ class Keithley2400_SCPI_Scripts:
     def potentiation_depression_cycle(self, set_voltage: float = 1.5,
                                      reset_voltage: float = -1.5,
                                      read_voltage: float = 0.2,
-                                     num_steps: int = 10,
+                                     steps: int = 10,
                                      pulse_width: float = 0.01,
                                      clim: float = 100e-3,
+                                     num_cycles: int = 1,
                                      delay_between_pulses: float = 0.01,
-                                     **kwargs) -> Dict[str, Any]:
-        """Pattern: Initial Read → Gradual SET → Gradual RESET
+                                     delay_before_read: float = 0.0,
+                                     delay_between_cycles: float = 0.0,
+                                     num_steps: Optional[int] = None) -> Dict[str, Any]:
+        """Pattern: Initial Read → (Gradual SET → Gradual RESET) × num_cycles
         
         Args:
             set_voltage: SET pulse voltage (V)
             reset_voltage: RESET pulse voltage (V)
             read_voltage: Read voltage (V)
-            num_steps: Number of steps in each direction
+            steps: Number of steps in each direction (``num_steps`` is the legacy name)
             pulse_width: Pulse width (seconds)
             clim: Current limit (A)
+            num_cycles: Number of potentiation+depression cycles
             delay_between_pulses: Delay between pulses (seconds)
-            **kwargs: Additional parameters (ignored for compatibility)
+            delay_before_read: Delay after each pulse before its read (seconds)
+            delay_between_cycles: Delay between cycles (seconds)
         
         Returns:
             Standardized data dictionary with phase field
         """
-        print(f"Starting potentiation_depression_cycle: {num_steps} steps each direction")
+        if num_steps is not None:
+            steps = num_steps
+        steps = max(1, int(steps))
+        print(f"Starting potentiation_depression_cycle: {num_cycles} cycle(s), {steps} steps each direction")
         
         v_range = max(abs(set_voltage), abs(reset_voltage), abs(read_voltage)) * 1.2
         v_range = max(min(v_range, 200.0), 0.2)
@@ -600,6 +619,19 @@ class Keithley2400_SCPI_Scripts:
         phases = []
         
         start_time = time.time()
+
+        def _pulse_and_read(pulse_v: float, phase: str) -> None:
+            self._pulse(pulse_v, pulse_width, icc=clim)
+            if delay_before_read > 0:
+                time.sleep(delay_before_read)
+            v, i, r = self._read(read_voltage, icc=clim)
+            timestamps.append(time.time() - start_time)
+            voltages.append(v)
+            currents.append(i)
+            resistances.append(r)
+            phases.append(phase)
+            if delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
         
         # Initial read
         v, i, r = self._read(read_voltage, icc=clim)
@@ -609,138 +641,100 @@ class Keithley2400_SCPI_Scripts:
         resistances.append(r)
         phases.append("INITIAL")
         
-        # Potentiation (SET) - gradual increase
-        for step in range(1, num_steps + 1):
-            pulse_v = set_voltage * (step / num_steps)
-            self._pulse(pulse_v, pulse_width, icc=clim)
-            if delay_between_pulses > 0:
-                time.sleep(delay_between_pulses)
-            v, i, r = self._read(read_voltage, icc=clim)
-            t = time.time() - start_time
-            timestamps.append(t)
-            voltages.append(v)
-            currents.append(i)
-            resistances.append(r)
-            phases.append("POTENTIATION")
-        
-        # Depression (RESET) - gradual decrease
-        for step in range(num_steps, 0, -1):
-            pulse_v = reset_voltage * (step / num_steps)
-            self._pulse(pulse_v, pulse_width, icc=clim)
-            if delay_between_pulses > 0:
-                time.sleep(delay_between_pulses)
-            v, i, r = self._read(read_voltage, icc=clim)
-            t = time.time() - start_time
-            timestamps.append(t)
-            voltages.append(v)
-            currents.append(i)
-            resistances.append(r)
-            phases.append("DEPRESSION")
+        for cycle in range(max(1, int(num_cycles))):
+            # Potentiation (SET) - gradual increase
+            for step in range(1, steps + 1):
+                _pulse_and_read(set_voltage * (step / steps), "POTENTIATION")
+            # Depression (RESET) - gradual decrease
+            for step in range(steps, 0, -1):
+                _pulse_and_read(reset_voltage * (step / steps), "DEPRESSION")
+            if cycle < num_cycles - 1 and delay_between_cycles > 0:
+                time.sleep(delay_between_cycles)
         
         self.controller.set_voltage(0.0, Icc=clim)
         return self._format_results(timestamps, voltages, currents, resistances,
                                    phase=phases)
     
+    def _repeated_pulse_reads(self, label: str, pulse_voltage: float, pulse_width: float,
+                              read_voltage: float, num_pulses: int,
+                              delay_between_pulses: float, delay_before_read: float,
+                              num_post_reads: int, post_read_interval: float,
+                              clim: float) -> Dict[str, Any]:
+        """Initial Read → (Pulse → [delay] → Read) × N → optional post-pulse reads."""
+        print(f"Starting {label}: {num_pulses} pulses, {num_post_reads} post-reads")
+
+        v_range = max(abs(pulse_voltage), abs(read_voltage)) * 1.2
+        v_range = max(min(v_range, 200.0), 0.2)
+        self.controller.prepare_for_pulses(Icc=clim, v_range=v_range)
+
+        timestamps: List[float] = []
+        voltages: List[float] = []
+        currents: List[float] = []
+        resistances: List[float] = []
+        phases: List[str] = []
+        start_time = time.time()
+
+        def _record(phase: str, t: Optional[float] = None) -> None:
+            v, i, r = self._read(read_voltage, icc=clim)
+            timestamps.append(time.time() - start_time if t is None else t)
+            voltages.append(v)
+            currents.append(i)
+            resistances.append(r)
+            phases.append(phase)
+
+        _record("initial", 0.0)
+        for n in range(num_pulses):
+            self._pulse(pulse_voltage, pulse_width, icc=clim)
+            if delay_before_read > 0:
+                time.sleep(delay_before_read)
+            _record("pulse")
+            if n < num_pulses - 1 and delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
+        for _ in range(max(0, int(num_post_reads))):
+            if post_read_interval > 0:
+                time.sleep(post_read_interval)
+            _record("post_read")
+
+        self.controller.set_voltage(0.0, Icc=clim)
+        return self._format_results(timestamps, voltages, currents, resistances, phase=phases)
+
     def potentiation_only(self, set_voltage: float = 1.5,
                          pulse_width: float = 0.01,
                          read_voltage: float = 0.2,
                          num_pulses: int = 10,
-                         clim: float = 100e-3,
-                         **kwargs) -> Dict[str, Any]:
-        """Pattern: Initial Read → Repeated SET pulses with reads
-        
-        Args:
-            set_voltage: SET pulse voltage (V)
-            pulse_width: Pulse width (seconds)
-            read_voltage: Read voltage (V)
-            num_pulses: Number of pulses
-            clim: Current limit (A)
-        
-        Returns:
-            Standardized data dictionary
+                         delay_between_pulses: float = 0.0,
+                         delay_before_read: float = 0.0,
+                         num_post_reads: int = 0,
+                         post_read_interval: float = 0.001,
+                         delay_between_cycles: float = 0.0,
+                         clim: float = 100e-3) -> Dict[str, Any]:
+        """Pattern: Initial Read → Repeated SET pulses with reads → optional post-pulse reads.
+
+        All times in seconds. ``delay_between_cycles`` is accepted for GUI parity (single run).
         """
-        print(f"Starting potentiation_only: {num_pulses} pulses")
-        
-        v_range = max(abs(set_voltage), abs(read_voltage)) * 1.2
-        v_range = max(min(v_range, 200.0), 0.2)
-        self.controller.prepare_for_pulses(Icc=clim, v_range=v_range)
-        
-        timestamps = []
-        voltages = []
-        currents = []
-        resistances = []
-        
-        start_time = time.time()
-        
-        # Initial read
-        v, i, r = self._read(read_voltage, icc=clim)
-        timestamps.append(0.0)
-        voltages.append(v)
-        currents.append(i)
-        resistances.append(r)
-        
-        # Repeated SET pulses
-        for _ in range(num_pulses):
-            self._pulse(set_voltage, pulse_width, icc=clim)
-            v, i, r = self._read(read_voltage, icc=clim)
-            t = time.time() - start_time
-            timestamps.append(t)
-            voltages.append(v)
-            currents.append(i)
-            resistances.append(r)
-        
-        self.controller.set_voltage(0.0, Icc=clim)
-        return self._format_results(timestamps, voltages, currents, resistances)
-    
+        return self._repeated_pulse_reads(
+            "potentiation_only", set_voltage, pulse_width, read_voltage, num_pulses,
+            delay_between_pulses, delay_before_read, num_post_reads, post_read_interval, clim,
+        )
+
     def depression_only(self, reset_voltage: float = -1.5,
                        pulse_width: float = 0.01,
                        read_voltage: float = 0.2,
                        num_pulses: int = 10,
+                       delay_between_pulses: float = 0.0,
+                       delay_before_read: float = 0.0,
+                       num_post_reads: int = 0,
+                       post_read_interval: float = 0.001,
+                       delay_between_cycles: float = 0.0,
                        clim: float = 100e-3) -> Dict[str, Any]:
-        """Pattern: Initial Read → Repeated RESET pulses with reads
-        
-        Args:
-            reset_voltage: RESET pulse voltage (V)
-            pulse_width: Pulse width (seconds)
-            read_voltage: Read voltage (V)
-            num_pulses: Number of pulses
-            clim: Current limit (A)
-        
-        Returns:
-            Standardized data dictionary
+        """Pattern: Initial Read → Repeated RESET pulses with reads → optional post-pulse reads.
+
+        All times in seconds. ``delay_between_cycles`` is accepted for GUI parity (single run).
         """
-        print(f"Starting depression_only: {num_pulses} pulses")
-        
-        v_range = max(abs(reset_voltage), abs(read_voltage)) * 1.2
-        v_range = max(min(v_range, 200.0), 0.2)
-        self.controller.prepare_for_pulses(Icc=clim, v_range=v_range)
-        
-        timestamps = []
-        voltages = []
-        currents = []
-        resistances = []
-        
-        start_time = time.time()
-        
-        # Initial read
-        v, i, r = self._read(read_voltage, icc=clim)
-        timestamps.append(0.0)
-        voltages.append(v)
-        currents.append(i)
-        resistances.append(r)
-        
-        # Repeated RESET pulses
-        for _ in range(num_pulses):
-            self._pulse(reset_voltage, pulse_width, icc=clim)
-            v, i, r = self._read(read_voltage, icc=clim)
-            t = time.time() - start_time
-            timestamps.append(t)
-            voltages.append(v)
-            currents.append(i)
-            resistances.append(r)
-        
-        self.controller.set_voltage(0.0, Icc=clim)
-        return self._format_results(timestamps, voltages, currents, resistances)
+        return self._repeated_pulse_reads(
+            "depression_only", reset_voltage, pulse_width, read_voltage, num_pulses,
+            delay_between_pulses, delay_before_read, num_post_reads, post_read_interval, clim,
+        )
     
     def endurance_test(self, set_voltage: float = 1.5,
                      reset_voltage: float = -1.5,
@@ -748,7 +742,7 @@ class Keithley2400_SCPI_Scripts:
                      num_cycles: int = 100,
                      pulse_width: float = 0.01,
                      clim: float = 100e-3,
-                     **kwargs) -> Dict[str, Any]:
+                     delay_between: float = 0.0) -> Dict[str, Any]:
         """Pattern: (SET → Read → RESET → Read) × N cycles
         
         Args:
@@ -758,6 +752,7 @@ class Keithley2400_SCPI_Scripts:
             num_cycles: Number of cycles
             pulse_width: Pulse width (seconds)
             clim: Current limit (A)
+            delay_between: Delay between cycles (seconds)
         
         Returns:
             Standardized data dictionary with cycle_number and operation fields
@@ -799,6 +794,8 @@ class Keithley2400_SCPI_Scripts:
             resistances.append(r)
             cycle_numbers.append(cycle + 1)
             operations.append("RESET")
+            if cycle < num_cycles - 1 and delay_between > 0:
+                time.sleep(delay_between)
         
         self.controller.set_voltage(0.0, Icc=clim)
         return self._format_results(timestamps, voltages, currents, resistances,
@@ -872,6 +869,7 @@ class Keithley2400_SCPI_Scripts:
                         pulse_width: float = 0.01,
                         read_voltage: float = 0.2,
                         num_pulses: int = 5,
+                        delay_between_pulses: float = 0.0,
                         num_reads: int = 10,
                         delay_between_reads: float = 0.01,
                         clim: float = 100e-3) -> Dict[str, Any]:
@@ -882,6 +880,7 @@ class Keithley2400_SCPI_Scripts:
             pulse_width: Pulse width (seconds)
             read_voltage: Read voltage (V)
             num_pulses: Number of pulses before reads
+            delay_between_pulses: Delay between pulses (seconds)
             num_reads: Number of reads after pulses
             delay_between_reads: Delay between reads (seconds)
             clim: Current limit (A)
@@ -903,8 +902,10 @@ class Keithley2400_SCPI_Scripts:
         start_time = time.time()
         
         # Multiple pulses
-        for _ in range(num_pulses):
+        for n in range(num_pulses):
             self._pulse(pulse_voltage, pulse_width, icc=clim)
+            if n < num_pulses - 1 and delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
         
         # Multiple reads
         for _ in range(num_reads):
@@ -924,7 +925,7 @@ class Keithley2400_SCPI_Scripts:
                        num_reads: int = 100,
                        delay_between_reads: float = 0.01,
                        clim: float = 100e-3,
-                       **kwargs) -> Dict[str, Any]:
+                       delay_between: Optional[float] = None) -> Dict[str, Any]:
         """Pattern: Just reads, no pulses
         
         Args:
@@ -932,10 +933,13 @@ class Keithley2400_SCPI_Scripts:
             num_reads: Number of reads
             delay_between_reads: Delay between reads (seconds)
             clim: Current limit (A)
+            delay_between: GUI name for delay_between_reads (seconds); overrides it when given
         
         Returns:
             Standardized data dictionary
         """
+        if delay_between is not None:
+            delay_between_reads = delay_between
         print(f"Starting multi_read_only: {num_reads} reads")
         
         v_range = max(abs(read_voltage), 0.2) * 1.2
@@ -962,52 +966,66 @@ class Keithley2400_SCPI_Scripts:
         self.controller.set_voltage(0.0, Icc=clim)
         return self._format_results(timestamps, voltages, currents, resistances)
     
-    def current_range_finder(self, read_voltage: float = 0.2,
-                            test_voltage: float = 1.0,
-                            test_pulse_width: float = 0.01,
-                            clim: float = 100e-3) -> Dict[str, Any]:
-        """Find optimal current measurement range
-        
-        Args:
-            read_voltage: Read voltage (V)
-            test_voltage: Test pulse voltage (V)
-            test_pulse_width: Test pulse width (seconds)
-            clim: Current limit (A)
-        
-        Returns:
-            Standardized data dictionary with range_values, range_stats, recommended_range
+    def current_range_finder(self, test_voltage: float = 0.2,
+                            num_reads_per_range: int = 10,
+                            delay_between_reads: float = 10e-3,
+                            current_ranges: Optional[List[float]] = None) -> Dict[str, Any]:
+        """For each current range: read N times at test_voltage; recommend the most stable range.
+
+        Same parameters and result keys as the 2450 version (range_values, range_stats,
+        recommended_range). Each range is also used as the compliance limit.
         """
-        print("Starting current_range_finder")
-        
-        v_range = max(abs(test_voltage), abs(read_voltage)) * 1.2
-        v_range = max(min(v_range, 200.0), 0.2)
-        self.controller.prepare_for_pulses(Icc=clim, v_range=v_range)
-        
-        # Test with a pulse and read
-        self._pulse(test_voltage, test_pulse_width, icc=clim)
-        v, i, r = self._read(read_voltage, icc=clim)
-        
-        # Determine recommended range based on measured current
-        abs_i = abs(i)
-        if abs_i < 1e-9:
-            recommended = 1e-9
-        elif abs_i < 1e-6:
-            recommended = 1e-6
-        elif abs_i < 1e-3:
-            recommended = 1e-3
-        else:
-            recommended = 1.0
-        
-        self.controller.set_voltage(0.0, Icc=clim)
-        
+        if current_ranges is None:
+            current_ranges = [1e-3, 100e-6, 10e-6, 1e-6]
+        print(f"Starting current_range_finder: {len(current_ranges)} ranges at {test_voltage}V")
+
+        timestamps: List[float] = []
+        voltages: List[float] = []
+        currents: List[float] = []
+        resistances: List[float] = []
+        range_values: List[float] = []
+        range_stats: List[Dict[str, Any]] = []
+        start_time = time.time()
+        v_range = max(min(abs(test_voltage) * 1.2, 200.0), 0.2)
+
+        for clim in current_ranges:
+            clim = float(clim)
+            self.controller.prepare_for_pulses(Icc=clim, v_range=v_range)
+            self.controller.set_current_measurement_range(clim)
+            readings: List[float] = []
+            for n in range(max(1, int(num_reads_per_range))):
+                v, i, r = self._read(test_voltage, icc=clim)
+                timestamps.append(time.time() - start_time)
+                voltages.append(v)
+                currents.append(i)
+                resistances.append(r)
+                range_values.append(clim)
+                readings.append(i)
+                if n < num_reads_per_range - 1 and delay_between_reads > 0:
+                    time.sleep(delay_between_reads)
+            self.controller.set_voltage(0.0, Icc=clim)
+
+            mean_i = sum(readings) / len(readings)
+            std_i = (sum((x - mean_i) ** 2 for x in readings) / len(readings)) ** 0.5
+            range_stats.append({
+                'range_limit': clim,
+                'mean_current': mean_i,
+                'std_current': std_i,
+                'min_current': min(readings),
+                'max_current': max(readings),
+                'mean_resistance': test_voltage / mean_i if abs(mean_i) > 1e-12 else 1e12,
+                'has_negative': any(x < 0 for x in readings),
+                'cv_percent': (std_i / abs(mean_i) * 100) if abs(mean_i) > 1e-12 else 999,
+            })
+
+        self.controller.set_current_measurement_range(0.0)
+        candidates = [s for s in range_stats if not s['has_negative'] and abs(s['mean_current']) > 1e-9]
+        best = min(candidates, key=lambda s: s['cv_percent']) if candidates else None
         return self._format_results(
-            timestamps=[0.0],
-            voltages=[v],
-            currents=[i],
-            resistances=[r],
-            range_values=[recommended],
-            range_stats=[{"measured_current": i, "recommended_range": recommended}],
-            recommended_range=recommended
+            timestamps, voltages, currents, resistances,
+            range_values=range_values,
+            range_stats=range_stats,
+            recommended_range=best['range_limit'] if best else None,
         )
     
     def relaxation_after_multi_pulse(self, pulse_voltage: float = 1.5,
@@ -1017,7 +1035,7 @@ class Keithley2400_SCPI_Scripts:
                                      delay_between_reads: float = 0.01,
                                      pulse_width: float = 0.01,
                                      clim: float = 100e-3,
-                                     **kwargs) -> Dict[str, Any]:
+                                     delay_between_pulses: float = 0.0) -> Dict[str, Any]:
         """Pattern: 1×Read → N×Pulse → N×Read (measure reads only)
         
         Args:
@@ -1028,6 +1046,7 @@ class Keithley2400_SCPI_Scripts:
             delay_between_reads: Delay between reads (seconds)
             pulse_width: Pulse width (seconds)
             clim: Current limit (A)
+            delay_between_pulses: Delay between pulses (seconds)
         
         Returns:
             Standardized data dictionary
@@ -1053,8 +1072,10 @@ class Keithley2400_SCPI_Scripts:
         resistances.append(r)
         
         # Multiple pulses
-        for _ in range(num_pulses):
+        for n in range(num_pulses):
             self._pulse(pulse_voltage, pulse_width, icc=clim)
+            if n < num_pulses - 1 and delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
         
         # Multiple reads
         for _ in range(num_reads):
@@ -1076,6 +1097,7 @@ class Keithley2400_SCPI_Scripts:
                                                             num_reads: int = 20,
                                                             delay_between_reads: float = 0.01,
                                                             pulse_width: float = 0.01,
+                                                            delay_between_pulses: float = 0.0,
                                                             clim: float = 100e-3) -> Dict[str, Any]:
         """Pattern: 1×Read → N×Pulse(measured) → N×Read
         
@@ -1138,6 +1160,8 @@ class Keithley2400_SCPI_Scripts:
                 time.sleep(remaining_width)
             self.controller.set_voltage(0.0, Icc=clim)
             time.sleep(0.001)
+            if delay_between_pulses > 0:
+                time.sleep(delay_between_pulses)
         
         # Multiple reads
         for _ in range(num_reads):
@@ -1394,16 +1418,18 @@ class Keithley2400_SCPI_Scripts:
     def pulse_train_varying_amplitudes(self, pulse_voltages: Optional[List[float]] = None,
                                        read_voltage: float = 0.2,
                                        pulse_width: float = 0.01,
-                                       num_cycles: int = 5,
+                                       num_repeats: int = 5,
+                                       delay_between: float = 0.0,
                                        clim: float = 100e-3,
-                                       **kwargs) -> Dict[str, Any]:
+                                       num_cycles: Optional[int] = None) -> Dict[str, Any]:
         """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
         
         Args:
             pulse_voltages: List of pulse voltages in sequence (V)
             read_voltage: Read voltage (V)
             pulse_width: Pulse width (seconds)
-            num_cycles: Number of cycles
+            num_repeats: Number of times the whole train repeats (``num_cycles`` is the legacy name)
+            delay_between: Delay after each pulse+read slot (seconds)
             clim: Current limit (A)
         
         Returns:
@@ -1411,6 +1437,7 @@ class Keithley2400_SCPI_Scripts:
         """
         if pulse_voltages is None:
             pulse_voltages = [0.5, 1.0, 1.5, 2.0]
+        num_cycles = int(num_cycles if num_cycles is not None else num_repeats)
         
         print(f"Starting pulse_train_varying_amplitudes: {len(pulse_voltages)} pulses per cycle, {num_cycles} cycles")
         
@@ -1445,6 +1472,8 @@ class Keithley2400_SCPI_Scripts:
                 voltages.append(v)
                 currents.append(i)
                 resistances.append(r)
+                if delay_between > 0:
+                    time.sleep(delay_between)
         
         self.controller.set_voltage(0.0, Icc=clim)
         return self._format_results(timestamps, voltages, currents, resistances)

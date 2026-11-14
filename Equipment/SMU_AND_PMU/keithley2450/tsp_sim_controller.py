@@ -25,8 +25,8 @@ from __future__ import annotations
 import math
 import random
 import time
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -89,6 +89,23 @@ class _SimulatedTSPTransport:
 
 
 @dataclass
+class Simulation2450Faults:
+    """Opt-in faults for ``measure_current``. All defaults are off.
+
+    A normal GUI connect leaves these off. Tests turn one flag on at a time.
+    """
+
+    halt: bool = False
+    """If True, ``measure_current`` raises TimeoutError."""
+
+    pause_s: float = 0.0
+    """Wall-clock delay at the start of ``measure_current``."""
+
+    force_stale_sample: bool = False
+    """If True, every ``measure_current`` after the first returns the previous current."""
+
+
+@dataclass
 class MemristorParameters:
     """Group tunable parameters that shape the simulated device response."""
 
@@ -125,11 +142,25 @@ class Keithley2450_TSP_Sim:
         *,
         params: Optional[MemristorParameters] = None,
         seed: Optional[int] = None,
+        faults: Optional[Simulation2450Faults] = None,
+        halt: bool = False,
+        pause_s: float = 0.0,
+        force_stale_sample: bool = False,
     ) -> None:
         self.address = address
         self.timeout = timeout
         self.terminals = terminals.lower()
         self.params = params or MemristorParameters()
+        # Keyword flags apply only when no fault object was passed, so a GUI
+        # connect (no faults) stays fully off.
+        if faults is None:
+            self.faults = Simulation2450Faults(
+                halt=bool(halt),
+                pause_s=float(pause_s),
+                force_stale_sample=bool(force_stale_sample),
+            )
+        else:
+            self.faults = faults
         self.device = _SimulatedTSPTransport()
 
         if seed is not None:
@@ -143,6 +174,7 @@ class Keithley2450_TSP_Sim:
         self._last_update: float = time.time()
 
         self._state_w: float = 0.2           # Start slightly conductive
+        self._last_measured_current: Optional[float] = None
         self._event_log: List[_SimEvent] = []
         self._error_queue: List[str] = []
 
@@ -244,12 +276,27 @@ class Keithley2450_TSP_Sim:
         return float(voltage)
 
     def measure_current(self) -> float:
+        if self.faults.pause_s > 0.0:
+            time.sleep(float(self.faults.pause_s))
+        if self.faults.halt:
+            raise TimeoutError("Simulated measure_current halt/timeout")
+        if self.faults.force_stale_sample and self._last_measured_current is not None:
+            return float(self._last_measured_current)
+
         self._update_state()
         if self._source_mode == "current":
             current = self._source_level
         else:
             conductance = self._conductance()
             current = self._source_level * conductance
+            # Optical tests share a process-wide laser flag. Emission raises
+            # photocurrent only while this SMU is forcing voltage with output on.
+            if self._output_on:
+                from Equipment.Laser_Controller.sim_link import get_laser_link
+
+                emitting, power_mw = get_laser_link().snapshot()
+                if emitting and power_mw > 0.0:
+                    current *= 1.0 + 0.25 * min(float(power_mw), 5.0)
 
         # Compliance limiting
         if abs(current) > self._current_limit:
@@ -257,7 +304,9 @@ class Keithley2450_TSP_Sim:
             self._log_event(1, "Current limited by compliance")
 
         current += random.gauss(0.0, self.params.noise_current)
-        return float(current)
+        current = float(current)
+        self._last_measured_current = current
+        return current
 
     def measure_both(self) -> Tuple[float, float]:
         """Return (voltage, current) pair."""

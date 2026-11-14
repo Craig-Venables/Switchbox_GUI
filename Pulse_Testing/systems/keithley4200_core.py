@@ -102,9 +102,15 @@ class Keithley4200KXCICommon(BaseMeasurementSystem, ABC):
         
         try:
             # Create KXCI scripts instance
+            script_kwargs: Dict[str, Any] = {}
+            if "live_hiccups" in kwargs:
+                script_kwargs["live_hiccups"] = kwargs["live_hiccups"]
+            if "wall_sleep" in kwargs:
+                script_kwargs["wall_sleep"] = kwargs["wall_sleep"]
             self._scripts = Keithley4200_KXCI_Scripts(
                 gpib_address=address,
-                timeout=self._timeout
+                timeout=self._timeout,
+                **script_kwargs,
             )
             
             # Test connection by getting controller
@@ -561,9 +567,7 @@ class Keithley4200KXCICommon(BaseMeasurementSystem, ABC):
             params['pulse_width'] = params['pulse_width'] / 1_000_000.0  # µs → s
         if 'delay_between' in params:
             params['delay_between'] = params['delay_between'] / 1_000_000.0  # µs → s
-        # Handle pulse_voltages if it's a string
-        if 'pulse_voltages' in params and isinstance(params['pulse_voltages'], str):
-            params['pulse_voltages'] = [float(x.strip()) for x in params['pulse_voltages'].split(",")]
+        params = self._pattern_to_pulse_voltages(params)
         return self._scripts.pulse_train_varying_amplitudes(**params)
     
     def laser_and_read(self, **params) -> Dict[str, Any]:
@@ -691,6 +695,26 @@ class Keithley4200KXCICommon(BaseMeasurementSystem, ABC):
         Returns dict with timestamps, voltages, currents, resistances.
         current_range_a: 0 = auto range, >0 = fixed measurement range in A (e.g. 1e-6 for 1 uA).
         """
+        gpib_address = self._address if self._address else self.DEFAULT_ADDRESS
+        if str(gpib_address).strip().upper().startswith("SIM"):
+            if self._scripts is None:
+                raise RuntimeError("Not connected")
+            controller = self._scripts._get_controller()
+            sim = getattr(controller, "simulation", None)
+            if sim is None:
+                if not controller.connect():
+                    raise RuntimeError("Failed to connect 4200 SMU simulator")
+                sim = getattr(controller, "simulation", None)
+            if sim is None:
+                raise RuntimeError("4200 SMU simulator backend is not available")
+            return sim.bias_timed_read(
+                vforce=vforce,
+                duration_s=duration_s,
+                sample_interval_s=sample_interval_s,
+                ilimit=ilimit,
+                num_points=num_points,
+                current_range_a=current_range_a,
+            )
         try:
             import importlib
             mod = importlib.import_module(

@@ -228,14 +228,8 @@ class Keithley2400System(BaseMeasurementSystem):
                 "burst_intervals",
                 "burst_wait_deltas",
                 "slow_tail_intervals",
-                "schedule_mode",
-                "t_min_s",
-                "burst_t_max_s",
-                "num_reads",
-                "include_slow_tail",
-                "slow_tail_start_s",
-                "slow_tail_num_reads",
-                "include_early_burst",
+                "retention_threshold",
+                "min_switch_ratio",
             )
         }
         run_params["read_intervals"] = all_intervals
@@ -327,7 +321,7 @@ class Keithley2400System(BaseMeasurementSystem):
         """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
-        return self.test_scripts.pulse_train_varying_amplitudes(**params)
+        return self.test_scripts.pulse_train_varying_amplitudes(**self._pattern_to_pulse_voltages(params))
 
     # ----- Optical-test API: source V + measure I in a loop (for laser+SMU hybrid tests) -----
 

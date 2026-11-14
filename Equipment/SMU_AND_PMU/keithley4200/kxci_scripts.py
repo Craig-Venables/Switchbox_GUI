@@ -571,20 +571,104 @@ ENABLE_MAX_POINTS_CHECK = True   # Set False to disable max points check
 # KXCI Client and Helper Functions
 # ============================================================================
 
+class _SimKXCISession:
+    """In-process stand-in for a pyvisa instrument. Used only for SIM addresses."""
+
+    def __init__(self, sim: Any) -> None:
+        self._sim = sim
+        self._lines: List[str] = []
+        self.timeout = 30000
+        self.write_termination = "\n"
+        self.read_termination = "\n"
+
+    def write(self, command: str) -> None:
+        text = str(command).strip()
+        upper = text.upper()
+        if upper == "UL":
+            self._sim._enter_ul_mode()
+            return
+        if upper == "DE":
+            self._sim._exit_ul_mode()
+            return
+        if upper.startswith("EX"):
+            ret, err = self._sim._execute_ex_command(text)
+            if err:
+                raise RuntimeError(err)
+            if ret is not None:
+                self._lines.append(f"Return Value = {ret}")
+            return
+
+    def read(self) -> str:
+        if not self._lines:
+            raise TimeoutError("SIM KXCI read timeout")
+        return self._lines.pop(0)
+
+    def query(self, command: str) -> str:
+        if str(command).strip().upper() == "*IDN?":
+            return "KEITHLEY INSTRUMENTS,MODEL 4200A-SCS,SIM,1.0.0"
+        return self._sim.query(command)
+
+    def close(self) -> None:
+        try:
+            self._sim.close()
+        except Exception:
+            pass
+
+
 class KXCIClient:
     """Minimal KXCI helper for sending EX/GP commands over GPIB."""
 
-    def __init__(self, gpib_address: str, timeout: float) -> None:
+    def __init__(
+        self,
+        gpib_address: str,
+        timeout: float,
+        live_hiccups: Optional[bool] = None,
+        wall_sleep: Optional[bool] = None,
+    ) -> None:
         self.gpib_address = gpib_address
         self.timeout_ms = int(timeout * 1000)
         self.rm = None
         self.inst = None
         self._ul_mode_active = False
+        self.simulation = None
+        is_sim = str(gpib_address).strip().upper().startswith("SIM")
+        self.live_hiccups = is_sim if live_hiccups is None else bool(live_hiccups)
+        self.wall_sleep = is_sim if wall_sleep is None else bool(wall_sleep)
+
+    def _connect_sim(self) -> bool:
+        """Open an in-process 4200 session. Does not import pyvisa."""
+        from Equipment.SMU_AND_PMU.keithley4200.simulation_4200 import Simulation4200
+
+        try:
+            timeout_s = self.timeout_ms / 1000.0 if self.timeout_ms else 30.0
+            self.simulation = Simulation4200(
+                gpib_address=self.gpib_address,
+                timeout=timeout_s,
+                live_hiccups=self.live_hiccups,
+                wall_sleep=self.wall_sleep,
+            )
+            self.inst = _SimKXCISession(self.simulation)
+            self.inst.timeout = self.timeout_ms
+            self.rm = None
+            try:
+                self.inst.write("DE")
+            except Exception:
+                pass
+            self._ul_mode_active = False
+            idn = self.inst.query("*IDN?").strip()
+            print(f"OK Connected to: {idn}")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            print(f"Connection failed: {exc}")
+            return False
 
     def connect(self) -> bool:
         """Open GPIB session. Idempotent: skips *IDN? if already connected."""
         if self.inst is not None:
             return True
+
+        if str(self.gpib_address).strip().upper().startswith("SIM"):
+            return self._connect_sim()
 
         try:
             import pyvisa
@@ -1908,16 +1992,26 @@ class Keithley4200_KXCI_Scripts:
             cap = max(1, cap // 2)
         return 1
 
-    def __init__(self, gpib_address: str, timeout: float = 30.0):
+    def __init__(
+        self,
+        gpib_address: str,
+        timeout: float = 30.0,
+        live_hiccups: Optional[bool] = None,
+        wall_sleep: Optional[bool] = None,
+    ):
         """
         Initialize with GPIB address.
         
         Args:
             gpib_address: VISA resource string (e.g., "GPIB0::17::INSTR")
             timeout: Communication timeout in seconds (default: 30.0)
+            live_hiccups: Occasional stalls on the SIM backend. Default True for SIM addresses.
+            wall_sleep: Sleep for pulse/sample times on the SIM backend. Default True for SIM addresses.
         """
         self.gpib_address = gpib_address
         self.timeout = timeout
+        self.live_hiccups = live_hiccups
+        self.wall_sleep = wall_sleep
         self.start_time = time.time()
         self._controller: Optional[KXCIClient] = None
     
@@ -2019,7 +2113,12 @@ class Keithley4200_KXCI_Scripts:
     def _get_controller(self) -> KXCIClient:
         """Get or create KXCI controller."""
         if self._controller is None:
-            self._controller = KXCIClient(self.gpib_address, self.timeout)
+            self._controller = KXCIClient(
+                self.gpib_address,
+                self.timeout,
+                live_hiccups=self.live_hiccups,
+                wall_sleep=self.wall_sleep,
+            )
         return self._controller
     
     def _convert_us_to_seconds(self, value_ms: float) -> float:
@@ -3083,6 +3182,7 @@ class Keithley4200_KXCI_Scripts:
                          read_delay: float = 1e-6,  # seconds (default 1 µs)
                          read_rise_time: float = 0.1e-6,  # seconds (default 0.1 µs)
                          pulse_rise_time: Optional[float] = None,
+                         i_range: Optional[float] = None,
                          enable_debug_output: bool = True) -> Dict:
         """(Pulse → Read → Delay) × N cycles.
         
@@ -3718,7 +3818,8 @@ class Keithley4200_KXCI_Scripts:
     def multi_read_only(self, read_voltage: float = 0.2,
                        num_reads: int = 100,
                        delay_between: float = 100000.0,
-                       clim: float = 100e-3) -> Dict:
+                       clim: float = 100e-3,
+                       i_range: Optional[float] = None) -> Dict:
         """Just reads, no pulses.
         
         Pattern: Just reads, no pulses
@@ -3728,7 +3829,8 @@ class Keithley4200_KXCI_Scripts:
             read_voltage: Read voltage (V)
             num_reads: Number of reads
             delay_between: Delay between reads (µs) - NOTE: readtrain uses fixed 1e-6 delay internally
-            clim: Current limit (A)
+            clim: Current limit (A); only used to pick the range when i_range is not given
+            i_range: PMU current range (A) from the GUI
         
         Returns:
             Dict with timestamps, voltages, currents, resistances
@@ -3738,7 +3840,10 @@ class Keithley4200_KXCI_Scripts:
         # This matches the working example: meas_delay = 1.00E-6
         meas_width = 2e-6
         meas_delay = 1e-6  # Fixed to match working example - readtrain doesn't support variable delays
-        i_range = self._convert_clim_to_i_range(clim)
+        if i_range is not None and i_range > 0:
+            i_range = self._resolve_pmu_i_range(i_range)
+        else:
+            i_range = self._convert_clim_to_i_range(clim)
         
         print(f"[WARN] multi_read_only: delay_between={delay_between}ms is ignored. "
               f"readtrain uses fixed meas_delay=1e-6 (1µs)")
@@ -3845,6 +3950,7 @@ class Keithley4200_KXCI_Scripts:
                               reset_width: float = 1000.0,
                               delay_between_widths: float = 5.0,
                               clim: float = 100e-3,
+                              i_range: Optional[float] = None,
                               enable_debug_output: bool = True) -> Dict:
         """Width sweep: For each width, pulse then read.
         
@@ -3877,7 +3983,8 @@ class Keithley4200_KXCI_Scripts:
         print(f"  Pulse widths (s): {[f'{w:.2e}' for w in pulse_widths_s]}")
         print(f"  Reset width: {reset_width_s:.2e} s ({reset_width_s*1e6:.2f} µs)")
         
-        i_range = self._convert_clim_to_i_range(clim)
+        if i_range is None or i_range <= 0:
+            i_range = self._convert_clim_to_i_range(clim)
         
         all_timestamps: List[float] = []
         all_voltages: List[float] = []
@@ -4955,22 +5062,24 @@ class Keithley4200_KXCI_Scripts:
         )
     
     def pulse_train_varying_amplitudes(self, pulse_voltages: list = None,
-                                      pulse_width: float = 100.0,
+                                      pulse_width: float = 100e-6,
                                       read_voltage: float = 0.2,
                                       num_repeats: int = 1,
-                                      delay_between: float = 10000.0,
-                                      clim: float = 100e-3) -> Dict:
+                                      delay_between: float = 10e-3,
+                                      clim: float = 100e-3,
+                                      i_range: Optional[float] = None) -> Dict:
         """Pulse train with varying amplitudes.
         
         Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
         
         Args:
             pulse_voltages: List of pulse voltages (V)
-            pulse_width: Pulse width (µs)
+            pulse_width: Pulse width (seconds) - system wrapper converts from µs
             read_voltage: Read voltage (V)
             num_repeats: Number of repeats
-            delay_between: Delay between pulses (µs)
-            clim: Current limit (A)
+            delay_between: Delay between pulses (seconds) - system wrapper converts from µs
+            clim: Current limit (A); only used to pick the range when i_range is not given
+            i_range: PMU current range (A) from the GUI
         
         Returns:
             Dict with timestamps, voltages, currents, resistances, voltages_applied
@@ -4978,10 +5087,13 @@ class Keithley4200_KXCI_Scripts:
         if pulse_voltages is None:
             pulse_voltages = [1.0, 1.5, 2.0, -1.0, -1.5, -2.0]
         
-        pulse_width_s = self._convert_us_to_seconds(pulse_width)
-        delay_between_s = self._convert_us_to_seconds(delay_between)
+        pulse_width_s = pulse_width
+        delay_between_s = delay_between
         
-        i_range = self._convert_clim_to_i_range(clim)
+        if i_range is not None and i_range > 0:
+            i_range = self._resolve_pmu_i_range(i_range)
+        else:
+            i_range = self._convert_clim_to_i_range(clim)
         
         all_timestamps: List[float] = []
         all_voltages: List[float] = []

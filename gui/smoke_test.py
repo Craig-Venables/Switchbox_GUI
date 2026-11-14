@@ -85,6 +85,7 @@ def test_child_gui_launchers() -> None:
     from gui.measurement_gui import child_gui_launchers
 
     assert callable(child_gui_launchers.open_pulse_testing_gui)
+    assert callable(child_gui_launchers.open_solartron_gui)
     assert callable(child_gui_launchers.resolve_sample_name)
 
 

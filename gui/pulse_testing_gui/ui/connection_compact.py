@@ -18,11 +18,13 @@ from gui.pulse_testing_gui.ui.instrument_current_range import (
     register_current_range_row,
     update_instrument_current_range_ui,
 )
+from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
 from Pulse_Testing.system_wrapper import detect_system_from_address, get_default_address_for_system
 
 SYSTEM_PROFILES: list[tuple[str, str]] = [
     ("4200 PMU (fast)", "keithley4200_pmu"),
     ("4200 SMU (slow)", "keithley4200_smu"),
+    ("4200 SMU Sim", "keithley4200_smu_sim"),
     ("2450 TSP", "keithley2450"),
     ("2450 Sim", "keithley2450_sim"),
     ("2400 SCPI", "keithley2400"),

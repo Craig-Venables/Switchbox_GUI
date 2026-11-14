@@ -102,6 +102,7 @@ Keithley2450_TSP_Scripts = keithley2450_tsp_scripts.Keithley2450_TSP_Scripts if 
 from Pulse_Testing.system_wrapper import SystemWrapper, detect_system_from_address, get_default_address_for_system
 from Pulse_Testing.test_capabilities import is_test_supported, get_test_explanation
 from Pulse_Testing.test_definitions import TEST_FUNCTIONS, get_test_definitions_for_gui, migrate_presets_dict, canonical_test_display_name
+from Pulse_Testing.test_registry import PMU_EDGE_PARAMS, TIME_PARAMS, functions_with_runner
 from Pulse_Testing.keithley4200_constants import KEITHLEY4200_PMU_TIMING_SYSTEMS
 from Pulse_Testing.pmu_channel_wiring import get_channel_wiring_hint
 
@@ -1018,9 +1019,11 @@ class TSPTestingGUI(tk.Toplevel):
             address = self.addr_var.get()
             system_name = self.system_var.get()
             
-            # Auto-detect system if not explicitly set or if address changed
+            # Auto-detect system if not explicitly set or if address changed.
+            # A *_sim profile must stay on the simulator even if the address
+            # string would otherwise select a real instrument.
             detected = detect_system_from_address(address)
-            if detected and detected != system_name:
+            if detected and detected != system_name and not str(system_name).endswith("_sim"):
                 # Update system selection if auto-detection differs
                 self.system_var.set(detected)
                 system_name = detected
@@ -1217,11 +1220,8 @@ class TSPTestingGUI(tk.Toplevel):
                 's': 1.0
             }
             
-            time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                          'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
-                          'post_read_interval', 'reset_width', 'delay_between_voltages', 
-                          'delay_between_levels']
-            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time', 'pulse_rise_time', 'pulse_fall_time']
+            time_params = TIME_PARAMS
+            read_pulse_params = PMU_EDGE_PARAMS
             
             for param_name, param_info in self.param_vars.items():
                 try:
@@ -1324,9 +1324,7 @@ class TSPTestingGUI(tk.Toplevel):
         # Check if current system is 4200A (use µs instead of ms)
         is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
         # Time parameters that should be in µs for 4200A
-        time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 'post_read_interval',
-                      'reset_width', 'delay_between_voltages', 'delay_between_levels']
+        time_params = TIME_PARAMS
         
         # Default values for 4200A (in µs) - different from 2450 defaults
         # For 4200A, we want 1 µs for pulse_width and delays, not 1000 µs (1 ms)
@@ -1661,12 +1659,10 @@ class TSPTestingGUI(tk.Toplevel):
     def get_test_parameters(self):
         """Extract and validate parameters"""
         params = {}
-        time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                      'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
-                      'post_read_interval', 'reset_width', 'delay_between_voltages', 
-                      'delay_between_levels', 'pulse_rise_time']
+        # pulse_rise_time is listed twice on purpose: the time-param branch is checked first.
+        time_params = TIME_PARAMS + ('pulse_rise_time',)
         
-        read_pulse_params = ['read_width', 'read_delay', 'read_rise_time', 'pulse_rise_time', 'pulse_fall_time']
+        read_pulse_params = PMU_EDGE_PARAMS
         laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
         # Parameters that 4200A expects in µs (not seconds)
         # These are converted to µs in the GUI, so the wrapper should NOT convert them again
@@ -1862,6 +1858,7 @@ class TSPTestingGUI(tk.Toplevel):
             try:
                 self.last_results = partial_results
                 self.last_results["test_name"] = self.test_var.get()
+                self.last_results["test_function"] = test_info["function"]
                 self.last_results["params"] = params
                 self.last_results["plot_type"] = test_info["plot_type"]
                 self.after(0, self._plot_incremental)
@@ -1874,19 +1871,16 @@ class TSPTestingGUI(tk.Toplevel):
                 self.log(f"  PMU current range (IRange): {float(ir):.2e} A")
         self.log(f"Executing {func_name} on {self.current_system_name}...")
         start_time = time.time()
-        if func_name in ("optical_binary_sweep", "optical_pattern_repeat"):
-            from gui.pulse_testing_gui import optical_runner
+        if func_name in functions_with_runner("optical_sweep"):
             self._run_sweep_test_thread(func_name, params, test_info)
             return  # _run_sweep_test_thread calls _test_finished itself
-        elif func_name in ("optical_read_pulsed_light", "optical_pulse_train_read", "optical_pulse_train_pattern_read"):
+        elif func_name in functions_with_runner("optical"):
             from gui.pulse_testing_gui import optical_runner
             results, err = optical_runner.run_optical_test(self, func_name, params)
         else:
             results, err = logic.run_test_worker(
                 self.system_wrapper, func_name, instrument_params,
-                progress_callback=progress_callback if func_name in (
-                    "smu_endurance", "smu_retention", "smu_retention_with_pulse_measurement"
-                ) else None,
+                progress_callback=progress_callback,
             )
 
         if err is not None:
@@ -1922,6 +1916,7 @@ class TSPTestingGUI(tk.Toplevel):
 
         self.last_results = results
         self.last_results["test_name"] = self.test_var.get()
+        self.last_results["test_function"] = test_info["function"]
         self.last_results["params"] = params
         self.last_results["plot_type"] = test_info["plot_type"]
 
@@ -2617,6 +2612,7 @@ class TSPTestingGUI(tk.Toplevel):
             # Update the GUI plot with the most recent run so the user can watch progress
             last = dict(result)
             last['test_name'] = test_name
+            last['test_function'] = test_info.get('function')
             last['params'] = params
             last['plot_type'] = test_info.get('plot_type', 'time_series')
             self.last_results = last
@@ -2921,14 +2917,11 @@ class TSPTestingGUI(tk.Toplevel):
         
         try:
             is_4200a = self.current_system_name in KEITHLEY4200_PMU_TIMING_SYSTEMS
-            time_params = ['pulse_width', 'delay_between', 'delay_between_pulses', 
-                          'delay_between_reads', 'delay_before_read', 'delay_between_cycles', 
-                          'post_read_interval', 'reset_width', 'delay_between_voltages', 
-                          'delay_between_levels']
+            time_params = TIME_PARAMS
             # Optical tests: user enters these in seconds (no unit selector conversion)
             params_already_seconds = ['total_time_s', 'optical_pulse_duration_s', 'optical_pulse_period_s', 
                                       'sample_interval_s', 'duration_s']
-            read_pulse_params = ['read_width', 'read_delay', 'read_rise_time', 'pulse_rise_time', 'pulse_fall_time']
+            read_pulse_params = PMU_EDGE_PARAMS
             laser_params = ['read_period', 'laser_width', 'laser_delay', 'laser_rise_time', 'laser_fall_time']
             if hasattr(self, 'time_unit_var'):
                 selected_unit = self.time_unit_var.get()

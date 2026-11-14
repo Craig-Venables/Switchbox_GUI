@@ -7,6 +7,8 @@ Device discovery and test execution helpers. Keeps main.py focused on UI wiring.
 
 from typing import List, Optional
 
+from Pulse_Testing.test_registry import progress_functions
+
 
 def get_available_devices(fallback_address: Optional[str] = None) -> List[str]:
     """
@@ -47,11 +49,7 @@ def run_test_worker(system_wrapper, func_name: str, params: dict, progress_callb
     Returns:
         (results_dict, None) on success, or (None, exception) on error.
     """
-    if progress_callback and func_name in (
-        "smu_endurance",
-        "smu_retention",
-        "smu_retention_with_pulse_measurement",
-    ):
+    if progress_callback and func_name in progress_functions():
         params = dict(params, progress_callback=progress_callback)
     try:
         results = system_wrapper.run_test(test_function=func_name, params=params)

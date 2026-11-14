@@ -212,6 +212,28 @@ class BaseMeasurementSystem(ABC):
         """
         raise NotImplementedError("pulse_train_varying_amplitudes not implemented for this system")
     
+    @staticmethod
+    def _pattern_to_pulse_voltages(params: Dict[str, Any]) -> Dict[str, Any]:
+        """Turn the GUI's Electrical Pulse Train fields into the scripts' ``pulse_voltages`` list.
+
+        ``pulse_pattern`` "11010" with ``pulse_voltage`` 1.5 → [1.5, 1.5, 0.0, 1.5, 0.0];
+        the pattern repeats to fill ``num_pulses`` slots. An explicit ``pulse_voltages`` wins.
+        """
+        out = dict(params)
+        pattern = str(out.pop("pulse_pattern", "") or "")
+        num_pulses = out.pop("num_pulses", None)
+        amplitude = out.pop("pulse_voltage", None)
+        if isinstance(out.get("pulse_voltages"), str):
+            out["pulse_voltages"] = [float(x) for x in out["pulse_voltages"].split(",") if x.strip()]
+        if out.get("pulse_voltages") or amplitude is None:
+            return out
+        bits = [c for c in pattern if c in "01"] or ["1"]
+        slots = int(num_pulses) if num_pulses else len(bits)
+        out["pulse_voltages"] = [
+            float(amplitude) if bits[k % len(bits)] == "1" else 0.0 for k in range(slots)
+        ]
+        return out
+
     def _format_results(self, timestamps: List[float], voltages: List[float], 
                        currents: List[float], resistances: List[float],
                        **extras) -> Dict[str, Any]:

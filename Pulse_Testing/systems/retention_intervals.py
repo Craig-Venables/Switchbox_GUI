@@ -310,7 +310,16 @@ def normalize_volatile_screening_params(params: MutableMapping[str, Any]) -> Dic
             slow_start, t_max, tail_num, include_early_burst=False
         )
     out["slow_tail_intervals"] = tail_intervals
+    for key in VOLATILE_SCHEDULE_FIELDS:
+        out.pop(key, None)
     return out
+
+
+# GUI schedule fields consumed by normalize_volatile_screening_params (replaced by interval lists).
+VOLATILE_SCHEDULE_FIELDS = (
+    "read_intervals", "schedule_mode", "t_min_s", "burst_t_max_s", "t_max_s", "num_reads",
+    "include_early_burst", "include_slow_tail", "slow_tail_start_s", "slow_tail_num_reads",
+)
 
 
 def classify_volatile_screening(

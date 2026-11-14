@@ -2,14 +2,11 @@
 Test Capability Definitions
 ===========================
 
-Defines which tests are supported by each measurement system.
-Easy to update: change boolean values to enable/disable test support.
+Which tests each measurement system supports. Built from ``test_registry.py``:
+a system supports a test function when any registry entry for that function lists
+the system in ``systems``. Edit the registry, not this file.
 
-To add Keithley 4200 support for a test:
-1. Implement the method once on ``Keithley4200KXCICommon`` in ``systems/keithley4200_core.py`` (Equipment KXCI scripts as needed).
-2. Set ``True`` in ``SYSTEM_CAPABILITIES['keithley4200_pmu']`` and/or ``['keithley4200_smu']`` (see README — Keithley 4200 profiles).
-
-See also: ``Pulse_Testing/README.md`` (How to add a new test, Keithley 4200 profiles).
+See also: ``Pulse_Testing/ADDING_A_TEST.md``.
 
 IMPORTANT NOTE FOR 4200A DATA COLLECTION:
 ------------------------------------------
@@ -20,194 +17,16 @@ pmu_pulse_read_interleaved, pmu_endurance_interleaved, and pmu_retention_dual_ch
 
 from typing import Dict, List, Optional
 
-# All available test function names (must match method names in base_system.py or system implementations)
-ALL_TEST_FUNCTIONS = [
-    'pulse_read_repeat',
-    'pulse_then_read',
-    'multi_pulse_then_read',
-    'varying_width_pulses',
-    'width_sweep_with_reads',
-    'width_sweep_with_all_measurements',
-    'potentiation_depression_cycle',
-    'potentiation_only',
-    'depression_only',
-    'endurance_test',
-    'endurance_burst_test',
-    'retention_test',
-    'log_retention_test',
-    'volatile_screening_test',
-    'pulse_multi_read',
-    'multi_read_only',
-    'current_range_finder',
-    'relaxation_after_multi_pulse',
-    'relaxation_after_multi_pulse_with_pulse_measurement',
-    # Additional tests available in some systems
-    'voltage_amplitude_sweep',
-    'ispp_test',
-    'switching_threshold_test',
-    'multilevel_programming',
-    'pulse_train_varying_amplitudes',
-    'laser_and_read',
-    'smu_slow_pulse_measure',  # SMU-based slow pulse (much slower than PMU)
-    'smu_endurance',  # SMU-based endurance: (SET pulse → Read → RESET pulse → Read) × N cycles
-    'smu_retention',  # SMU-based retention: Pulse → Read @ t1 → Read @ t2 → Read @ t3... (retention over time)
-    'smu_retention_with_pulse_measurement',  # SMU-based retention with measurements during SET/RESET pulses
-    'optical_read_pulsed_light',  # Optical: read at V while laser pulses periodically (2450/2400 only)
-    'optical_pulse_train_read',   # Optical: read at V while one laser pulse train (2450/2400 only)
-    'optical_pulse_train_pattern_read',  # Optical: read at V while laser fires pattern (11010 etc., 2450/2400 only)
-    'optical_binary_sweep',  # Optical: iterate all 2^N binary patterns, save per-run files
-    'optical_pattern_repeat',  # Optical: repeat one fixed pattern N times, save per-run files
-]
+from .test_registry import ALL_SYSTEMS, all_functions, systems_for_function
 
-# System capability matrix
-# True = test is supported, False = test is not supported
+# All test function names (must match method names on the system adapters)
+ALL_TEST_FUNCTIONS: List[str] = all_functions()
+
+# System capability matrix: SYSTEM_CAPABILITIES[system][function] -> bool
 SYSTEM_CAPABILITIES: Dict[str, Dict[str, bool]] = {
-    'keithley2450': {
-        'pulse_read_repeat': True,
-        'pulse_then_read': True,
-        'multi_pulse_then_read': True,
-        'varying_width_pulses': True,
-        'width_sweep_with_reads': True,
-        'width_sweep_with_all_measurements': True,
-        'potentiation_depression_cycle': True,
-        'potentiation_only': True,
-        'depression_only': True,
-        'endurance_test': True,
-        'retention_test': True,
-        'log_retention_test': True,
-        'volatile_screening_test': True,
-        'pulse_multi_read': True,
-        'multi_read_only': True,
-        'current_range_finder': True,
-        'relaxation_after_multi_pulse': True,
-        'relaxation_after_multi_pulse_with_pulse_measurement': True,
-        'voltage_amplitude_sweep': True,
-        'ispp_test': True,
-        'switching_threshold_test': True,
-        'multilevel_programming': True,
-        'pulse_train_varying_amplitudes': True,
-        'optical_read_pulsed_light': True,
-        'optical_pulse_train_read': True,
-        'optical_pulse_train_pattern_read': True,
-        'optical_binary_sweep': True,
-        'optical_pattern_repeat': True,
-    },
-    # --- Keithley 4200-SCS: PMU vs SMU profiles (shared implementation: keithley4200_core.py) ---
-    'keithley4200_pmu': {
-        # Fast interleaved PMU + laser_and_read (CH2 PMU for laser)
-        'pulse_read_repeat': True,
-        'pulse_then_read': True,
-        'multi_pulse_then_read': True,
-        'varying_width_pulses': False,
-        'width_sweep_with_reads': True,
-        'width_sweep_with_all_measurements': False,
-        'potentiation_depression_cycle': True,
-        'potentiation_only': True,
-        'depression_only': True,
-        'endurance_test': True,
-        'endurance_burst_test': True,
-        'retention_test': True,
-        'log_retention_test': True,
-        'volatile_screening_test': True,
-        'pulse_multi_read': True,
-        'multi_read_only': True,
-        'current_range_finder': False,
-        'relaxation_after_multi_pulse': True,
-        'relaxation_after_multi_pulse_with_pulse_measurement': False,
-        'voltage_amplitude_sweep': True,
-        'ispp_test': True,
-        'switching_threshold_test': True,
-        'multilevel_programming': True,
-        'pulse_train_varying_amplitudes': True,
-        'laser_and_read': True,
-        'smu_slow_pulse_measure': False,
-        'smu_endurance': False,
-        'smu_retention': False,
-        'smu_retention_with_pulse_measurement': False,
-        'optical_read_pulsed_light': False,
-        'optical_pulse_train_read': False,
-        'optical_pulse_train_pattern_read': False,
-        'optical_binary_sweep': False,
-        'optical_pattern_repeat': False,
-    },
-    'keithley4200_smu': {
-        # Slow SMU scripts + SMU_BiasTimedRead optical coordination
-        'pulse_read_repeat': False,
-        'pulse_then_read': False,
-        'multi_pulse_then_read': False,
-        'varying_width_pulses': False,
-        'width_sweep_with_reads': False,
-        'width_sweep_with_all_measurements': False,
-        'potentiation_depression_cycle': False,
-        'potentiation_only': False,
-        'depression_only': False,
-        'endurance_test': False,
-        'endurance_burst_test': False,
-        'retention_test': False,
-        'pulse_multi_read': False,
-        'multi_read_only': False,
-        'current_range_finder': False,
-        'relaxation_after_multi_pulse': False,
-        'relaxation_after_multi_pulse_with_pulse_measurement': False,
-        'voltage_amplitude_sweep': False,
-        'ispp_test': False,
-        'switching_threshold_test': False,
-        'multilevel_programming': False,
-        'pulse_train_varying_amplitudes': False,
-        'laser_and_read': False,
-        'smu_slow_pulse_measure': True,
-        'smu_endurance': True,
-        'smu_retention': True,
-        'smu_retention_with_pulse_measurement': True,
-        'optical_read_pulsed_light': True,
-        'optical_pulse_train_read': True,
-        'optical_pulse_train_pattern_read': True,
-        'optical_binary_sweep': True,
-        'optical_pattern_repeat': True,
-    },
-    'keithley2400': {
-        # Tests implemented using direct SCPI commands via Keithley2400Controller
-        # All tests use voltage-based pulsing (0V → pulse → 0V) without toggling output on/off
-        # NOTE: GPIB speed limitations mean minimum pulse width is ~10ms
-        'pulse_read_repeat': True,  # ✅ SCPI-based: Initial Read → (Pulse → Read → Delay) × N
-        'pulse_then_read': True,  # ✅ SCPI-based: (Pulse → Delay → Read) × N
-        'multi_pulse_then_read': True,  # ✅ SCPI-based: (Pulse×N → Read) × Cycles
-        'varying_width_pulses': True,  # ✅ SCPI-based: Test multiple pulse widths
-        'width_sweep_with_reads': True,  # ✅ SCPI-based: For each width: (Read→Pulse→Read)×N, Reset
-        'width_sweep_with_all_measurements': True,  # ✅ SCPI-based: Width sweep with pulse peak measurements
-        'potentiation_depression_cycle': True,  # ✅ SCPI-based: Initial Read → Gradual SET → Gradual RESET
-        'potentiation_only': True,  # ✅ SCPI-based: Initial Read → Repeated SET pulses with reads
-        'depression_only': True,  # ✅ SCPI-based: Initial Read → Repeated RESET pulses with reads
-        'endurance_test': True,  # ✅ SCPI-based: (SET → Read → RESET → Read) × N cycles
-        'retention_test': True,  # ✅ SCPI-based: Pulse → Read @ t1 → Read @ t2 → Read @ t3...
-        'log_retention_test': True,  # PC-timed log-spaced retention
-        'volatile_screening_test': True,  # PC-timed (GPIB — not ms-resolution)
-        'pulse_multi_read': True,  # ✅ SCPI-based: N pulses then many reads
-        'multi_read_only': True,  # ✅ SCPI-based: Just reads, no pulses
-        'current_range_finder': True,  # ✅ SCPI-based: Find optimal current measurement range
-        'relaxation_after_multi_pulse': True,  # ✅ SCPI-based: 1×Read → N×Pulse → N×Read (measure reads only)
-        'relaxation_after_multi_pulse_with_pulse_measurement': True,  # ✅ SCPI-based: 1×Read → N×Pulse(measured) → N×Read
-        'voltage_amplitude_sweep': True,  # ✅ SCPI-based: For each voltage: Initial Read → (Pulse → Read) × N → Reset
-        'ispp_test': True,  # ✅ SCPI-based: Start at low voltage, increase by step each pulse
-        'switching_threshold_test': True,  # ✅ SCPI-based: Try increasing voltages, find minimum that causes switching
-        'multilevel_programming': True,  # ✅ SCPI-based: For each level: Reset → Program with pulses → Read
-        'pulse_train_varying_amplitudes': True,  # ✅ SCPI-based: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N
-        'optical_read_pulsed_light': True,
-        'optical_pulse_train_read': True,
-        'optical_pulse_train_pattern_read': True,
-        'optical_binary_sweep': True,
-        'optical_pattern_repeat': True,
-    },
+    system: {func: system in systems_for_function(func) for func in ALL_TEST_FUNCTIONS}
+    for system in sorted(ALL_SYSTEMS)
 }
-
-# Setup-only profile: connect works; no pulse tests listed in GUI
-SYSTEM_CAPABILITIES['keithley4200_custom'] = {k: False for k in ALL_TEST_FUNCTIONS}
-
-# Legacy alias: same as keithley4200_pmu (saved configs / address auto-detect migration)
-SYSTEM_CAPABILITIES['keithley4200a'] = dict(SYSTEM_CAPABILITIES['keithley4200_pmu'])
-
-# Simulation uses same capability matrix as hardware 2450
-SYSTEM_CAPABILITIES['keithley2450_sim'] = dict(SYSTEM_CAPABILITIES['keithley2450'])
 
 
 def is_test_supported(system_name: str, test_function: str) -> bool:

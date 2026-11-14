@@ -67,6 +67,74 @@ class SingleMeasurementRunner:
     def __setattr__(self, key: str, value: Any) -> None:  # pragma: no cover
         setattr(self._gui, key, value)
 
+    def _publish_completed_iv_sweep(
+        self,
+        v_arr: Any,
+        c_arr: Any,
+        timestamps: Any,
+        label: str,
+        stop_v: float,
+    ) -> None:
+        """Draw one finished device sweep on the live and all-sweeps panels.
+
+        ``v_arr`` / ``c_arr`` / ``timestamps`` from ``do_iv_sweep`` replace the
+        display buffers. Missing plot helpers are skipped. This never raises.
+        """
+        try:
+            voltages = [float(v) for v in v_arr]
+            currents = [float(c) for c in c_arr]
+            times = [] if timestamps is None else [float(t) for t in timestamps]
+        except Exception:
+            return
+
+        try:
+            self.v_arr_disp = list(voltages)
+            self.c_arr_disp = list(currents)
+            self.t_arr_disp = list(times)
+        except Exception:
+            pass
+
+        updaters = getattr(self, "plot_updaters", None)
+        update_line = getattr(updaters, "_update_line", None) if updaters is not None else None
+        if callable(update_line):
+            try:
+                abs_currents = np.abs(np.asarray(currents, dtype=float))
+                abs_currents[abs_currents == 0] = 1e-12
+                update_line("rt_iv", voltages, currents)
+                update_line("rt_logiv", voltages, abs_currents.tolist())
+                n = min(len(times), len(currents))
+                update_line("ct_rt", times[:n], currents[:n])
+            except Exception:
+                pass
+
+        panels = getattr(self, "plot_panels", None)
+        canvases = getattr(panels, "canvases", None) if panels is not None else None
+        if isinstance(canvases, dict):
+            for key in ("rt_iv", "rt_logiv", "ct_rt"):
+                canvas = canvases.get(key)
+                draw = getattr(canvas, "draw", None) if canvas is not None else None
+                if not callable(draw):
+                    continue
+                try:
+                    draw()
+                except Exception:
+                    pass
+
+        show = getattr(panels, "graphs_show", None) if panels is not None else None
+        if callable(show):
+            try:
+                show(voltages, currents, str(label), stop_v)
+            except Exception:
+                pass
+
+        master = getattr(self, "master", None)
+        update = getattr(master, "update", None) if master is not None else None
+        if callable(update):
+            try:
+                update()
+            except Exception:
+                pass
+
     # Public API --------------------------------------------------------
     def run_standard_iv(self) -> None:
         """
@@ -207,6 +275,13 @@ class SingleMeasurementRunner:
                 and step_delay < 0.05
             )
 
+            def _on_point(v, i, t_s):
+                # Live buffers fill during the sweep; the returned arrays are
+                # published afterwards and replace these lists.
+                self.v_arr_disp.append(v)
+                self.c_arr_disp.append(i)
+                self.t_arr_disp.append(t_s)
+
             if using_hardware_sweep:
                 self.set_status_message("Hardware sweep in progress (fast mode)...")
                 self.master.update()
@@ -247,7 +322,7 @@ class SingleMeasurementRunner:
                         psu=getattr(self, "psu", None),
                         optical=getattr(self, "optical", None),
                         should_stop=lambda: getattr(self, "stop_measurement_flag", False),
-                        on_point=None,
+                        on_point=_on_point,
                     )
                 else:
                     # Fallback to measurement service (for backwards compatibility)
@@ -258,7 +333,7 @@ class SingleMeasurementRunner:
                         psu=getattr(self, "psu", None),
                         optical=getattr(self, "optical", None),
                         should_stop=lambda: getattr(self, "stop_measurement_flag", False),
-                        on_point=None,
+                        on_point=_on_point,
                     )
 
                 if timestamps:
@@ -266,12 +341,6 @@ class SingleMeasurementRunner:
                         f"Sweep complete: {len(v_arr)} points in {timestamps[-1]:.2f}s"
                     )
             else:
-                def _on_point(v, i, t_s):
-                    # Keep all sweeps in live buffers so multi-sweep overlays stay visible
-                    self.v_arr_disp.append(v)
-                    self.c_arr_disp.append(i)
-                    self.t_arr_disp.append(t_s)
-
                 from Measurements.source_modes import SourceMode
 
                 source_mode_var = getattr(self, "source_mode_var", None)
@@ -430,9 +499,11 @@ class SingleMeasurementRunner:
             except Exception as exc:
                 print(f"[SAVE ERROR] Failed to save file: {exc}")
 
-            # Note: graphs_show is only for custom measurements - normal sweeps don't add to "all sweeps" graph
-            # self.graphs_show(v_arr, c_arr, "1", stop_v)
-            
+            # Publish before measuring is cleared and before summary PNGs are saved.
+            # save_key 0 is a real first-file index; only a missing key falls back to "1".
+            sweep_label = "1" if save_key is None else str(save_key)
+            self._publish_completed_iv_sweep(v_arr, c_arr, timestamps, sweep_label, stop_v)
+
             # Run IV analysis if enabled
             try:
                 # Build metadata for analysis

@@ -166,32 +166,28 @@ class Keithley2450System(BaseMeasurementSystem):
         """Pattern: Initial Read → Gradual SET → Gradual RESET"""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
-        
-        # Filter out unsupported parameters or map them to supported ones
-        # delay_between_cycles is not directly supported by the TSP script
-        # Map delay_between_cycles to delay_between if delay_between is not already set
-        # The GUI converts time params to seconds for 2450, so delay_between_cycles is already in seconds
-        if 'delay_between_cycles' in params:
-            if 'delay_between' not in params:
-                # Use delay_between_cycles as delay_between (already in seconds from GUI)
-                params['delay_between'] = params.pop('delay_between_cycles')
-            else:
-                # If both are provided, remove delay_between_cycles (delay_between takes precedence)
-                params.pop('delay_between_cycles')
-        
-        return self.test_scripts.potentiation_depression_cycle(**params)
+        return self.test_scripts.potentiation_depression_cycle(**self._map_cycle_delay(params))
+
+    @staticmethod
+    def _map_cycle_delay(params: Dict[str, Any]) -> Dict[str, Any]:
+        """TSP scripts call the GUI's ``delay_between_cycles`` (seconds) ``delay_between``."""
+        out = dict(params)
+        if 'delay_between_cycles' in out:
+            cycle_delay = out.pop('delay_between_cycles')
+            out.setdefault('delay_between', cycle_delay)
+        return out
     
     def potentiation_only(self, **params) -> Dict[str, Any]:
         """Pattern: Initial Read → Repeated SET pulses with reads"""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
-        return self.test_scripts.potentiation_only(**params)
+        return self.test_scripts.potentiation_only(**self._map_cycle_delay(params))
     
     def depression_only(self, **params) -> Dict[str, Any]:
         """Pattern: Initial Read → Repeated RESET pulses with reads"""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
-        return self.test_scripts.depression_only(**params)
+        return self.test_scripts.depression_only(**self._map_cycle_delay(params))
     
     def endurance_test(self, **params) -> Dict[str, Any]:
         """Pattern: (SET → Read → RESET → Read) × N cycles"""
@@ -283,7 +279,7 @@ class Keithley2450System(BaseMeasurementSystem):
         """Pattern: Initial Read → (Pulse1 → Read → Pulse2 → Read → ...) × N"""
         if not self.test_scripts:
             raise RuntimeError("Not connected to device")
-        return self.test_scripts.pulse_train_varying_amplitudes(**params)
+        return self.test_scripts.pulse_train_varying_amplitudes(**self._pattern_to_pulse_voltages(params))
 
     # ----- Optical-test API: source V + measure I in a loop (for laser+SMU hybrid tests) -----
 
@@ -335,4 +331,11 @@ class Keithley2450SimSystem(Keithley2450System):
         except Exception as e:
             self._connected = False
             raise ConnectionError(f"Failed to initialize Keithley 2450 simulation: {e}") from e
+
+    def source_voltage_for_optical(self, voltage: float, current_limit: float) -> None:
+        """Set the voltage source and enable the output. Does not send TSP strings."""
+        if not self.tsp_controller:
+            raise RuntimeError("Not connected to device")
+        self.tsp_controller.set_voltage(voltage, current_limit)
+        self.tsp_controller.enable_output(True)
 

@@ -90,8 +90,9 @@ def _draw_laser_on_intervals(ax, laser_on_intervals, zorder=0):
 def _plot_time_series(gui):
     """Plot resistance vs time - raw data, no filtering"""
     test_name = gui.last_results['test_name']
+    test_function = gui.last_results.get('test_function', '')
     params = gui.last_results.get('params', {})
-    
+
     timestamps = gui.last_results.get('timestamps', [])
     resistances = gui.last_results.get('resistances', [])
     
@@ -118,7 +119,7 @@ def _plot_time_series(gui):
     
     operations = gui.last_results.get('operation') or []
     # Timed Retention / SMU Retention: highlight initial state vs after-pulse reads
-    if test_name in ("SMU: Retention", "⚠️ SMU Retention", "Timed Retention") or (
+    if test_function in ("smu_retention", "retention_test") or (
         operations and any(op in ('baseline', 'post_pulse', 'retention') for op in operations)
     ):
         if timestamps and resistances:
@@ -168,9 +169,9 @@ def _plot_time_series(gui):
     
     # Special handling for SMU Endurance: plot SET and RESET separately with different colors
     pulse_types = gui.last_results.get('pulse_types', [])
-    if test_name in ["⚠️ SMU Endurance", "⚠️ SMU Retention (Pulse Measured)"] and pulse_types:
+    if test_function in ("smu_endurance", "smu_retention_with_pulse_measurement") and pulse_types:
         # For smu_retention_with_pulse_measurement: plot all four types
-        if test_name == "⚠️ SMU Retention (Pulse Measured)":
+        if test_function == "smu_retention_with_pulse_measurement":
             # Plot all four types with different colors
             set_pulse_indices = [i for i, pt in enumerate(pulse_types) if pt == "SET_PULSE"]
             read_after_set_indices = [i for i, pt in enumerate(pulse_types) if pt == "READ_AFTER_SET"]
@@ -301,7 +302,7 @@ def _plot_time_series(gui):
         _draw_laser_on_intervals(gui.ax, laser_on_intervals, zorder=0)
     
     # Add red dotted line for potentiation/depression tests with post-reads
-    if test_name in ["Potentiation Only", "Depression Only"]:
+    if test_function in ("potentiation_only", "depression_only"):
         num_post_reads = params.get('num_post_reads', 0)
         if num_post_reads > 0:
             num_pulses = params.get('num_pulses', 30)

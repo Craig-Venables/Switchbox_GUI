@@ -504,125 +504,70 @@ def _run_optical_4200(
     return _run_optical_4200_fallback(system, laser, func_name, params)
 
 
-def _run_optical_read_pulsed_light(system, laser, params: dict) -> Dict[str, Any]:
-    """Read at V for total_time_s; optical pulse duration_s every period_s, starting after laser_delay_s."""
+def _run_optical_smu_during_laser(
+    system, laser, func_name: str, params: dict
+) -> Dict[str, Any]:
+    """Sample SMU current while the laser schedule runs, sharing one t0.
+
+    A sample thread calls measure_current_once until duration_s. The caller
+    thread runs _run_laser_schedule. Timestamps and laser_on_intervals are
+    both relative to that t0. optical_read_pulsed_light uses total_time_s;
+    the other optical tests use duration_s.
+    """
     read_voltage = float(params.get('read_voltage', 0.2))
-    total_time_s = float(params.get('total_time_s', 10.0))
-    optical_pulse_duration_s = float(params.get('optical_pulse_duration_s', 0.2))
-    optical_pulse_period_s = float(params.get('optical_pulse_period_s', 1.0))
     sample_interval_s = float(params.get('sample_interval_s', 0.02))
     clim = float(params.get('clim', 1e-3))
-    laser_delay_s = float(params.get('laser_delay_s', 0.0))
+    if sample_interval_s <= 0:
+        sample_interval_s = 0.02
+    if func_name == 'optical_read_pulsed_light':
+        duration_s = float(params.get('total_time_s', 10.0))
+    else:
+        duration_s = float(params.get('duration_s', 5.0))
 
-    system.source_voltage_for_optical(read_voltage, clim)
-    t0 = time.perf_counter()
     timestamps: List[float] = []
     currents: List[float] = []
-    laser_on_intervals: List[Tuple[float, float]] = []
-    next_pulse_t = laser_delay_s  # Start first pulse after delay
-    next_read_t = 0.0
+    exc_holder: List[Optional[Exception]] = [None]
 
-    try:
-        while True:
-            elapsed = time.perf_counter() - t0
-            if elapsed >= total_time_s:
-                break
-
-            # Fire laser at each period (e.g. at t=delay, delay+period, delay+2*period, ... s)
-            if next_pulse_t < total_time_s and elapsed >= next_pulse_t:
-                t_start = time.perf_counter()
-                laser.pulse_on_ms(optical_pulse_duration_s * 1000.0)
-                t_end = time.perf_counter()
-                laser_on_intervals.append((t_start - t0, t_end - t0))
-                next_pulse_t += optical_pulse_period_s
-
-            # Take one current reading at sample interval
-            if elapsed >= next_read_t:
-                t_sec, i = system.measure_current_once()
-                timestamps.append(t_sec - t0)
-                currents.append(i)
-                next_read_t += sample_interval_s
-
-            # Sleep until next action or end
-            next_event = min(next_pulse_t, next_read_t, total_time_s)
-            sleep_s = max(0, min(sample_interval_s * 0.25, next_event - (time.perf_counter() - t0)))
-            if sleep_s > 0:
-                time.sleep(sleep_s)
-    finally:
-        system.source_output_off()
-
-    voltages = [read_voltage] * len(timestamps)
-    resistances = [v / i if i and abs(i) > 1e-18 else float('nan') for v, i in zip(voltages, currents)]
-    return {
-        'timestamps': timestamps,
-        'voltages': voltages,
-        'currents': currents,
-        'resistances': resistances,
-        'laser_on_intervals': laser_on_intervals,
-    }
-
-
-def _run_optical_pulse_train_read(system, laser, params: dict) -> Dict[str, Any]:
-    """Read at V for duration_s while running one optical pulse train (n pulses, on_ms, off_ms) after laser_delay_s."""
-    read_voltage = float(params.get('read_voltage', 0.2))
-    optical_on_ms = float(params.get('optical_on_ms', 100.0))
-    optical_off_ms = float(params.get('optical_off_ms', 100.0))
-    on_seconds = _optical_on_to_seconds(optical_on_ms)
-    off_seconds = _optical_on_to_seconds(optical_off_ms)
-    n_optical_pulses = int(params.get('n_optical_pulses', 5))
-    duration_s = float(params.get('duration_s', 5.0))
-    sample_interval_s = float(params.get('sample_interval_s', 0.02))
-    clim = float(params.get('clim', 1e-3))
-    laser_delay_s = float(params.get('laser_delay_s', 0.0))
-
-    system.source_voltage_for_optical(read_voltage, clim)
-    t0 = time.perf_counter()
-    timestamps: List[float] = []
-    currents: List[float] = []
-    laser_on_intervals: List[Tuple[float, float]] = []
-    next_read_t = 0.0
-    pulse_period_s = on_seconds + off_seconds
-
-    try:
-        for pulse_idx in range(n_optical_pulses):
-            pulse_start = laser_delay_s + pulse_idx * pulse_period_s
-            # Take reads until just before this pulse starts
+    def sample_loop(t0: float) -> None:
+        next_read_t = 0.0
+        try:
             while True:
                 elapsed = time.perf_counter() - t0
-                if elapsed >= pulse_start or elapsed >= duration_s:
+                if elapsed >= duration_s:
                     break
                 if elapsed >= next_read_t:
                     t_sec, i = system.measure_current_once()
                     timestamps.append(t_sec - t0)
                     currents.append(i)
                     next_read_t += sample_interval_s
-                time.sleep(max(0, min(sample_interval_s * 0.25, pulse_start - elapsed)))
-            if (time.perf_counter() - t0) >= duration_s:
-                break
-            # Laser on then off
-            t_start = time.perf_counter()
-            laser.emission_on()
-            time.sleep(on_seconds)
-            laser.emission_off()
-            t_end = time.perf_counter()
-            laser_on_intervals.append((t_start - t0, t_end - t0))
-            next_read_t = max(next_read_t, t_end - t0)
-            time.sleep(off_seconds)
+                remaining = duration_s - (time.perf_counter() - t0)
+                until_next = next_read_t - (time.perf_counter() - t0)
+                sleep_s = remaining if until_next > remaining else until_next
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
+        except Exception as exc:
+            exc_holder[0] = exc
 
-        # Reads until duration_s
-        while (time.perf_counter() - t0) < duration_s:
-            elapsed = time.perf_counter() - t0
-            if elapsed >= next_read_t:
-                t_sec, i = system.measure_current_once()
-                timestamps.append(t_sec - t0)
-                currents.append(i)
-                next_read_t += sample_interval_s
-            time.sleep(max(0, min(sample_interval_s, t0 + duration_s - time.perf_counter())))
+    system.source_voltage_for_optical(read_voltage, clim)
+    sample_thread: Optional[threading.Thread] = None
+    laser_on_intervals: List[Tuple[float, float]] = []
+    try:
+        t0 = time.perf_counter()
+        sample_thread = threading.Thread(target=sample_loop, args=(t0,), daemon=False)
+        sample_thread.start()
+        laser_on_intervals = _run_laser_schedule(laser, func_name, params, t0, duration_s)
+        sample_thread.join()
+        if exc_holder[0] is not None:
+            raise exc_holder[0]
     finally:
+        if sample_thread is not None and sample_thread.is_alive():
+            sample_thread.join()
         system.source_output_off()
 
     voltages = [read_voltage] * len(timestamps)
-    resistances = [v / i if i and abs(i) > 1e-18 else float('nan') for v, i in zip(voltages, currents)]
+    resistances = [
+        v / i if i and abs(i) > 1e-18 else float('nan') for v, i in zip(voltages, currents)
+    ]
     return {
         'timestamps': timestamps,
         'voltages': voltages,
@@ -630,6 +575,16 @@ def _run_optical_pulse_train_read(system, laser, params: dict) -> Dict[str, Any]
         'resistances': resistances,
         'laser_on_intervals': laser_on_intervals,
     }
+
+
+def _run_optical_read_pulsed_light(system, laser, params: dict) -> Dict[str, Any]:
+    """Read at V for total_time_s; optical pulses run on the laser thread while the SMU samples."""
+    return _run_optical_smu_during_laser(system, laser, 'optical_read_pulsed_light', params)
+
+
+def _run_optical_pulse_train_read(system, laser, params: dict) -> Dict[str, Any]:
+    """Read at V for duration_s while one optical pulse train runs on the laser thread."""
+    return _run_optical_smu_during_laser(system, laser, 'optical_pulse_train_read', params)
 
 
 def run_binary_sweep_test(
@@ -859,87 +814,12 @@ def run_pattern_repeat_test(
 
 
 def _run_optical_pulse_train_pattern_read(system, laser, params: dict) -> Dict[str, Any]:
-    """Read at V for duration_s while firing laser pulses per binary pattern (1=on, 0=off) after laser_delay_s."""
-    read_voltage = float(params.get('read_voltage', 0.2))
-    optical_on_ms = float(params.get('optical_on_ms', 100.0))
-    optical_off_ms = float(params.get('optical_off_ms', 100.0))
-    on_seconds = _optical_on_to_seconds(optical_on_ms)
-    off_seconds = _optical_on_to_seconds(optical_off_ms)
-    pattern_raw = str(params.get('laser_pattern', '1011')).strip()
-    duration_s = float(params.get('duration_s', 5.0))
-    sample_interval_s = float(params.get('sample_interval_s', 0.02))
-    clim = float(params.get('clim', 1e-3))
-    laser_delay_s = float(params.get('laser_delay_s', 0.0))
-    pattern_repeats = max(1, int(params.get('pattern_repeats', 1)))
-    time_between_patterns_s = float(params.get('time_between_patterns_s', 0.0))
-
-    # Build pattern and validate
-    pattern = ''.join(c for c in pattern_raw if c in '01')
+    """Read at V for duration_s while the laser thread fires pulses per binary pattern."""
+    pattern = ''.join(c for c in str(params.get('laser_pattern', '1011')).strip() if c in '01')
     if not pattern:
-        raise ValueError("Laser pattern is empty. Use binary pattern with 1s and 0s (e.g., 1011 or 10101).")
-    
-    # Build pulse schedule: indices where pattern is '1' (per repeat)
-    pulse_schedule = [i for i, c in enumerate(pattern) if c == '1']
-    pulse_period_s = on_seconds + off_seconds
-    pattern_duration_s = len(pattern) * pulse_period_s
-    # If time_between_patterns_s is 0, use one period as default; otherwise use specified time
-    wait_between_repeats_s = time_between_patterns_s if time_between_patterns_s > 0 else pulse_period_s
-
-    system.source_voltage_for_optical(read_voltage, clim)
-    t0 = time.perf_counter()
-    timestamps: List[float] = []
-    currents: List[float] = []
-    laser_on_intervals: List[Tuple[float, float]] = []
-    next_read_t = 0.0
-
-    try:
-        for repeat in range(pattern_repeats):
-            repeat_start = laser_delay_s + repeat * (pattern_duration_s + wait_between_repeats_s)
-            for slot_idx in pulse_schedule:
-                pulse_start = repeat_start + slot_idx * pulse_period_s
-                # Take reads until just before this pulse starts
-                while True:
-                    elapsed = time.perf_counter() - t0
-                    if elapsed >= pulse_start or elapsed >= duration_s:
-                        break
-                    if elapsed >= next_read_t:
-                        t_sec, i = system.measure_current_once()
-                        timestamps.append(t_sec - t0)
-                        currents.append(i)
-                        next_read_t += sample_interval_s
-                    time.sleep(max(0, min(sample_interval_s * 0.25, pulse_start - elapsed)))
-                if (time.perf_counter() - t0) >= duration_s:
-                    break
-                # Laser on then off
-                t_start = time.perf_counter()
-                laser.emission_on()
-                time.sleep(on_seconds)
-                laser.emission_off()
-                t_end = time.perf_counter()
-                laser_on_intervals.append((t_start - t0, t_end - t0))
-                next_read_t = max(next_read_t, t_end - t0)
-                time.sleep(off_seconds)
-            if (time.perf_counter() - t0) >= duration_s:
-                break
-
-        # Reads until duration_s
-        while (time.perf_counter() - t0) < duration_s:
-            elapsed = time.perf_counter() - t0
-            if elapsed >= next_read_t:
-                t_sec, i = system.measure_current_once()
-                timestamps.append(t_sec - t0)
-                currents.append(i)
-                next_read_t += sample_interval_s
-            time.sleep(max(0, min(sample_interval_s, t0 + duration_s - time.perf_counter())))
-    finally:
-        system.source_output_off()
-
-    voltages = [read_voltage] * len(timestamps)
-    resistances = [v / i if i and abs(i) > 1e-18 else float('nan') for v, i in zip(voltages, currents)]
-    return {
-        'timestamps': timestamps,
-        'voltages': voltages,
-        'currents': currents,
-        'resistances': resistances,
-        'laser_on_intervals': laser_on_intervals,
-    }
+        raise ValueError(
+            "Laser pattern is empty. Use binary pattern with 1s and 0s (e.g., 1011 or 10101)."
+        )
+    return _run_optical_smu_during_laser(
+        system, laser, 'optical_pulse_train_pattern_read', params
+    )

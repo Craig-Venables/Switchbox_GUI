@@ -35,8 +35,9 @@ The three dropdown entries (`keithley4200_pmu`, `keithley4200_smu`, `keithley420
 |---------------|--------|
 | `system_wrapper.py` | Routes test calls to the right system; detects system from address. |
 | `keithley4200_constants.py` | Shared frozensets: PMU timing ids, SMU optical ids, all 4200 ids (for GUIs). |
-| `test_capabilities.py` | **Single source** for “which system supports which test” (`SYSTEM_CAPABILITIES`). |
-| `test_definitions.py` | GUI metadata: display name, params, description, plot_type; optional `only_for_systems`. |
+| `test_registry.py` | **Single source**: one `TestSpec` per test (systems, label, params, plot, order). |
+| `test_capabilities.py` | `SYSTEM_CAPABILITIES`, generated from the registry. |
+| `test_definitions.py` | `TEST_FUNCTIONS` / `TEST_DISPLAY_ORDER` for the GUI, generated from the registry. |
 | `systems/base_system.py` | Abstract interface all systems implement. |
 | `systems/keithley4200_core.py` | Shared Keithley 4200-SCS KXCI implementation (`Keithley4200KXCICommon`). |
 | `systems/keithley2450.py`, `keithley2400.py`, `keithley4200_*.py` | Thin adapters; 4200 variants only override `get_system_name()`. |
@@ -44,32 +45,13 @@ The three dropdown entries (`keithley4200_pmu`, `keithley4200_smu`, `keithley420
 
 ## How to add a new test
 
-1. **Capabilities** – In `test_capabilities.py`:
-   - Add the function name to `ALL_TEST_FUNCTIONS`.
-   - For each system that supports it, set `SYSTEM_CAPABILITIES[system_name][function_name] = True`.
+See **[ADDING_A_TEST.md](ADDING_A_TEST.md)** for the full walkthrough. In short:
 
-2. **Definitions** – In `test_definitions.py`:
-   - Add an entry to `TEST_FUNCTIONS`: display name → `function`, `description`, `params`, `plot_type`.
-   - If the test should only appear for specific systems, set `only_for_systems` (e.g. `["keithley4200_smu"]` for SMU-only GUI rows).
-
-3. **Implementation** – In `systems/base_system.py`:
-   - Either add an `@abstractmethod` (all systems must implement) or a default that raises `NotImplementedError`.
-   - Implement the method on each adapter that supports it.
-
-The GUI uses `get_test_definitions_for_gui(system_name)` so only supported tests appear; no duplicate “who supports what” in the GUI.
-
-### Adding a new test on Keithley 4200 only
-
-Implement **once** on `Keithley4200KXCICommon` in `systems/keithley4200_core.py` (delegate to `Keithley4200_KXCI_Scripts` / C modules as today). Do **not** duplicate code in `keithley4200_pmu.py` or `keithley4200_smu.py`.
-
-Then:
-
-1. Add the function name to `ALL_TEST_FUNCTIONS` if it is new.
-2. Set `SYSTEM_CAPABILITIES['keithley4200_pmu'][name]` and/or `SYSTEM_CAPABILITIES['keithley4200_smu'][name]` to `True` for whichever bench configuration should expose the test (often only one of them).
-3. Add the `TEST_FUNCTIONS` row in `test_definitions.py`; use `only_for_systems` when the test must not appear on 2450/2400.
-4. For interleaved PMU timing, keep using the existing param flag **`4200a_only`** in definitions; the pulse GUI treats it as “PMU µs timing” via `KEITHLEY4200_PMU_TIMING_SYSTEMS` in `keithley4200_constants.py`.
-
-If both PMU and SMU profiles should list the same new test, set both capability entries to `True`.
+1. Add a `TestSpec` to `TESTS` in `test_registry.py` (systems, label, params, plot_type).
+2. Add a `NotImplementedError` default in `systems/base_system.py` and the method on each adapter
+   (4200: once in `keithley4200_core.py`, converting µs → s there).
+3. Add the script method on each instrument's scripts class, naming every GUI parameter.
+4. Run `py -m pytest Pulse_Testing/tests -q`; it dry-runs every test on every claimed system.
 
 ## How to add a new measurement system
 
@@ -80,9 +62,9 @@ If both PMU and SMU profiles should list the same new test, set both capability 
    - In `detect_system_from_address`, add rules so your address format returns `'my_instrument'`.
    - If the system has a default address, implement `get_default_address()` on the class.
 
-3. **Capabilities** – In `test_capabilities.py` add a new key to `SYSTEM_CAPABILITIES` for your system and set `True`/`False` for each test.
+3. **Registry** – In `test_registry.py` add the system id to `ALL_SYSTEMS` (or a group) and to the `systems` of each test it supports.
 
-4. **Optional** – If some tests are only for this system, set `only_for_systems` in `test_definitions.py` for those entries.
+4. **Dry-run test** – Add the system's scripts class to `SCRIPT_SLOTS` in `tests/test_registry.py` so the parameter checks cover it.
 
 ## Future: shared pattern layer (2400 / 2450)
 

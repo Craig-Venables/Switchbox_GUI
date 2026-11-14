@@ -8,9 +8,12 @@ import subprocess
 import sys
 import tkinter as tk
 from pathlib import Path
-import threading
 
 from Equipment.Laser_Controller.oxxius import OxxiusLaser
+from Equipment.Laser_Controller.simulation_oxxius import (
+    SimulatedOxxius,
+    is_simulation_port,
+)
 
 
 def toggle_laser_section(gui):
@@ -34,21 +37,21 @@ def build_laser_section(parent, gui, *, start_hidden: bool = False, show_smu_ran
     gui.laser_section_frame = frame
     if not start_hidden:
         frame.pack(fill=tk.X, padx=5, pady=(3, 3))
-    
+
     # Initialize laser attributes
     gui.laser = None
     gui._optical_pulse_running = False
-    
+
     # Header with collapse button and status
     header_frame = tk.Frame(frame)
     header_frame.pack(fill=tk.X, pady=(0, 3))
-    
+
     gui.laser_collapsed = tk.BooleanVar(value=start_hidden)
     gui.laser_collapse_btn = tk.Button(header_frame, text="▶", width=3,
                                        command=lambda: toggle_laser_section(gui),
                                        font=("TkDefaultFont", 8), relief=tk.FLAT)
     gui.laser_collapse_btn.pack(side=tk.LEFT, padx=(0, 5))
-    
+
     tk.Label(header_frame, text="Oxxius Laser", font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT, anchor="w")
     if not hasattr(gui, "laser_status_var"):
         gui.laser_status_var = tk.StringVar(value="Disconnected")
@@ -65,18 +68,22 @@ def build_laser_section(parent, gui, *, start_hidden: bool = False, show_smu_ran
                 lbl.config(fg="green" if s == "Connected" else "gray")
         gui.laser_status_var.trace_add("write", _update_status_color)
         _update_status_color()
-    
+
     # Inner frame for collapsible content
     gui.laser_inner_frame = tk.Frame(frame)
-    
+
     # --- Laser connection ---
     row1 = tk.Frame(gui.laser_inner_frame)
     row1.pack(fill=tk.X, pady=1)
     tk.Label(row1, text="Port:", width=8, anchor="w").pack(side=tk.LEFT)
-    gui.laser_port_var = tk.StringVar(value="COM4")
+    # Classic layout builds this section, then the Optical tab. Reuse the
+    # same StringVar so both Port entries stay bound to the value Connect reads.
+    if getattr(gui, "laser_port_var", None) is None:
+        gui.laser_port_var = tk.StringVar(value="COM4")
     tk.Entry(row1, textvariable=gui.laser_port_var, width=12).pack(side=tk.LEFT, padx=2)
     tk.Label(row1, text="Baud:").pack(side=tk.LEFT, padx=(10, 2))
-    gui.laser_baud_var = tk.StringVar(value="19200")
+    if getattr(gui, "laser_baud_var", None) is None:
+        gui.laser_baud_var = tk.StringVar(value="19200")
     tk.Entry(row1, textvariable=gui.laser_baud_var, width=8).pack(side=tk.LEFT, padx=2)
 
     smu_cr_row = tk.Frame(gui.laser_inner_frame)
@@ -221,9 +228,9 @@ def _update_laser_true_power(gui):
         return
     try:
         from Equipment.Laser_Power_Meter.laser_power_calibration import (
-            load_calibration,
-            get_actual_mw,
             format_true_power_display,
+            get_actual_mw,
+            load_calibration,
         )
         set_mw = float(gui.laser_power_var.get().strip())
         cal = load_calibration()
@@ -290,18 +297,23 @@ def _connect_laser(gui):
         gui.log("Laser: Invalid baud rate.")
         return
     gui._laser_from_provider = False
+    sim = is_simulation_port(port)
     try:
-        gui.laser = OxxiusLaser(port=port, baud=baud)
+        if sim:
+            gui.laser = SimulatedOxxius(port=port, baud=baud, live_hiccups=True)
+        else:
+            gui.laser = OxxiusLaser(port=port, baud=baud)
         idn = gui.laser.idn()
+        connected = "Laser: Simulator connected" if sim else "Laser: Connected"
         if getattr(gui, "laser_power_use_software_var", None) and gui.laser_power_use_software_var.get():
             try:
                 power_mw = float(gui.laser_power_var.get().strip())
                 gui.laser.set_to_digital_power_control(power_mw)
-                gui.log(f"Laser: Connected ({idn}), power {power_mw} mW.")
+                gui.log(f"{connected} ({idn}), power {power_mw} mW.")
             except ValueError:
-                gui.log(f"Laser: Connected ({idn}). Set power (mW) and use 'Set (mW)' to apply.")
+                gui.log(f"{connected} ({idn}). Set power (mW) and use 'Set (mW)' to apply.")
         else:
-            gui.log(f"Laser: Connected ({idn}), manual power.")
+            gui.log(f"{connected} ({idn}), manual power.")
         gui.laser_status_var.set("Connected")
         gui.laser_emission_on_var.set(False)
         from gui.pulse_testing_gui.ui import tabs_optical

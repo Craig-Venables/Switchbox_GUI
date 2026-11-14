@@ -49,6 +49,7 @@ DEFAULT_CHILD_GUIS: tuple[ChildGuiSpec, ...] = (
     ChildGuiSpec("device_visualizer", "Device Visualizer", "open_device_visualizer", "default"),
     ChildGuiSpec("oscilloscope_pulse", "Oscilloscope Pulse", "open_oscilloscope_pulse", "default"),
     ChildGuiSpec("laser_fg_scope", "Laser FG Scope", "open_laser_fg_scope", "default"),
+    ChildGuiSpec("solartron", "Solartron", "open_solartron", "default"),
 )
 
 
@@ -93,6 +94,7 @@ class ChildGuiRegistry:
             "device_visualizer": "device_visualizer_button",
             "oscilloscope_pulse": "oscilloscope_pulse_button",
             "laser_fg_scope": "laser_fg_scope_button",
+            "solartron": "solartron_button",
         }
 
         for spec in self._specs:

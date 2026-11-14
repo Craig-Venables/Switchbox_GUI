@@ -625,6 +625,7 @@ class MeasurementGUI:
                 "update_messaging_info": getattr(self, "update_messaging_info", None),
                 "open_oscilloscope_pulse": self.open_oscilloscope_pulse,
                 "open_laser_fg_scope": self.open_laser_fg_scope_gui,
+                "open_solartron": self.open_solartron_gui,
                 "run_conditional_testing": self.run_conditional_testing,
                 "run_single_pulse": self._run_single_pulse,
                 "run_read_pulse": self._run_read_pulse,
@@ -3049,6 +3050,10 @@ class MeasurementGUI:
     def open_laser_fg_scope_gui(self) -> None:
         from gui.measurement_gui.child_gui_launchers import open_laser_fg_scope_gui
         open_laser_fg_scope_gui(self)
+
+    def open_solartron_gui(self) -> None:
+        from gui.measurement_gui.child_gui_launchers import open_solartron_gui
+        open_solartron_gui(self)
 
     def open_device_visualizer(self) -> None:
         from gui.measurement_gui.child_gui_launchers import open_device_visualizer

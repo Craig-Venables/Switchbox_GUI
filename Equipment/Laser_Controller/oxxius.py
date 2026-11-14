@@ -35,6 +35,9 @@ class OxxiusLaser:
             stopbits=serial.STOPBITS_ONE,
             timeout=timeout
         )
+        # A dead COM port otherwise blocks forever in ser.write() (write_timeout
+        # defaults to None) and freezes the GUI thread on the first command.
+        self.ser.write_timeout = timeout
         time.sleep(0.2)  # settle interface
         if safe_power_mw is not None:
             try:
